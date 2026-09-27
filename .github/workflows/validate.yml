@@ -5,6 +5,12 @@
 # changed files through `git diff --name-status` and `git show` inside Desk's
 # validator, cloned from ourostack/desk main. Nothing from the candidate is
 # checked out, installed or executed. Failures report stable reason codes only.
+#
+# A maintainer is the pull request author when their permission on this
+# repository is `admin` or `write` (`maintain` reads as `write`), read from
+# the collaborator permission API with the read-only workflow token. The
+# author association is not used: it depends on whether a member's
+# organization membership is public. Any API error means "not a maintainer".
 name: factory-validate
 
 on:
@@ -49,11 +55,32 @@ jobs:
           git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
           echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
 
+      - name: Decide whether the author maintains this repository
+        id: maintainer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -uo pipefail
+          association=NONE
+          if printf '%s' "$AUTHOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+            if permission=$(gh api "repos/$REPOSITORY/collaborators/$AUTHOR/permission" --jq '.permission' 2> /dev/null); then
+              case "$permission" in
+                admin|write) association=COLLABORATOR ;;
+              esac
+            else
+              printf 'factory-validate: maintainer_check_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "association=$association" >> "$GITHUB_OUTPUT"
+          echo "Maintainer association: $association"
+
       - name: Validate the pull request
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          AUTHOR_ASSOCIATION: ${{ steps.maintainer.outputs.association }}
         run: |
           set -uo pipefail
           result="$RUNNER_TEMP/factory-validate.json"

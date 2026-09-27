@@ -7,8 +7,11 @@
 # and GitHub enforces the head match again at merge time. It rejects only when
 # the trusted validation fails and the head is unchanged, with a comment of
 # `factory-rejected: <code>` lines and nothing else. Maintenance pull requests
-# (changes outside facts/ by an owner, member or collaborator) are labeled
-# `maintenance` and left for a maintainer to merge.
+# (changes outside facts/ by a maintainer) are labeled
+# `maintenance` and left for a maintainer to merge. A maintainer is the pull
+# request author when their permission on this repository is `admin` or
+# `write`, read from the collaborator permission API; any API error means
+# "not a maintainer".
 name: factory-merge
 
 on:
@@ -92,7 +95,17 @@ jobs:
               continue
             fi
 
-            association=$(jq -r '.author_association' <<<"$pr")
+            author=$(jq -r '.user.login' <<<"$pr")
+            association=NONE
+            if printf '%s' "$author" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+              if permission=$(gh api "repos/$REPOSITORY/collaborators/$author/permission" --jq '.permission' 2> /dev/null); then
+                case "$permission" in
+                  admin|write) association=COLLABORATOR ;;
+                esac
+              else
+                summary "factory-merge: #$number maintainer_check_unavailable"
+              fi
+            fi
             result="$RUNNER_TEMP/factory-validate-$number.json"
             node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
