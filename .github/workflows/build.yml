@@ -7,9 +7,24 @@
 # so the same facts always produce the same commit and an unchanged build
 # pushes nothing. The commit has no parent and holds only the build output.
 #
+# It also runs when an issue is opened, edited, reopened or labeled, so a new
+# or edited kaizen card is checked right away. Changes the build itself makes
+# with the workflow token start no new run.
+#
+# After publishing, the build runs the kaizen check: for every open issue
+# labeled `kaizen` it compares the card's measure before and after the
+# card's version, keeps one comment of its own on the card up to date and
+# sets or clears the `confirmed` and `not-confirmed` labels. It never closes
+# a card. Card bodies are untrusted data: Desk parses them strictly and
+# echoes nothing back but stable codes and validated values. Then andon
+# compares each plugin's latest version with the one before it on the
+# quality measures and opens, updates, reopens or closes the issues labeled
+# `andon` that this workflow opened; it never touches anyone else's issue.
+#
 # A pull request can name one of its own workflows `factory-merge` and start
-# this workflow through `workflow_run`. That is harmless because this
-# workflow reads no event data: it always builds main. Keep it that way.
+# this workflow through `workflow_run`, and anyone can open an issue. That is
+# harmless because this workflow reads no event data: it always builds main.
+# Keep it that way.
 name: factory-build
 
 on:
@@ -18,6 +33,8 @@ on:
   workflow_run:
     workflows: [factory-merge]
     types: [completed]
+  issues:
+    types: [opened, edited, reopened, labeled]
   schedule:
     - cron: "23 4 * * *"
   workflow_dispatch:
@@ -90,3 +107,21 @@ jobs:
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
             push --quiet --force "https://github.com/$REPOSITORY" HEAD:refs/heads/reports
           echo "Published reports: $built" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the kaizen cards
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" kaizen-check --store . --repo "$REPOSITORY" > "$RUNNER_TEMP/kaizen.json"
+          echo "Kaizen check: $(cat "$RUNNER_TEMP/kaizen.json")" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Pull the andon cord
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" andon --store . --repo "$REPOSITORY" > "$RUNNER_TEMP/andon.json"
+          echo "Andon: $(cat "$RUNNER_TEMP/andon.json")" | tee -a "$GITHUB_STEP_SUMMARY"

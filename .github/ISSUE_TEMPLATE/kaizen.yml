@@ -1,0 +1,35 @@
+name: Kaizen card
+description: Propose one improvement to how the work runs, with the measure the build checks once it ships.
+title: "Kaizen: "
+labels: [kaizen]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A kaizen card names a signal from the rollups, the countermeasure meant to improve it, and the measure the store's build compares before and after the version that ships it. The build keeps one comment on the card with the numbers and adds `confirmed` or `not-confirmed` only when the 95% bootstrap interval for the change in median lies wholly on one side of zero.
+
+        Write the card generically: no person, private repository, work system, date or time of day.
+  - type: textarea
+    id: signal
+    attributes:
+      label: What the rollups show
+      description: The signal in plain words, for example "shell tool failures are most of every job's tool failures".
+    validations:
+      required: true
+  - type: textarea
+    id: card
+    attributes:
+      label: Card
+      description: The block the build checks. Set `version` to the first plugin version that carries the countermeasure once its release lands. `job_class` is engineering, review, investigation, operations, other or any.
+      render: yaml
+      value: |
+        kaizen: 1
+        signal: tool_failures
+        job_class: any
+        evidence_jobs: []
+        countermeasure: null
+        plugin: desk
+        version: null
+        hypothesis: { measure: tool_failures, direction: down }
+    validations:
+      required: true
