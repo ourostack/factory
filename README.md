@@ -40,6 +40,6 @@ Contribution is opt-in. Desk asks once, when a desk is set up, whether to contri
 
 When a session starts, Desk publishes the facts of earlier sessions as one pull request per machine. CI validates the pull request, merges it when it passes, and closes it with a `factory-rejected: <code>` comment when it fails.
 
-**Your GitHub account is visible.** An intake pull request is opened from the contributor's GitHub account, so that account appears as the pull request's author, like any other public contribution. The facts inside it still carry no identity.
+**Your GitHub account and the timing of your pull requests are visible.** An intake pull request is opened from the contributor's GitHub account, so that account appears as the pull request's author, like any other public contribution, and GitHub shows when the pull request and its commits were made. A rejected pull request stays readable after it is closed. The facts inside it still carry no identity and no time.
 
-Changes to anything outside `facts/` are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI never merges them automatically.
+Changes to anything outside the two data paths, published facts under `facts/` and published waste labels under `labels/`, are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI never merges them automatically.

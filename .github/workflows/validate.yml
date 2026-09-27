@@ -1,10 +1,19 @@
 # Validates every pull request against the published facts schema.
 #
 # The candidate is untrusted data. This workflow checks out the base, fetches
-# the pull request's exact head commit as Git objects only, and reads the
-# changed files through `git diff --name-status` and `git show` inside Desk's
-# validator, cloned from ourostack/desk main. Nothing from the candidate is
-# checked out, installed or executed. Failures report stable reason codes only.
+# the pull request's exact head commit as Git objects only, and runs Desk's
+# validator, cloned from ourostack/desk main, on what merging that head into
+# the base would land. This file never checks out, installs or executes the
+# candidate's files. Failures report stable reason codes only.
+#
+# GitHub runs the workflow files of the pull request's own merge commit on
+# `pull_request`, so a pull request that edits this file, or adds a workflow
+# with a job named `factory-validate`, runs its own code here instead, with
+# a read-only token and no secrets, and can post a green check. A green
+# `factory-validate` is therefore not evidence on its own: factory-merge
+# validates again from main before it merges, and a maintainer merges
+# someone else's pull request only through factory-merge or after running
+# validate-pr at its exact head.
 #
 # A maintainer is the pull request author when their permission on this
 # repository is `admin` or `write` (`maintain` reads as `write`), read from
