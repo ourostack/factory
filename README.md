@@ -42,4 +42,4 @@ When a session starts, Desk publishes the facts of earlier sessions as one pull 
 
 **Your GitHub account is visible.** An intake pull request is opened from the contributor's GitHub account, so that account appears as the pull request's author, like any other public contribution. The facts inside it still carry no identity.
 
-Changes to anything outside `facts/` are maintenance and go through a maintainer's reviewed pull request; CI never merges them automatically.
+Changes to anything outside `facts/` are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI never merges them automatically.
