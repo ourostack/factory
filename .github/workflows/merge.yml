@@ -10,18 +10,21 @@
 #
 # Three steps keep the write token away from candidate data: the first finds
 # the open pull requests at that head and their authors' permission; the
-# second, which holds no token, runs Desk's validator; the third acts on the
-# results. It merges only when both validations pass and the pull request
-# still has that head, and the merge call passes that head as `sha`, so
-# GitHub refuses the merge if the head moved. It rejects only when the
-# trusted validation fails and the head is unchanged, with a comment of
-# `factory-rejected: <code>` lines and nothing else. Maintenance pull
-# requests (changes outside the data paths facts/ and labels/, including
-# .github/, by a maintainer) are labeled `maintenance` and left for a
-# maintainer; the same changes from anyone else fail validation with `path`
-# and are rejected. A maintainer is the pull request author when their
-# permission on this repository is `admin` or `write`; any API error means
-# "not a maintainer".
+# second, which holds no token, runs Desk's validator and then, for a data
+# pull request it passes, the store's own plugin-name rule
+# (`.github/scripts/check-intake-plugins.sh`, from main: every added facts
+# file carries `refs.private.plugins` and names only plugins listed in
+# `intake.json`); the third acts on the results. It merges only when both
+# validations pass and the pull request still has that head, and the merge
+# call passes that head as `sha`, so GitHub refuses the merge if the head
+# moved. It rejects only when the trusted validation fails and the head is
+# unchanged, with a comment of `factory-rejected: <code>` lines and nothing
+# else. Maintenance pull requests (changes outside the data paths facts/ and
+# labels/, including .github/, by a maintainer) are labeled `maintenance` and
+# left for a maintainer; the same changes from anyone else fail validation
+# with `path` and are rejected. A maintainer is the pull request author when
+# their permission on this repository is `admin` or `write`; any API error
+# means "not a maintainer".
 name: factory-merge
 
 on:
@@ -130,6 +133,14 @@ jobs:
             node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
               > "$RUNNER_TEMP/factory-validate-$number.json" 2> /dev/null || true
+            result="$RUNNER_TEMP/factory-validate-$number.json"
+            # The store's own plugin-name rule, from main, for a data pull
+            # request Desk passed; a failure becomes a rejection with its codes.
+            if jq -e '.ok == true and .maintenance != true' "$result" > /dev/null 2>&1; then
+              if ! codes=$(bash .github/scripts/check-intake-plugins.sh "$base_sha" "$HEAD_SHA"); then
+                printf '%s\n' "$codes" | jq -R -s -c '{ok: false, errors: [split("\n")[] | select(length > 0) | {code: .}]}' > "$result"
+              fi
+            fi
           done < "$RUNNER_TEMP/factory-prs.tsv"
 
       - name: Merge or reject
