@@ -1,0 +1,77 @@
+# Validates every pull request against the published facts schema.
+#
+# The candidate is untrusted data. This workflow checks out the base, fetches
+# the pull request's exact head commit as Git objects only, and reads the
+# changed files through `git diff --name-status` and `git show` inside Desk's
+# validator, cloned from ourostack/desk main. Nothing from the candidate is
+# checked out, installed or executed. Failures report stable reason codes only.
+name: factory-validate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  factory-validate:
+    name: factory-validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out the base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the candidate as data
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags origin "$HEAD_SHA"
+          test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
+
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
+
+      - name: Validate the pull request
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          set -uo pipefail
+          result="$RUNNER_TEMP/factory-validate.json"
+          node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --author-association "$AUTHOR_ASSOCIATION" \
+            > "$result" 2> /dev/null || true
+          if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
+            printf 'factory-validate: validator_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if jq -e '.ok == true' "$result" > /dev/null; then
+            if jq -e '.maintenance == true' "$result" > /dev/null; then
+              printf 'factory-validate: passed (maintenance)\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              printf 'factory-validate: passed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+          printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r '[.errors[].code | if type == "string" and test("^[a-z][a-z0-9_]{0,63}$") then . else "unknown_code" end] | unique[] | "factory-rejected: \(.)"' "$result" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
