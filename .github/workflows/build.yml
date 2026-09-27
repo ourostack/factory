@@ -8,18 +8,25 @@
 # pushes nothing. The commit has no parent and holds only the build output.
 #
 # It also runs when an issue is opened, edited, reopened or labeled, so a new
-# or edited kaizen card is checked right away. Changes the build itself makes
+# or edited kaizen card is checked right away; an issue event skips the
+# report build and runs only the issue checks. Changes the build itself makes
 # with the workflow token start no new run.
 #
-# After publishing, the build runs the kaizen check: for every open issue
-# labeled `kaizen` it compares the card's measure before and after the
-# card's version, keeps one comment of its own on the card up to date and
+# Two jobs keep write access apart. `factory-build` holds `contents: write`
+# and no issue access; it reads only facts and labels on main. The second
+# job, `issue-checks`, reads issue text anyone can write, so it holds only
+# `contents: read` and `issues: write`. It runs the kaizen check: for every
+# open issue labeled `kaizen` it compares the card's measure before and after
+# the card's version, keeps one comment of its own on the card up to date and
 # sets or clears the `confirmed` and `not-confirmed` labels. It never closes
 # a card. Card bodies are untrusted data: Desk parses them strictly and
-# echoes nothing back but stable codes and validated values. Then andon
-# compares each plugin's latest version with the one before it on the
-# quality measures and opens, updates, reopens or closes the issues labeled
-# `andon` that this workflow opened; it never touches anyone else's issue.
+# echoes nothing back but stable codes and validated values; a card that
+# fails is reported and the rest are still checked. Then andon runs even if
+# the kaizen check failed: for each plugin listed in `factory.json` (a
+# maintenance path, so only a maintainer changes it) it compares the latest
+# version with enough jobs to the one before it on the quality measures and
+# opens, updates, reopens or closes the issues labeled `andon` that this
+# workflow opened; it never touches anyone else's issue.
 #
 # A pull request can name one of its own workflows `factory-merge` and start
 # this workflow through `workflow_run`, and anyone can open an issue. That is
@@ -39,9 +46,7 @@ on:
     - cron: "23 4 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  issues: write
+permissions: {}
 
 concurrency:
   group: factory-build
@@ -50,9 +55,11 @@ concurrency:
 jobs:
   factory-build:
     name: factory-build
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'issues' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -108,20 +115,53 @@ jobs:
             push --quiet --force "https://github.com/$REPOSITORY" HEAD:refs/heads/reports
           echo "Published reports: $built" | tee -a "$GITHUB_STEP_SUMMARY"
 
+  issue-checks:
+    name: issue-checks
+    needs: factory-build
+    if: ${{ !cancelled() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
+          mkdir -p facts
+
       - name: Check the kaizen cards
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" kaizen-check --store . --repo "$REPOSITORY" > "$RUNNER_TEMP/kaizen.json"
+          status=$?
           echo "Kaizen check: $(cat "$RUNNER_TEMP/kaizen.json")" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Pull the andon cord
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" andon --store . --repo "$REPOSITORY" > "$RUNNER_TEMP/andon.json"
+          status=$?
           echo "Andon: $(cat "$RUNNER_TEMP/andon.json")" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $status

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        A kaizen card names a signal from the rollups, the countermeasure meant to improve it, and the measure the store's build compares before and after the version that ships it. The build keeps one comment on the card with the numbers and adds `confirmed` or `not-confirmed` only when the 95% bootstrap interval for the change in median lies wholly on one side of zero.
+        A kaizen card names a signal from the rollups, the countermeasure meant to improve it, and the measure the store's build compares before and after the version that ships it. The build keeps one comment on the card with the numbers and adds `confirmed` or `not-confirmed` only when the 95% bootstrap interval for the change in median lies wholly on one side of zero. Jobs that share a session count as one independent group, and each side needs at least 6 groups before any interval exists.
 
         Write the card generically: no person, private repository, work system, date or time of day.
   - type: textarea
@@ -20,7 +20,7 @@ body:
     id: card
     attributes:
       label: Card
-      description: The block the build checks. Set `version` to the first plugin version that carries the countermeasure once its release lands. `job_class` is engineering, review, investigation, operations, other or any.
+      description: The block the build checks. Set `version` to the first plugin version that carries the countermeasure once its release lands. Keep `job_class: any`: published facts do not carry a job class yet, so every job is `other` and the build compares all jobs together.
       render: yaml
       value: |
         kaizen: 1
