@@ -1,16 +1,26 @@
 # Merges or rejects intake pull requests after factory-validate completes.
 #
-# This workflow always runs from main, so the candidate cannot change it. It
-# never trusts the triggering run: it validates again, with Desk main, the
-# exact head commit that run validated, fetched as Git objects only. It merges
-# only when both validations pass and the pull request still has that head,
-# and GitHub enforces the head match again at merge time. It rejects only when
-# the trusted validation fails and the head is unchanged, with a comment of
-# `factory-rejected: <code>` lines and nothing else. Maintenance pull requests
-# (changes outside facts/ by a maintainer) are labeled
-# `maintenance` and left for a maintainer to merge. A maintainer is the pull
-# request author when their permission on this repository is `admin` or
-# `write`, read from the collaborator permission API; any API error means
+# This workflow always runs from main, so a pull request cannot change it.
+# It never trusts the triggering run: a pull request's own workflow files run
+# on its `pull_request` event and can post a green `factory-validate`, or name
+# a workflow `factory-validate`, so the only field of the `workflow_run`
+# event used here is `head_sha`, and that head is validated again with Desk
+# main, fetched as Git objects only. Keep it that way: never read any other
+# event field, and never trust the triggering conclusion alone.
+#
+# Three steps keep the write token away from candidate data: the first finds
+# the open pull requests at that head and their authors' permission; the
+# second, which holds no token, runs Desk's validator; the third acts on the
+# results. It merges only when both validations pass and the pull request
+# still has that head, and the merge call passes that head as `sha`, so
+# GitHub refuses the merge if the head moved. It rejects only when the
+# trusted validation fails and the head is unchanged, with a comment of
+# `factory-rejected: <code>` lines and nothing else. Maintenance pull
+# requests (changes outside the data paths facts/ and labels/, including
+# .github/, by a maintainer) are labeled `maintenance` and left for a
+# maintainer; the same changes from anyone else fail validation with `path`
+# and are rejected. A maintainer is the pull request author when their
+# permission on this repository is `admin` or `write`; any API error means
 # "not a maintainer".
 name: factory-merge
 
@@ -54,16 +64,16 @@ jobs:
           git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
           echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
 
-      - name: Merge or reject
+      - name: Find the pull requests at the validated head
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
           summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          : > "$RUNNER_TEMP/factory-prs.tsv"
 
           if ! printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             summary "factory-merge: invalid head"
@@ -79,11 +89,6 @@ jobs:
             exit 0
           fi
 
-          git fetch --quiet --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
-          git fetch --quiet --no-tags origin "$HEAD_SHA"
-          test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
-          base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
-
           for number in $numbers; do
             pr=$(gh api "repos/$REPOSITORY/pulls/$number")
             if [ "$(jq -r '.state' <<<"$pr")" != "open" ] || [ "$(jq -r '.head.sha' <<<"$pr")" != "$HEAD_SHA" ]; then
@@ -94,7 +99,6 @@ jobs:
               summary "factory-merge: #$number is maintenance; left for a maintainer"
               continue
             fi
-
             author=$(jq -r '.user.login' <<<"$pr")
             association=NONE
             if printf '%s' "$author" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
@@ -106,13 +110,44 @@ jobs:
                 summary "factory-merge: #$number maintainer_check_unavailable"
               fi
             fi
-            result="$RUNNER_TEMP/factory-validate-$number.json"
+            printf '%s\t%s\n' "$number" "$association" >> "$RUNNER_TEMP/factory-prs.tsv"
+          done
+
+      - name: Validate with Desk main (no token)
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ ! -s "$RUNNER_TEMP/factory-prs.tsv" ]; then
+            exit 0
+          fi
+          git fetch --quiet --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          git fetch --quiet --no-tags origin "$HEAD_SHA"
+          test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
+          base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
+          while IFS=$'\t' read -r number association; do
             node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
-              > "$result" 2> /dev/null || true
+              > "$RUNNER_TEMP/factory-validate-$number.json" 2> /dev/null || true
+          done < "$RUNNER_TEMP/factory-prs.tsv"
+
+      - name: Merge or reject
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          unavailable=0
+          while IFS=$'\t' read -r number association; do
+            result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
               summary "factory-merge: #$number validator_unavailable; no action"
-              exit 1
+              unavailable=1
+              continue
             fi
 
             if jq -e '.ok == true' "$result" > /dev/null; then
@@ -145,4 +180,5 @@ jobs:
             gh api -X PATCH "repos/$REPOSITORY/pulls/$number" -f state=closed > /dev/null
             summary "factory-merge: #$number rejected and closed"
             summary "$codes"
-          done
+          done < "$RUNNER_TEMP/factory-prs.tsv"
+          exit "$unavailable"

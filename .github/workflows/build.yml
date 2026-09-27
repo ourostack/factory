@@ -6,6 +6,10 @@
 # and on demand. The build is deterministic and the commit has fixed metadata,
 # so the same facts always produce the same commit and an unchanged build
 # pushes nothing. The commit has no parent and holds only the build output.
+#
+# A pull request can name one of its own workflows `factory-merge` and start
+# this workflow through `workflow_run`. That is harmless because this
+# workflow reads no event data: it always builds main. Keep it that way.
 name: factory-build
 
 on:
