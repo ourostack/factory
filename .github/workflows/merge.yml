@@ -1,0 +1,135 @@
+# Merges or rejects intake pull requests after factory-validate completes.
+#
+# This workflow always runs from main, so the candidate cannot change it. It
+# never trusts the triggering run: it validates again, with Desk main, the
+# exact head commit that run validated, fetched as Git objects only. It merges
+# only when both validations pass and the pull request still has that head,
+# and GitHub enforces the head match again at merge time. It rejects only when
+# the trusted validation fails and the head is unchanged, with a comment of
+# `factory-rejected: <code>` lines and nothing else. Maintenance pull requests
+# (changes outside facts/ by an owner, member or collaborator) are labeled
+# `maintenance` and left for a maintainer to merge.
+name: factory-merge
+
+on:
+  workflow_run:
+    workflows: [factory-validate]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: factory-merge-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  factory-merge:
+    name: factory-merge
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
+
+      - name: Merge or reject
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          if ! printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            summary "factory-merge: invalid head"
+            exit 1
+          fi
+
+          # Fork pull requests leave workflow_run.pull_requests empty, so find
+          # the open pull requests whose head is the validated commit.
+          numbers=$(gh api "repos/$REPOSITORY/pulls?state=open&base=$DEFAULT_BRANCH&per_page=100" --paginate \
+            --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number")
+          if [ -z "$numbers" ]; then
+            summary "factory-merge: no open pull request has head $HEAD_SHA"
+            exit 0
+          fi
+
+          git fetch --quiet --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          git fetch --quiet --no-tags origin "$HEAD_SHA"
+          test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
+          base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
+
+          for number in $numbers; do
+            pr=$(gh api "repos/$REPOSITORY/pulls/$number")
+            if [ "$(jq -r '.state' <<<"$pr")" != "open" ] || [ "$(jq -r '.head.sha' <<<"$pr")" != "$HEAD_SHA" ]; then
+              summary "factory-merge: #$number head moved; skipped"
+              continue
+            fi
+            if jq -e '[.labels[].name] | index("maintenance")' <<<"$pr" > /dev/null; then
+              summary "factory-merge: #$number is maintenance; left for a maintainer"
+              continue
+            fi
+
+            association=$(jq -r '.author_association' <<<"$pr")
+            result="$RUNNER_TEMP/factory-validate-$number.json"
+            node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
+              --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
+              > "$result" 2> /dev/null || true
+            if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
+              summary "factory-merge: #$number validator_unavailable; no action"
+              exit 1
+            fi
+
+            if jq -e '.ok == true' "$result" > /dev/null; then
+              if jq -e '.maintenance == true' "$result" > /dev/null; then
+                gh api -X POST "repos/$REPOSITORY/issues/$number/labels" -f 'labels[]=maintenance' > /dev/null
+                summary "factory-merge: #$number labeled maintenance; left for a maintainer"
+                continue
+              fi
+              if [ "$CONCLUSION" != "success" ]; then
+                summary "factory-merge: #$number passed revalidation but its validation run failed; no action"
+                continue
+              fi
+              # The sha parameter makes GitHub refuse the merge if the head moved.
+              gh api -X PUT "repos/$REPOSITORY/pulls/$number/merge" \
+                -f merge_method=merge -f sha="$HEAD_SHA" > /dev/null
+              summary "factory-merge: #$number merged at head $HEAD_SHA"
+              continue
+            fi
+
+            codes=$(jq -r '[.errors[].code | if type == "string" and test("^[a-z][a-z0-9_]{0,63}$") then . else "unknown_code" end] | unique[] | "factory-rejected: \(.)"' "$result")
+            if [ -z "$codes" ]; then
+              codes="factory-rejected: unknown_code"
+            fi
+            current=$(gh api "repos/$REPOSITORY/pulls/$number" --jq '.head.sha')
+            if [ "$current" != "$HEAD_SHA" ]; then
+              summary "factory-merge: #$number head moved before rejection; skipped"
+              continue
+            fi
+            gh api -X POST "repos/$REPOSITORY/issues/$number/comments" -f body="$codes" > /dev/null
+            gh api -X PATCH "repos/$REPOSITORY/pulls/$number" -f state=closed > /dev/null
+            summary "factory-merge: #$number rejected and closed"
+            summary "$codes"
+          done
