@@ -12,13 +12,13 @@
 # the open pull requests at that head and their authors' permission; the
 # second, which holds no token, runs Desk's validator and then, for a data
 # pull request it passes, the store's own plugin-name rule
-# (`.github/scripts/check-intake-plugins.sh`, from main: every added facts
-# file carries `refs.private.plugins` and names only plugins listed in
-# `intake.json`); the third acts on the results. It merges only when both
-# validations pass and the pull request still has that head, and the merge
-# call passes that head as `sha`, so GitHub refuses the merge if the head
-# moved. It rejects only when the trusted validation fails and the head is
-# unchanged, with a comment of `factory-rejected: <code>` lines and nothing
+# (`.github/scripts/check-intake-plugins.sh`, from main: every added or
+# modified facts file carries `refs.private.plugins` and names only plugins
+# listed in `intake.json`); the third acts on the results. It merges only when
+# both validations pass and the pull request still has that head, and the
+# merge call passes that head as `sha`, so GitHub refuses the merge if the
+# head moved. It rejects only when the trusted validation fails and the head
+# is unchanged, with a comment of `factory-rejected: <code>` lines and nothing
 # else. Maintenance pull requests (changes outside the data paths facts/ and
 # labels/, including .github/, by a maintainer) are labeled `maintenance` and
 # left for a maintainer; the same changes from anyone else fail validation
