@@ -40,6 +40,8 @@ Contribution is opt-in. Desk asks once, when a desk is set up, whether to contri
 
 When a session starts, Desk publishes the facts of earlier sessions as one pull request per machine. CI validates the pull request, merges it when it passes, and closes it with a `factory-rejected: <code>` comment when it fails.
 
+The store also checks plugin names on every facts file a pull request adds. The file must come from a Desk that withholds the names of plugins installed from private repositories, which records how many it withheld as `refs.private.plugins`, and it may name only plugins listed in `intake.json`. A file from an older Desk fails with `private_plugins_missing`, and a file that names an unlisted plugin fails with `plugin_not_public`; update Desk to contribute. Files already in the store are not checked again. A maintainer adds a plugin to `intake.json` once its source repository is public.
+
 **Your GitHub account and the timing of your pull requests are visible.** An intake pull request is opened from the contributor's GitHub account, so that account appears as the pull request's author, like any other public contribution, and GitHub shows when the pull request and its commits were made. A rejected pull request stays readable after it is closed. The facts inside it still carry no identity and no time.
 
 Changes to anything outside the two data paths, published facts under `facts/` and published waste labels under `labels/`, are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI never merges them automatically.
