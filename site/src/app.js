@@ -157,12 +157,17 @@
     return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)} ${m[4]}:00`;
   }
 
-  function renderIntakeChart(container, items) {
+  function renderIntakeChart(container, rawItems) {
     container.innerHTML = "";
-    if (!items.length) {
+    if (!rawItems.length) {
       emptyState(container, "No intake history available yet.");
       return;
     }
+    let running = 0;
+    const items = rawItems.map((i) => {
+      running += i.count;
+      return { hour: i.hour, count: running, added: i.count };
+    });
     const width = 600;
     const height = 190;
     const padL = 34;
@@ -177,7 +182,7 @@
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("class", "svg-chart");
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", "Sessions publishing facts, by hour");
+    svg.setAttribute("aria-label", "Cumulative sessions published, by hour");
 
     [0, 0.5, 1].forEach((frac) => {
       const y = padT + innerH * (1 - frac);
@@ -219,7 +224,8 @@
         const cx = evt && evt.clientX ? evt.clientX : box.left + box.width / 2;
         const cy = evt && evt.clientY ? evt.clientY : box.top;
         showTooltipAt(cx, cy, item.hour.replace("T", " "), [
-          { label: "Sessions published", value: item.count.toLocaleString() },
+          { label: "Total published so far", value: item.count.toLocaleString() },
+          { label: "Published this hour", value: item.added.toLocaleString() },
         ]);
       };
       rect.addEventListener("mousemove", showTT);
@@ -408,20 +414,29 @@
   function renderWaste(captionEl, panelEl, waste) {
     const total = waste.jobs_total ?? 0;
     const labeled = waste.jobs_labeled ?? 0;
-    captionEl.textContent =
-      labeled > 0
-        ? `${labeled} of ${total} jobs are fully labeled for waste. Bars show jobs affected by each type.`
-        : `${labeled} of ${total} jobs are fully labeled for waste so far — the taxonomy below is what labeling classifies against once evidence catches up.`;
+    const labelFiles = waste.label_files ?? 0;
+    if (labeled > 0) {
+      captionEl.textContent = `${labeled} of ${total} jobs are fully labeled for waste. Bars show total time lost to each type, across labeled jobs.`;
+    } else if (labelFiles > 0) {
+      captionEl.textContent = `Labeling has just started: ${labelFiles} session${labelFiles === 1 ? "" : "s"} labeled, but no job is fully labeled yet — a job needs every one of its sessions evaluated before it counts here. The taxonomy below is what labeling classifies against; bars appear as finished jobs are evaluated.`;
+    } else {
+      captionEl.textContent = `Labeling has just started: no session has been evaluated yet. The taxonomy below is what labeling will classify against; bars appear here as finished jobs are evaluated.`;
+    }
 
     panelEl.innerHTML = "";
     if (labeled > 0 && waste.breakdown && waste.breakdown.length) {
       const rows = waste.breakdown.map((w) => ({
-        label: WASTE_NAMES[w.type || w.waste] || w.type || w.waste,
-        value: w.jobs ?? w.count ?? 0,
+        label: WASTE_NAMES[w.waste] || w.waste,
+        value: w.total_ms,
+        tooltipRows: [
+          { label: "Time lost", value: fmtDuration(w.total_ms) },
+          { label: "Jobs affected", value: fmtNum(w.jobs) },
+          { label: "Share of labeled waste", value: w.share != null ? fmtPct(w.share, 1) : "unavailable" },
+        ],
       }));
       renderBarList(panelEl, rows, {
         color: "var(--series-8)",
-        formatValue: (r) => `${r.value} job${r.value === 1 ? "" : "s"}`,
+        formatValue: (r) => fmtDuration(r.value),
       });
       return;
     }
@@ -467,7 +482,26 @@
         a.textContent = issue.title;
         left.appendChild(a);
         li.appendChild(left);
-        li.appendChild(el("span", "issue-num", `#${issue.number} · ${issue.state}`));
+
+        const right = el("span", "issue-right");
+        right.appendChild(el("span", "issue-num", `#${issue.number} · ${issue.state}`));
+        const res = issue.resolution;
+        if (issue.state === "closed" && res && res.kind === "countermeasure") {
+          const resLine = document.createElement("span");
+          resLine.className = "issue-resolution";
+          resLine.appendChild(document.createTextNode(res.merged ? "fixed by " : "closed, references "));
+          const ra = document.createElement("a");
+          ra.href = res.url;
+          ra.target = "_blank";
+          ra.rel = "noopener";
+          ra.textContent = `${res.repo}#${res.number}`;
+          resLine.appendChild(ra);
+          if (res.merged === false) resLine.appendChild(document.createTextNode(" (not yet merged)"));
+          right.appendChild(resLine);
+        } else if (issue.state === "closed") {
+          right.appendChild(el("span", "issue-resolution", "closed"));
+        }
+        li.appendChild(right);
         ul.appendChild(li);
       }
       wrap.appendChild(ul);
@@ -592,19 +626,56 @@
     // 1. Proof
     renderFeatured(document.getElementById("featured-grid"), data.featured);
 
-    // 2. Work design
+    // 2. Work design — scoped to sessions that loaded Desk, since that is
+    // the work system this section studies.
     const totalToolCalls = data.tool_kinds.reduce((s, t) => s + t.calls, 0);
     const totalModelRequests = data.models.reduce((s, m) => s + m.requests, 0);
-    const kaizenOpen = data.kaizen_issues.filter((i) => i.state === "open").length;
+    const kaizenNote =
+      data.kaizen.raised > 0 && data.kaizen.resolved === data.kaizen.raised
+        ? `all ${data.kaizen.resolved} resolved`
+        : `${fmtNum(data.kaizen.resolved)} of ${fmtNum(data.kaizen.raised)} resolved`;
     renderKPIs(document.getElementById("kpi-row"), [
-      { label: "Sessions published", value: fmtNum(data.coverage.sessions_with_facts) },
+      { label: "Sessions that loaded Desk", value: fmtNum(data.scope.sessions_desk), note: `of ${fmtNum(data.scope.sessions_total)} published` },
       { label: "Jobs tracked", value: fmtNum(data.coverage.jobs), note: `${fmtNum(data.coverage.jobs_open)} open` },
-      { label: "Subagent dispatches", value: fmtNum(data.subagents.subagent_dispatches) },
-      { label: "Tool calls recorded", value: fmtCompact(totalToolCalls) },
-      { label: "Model requests", value: fmtCompact(totalModelRequests) },
-      { label: "Kaizen issues open", value: fmtNum(kaizenOpen) },
+      { label: "Subagent dispatches", value: fmtNum(data.subagents.subagent_dispatches), note: "sessions that loaded Desk" },
+      { label: "Tool calls recorded", value: fmtCompact(totalToolCalls), note: "sessions that loaded Desk" },
+      { label: "Model requests", value: fmtCompact(totalModelRequests), note: "sessions that loaded Desk" },
+      { label: "Kaizen issues", value: `${fmtNum(data.kaizen.raised)} raised`, note: kaizenNote },
     ]);
+
+    const ENTRYPOINT_NAMES = {
+      desktop: "desktop",
+      launcher: "Copilot launcher",
+      sdk: "headless sdk automation",
+      cli: "interactive cli",
+    };
+    function entrypointPhrase(obj) {
+      return Object.entries(obj || {})
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${fmtNum(v)} ${ENTRYPOINT_NAMES[k] || k}`)
+        .join(", ");
+    }
+    const scopeContextEl = document.getElementById("scope-context");
+    if (scopeContextEl && data.scope) {
+      scopeContextEl.textContent =
+        `${fmtNum(data.scope.sessions_total)} sessions are published in total. Everything above and below in this section is scoped to the ` +
+        `${fmtNum(data.scope.sessions_desk)} that loaded Desk (${entrypointPhrase(data.scope.entrypoints_desk)}) — that is the work system being studied here. ` +
+        `The other ${fmtNum(data.scope.sessions_other)} sessions on contributing machines (${entrypointPhrase(data.scope.entrypoints_other)}) never loaded Desk and are ` +
+        `context, not a finding: most are short desktop chats or Copilot launcher sessions, and "sdk" means headless automation such as a scripted claude -p run, not interactive work.`;
+    }
+
     renderTakeaways(document.getElementById("takeaways"), data.takeaways);
+
+    const timeBreakdownNoteEl = document.getElementById("time-breakdown-note");
+    if (timeBreakdownNoteEl && data.flow_efficiency) {
+      const n = data.flow_efficiency.eligible_jobs ?? 0;
+      const jobsTotal = data.flow_efficiency.jobs_total ?? data.coverage.jobs;
+      timeBreakdownNoteEl.textContent =
+        n > 0
+          ? `Only ${n} of ${fmtNum(jobsTotal)} tracked jobs qualify right now (finished, whole life inside capture) — treat this as a small-sample signal, not a settled figure.`
+          : `No job yet both finished and had its whole life inside capture, so this chart has nothing to show yet.`;
+    }
 
     const timeBreakdownRows = data.time_breakdown.map((r) => ({
       label: r.label,

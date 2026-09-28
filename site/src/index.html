@@ -58,7 +58,8 @@
         are no leaderboards here and nothing about any one person or agent.
       </p>
 
-      <div id="kpi-row" class="kpi-row" style="margin-bottom: 30px;"></div>
+      <div id="kpi-row" class="kpi-row" style="margin-bottom: 14px;"></div>
+      <p id="scope-context" class="chart-caption" style="margin: 0 0 30px;"></p>
 
       <h3 style="font-size:16px;margin:0 0 12px;">What the data shows so far</h3>
       <div id="takeaways" class="takeaways" style="margin-bottom: 34px;"></div>
@@ -66,7 +67,8 @@
       <div class="chart-grid cols-2">
         <div class="chart-card">
           <h3>Where time goes</h3>
-          <p class="chart-caption">Median and 75th-percentile duration per job, across jobs with enough evidence to measure each figure. Not all four figures sum to one lead time &mdash; each is its own independent measure. Bar length is log-scaled so seconds and days both stay visible; the label always shows the real duration.</p>
+          <p class="chart-caption">Median and 75th-percentile duration per job, computed only over finished jobs whose whole life sits inside capture &mdash; no gap between the job's recorded start and its first captured session. Every other job's card predates capture, so counting that gap as lead time would be an artifact, not a finding, and it is left out here. Bar length is log-scaled so seconds and days both stay visible; the label always shows the real duration.</p>
+          <p class="chart-caption" id="time-breakdown-note"></p>
           <div class="legend">
             <span class="legend-item"><span class="legend-swatch" style="background:var(--series-1);"></span>Median</span>
             <span class="legend-item"><span class="legend-swatch" style="background:repeating-linear-gradient(45deg, var(--series-2), var(--series-2) 2px, transparent 2px, transparent 4px);border:1px dashed var(--series-2);"></span>75th percentile</span>
@@ -93,15 +95,13 @@
     <div class="wrap">
       <h2 class="section-title" id="details-title">Explore the store</h2>
       <p class="section-sub">
-        Every chart below reads the current build of the store. Numbers will shift as more sessions publish, and the job-status and
-        lifecycle figures will change once a pending cleanup of about two dozen job attributions lands &mdash; this page will simply
-        reflect that when it happens.
+        Every chart below reads the current build of the store. Numbers will shift as more sessions publish and more jobs finish.
       </p>
 
       <div class="chart-grid cols-2">
         <div class="chart-card">
-          <h3>Sessions arriving, by hour</h3>
-          <p class="chart-caption">Published facts carry no clock time by design ("no when"). This uses the one legitimate public timestamp available: when each facts file first landed on <code>main</code>, the same information visible on any GitHub pull request.</p>
+          <h3>Sessions published, cumulative</h3>
+          <p class="chart-caption">Published facts carry no clock time by design ("no when"). This uses the one legitimate public timestamp available: when each facts file first landed on <code>main</code>, the same information visible on any GitHub pull request. Shown as a running total, not a per-hour count: the store's history so far is short enough that its first hour was a one-time flush of sessions already sitting on contributing machines when the store went live, not a burst of new work, and a per-hour bar chart would read that flush as a spike.</p>
           <div id="chart-intake"></div>
         </div>
         <div class="chart-card">
@@ -114,12 +114,12 @@
       <div class="chart-grid cols-2" style="margin-top:20px;">
         <div class="chart-card">
           <h3>Tool calls by kind</h3>
-          <p class="chart-caption">Total calls recorded across every published session.</p>
+          <p class="chart-caption">Total calls recorded across sessions that loaded Desk.</p>
           <div id="chart-tool-calls"></div>
         </div>
         <div class="chart-card">
           <h3>Failure rate by tool kind</h3>
-          <p class="chart-caption">Share of calls that failed, for tool kinds used at least 20 times.</p>
+          <p class="chart-caption">Share of calls that failed, for tool kinds used at least 20 times, across sessions that loaded Desk.</p>
           <div id="chart-tool-failures"></div>
         </div>
       </div>
@@ -127,12 +127,12 @@
       <div class="chart-grid cols-2" style="margin-top:20px;">
         <div class="chart-card">
           <h3>Model requests</h3>
-          <p class="chart-caption">Requests by model, summed across every published session.</p>
+          <p class="chart-caption">Requests by model, summed across sessions that loaded Desk.</p>
           <div id="chart-models"></div>
         </div>
         <div class="chart-card">
           <h3>Subagent fan-out</h3>
-          <p class="chart-caption">Subagents dispatched per session.</p>
+          <p class="chart-caption">Subagents dispatched per session, across sessions that loaded Desk.</p>
           <div id="chart-subagents"></div>
         </div>
       </div>

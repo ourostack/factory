@@ -617,6 +617,29 @@ table.data-table code {
   font-size: 12px;
 }
 
+.issue-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.issue-resolution {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.issue-resolution a {
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.issue-resolution a:hover {
+  text-decoration: underline;
+}
+
 /* ---------- featured (long-horizon proof) cards ---------- */
 
 .featured-card {
