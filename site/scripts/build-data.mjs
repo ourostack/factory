@@ -324,6 +324,10 @@ const ghHeaders = {
   "User-Agent": "factory-site-build",
   ...(ghToken ? { Authorization: `Bearer ${ghToken}` } : {}),
 };
+// The store repo itself, for the kaizen/andon issue lookups below. In CI
+// this is always the checked-out repo (GITHUB_REPOSITORY); the literal is
+// only a local-run fallback.
+const GITHUB_REPO = process.env.GITHUB_REPOSITORY || "ourostack/factory";
 
 async function checkMerged(repo, number) {
   try {
@@ -440,6 +444,11 @@ try {
 // auto-filed body) or, failing that, the first pull request linked in the
 // closing comment - both live-checked for merge state, same as the featured
 // sessions above.
+//
+// A failed fetch (rate limit, network) and a genuine zero look identical as
+// a bare array, so `fetchIssues` carries its own verification state back
+// (same "verified"/"unavailable" vocabulary as the featured sessions'
+// merge-check above) rather than collapsing a failure into a true zero.
 // ---------------------------------------------------------------------------
 
 const PR_URL_RE = /https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/;
@@ -461,30 +470,33 @@ function extractCountermeasure(body) {
 async function fetchIssues(label) {
   try {
     const res = await fetch(
-      `https://api.github.com/repos/ourostack/factory/issues?state=all&labels=${encodeURIComponent(label)}&per_page=50`,
+      `https://api.github.com/repos/${GITHUB_REPO}/issues?state=all&labels=${encodeURIComponent(label)}&per_page=50`,
       { headers: ghHeaders },
     );
-    if (!res.ok) return [];
+    if (!res.ok) return { verification: "unavailable", issues: [] };
     const items = await res.json();
-    return items
-      .filter((i) => !i.pull_request)
-      .map((i) => ({
-        number: i.number,
-        title: i.title,
-        state: i.state,
-        url: i.html_url,
-        created_at: i.created_at,
-        body: i.body || "",
-      }));
+    return {
+      verification: "verified",
+      issues: items
+        .filter((i) => !i.pull_request)
+        .map((i) => ({
+          number: i.number,
+          title: i.title,
+          state: i.state,
+          url: i.html_url,
+          created_at: i.created_at,
+          body: i.body || "",
+        })),
+    };
   } catch {
-    return [];
+    return { verification: "unavailable", issues: [] };
   }
 }
 
 async function fetchLastComment(number) {
   try {
     const res = await fetch(
-      `https://api.github.com/repos/ourostack/factory/issues/${number}/comments?per_page=50`,
+      `https://api.github.com/repos/${GITHUB_REPO}/issues/${number}/comments?per_page=50`,
       { headers: ghHeaders },
     );
     if (!res.ok) return null;
@@ -517,12 +529,12 @@ async function enrichIssue(issue) {
   };
 }
 
-const [kaizenIssuesRaw, andonIssuesRaw] = await Promise.all([
+const [kaizenFetch, andonFetch] = await Promise.all([
   fetchIssues("kaizen"),
   fetchIssues("andon"),
 ]);
-const kaizenIssues = await mapLimit(kaizenIssuesRaw, 4, enrichIssue);
-const andonIssues = await mapLimit(andonIssuesRaw, 4, enrichIssue);
+const kaizenIssues = await mapLimit(kaizenFetch.issues, 4, enrichIssue);
+const andonIssues = await mapLimit(andonFetch.issues, 4, enrichIssue);
 const kaizenRaised = kaizenIssues.length;
 const kaizenResolved = kaizenIssues.filter((i) => i.state === "closed").length;
 
@@ -667,9 +679,10 @@ const data = {
     label_files: coverageRaw.labels?.files ?? 0,
     breakdown: mudaOverall.wastes ?? [],
   },
-  kaizen: { raised: kaizenRaised, resolved: kaizenResolved },
+  kaizen: { raised: kaizenRaised, resolved: kaizenResolved, verification: kaizenFetch.verification },
   kaizen_issues: kaizenIssues,
   andon_issues: andonIssues,
+  andon_verification: andonFetch.verification,
   featured,
   takeaways,
 };

@@ -453,8 +453,17 @@
 
   // ------------------------------------------------------------- kaizen
 
-  function renderKaizen(container, kaizenIssues, andonIssues) {
+  function renderKaizen(container, kaizenIssues, andonIssues, kaizenVerification, andonVerification) {
     container.innerHTML = "";
+    const kaizenOk = kaizenVerification !== "unavailable";
+    const andonOk = andonVerification !== "unavailable";
+    if (!kaizenIssues.length && !andonIssues.length && !kaizenOk && !andonOk) {
+      emptyState(
+        container,
+        "Kaizen and andon issues couldn't be checked for this build (the GitHub request didn't succeed). This says nothing about how many actually exist — check back on the next build.",
+      );
+      return;
+    }
     if (!kaizenIssues.length && !andonIssues.length) {
       emptyState(container, "No kaizen or andon issues opened yet.");
       return;
@@ -508,10 +517,20 @@
       return wrap;
     }
     container.appendChild(
-      list("Kaizen — improvement issues", kaizenIssues, "No kaizen issues opened yet."),
+      list(
+        "Kaizen — improvement issues",
+        kaizenIssues,
+        kaizenOk ? "No kaizen issues opened yet." : "Kaizen issues couldn't be checked for this build.",
+      ),
     );
     container.appendChild(
-      list("Andon — stop-the-line signals", andonIssues, "No andon issues — no tracked plugin release has been flagged."),
+      list(
+        "Andon — stop-the-line signals",
+        andonIssues,
+        andonOk
+          ? "No andon issues — no tracked plugin release has been flagged."
+          : "Andon issues couldn't be checked for this build.",
+      ),
     );
   }
 
@@ -542,6 +561,7 @@
     for (const c of cols) {
       const th = document.createElement("th");
       th.textContent = c;
+      if (c === "Flow eff.") th.title = "Active time ÷ lead time. Higher means less of the job's time was spent waiting.";
       if (c !== "Job" && c !== "Status" && c !== "Sessions") th.className = "num";
       headRow.appendChild(th);
     }
@@ -633,8 +653,11 @@
     // sessions" apart from the rest; this page never claims to.
     const totalToolCalls = data.tool_kinds.reduce((s, t) => s + t.calls, 0);
     const totalModelRequests = data.models.reduce((s, m) => s + m.requests, 0);
-    const kaizenNote =
-      data.kaizen.raised > 0 && data.kaizen.resolved === data.kaizen.raised
+    const kaizenVerified = data.kaizen.verification !== "unavailable";
+    const kaizenValue = kaizenVerified ? `${fmtNum(data.kaizen.raised)} raised` : "unavailable";
+    const kaizenNote = !kaizenVerified
+      ? "couldn't check GitHub for this build"
+      : data.kaizen.raised > 0 && data.kaizen.resolved === data.kaizen.raised
         ? `all ${data.kaizen.resolved} resolved`
         : `${fmtNum(data.kaizen.resolved)} of ${fmtNum(data.kaizen.raised)} resolved`;
     renderKPIs(document.getElementById("kpi-row"), [
@@ -643,7 +666,7 @@
       { label: "Subagent dispatches", value: fmtNum(data.subagents.subagent_dispatches), note: "substantial sessions" },
       { label: "Tool calls recorded", value: fmtCompact(totalToolCalls), note: "substantial sessions" },
       { label: "Model requests", value: fmtCompact(totalModelRequests), note: "substantial sessions" },
-      { label: "Kaizen issues", value: `${fmtNum(data.kaizen.raised)} raised`, note: kaizenNote },
+      { label: "Kaizen issues", value: kaizenValue, note: kaizenNote },
     ]);
 
     const ENTRYPOINT_NAMES = {
@@ -701,7 +724,13 @@
     });
 
     renderWaste(document.getElementById("waste-caption"), document.getElementById("waste-panel"), data.waste);
-    renderKaizen(document.getElementById("kaizen-panel"), data.kaizen_issues, data.andon_issues);
+    renderKaizen(
+      document.getElementById("kaizen-panel"),
+      data.kaizen_issues,
+      data.andon_issues,
+      data.kaizen.verification,
+      data.andon_verification,
+    );
 
     // 3. Detail views
     renderIntakeChart(document.getElementById("chart-intake"), data.intake_over_time);
