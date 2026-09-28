@@ -178,30 +178,38 @@ const scopedFlowEfficiency = {
 };
 
 // ---------------------------------------------------------------------------
-// Facts on main: session population, and the subset that loaded Desk.
+// Facts on main: session population, and the substantial subset this section
+// studies.
 //
 // Published facts name no person, machine or time of day, so this is safe
-// to aggregate. Most sessions published from a contributing machine never
-// loaded Desk at all (a desktop chat, a Copilot launcher session, a short
-// exploratory run); the factory studies the work system Desk instruments,
-// so every measure and takeaway below that describes "the work" is scoped
-// to sessions whose published `plugins` list includes `desk`. The rest are
-// reported once, plainly, as population context, never as a finding about
-// the work.
+// to aggregate. A published session withholds which plugins it ran by
+// default (`plugins: []`, with only a private count at `refs.private.plugins`);
+// only a session whose publisher separately marked each plugin name public
+// shows one. Most sessions, including real, substantial work, publish this
+// way, so `plugins` cannot answer "did this session use Desk" for the
+// store as a whole, and this page never claims to identify Desk sessions.
+//
+// What the public facts always carry is session length and job binding, so
+// this section studies the sessions that ran at least 5 minutes or are
+// bound to a tracked job: real, substantial work, not a launcher blip or a
+// scripted check. Every other session is reported once, plainly, as
+// population context, never folded into a finding about the work.
 // ---------------------------------------------------------------------------
+
+const SUBSTANTIAL_DURATION_MS = 5 * 60 * 1000;
 
 const factsDir = join(mainDir, "facts");
 const factFiles = listJSON(factsDir);
 
 const allEntrypoints = {};
-const deskEntrypoints = {};
-let deskSessionCount = 0;
-let deskBoundCount = 0;
+const scopedEntrypoints = {};
+let scopedSessionCount = 0;
+let scopedBoundCount = 0;
 
-const toolKindTotals = new Map(); // desk-scoped
-const modelTotals = new Map(); // desk-scoped
-let subagentDispatches = 0; // desk-scoped
-let deskSessionsWithSubagents = 0;
+const toolKindTotals = new Map(); // scoped to substantial sessions
+const modelTotals = new Map(); // scoped to substantial sessions
+let subagentDispatches = 0; // scoped to substantial sessions
+let scopedSessionsWithSubagents = 0;
 const subagentBuckets = { "0": 0, "1-2": 0, "3-5": 0, "6+": 0 };
 
 for (const f of factFiles) {
@@ -209,13 +217,13 @@ for (const f of factFiles) {
   const entrypoint = d.session?.entrypoint || "unknown";
   allEntrypoints[entrypoint] = (allEntrypoints[entrypoint] || 0) + 1;
 
-  const pluginNames = (d.plugins || []).map((p) => (typeof p === "string" ? p : p?.name));
-  const loadedDesk = pluginNames.includes("desk");
-  if (!loadedDesk) continue;
+  const bound = Array.isArray(d.jobs) && d.jobs.length > 0;
+  const long = (d.session?.duration_ms ?? 0) >= SUBSTANTIAL_DURATION_MS;
+  if (!long && !bound) continue;
 
-  deskSessionCount += 1;
-  deskEntrypoints[entrypoint] = (deskEntrypoints[entrypoint] || 0) + 1;
-  if (Array.isArray(d.jobs) && d.jobs.length > 0) deskBoundCount += 1;
+  scopedSessionCount += 1;
+  scopedEntrypoints[entrypoint] = (scopedEntrypoints[entrypoint] || 0) + 1;
+  if (bound) scopedBoundCount += 1;
 
   for (const [tool, calls] of Object.entries(d.counts?.tool_calls || {})) {
     const cur = toolKindTotals.get(tool) || { tool, calls: 0, failures: 0, sessions: 0 };
@@ -244,7 +252,7 @@ for (const f of factFiles) {
   const agents = Array.isArray(d.agents) ? d.agents : [];
   const subCount = agents.filter((a) => a.parent !== null && a.parent !== undefined).length;
   subagentDispatches += subCount;
-  if (subCount > 0) deskSessionsWithSubagents += 1;
+  if (subCount > 0) scopedSessionsWithSubagents += 1;
   const bucket = subCount === 0 ? "0" : subCount <= 2 ? "1-2" : subCount <= 5 ? "3-5" : "6+";
   subagentBuckets[bucket] += 1;
 }
@@ -256,19 +264,19 @@ const toolKinds = [...toolKindTotals.values()]
 const models = [...modelTotals.values()].sort((a, b) => b.requests - a.requests);
 const totalModelRequests = models.reduce((s, m) => s + m.requests, 0);
 
-const otherSessionCount = factFiles.length - deskSessionCount;
+const otherSessionCount = factFiles.length - scopedSessionCount;
 const otherEntrypoints = {};
 for (const [k, v] of Object.entries(allEntrypoints)) {
-  otherEntrypoints[k] = v - (deskEntrypoints[k] || 0);
+  otherEntrypoints[k] = v - (scopedEntrypoints[k] || 0);
 }
 
 // ---------------------------------------------------------------------------
 // Featured long-horizon sessions: the proof that, given durable context and
 // an engineering lifecycle, an agent can carry a real task to a merged,
-// reviewed result over a long span. This is a claim about agent capability
-// in general, not about the Desk work system specifically, so it draws from
-// every published session (any entrypoint, any plugin set) with a real
-// public pull request reference, not only the Desk-scoped population above.
+// reviewed result over a long span. This draws from every published session
+// (any entrypoint, any duration, bound or not) with a real public pull
+// request reference, not only the substantial-session population above,
+// since the claim here is about agent capability in general.
 // This reads facts directly rather than through job attribution, so a job
 // hash that several sessions share can never distort which sessions are
 // picked; each candidate is a single session's own record. It recomputes on
@@ -522,9 +530,11 @@ const kaizenResolved = kaizenIssues.filter((i) => i.state === "closed").length;
 // Takeaways: every number here is read from the data above, not typed in.
 // Re-running this script against a later store rebuild changes the numbers
 // and the sentences together. Anything describing the work itself is scoped
-// to sessions that loaded Desk, since that is the work system being studied;
-// other sessions on contributing machines are reported once, as population
-// context, never folded into a "finding" about the work.
+// to the substantial sessions (ran at least 5 minutes, or bound to a
+// tracked job), since that is real work rather than a launcher blip or a
+// scripted check; other sessions on contributing machines are reported
+// once, as population context, never folded into a "finding" about the
+// work.
 // ---------------------------------------------------------------------------
 
 function pct(n, digits = 0) {
@@ -533,12 +543,12 @@ function pct(n, digits = 0) {
 
 const takeaways = [];
 
-if (deskSessionCount > 0) {
+if (scopedSessionCount > 0) {
   takeaways.push({
     id: "attribution",
-    text: `Of the ${deskSessionCount} sessions that loaded Desk, ${deskBoundCount} are bound to a tracked job; the rest ran without a job attribution.`,
-    n: deskSessionCount,
-    small_sample: deskSessionCount < 15,
+    text: `Of the ${scopedSessionCount} substantial sessions, ${scopedBoundCount} are bound to a tracked job; the rest ran without a job attribution.`,
+    n: scopedSessionCount,
+    small_sample: scopedSessionCount < 15,
   });
 }
 
@@ -565,7 +575,7 @@ if (scopedFlowEfficiency.jobs_counted > 0) {
   if (worst) {
     takeaways.push({
       id: "tool_failures",
-      text: `Among sessions that loaded Desk, "${worst.tool}" calls fail most often of the tool kinds used at least 20 times: ${pct(worst.failure_rate, 1)} of ${worst.calls.toLocaleString()} calls (${worst.failures.toLocaleString()} failures).`,
+      text: `Among the substantial sessions, "${worst.tool}" calls fail most often of the tool kinds used at least 20 times: ${pct(worst.failure_rate, 1)} of ${worst.calls.toLocaleString()} calls (${worst.failures.toLocaleString()} failures).`,
       n: worst.calls,
       small_sample: worst.calls < 100,
     });
@@ -576,19 +586,19 @@ if (models.length > 0 && totalModelRequests > 0) {
   const top = models[0];
   takeaways.push({
     id: "model_concentration",
-    text: `Among sessions that loaded Desk, ${top.id} accounts for ${pct(top.requests / totalModelRequests)} of the ${totalModelRequests.toLocaleString()} model requests recorded.`,
+    text: `Among the substantial sessions, ${top.id} accounts for ${pct(top.requests / totalModelRequests)} of the ${totalModelRequests.toLocaleString()} model requests recorded.`,
     n: totalModelRequests,
     small_sample: false,
   });
 }
 
-if (deskSessionCount > 0) {
-  const share = deskSessionsWithSubagents / deskSessionCount;
+if (scopedSessionCount > 0) {
+  const share = scopedSessionsWithSubagents / scopedSessionCount;
   takeaways.push({
     id: "subagents",
-    text: `${deskSessionsWithSubagents} of the ${deskSessionCount} sessions that loaded Desk (${pct(share)}) dispatch at least one subagent, ${subagentDispatches.toLocaleString()} dispatches in total.`,
-    n: deskSessionCount,
-    small_sample: deskSessionCount < 15,
+    text: `${scopedSessionsWithSubagents} of the ${scopedSessionCount} substantial sessions (${pct(share)}) dispatch at least one subagent, ${subagentDispatches.toLocaleString()} dispatches in total.`,
+    n: scopedSessionCount,
+    small_sample: scopedSessionCount < 15,
   });
 }
 
@@ -625,10 +635,11 @@ const data = {
   },
   scope: {
     sessions_total: factFiles.length,
-    sessions_desk: deskSessionCount,
-    sessions_desk_bound: deskBoundCount,
+    sessions_scoped: scopedSessionCount,
+    sessions_scoped_bound: scopedBoundCount,
     sessions_other: otherSessionCount,
-    entrypoints_desk: deskEntrypoints,
+    substantial_duration_ms: SUBSTANTIAL_DURATION_MS,
+    entrypoints_scoped: scopedEntrypoints,
     entrypoints_other: otherEntrypoints,
   },
   tool_kinds: toolKinds,
@@ -642,9 +653,9 @@ const data = {
   jobs: jobs.sort((a, b) => (b.lead_time_ms ?? -1) - (a.lead_time_ms ?? -1)),
   models,
   subagents: {
-    root_sessions: deskSessionCount,
+    root_sessions: scopedSessionCount,
     subagent_dispatches: subagentDispatches,
-    sessions_with_subagents: deskSessionsWithSubagents,
+    sessions_with_subagents: scopedSessionsWithSubagents,
     buckets: subagentBuckets,
   },
   intake_over_time: intakeOverTime,
@@ -667,5 +678,5 @@ mkdirSync(dirname(outFile), { recursive: true });
 writeFileSync(outFile, JSON.stringify(data), "utf8");
 
 console.log(
-  `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${deskSessionCount} loaded Desk), ${toolKinds.length} tool kinds, ${models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups) -> ${outFile}`,
+  `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${scopedSessionCount} substantial), ${toolKinds.length} tool kinds, ${models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups) -> ${outFile}`,
 );

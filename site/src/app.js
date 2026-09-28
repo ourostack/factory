@@ -626,8 +626,11 @@
     // 1. Proof
     renderFeatured(document.getElementById("featured-grid"), data.featured);
 
-    // 2. Work design — scoped to sessions that loaded Desk, since that is
-    // the work system this section studies.
+    // 2. Work design — scoped to substantial sessions (ran at least 5
+    // minutes, or bound to a tracked job), since that is real work rather
+    // than a launcher blip or a scripted check. Published sessions withhold
+    // which plugins they ran by default, so plugin data cannot tell "Desk
+    // sessions" apart from the rest; this page never claims to.
     const totalToolCalls = data.tool_kinds.reduce((s, t) => s + t.calls, 0);
     const totalModelRequests = data.models.reduce((s, m) => s + m.requests, 0);
     const kaizenNote =
@@ -635,11 +638,11 @@
         ? `all ${data.kaizen.resolved} resolved`
         : `${fmtNum(data.kaizen.resolved)} of ${fmtNum(data.kaizen.raised)} resolved`;
     renderKPIs(document.getElementById("kpi-row"), [
-      { label: "Sessions that loaded Desk", value: fmtNum(data.scope.sessions_desk), note: `of ${fmtNum(data.scope.sessions_total)} published` },
+      { label: "Substantial sessions", value: fmtNum(data.scope.sessions_scoped), note: `of ${fmtNum(data.scope.sessions_total)} published` },
       { label: "Jobs tracked", value: fmtNum(data.coverage.jobs), note: `${fmtNum(data.coverage.jobs_open)} open` },
-      { label: "Subagent dispatches", value: fmtNum(data.subagents.subagent_dispatches), note: "sessions that loaded Desk" },
-      { label: "Tool calls recorded", value: fmtCompact(totalToolCalls), note: "sessions that loaded Desk" },
-      { label: "Model requests", value: fmtCompact(totalModelRequests), note: "sessions that loaded Desk" },
+      { label: "Subagent dispatches", value: fmtNum(data.subagents.subagent_dispatches), note: "substantial sessions" },
+      { label: "Tool calls recorded", value: fmtCompact(totalToolCalls), note: "substantial sessions" },
+      { label: "Model requests", value: fmtCompact(totalModelRequests), note: "substantial sessions" },
       { label: "Kaizen issues", value: `${fmtNum(data.kaizen.raised)} raised`, note: kaizenNote },
     ]);
 
@@ -658,11 +661,14 @@
     }
     const scopeContextEl = document.getElementById("scope-context");
     if (scopeContextEl && data.scope) {
+      const minutes = Math.round((data.scope.substantial_duration_ms ?? 300000) / 60000);
       scopeContextEl.textContent =
         `${fmtNum(data.scope.sessions_total)} sessions are published in total. Everything above and below in this section is scoped to the ` +
-        `${fmtNum(data.scope.sessions_desk)} that loaded Desk (${entrypointPhrase(data.scope.entrypoints_desk)}) — that is the work system being studied here. ` +
-        `The other ${fmtNum(data.scope.sessions_other)} sessions on contributing machines (${entrypointPhrase(data.scope.entrypoints_other)}) never loaded Desk and are ` +
-        `context, not a finding: most are short desktop chats or Copilot launcher sessions, and "sdk" means headless automation such as a scripted claude -p run, not interactive work.`;
+        `${fmtNum(data.scope.sessions_scoped)} that ran at least ${minutes} minutes or are bound to a tracked job (${entrypointPhrase(data.scope.entrypoints_scoped)}) — ` +
+        `real, substantial work, not a launcher blip or a scripted check. The other ${fmtNum(data.scope.sessions_other)} sessions on contributing machines ` +
+        `(${entrypointPhrase(data.scope.entrypoints_other)}) are shorter and unbound, shown here as context, not folded into any measure. A published session ` +
+        `withholds which plugins it ran by default; only a session whose publisher separately marks each plugin name public would show one, so this page cannot ` +
+        `identify "Desk sessions" specifically and does not claim to — it scopes by session length and job binding instead, both of which every published session carries.`;
     }
 
     renderTakeaways(document.getElementById("takeaways"), data.takeaways);
