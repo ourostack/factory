@@ -1,0 +1,89 @@
+# Builds and publishes the public GitHub Pages site under site/.
+#
+# The site has no server and no build-time secrets: site/scripts/build-data.mjs
+# reads the already-built `reports` branch (rollups/jobs factory-build just
+# published) and the facts on `main`, makes a handful of unauthenticated,
+# read-only calls to the public GitHub REST API (pull request merge state,
+# kaizen/andon issues), and writes one data.json next to the static
+# HTML/CSS/JS in site/src. The page itself fetches that data.json at runtime;
+# nothing here talks to a database or holds a token beyond the ambient
+# GITHUB_TOKEN used only to raise the GitHub API rate limit.
+#
+# Runs after factory-build finishes (so the reports branch it reads is
+# current) and on demand. It does not run on every push to main, since
+# main alone (without a fresh reports build) is not enough to render the
+# job-level charts.
+name: pages
+
+on:
+  workflow_run:
+    workflows: [factory-build]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out reports
+        uses: actions/checkout@v7
+        with:
+          ref: reports
+          path: _reports
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build site data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/dist
+          node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json
+          cp site/src/index.html site/src/styles.css site/src/app.js site/dist/
+          echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

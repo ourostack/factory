@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The factory</title>
+<meta name="description" content="How Desk measures agentic work the way Lean measures a factory floor: no who, no when, just how the work flowed." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232a78d6'/%3E%3Cpath d='M7 22V10l6 5 6-5v12M25 22V13' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <p class="eyebrow">Desk factory &middot; public measurement store</p>
+    <h1 class="hero-title">Agents can carry real engineering work for days. Here is the proof, and where the time still goes.</h1>
+    <p class="hero-sub">
+      The factory measures agentic work the way Lean measures a production line: not who did the work or when, but how it flowed &mdash;
+      value, waiting, rework, and everything the system could improve. Every number on this page is read live from the public store,
+      <a href="https://github.com/ourostack/factory" target="_blank" rel="noopener">ourostack/factory</a>. No session is staged for this page.
+    </p>
+    <div class="header-links">
+      <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/docs/agentic-engineering-v2-rfc.md#4-the-factory-measuring-and-designing-the-work" target="_blank" rel="noopener">Read the RFC (section 4)</a>
+      <a href="https://github.com/ourostack/factory" target="_blank" rel="noopener">Store repository</a>
+      <a href="https://github.com/ourostack/factory/tree/reports" target="_blank" rel="noopener">Reports branch</a>
+      <a href="https://github.com/ourostack/factory/issues?q=is%3Aissue+label%3Akaizen" target="_blank" rel="noopener">Kaizen issues</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ 1. THE PROOF ============ -->
+  <section id="proof" aria-labelledby="proof-title">
+    <div class="wrap">
+      <h2 class="section-title" id="proof-title">Long-horizon work, proven</h2>
+      <p class="section-sub">
+        Most people have not yet figured out how to hand an agent a task and walk away for hours. These are the three longest single
+        agent sessions currently in the store, chosen automatically by length among sessions that reference at least one pull request &mdash;
+        then checked live against GitHub to confirm those pull requests actually merged. This is what "done" looks like: reviewed,
+        passed CI, merged.
+      </p>
+      <div id="featured-grid" class="chart-grid cols-2" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+        <p class="chart-empty">Loading&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. WORK DESIGN ============ -->
+  <section id="work-design" aria-labelledby="work-design-title">
+    <div class="wrap">
+      <h2 class="section-title" id="work-design-title">So what are they doing the rest of the time?</h2>
+      <p class="section-sub">
+        A long session is not automatically a well-run one. Once an agent can work for hours or days at a stretch, the next question is
+        an industrial-engineering question: where does the time actually go &mdash; value-adding work, necessary support, or waste &mdash;
+        and can the system around the agent be redesigned to move more of it toward value? This studies the work, not the worker. There
+        are no leaderboards here and nothing about any one person or agent.
+      </p>
+
+      <div id="kpi-row" class="kpi-row" style="margin-bottom: 14px;"></div>
+      <p id="scope-context" class="chart-caption" style="margin: 0 0 30px;"></p>
+
+      <h3 style="font-size:16px;margin:0 0 12px;">What the data shows so far</h3>
+      <div id="takeaways" class="takeaways" style="margin-bottom: 34px;"></div>
+
+      <div class="chart-grid cols-2">
+        <div class="chart-card">
+          <h3>Where time goes</h3>
+          <p class="chart-caption">Median and 75th-percentile duration per job, computed only over finished jobs whose whole life sits inside capture &mdash; no gap between the job's recorded start and its first captured session. Every other job's card predates capture, so counting that gap as lead time would be an artifact, not a finding, and it is left out here. Flow efficiency, referenced in the takeaways above and in the jobs table below, is active time divided by lead time; a higher share means less of the job's time was spent waiting. Bar length is log-scaled so seconds and days both stay visible; the label always shows the real duration.</p>
+          <p class="chart-caption" id="time-breakdown-note"></p>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-swatch" style="background:var(--series-1);"></span>Median</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:repeating-linear-gradient(45deg, var(--series-2), var(--series-2) 2px, transparent 2px, transparent 4px);border:1px dashed var(--series-2);"></span>75th percentile</span>
+          </div>
+          <div id="chart-time-breakdown"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Waste, by Lean type</h3>
+          <p class="chart-caption" id="waste-caption"></p>
+          <div id="waste-panel"></div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-top:20px;">
+        <h3>The kaizen loop</h3>
+        <p class="chart-caption">Friction the evidence surfaces becomes an issue here, naming the measure it should move and the countermeasure's pull request. Andon issues are a stop-the-line signal: a tracked plugin's release made a quality measure clearly worse.</p>
+        <div id="kaizen-panel"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. DETAIL VIEWS ============ -->
+  <section id="details" aria-labelledby="details-title">
+    <div class="wrap">
+      <h2 class="section-title" id="details-title">Explore the store</h2>
+      <p class="section-sub">
+        Every chart below reads the current build of the store. Numbers will shift as more sessions publish and more jobs finish.
+      </p>
+
+      <div class="chart-grid cols-2">
+        <div class="chart-card">
+          <h3>Sessions published, cumulative</h3>
+          <p class="chart-caption">Published facts carry no clock time by design ("no when"). This uses the one legitimate public timestamp available: when each facts file first landed on <code>main</code>, the same information visible on any GitHub pull request. Shown as a running total, not a per-hour count: the store's history so far is short enough that its first hour was a one-time flush of sessions already sitting on contributing machines when the store went live, not a burst of new work, and a per-hour bar chart would read that flush as a spike.</p>
+          <div id="chart-intake"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Job lifecycle</h3>
+          <p class="chart-caption">Status of every job the store currently tracks.</p>
+          <div id="chart-job-status"></div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-top:20px;">
+        <div class="chart-card">
+          <h3>Tool calls by kind</h3>
+          <p class="chart-caption">Total calls recorded across the substantial sessions.</p>
+          <div id="chart-tool-calls"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Failure rate by tool kind</h3>
+          <p class="chart-caption">Share of calls that failed, for tool kinds used at least 20 times, across the substantial sessions.</p>
+          <div id="chart-tool-failures"></div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-top:20px;">
+        <div class="chart-card">
+          <h3>Model requests</h3>
+          <p class="chart-caption">Requests by model, summed across the substantial sessions.</p>
+          <div id="chart-models"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Subagent fan-out</h3>
+          <p class="chart-caption">Subagents dispatched per session, across the substantial sessions.</p>
+          <div id="chart-subagents"></div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-top:20px;">
+        <h3>Every job</h3>
+        <p class="chart-caption">One row per job the store tracks. "Unavailable" means the store could not measure that figure yet, never zero.</p>
+        <div id="jobs-table"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. HOW IT WORKS ============ -->
+  <section id="how-it-works" aria-labelledby="how-it-works-title">
+    <div class="wrap">
+      <h2 class="section-title" id="how-it-works-title">How this data gets here</h2>
+      <p class="section-sub">Desk is a plugin that gives coding agents (Claude Code, Copilot CLI, Codex) a durable "desk" of tracks and tasks. The factory is how that work gets measured.</p>
+
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <p class="step-index">1</p>
+          <p class="step-title">A session ends</p>
+          <p class="step-body">The host publishes an anonymous facts file: tool calls, failures, retries, models, tokens, subagents, time intervals, which job it touched.</p>
+        </div>
+        <div class="pipeline-step">
+          <p class="step-index">2</p>
+          <p class="step-title">CI validates &amp; merges</p>
+          <p class="step-body">Every field is checked against the published schema. No transcript text, prompt, file content or identity is ever accepted.</p>
+        </div>
+        <div class="pipeline-step">
+          <p class="step-index">3</p>
+          <p class="step-title">CI builds reports</p>
+          <p class="step-body">A job's timeline is rebuilt and its report published: what happened, what mattered, what was waste, what we could not see.</p>
+        </div>
+        <div class="pipeline-step">
+          <p class="step-index">4</p>
+          <p class="step-title">An evaluator labels waste</p>
+          <p class="step-body">An independent agent classifies finished stretches as value, necessary support, or one of the eight Lean wastes &mdash; citing evidence, never grading itself.</p>
+        </div>
+        <div class="pipeline-step">
+          <p class="step-index">5</p>
+          <p class="step-title">Kaizen closes the loop</p>
+          <p class="step-body">Evidence becomes an improvement issue naming the measure, the countermeasure and, once it ships, whether the data confirms it helped.</p>
+        </div>
+      </div>
+
+      <h3 style="font-size:16px;margin:32px 0 10px;">No who, no when, just how</h3>
+      <div class="chart-grid cols-2">
+        <div class="chart-card">
+          <h3>No who</h3>
+          <p class="chart-caption" style="font-size:13.5px;">No contributor, operator, account, machine, host name, desk path or branch appears in any facts file. A job is identified only by a one-way hash.</p>
+        </div>
+        <div class="chart-card">
+          <h3>No when</h3>
+          <p class="chart-caption" style="font-size:13.5px;">Facts carry durations and offsets from the session start, never a date, a time of day or an epoch value.</p>
+        </div>
+        <div class="chart-card">
+          <h3>No content</h3>
+          <p class="chart-caption" style="font-size:13.5px;">No transcript text, prompt, response, tool argument, file content, file path or task title ever leaves the contributor's machine.</p>
+        </div>
+        <div class="chart-card">
+          <h3>Public references only</h3>
+          <p class="chart-caption" style="font-size:13.5px;">References to private repositories are dropped and only counted. Public pull requests and commits &mdash; the evidence on this page &mdash; are, like any GitHub contribution, already public.</p>
+        </div>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-top:16px;">
+        Contribution is opt-in, asked once per machine. The measurement rubric is public and open to review:
+        <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/docs/agentic-engineering-v2-rfc.md#4-the-factory-measuring-and-designing-the-work" target="_blank" rel="noopener">RFC section 4</a>
+        and the <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/skills/factory-evaluator/SKILL.md" target="_blank" rel="noopener">evaluator's rubric</a>.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-links">
+      <a href="https://github.com/ourostack/factory" target="_blank" rel="noopener">ourostack/factory</a>
+      <a href="https://github.com/ourostack/desk" target="_blank" rel="noopener">ourostack/desk</a>
+      <a href="https://github.com/ourostack/factory/tree/reports" target="_blank" rel="noopener">reports branch</a>
+      <a href="https://github.com/ourostack/factory/issues" target="_blank" rel="noopener">issues</a>
+    </div>
+    <p id="build-meta">Built from the store's current data.</p>
+    <p>This measures the work, never the people who did it.</p>
+  </div>
+</footer>
+
+<div id="tooltip" class="tooltip" role="tooltip"></div>
+<script src="app.js"></script>
+</body>
+</html>
