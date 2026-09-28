@@ -5,10 +5,10 @@
 # validator, cloned from ourostack/desk main, on what merging that head into
 # the base would land. A data pull request that passes it must also pass the
 # store's own plugin-name rule (`.github/scripts/check-intake-plugins.sh`,
-# read from the base): every facts file it adds carries `refs.private.plugins`
-# and names only plugins listed in `intake.json`. This file never checks out,
-# installs or executes the candidate's files. Failures report stable reason
-# codes only.
+# read from the base): every facts file it adds or modifies carries
+# `refs.private.plugins` and names only plugins listed in `intake.json`. This
+# file never checks out, installs or executes the candidate's files. Failures
+# report stable reason codes only.
 #
 # GitHub runs the workflow files of the pull request's own merge commit on
 # `pull_request`, so a pull request that edits this file, or adds a workflow
@@ -109,9 +109,10 @@ jobs:
               printf 'factory-validate: passed (maintenance)\n' | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            # The store's own rule on plugin names, from the base: newly
-            # added facts must come from a client that withholds privately
-            # sourced plugin names, and may name only listed public plugins.
+            # The store's own rule on plugin names, from the base: newly added
+            # or modified facts must come from a client that withholds
+            # privately sourced plugin names, and may name only listed public
+            # plugins.
             if ! codes=$(bash .github/scripts/check-intake-plugins.sh "$BASE_SHA" "$HEAD_SHA"); then
               printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
               printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
