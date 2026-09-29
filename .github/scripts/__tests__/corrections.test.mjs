@@ -104,6 +104,39 @@ test("validateCorrectionRecord rejects a non-positive-integer pr", () => {
   }
 })
 
+test("validateCorrectionRecord rejects a jobs value of the wrong type outright", () => {
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { jobs: "oops" } }), FILE_NAME)
+  assert.equal(ok, false)
+  assert.ok(errors.some((e) => e.code === "correction_field_type" && e.path === "fields.jobs"))
+})
+
+test("validateCorrectionRecord rejects a jobs entry missing a required key", () => {
+  const badJob = { job: "2927a4630f97b7869a71f387a4a757f1", basis: ["desk_commit"], session_offset_ms: null, transitions: [] } // no `observed`
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { jobs: [badJob] } }), FILE_NAME)
+  assert.equal(ok, false)
+  assert.ok(errors.some((e) => e.code === "correction_field_missing" && e.path === "fields.jobs.0.observed"))
+})
+
+test("validateCorrectionRecord rejects a jobs entry with an out-of-enum status", () => {
+  const badJob = {
+    job: "2927a4630f97b7869a71f387a4a757f1",
+    basis: ["desk_commit"],
+    session_offset_ms: null,
+    transitions: [],
+    observed: { status: "not-a-real-status", offset_ms: null },
+  }
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { jobs: [badJob] } }), FILE_NAME)
+  assert.equal(ok, false)
+  assert.ok(errors.some((e) => e.code === "correction_field_enum" && e.path === "fields.jobs.0.observed.status"))
+})
+
+test("validateCorrectionRecord rejects a jobs entry whose basis repeats an entry", () => {
+  const badJob = { job: "2927a4630f97b7869a71f387a4a757f1", basis: ["desk_commit", "desk_commit"], session_offset_ms: null, transitions: [], observed: null }
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { jobs: [badJob] } }), FILE_NAME)
+  assert.equal(ok, false)
+  assert.ok(errors.some((e) => e.code === "correction_field_duplicate" && e.path === "fields.jobs.0.basis"))
+})
+
 // --- applyCorrection / correctionChanges ------------------------------------
 
 test("applyCorrection overlays only the named fields", () => {
@@ -186,16 +219,35 @@ test("a facts file with no correction record is left alone", () => {
   assert.deepEqual(store.writes, [])
 })
 
-test("a correction for a facts file that is not present is reported as missing, not applied", () => {
+test("a correction whose target facts file is missing fails loudly and names the file, applying nothing", () => {
   const storeDir = "/store"
   const store = memoryStore({
     [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord()),
   })
 
-  const result = applyCorrectionsToStore({ storeDir, ...store })
+  assert.throws(
+    () => applyCorrectionsToStore({ storeDir, ...store }),
+    (error) => {
+      assert.ok(error instanceof CorrectionsInvalidError)
+      assert.ok(error.problems.some((problem) => problem.file === FILE_NAME
+        && problem.errors.some((e) => e.code === "correction_facts_missing" && e.path === FILE_NAME)))
+      return true
+    },
+  )
+  assert.deepEqual(store.writes, [], "nothing is written when a correction's target facts file is gone")
+})
 
-  assert.deepEqual(result.missing, [FILE_NAME])
-  assert.deepEqual(result.applied, [])
+test("a missing target still fails loudly even when another record's target is present", () => {
+  const storeDir = "/store"
+  const otherFile = "claude-code-00000000-0000-4000-8000-000000000000.json"
+  const store = memoryStore({
+    [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord()),
+    [`${storeDir}/corrections/${otherFile}`]: JSON.stringify(validRecord({ file: otherFile })),
+    [`${storeDir}/facts/${otherFile}`]: JSON.stringify({ schema: "desk.factory.published/1", jobs: [] }),
+  })
+
+  assert.throws(() => applyCorrectionsToStore({ storeDir, ...store }), CorrectionsInvalidError)
+  assert.deepEqual(store.writes, [], "the present target is not written either: nothing applies until every target exists")
 })
 
 test("a malformed correction record fails loudly and applies nothing", () => {
@@ -274,6 +326,23 @@ test("checkCorrections fails loudly on a malformed added correction record", () 
     assert.equal(ok, false)
     assert.ok(codes.length > 0)
     assert.ok(codes.every((c) => /^correction_/.test(c)))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("checkCorrections rejects a correction record whose jobs value is the wrong shape", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "corrections-"))
+  try {
+    initRepo(dir)
+    const base = commitAll(dir, "base")
+    mkdirSync(path.join(dir, "corrections"), { recursive: true })
+    writeFileSync(path.join(dir, "corrections", FILE_NAME), JSON.stringify(validRecord({ fields: { jobs: "oops" } })))
+    const head = commitAll(dir, "add correction with malformed jobs value")
+
+    const { ok, codes } = checkCorrectionsIn(dir, { base, head })
+    assert.equal(ok, false)
+    assert.deepEqual(codes, ["correction_field_type"])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

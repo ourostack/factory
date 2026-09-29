@@ -33,15 +33,16 @@
 # harmless because this workflow reads no event data: it always builds main.
 # Keep it that way.
 #
-# Before the build reads `facts/`, `.github/scripts/apply-corrections.mjs`
-# overlays every `corrections/*.json` record onto this checkout's own facts
-# files, in place. This runs on every build (a push, a scheduled rebuild, or
-# after factory-merge), so a session a correction record names always shows
-# corrected here even when a stale client has republished the polluted
-# version to `main` again since the last build: this checkout is never
-# pushed anywhere, so the overlay only shapes what this build sees, never
-# `main` itself. A malformed correction record fails this step loudly
-# instead of silently building from unvalidated or stale data.
+# Before either job reads `facts/`, `.github/scripts/apply-corrections.mjs`
+# overlays every `corrections/*.json` record onto that job's own checkout's
+# facts files, in place. Both `factory-build` and `issue-checks` run it, each
+# against its own ephemeral checkout, so the report, the kaizen check and
+# andon all see a session a correction record names as corrected even when a
+# stale client has republished the polluted version to `main` again since
+# the last build: neither checkout is ever pushed anywhere, so the overlay
+# only shapes what that job sees, never `main` itself. A malformed
+# correction record fails that step loudly instead of silently computing
+# from unvalidated or stale data.
 name: factory-build
 
 on:
@@ -157,6 +158,11 @@ jobs:
           git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
           echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
           mkdir -p facts
+
+      - name: Apply store corrections
+        run: |
+          set -euo pipefail
+          node .github/scripts/apply-corrections.mjs --store .
 
       - name: Check the kaizen cards
         env:
