@@ -20,6 +20,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { compareJobs, jobSummary } from "./job-summary.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -107,32 +108,7 @@ const mudaOverall = mudaRaw.groupings?.overall?.all || {
 const jobsDir = join(reportsDir, "jobs");
 const jobFiles = listJSON(jobsDir);
 
-const jobs = jobFiles.map((f) => {
-  const d = readJSON(join(jobsDir, f), {});
-  const F = d.formulas || {};
-  const val = (k) => (F[k] && "value" in F[k] ? F[k].value : null);
-  const waits = F.waits || {};
-  const waitVal = (k) => (waits[k] && "value" in waits[k] ? waits[k].value : null);
-  return {
-    id: d.job || f.replace(/\.json$/, ""),
-    status: val("status") ?? "unavailable",
-    status_class: F.status?.class ?? "unavailable",
-    lead_time_ms: val("lead_time_ms"),
-    lead_time_class: F.lead_time_ms?.class ?? "unavailable",
-    active_time_ms: val("active_time_ms"),
-    flow_efficiency: val("flow_efficiency"),
-    queue_before_start_ms: val("queue_before_start_ms"),
-    human_wait_ms: waitVal("human_wait_ms"),
-    api_retry_ms: waitVal("api_retry_ms"),
-    tool_failures: F.rework_signals?.tool_failures?.value ?? null,
-    tool_retries: F.rework_signals?.tool_retries?.value ?? null,
-    sessions_bound: F.sessions?.value?.bound ?? null,
-    sessions_shared: F.sessions?.value?.shared ?? null,
-    hosts: F.sessions_by_host?.value ?? {},
-    concurrent_agents_max: F.concurrent_agents?.value?.maximum ?? null,
-    public_prs: F.references?.value?.public_prs ?? 0,
-  };
-});
+const jobs = jobFiles.map((f) => jobSummary(readJSON(join(jobsDir, f), {}), f));
 
 const jobStatusCounts = {};
 for (const j of jobs) {
@@ -662,7 +638,7 @@ const data = {
     tool_retries: toolRetriesMeasure,
   },
   job_status_counts: jobStatusCounts,
-  jobs: jobs.sort((a, b) => (b.lead_time_ms ?? -1) - (a.lead_time_ms ?? -1)),
+  jobs: jobs.sort(compareJobs),
   models,
   subagents: {
     root_sessions: scopedSessionCount,

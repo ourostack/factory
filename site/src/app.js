@@ -586,8 +586,11 @@
       statusTd.appendChild(document.createTextNode(j.status));
       tr.appendChild(statusTd);
 
+      const leadTime = j.lead_time_censored && j.lead_time_ms != null
+        ? `≥ ${fmtDuration(j.lead_time_ms)} (open)`
+        : fmtDuration(j.lead_time_ms);
       const cells = [
-        fmtDuration(j.lead_time_ms),
+        leadTime,
         fmtDuration(j.active_time_ms),
         fmtPct(j.flow_efficiency),
         fmtNum(j.tool_failures),
@@ -599,6 +602,9 @@
         const td = document.createElement("td");
         if (i !== 5) td.className = "num";
         td.textContent = val;
+        if (i === 0 && j.lead_time_censored) {
+          td.title = "Still open or no valid status: lower bound, not a measured lead time";
+        }
         tr.appendChild(td);
       });
 
