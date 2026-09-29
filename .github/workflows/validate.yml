@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -d .github/scripts/__tests__ ]; then
-            node --test .github/scripts/__tests__
+            node --test '.github/scripts/__tests__/*.test.mjs'
           else
             echo "factory-validate: no .github/scripts/__tests__ on the base yet; skipped"
           fi
