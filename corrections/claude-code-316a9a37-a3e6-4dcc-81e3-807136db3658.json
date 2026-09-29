@@ -1,0 +1,10 @@
+{
+  "schema": "factory.correction/1",
+  "file": "claude-code-316a9a37-a3e6-4dcc-81e3-807136db3658.json",
+  "fields": {
+    "jobs": []
+  },
+  "reason": "Store commit 90eea70 removed this session's housekeeping-only job bindings by editing its facts directly. On 2026-09-29 a Desk 3.2.0-alpha.146 flush released an old local quarantine and republished the pre-cleanup bindings, which overwrote that edit (intake PR #114). This record restores the 90eea70 bindings at read time, so a later republish cannot undo them.",
+  "pr": 114,
+  "date": "2026-09-29"
+}

@@ -1,0 +1,134 @@
+{
+  "schema": "factory.correction/1",
+  "file": "claude-code-1cd05863-3a2a-43d0-bc2d-9ba9f949f58b.json",
+  "fields": {
+    "jobs": [
+      {
+        "job": "015ff969ffb5247b877c8cabb9c20967",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 124661150,
+        "transitions": [],
+        "observed": {
+          "status": "processing",
+          "offset_ms": null
+        }
+      },
+      {
+        "job": "340ba86c6e63b7ca4834773dc581ce73",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 459647150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 12403000
+        }
+      },
+      {
+        "job": "800163a15783a69bceaf189f60d686fd",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": null,
+        "transitions": [],
+        "observed": null
+      },
+      {
+        "job": "8dfcf66ae3c06ef8ce22d0e7f3755a26",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 3207276150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 46192000
+        }
+      },
+      {
+        "job": "9c92013ad3f7160b04e97aa51f4931e6",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 3207276150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 20212000
+        }
+      },
+      {
+        "job": "a594b6b6cee01b021cc7a8933d141ff0",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 437277150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 1712000
+        }
+      },
+      {
+        "job": "b2b5d3c9328ce2fd892465b617769b2d",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 8335448150,
+        "transitions": [],
+        "observed": null
+      },
+      {
+        "job": "c33cc6f86c225272fa7ece6afedafe8b",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 443755150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 3560000
+        }
+      },
+      {
+        "job": "cb6e31176e731afc91745b4bf27cda30",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 531299150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 31254000
+        }
+      },
+      {
+        "job": "e7b425d8ff3c8cb50c332420e3483063",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": null,
+        "transitions": [],
+        "observed": null
+      },
+      {
+        "job": "f9ec198981f1f4b8ebc73ae348fa2602",
+        "basis": [
+          "desk_commit"
+        ],
+        "session_offset_ms": 8048444150,
+        "transitions": [],
+        "observed": {
+          "status": "done",
+          "offset_ms": 1494900000
+        }
+      }
+    ]
+  },
+  "reason": "Store commit 90eea70 removed this session's housekeeping-only job bindings by editing its facts directly. On 2026-09-29 a Desk 3.2.0-alpha.146 flush released an old local quarantine and republished the pre-cleanup bindings, which overwrote that edit (intake PR #114). This record restores the 90eea70 bindings at read time, so a later republish cannot undo them.",
+  "pr": 114,
+  "date": "2026-09-29"
+}
