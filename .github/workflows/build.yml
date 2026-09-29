@@ -32,6 +32,17 @@
 # this workflow through `workflow_run`, and anyone can open an issue. That is
 # harmless because this workflow reads no event data: it always builds main.
 # Keep it that way.
+#
+# Before either job reads `facts/`, `.github/scripts/apply-corrections.mjs`
+# overlays every `corrections/*.json` record onto that job's own checkout's
+# facts files, in place. Both `factory-build` and `issue-checks` run it, each
+# against its own ephemeral checkout, so the report, the kaizen check and
+# andon all see a session a correction record names as corrected even when a
+# stale client has republished the polluted version to `main` again since
+# the last build: neither checkout is ever pushed anywhere, so the overlay
+# only shapes what that job sees, never `main` itself. A malformed
+# correction record fails that step loudly instead of silently computing
+# from unvalidated or stale data.
 name: factory-build
 
 on:
@@ -78,12 +89,17 @@ jobs:
           git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
           echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
 
+      - name: Apply store corrections
+        run: |
+          set -euo pipefail
+          # Git keeps no empty folders, so a store with no facts has none.
+          mkdir -p facts
+          node .github/scripts/apply-corrections.mjs --store .
+
       - name: Build the reports
         run: |
           set -euo pipefail
           echo "Store main: $(git rev-parse HEAD)"
-          # Git keeps no empty folders, so a store with no facts has none.
-          mkdir -p facts
           node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" build --store . --out _out
 
       - name: Publish the reports branch
@@ -142,6 +158,11 @@ jobs:
           git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
           echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
           mkdir -p facts
+
+      - name: Apply store corrections
+        run: |
+          set -euo pipefail
+          node .github/scripts/apply-corrections.mjs --store .
 
       - name: Check the kaizen cards
         env:
