@@ -6,9 +6,17 @@
 # the base would land. A data pull request that passes it must also pass the
 # store's own plugin-name rule (`.github/scripts/check-intake-plugins.sh`,
 # read from the base): every facts file it adds or modifies carries
-# `refs.private.plugins` and names only plugins listed in `intake.json`. This
-# file never checks out, installs or executes the candidate's files. Failures
-# report stable reason codes only.
+# `refs.private.plugins` and names only plugins listed in `intake.json`. It
+# must also pass the store's own rule on correction records
+# (`.github/scripts/check-corrections.mjs`, read from the base): every
+# `corrections/*.json` file it adds or modifies parses as JSON and passes
+# `validateCorrectionRecord`. This file never checks out, installs or
+# executes the candidate's files. Failures report stable reason codes only.
+#
+# Both checks are skipped (not failed) when the base checkout does not yet
+# have the script: the pull request that first adds a repo-owned check can
+# only be judged once it lands. The unit tests under
+# `.github/scripts/__tests__/` run the same way, for the same reason.
 #
 # GitHub runs the workflow files of the pull request's own merge commit on
 # `pull_request`, so a pull request that edits this file, or adds a workflow
@@ -62,6 +70,15 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
 
+      - name: Run the store's own script tests
+        run: |
+          set -euo pipefail
+          if [ -d .github/scripts/__tests__ ]; then
+            node --test .github/scripts/__tests__
+          else
+            echo "factory-validate: no .github/scripts/__tests__ on the base yet; skipped"
+          fi
+
       - name: Clone Desk main
         run: |
           set -euo pipefail
@@ -105,6 +122,16 @@ jobs:
             exit 1
           fi
           if jq -e '.ok == true' "$result" > /dev/null; then
+            # The store's own rule on correction records, from the base, for
+            # every pull request (maintenance or not): a corrections/*.json
+            # file it adds or modifies must pass validateCorrectionRecord.
+            if [ -f .github/scripts/check-corrections.mjs ]; then
+              if ! codes=$(node .github/scripts/check-corrections.mjs "$BASE_SHA" "$HEAD_SHA"); then
+                printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+                printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            fi
             if jq -e '.maintenance == true' "$result" > /dev/null; then
               printf 'factory-validate: passed (maintenance)\n' | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0

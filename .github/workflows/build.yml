@@ -32,6 +32,16 @@
 # this workflow through `workflow_run`, and anyone can open an issue. That is
 # harmless because this workflow reads no event data: it always builds main.
 # Keep it that way.
+#
+# Before the build reads `facts/`, `.github/scripts/apply-corrections.mjs`
+# overlays every `corrections/*.json` record onto this checkout's own facts
+# files, in place. This runs on every build (a push, a scheduled rebuild, or
+# after factory-merge), so a session a correction record names always shows
+# corrected here even when a stale client has republished the polluted
+# version to `main` again since the last build: this checkout is never
+# pushed anywhere, so the overlay only shapes what this build sees, never
+# `main` itself. A malformed correction record fails this step loudly
+# instead of silently building from unvalidated or stale data.
 name: factory-build
 
 on:
@@ -78,12 +88,17 @@ jobs:
           git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
           echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
 
+      - name: Apply store corrections
+        run: |
+          set -euo pipefail
+          # Git keeps no empty folders, so a store with no facts has none.
+          mkdir -p facts
+          node .github/scripts/apply-corrections.mjs --store .
+
       - name: Build the reports
         run: |
           set -euo pipefail
           echo "Store main: $(git rev-parse HEAD)"
-          # Git keeps no empty folders, so a store with no facts has none.
-          mkdir -p facts
           node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" build --store . --out _out
 
       - name: Publish the reports branch

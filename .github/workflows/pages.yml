@@ -13,6 +13,13 @@
 # current) and on demand. It does not run on every push to main, since
 # main alone (without a fresh reports build) is not enough to render the
 # job-level charts.
+#
+# Before building site data, `.github/scripts/apply-corrections.mjs`
+# overlays `corrections/*.json` onto this checkout's own `facts/`, in place
+# and never pushed, the same way `factory-build` does: the session-level
+# reads in `site/scripts/build-data.mjs` (which reads `facts/` directly,
+# not only the already-built reports) see corrected data on every run, no
+# matter how many more times a stale client has republished since.
 name: pages
 
 on:
@@ -56,6 +63,11 @@ jobs:
           path: _reports
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Apply store corrections
+        run: |
+          set -euo pipefail
+          node .github/scripts/apply-corrections.mjs --store .
 
       - name: Build site data
         env:
