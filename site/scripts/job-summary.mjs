@@ -14,7 +14,9 @@ export function jobSummary(d, f) {
     lead_time_class: F.lead_time_ms?.class ?? "unavailable",
     lead_time_censored: F.lead_time_ms?.censored === true,
     active_time_ms: val("active_time_ms"),
+    active_time_shared: sharedTime(F.active_time_ms),
     flow_efficiency: val("flow_efficiency"),
+    flow_efficiency_shared: sharedTime(F.flow_efficiency),
     queue_before_start_ms: val("queue_before_start_ms"),
     human_wait_ms: waitVal("human_wait_ms"),
     api_retry_ms: waitVal("api_retry_ms"),
@@ -26,6 +28,13 @@ export function jobSummary(d, f) {
     concurrent_agents_max: F.concurrent_agents?.value?.maximum ?? null,
     public_prs: F.references?.value?.public_prs ?? 0,
   };
+}
+
+// True when a job's time includes a worker, usually the controlling session,
+// that other jobs share: the pipeline marks such a measure partial with the
+// reason `worker_shared` instead of splitting it, so it is an upper bound.
+function sharedTime(formula) {
+  return Array.isArray(formula?.partial_reasons) && formula.partial_reasons.includes("worker_shared");
 }
 
 // Measured lead times first (longest first), then censored ones (a lower
