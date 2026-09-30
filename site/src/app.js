@@ -600,7 +600,7 @@
         fmtNum(j.tool_failures),
         fmtNum(j.tool_retries),
         j.sessions_bound != null ? `${j.sessions_bound} bound` : "unavailable",
-        fmtNum(j.public_prs),
+        j.public_prs_shared ? `≥ ${fmtNum(j.public_prs)} (shared)` : fmtNum(j.public_prs),
       ];
       cells.forEach((val, i) => {
         const td = document.createElement("td");
@@ -611,6 +611,9 @@
         }
         if ((i === 1 && j.active_time_shared) || (i === 2 && j.flow_efficiency_shared)) {
           td.title = "Includes time from a session shared with other jobs: an upper bound, not this job's own measured time";
+        }
+        if (i === 6 && j.public_prs_shared) {
+          td.title = "Pull requests from a session shared with other jobs are not counted for any of them: a lower bound";
         }
         tr.appendChild(td);
       });
