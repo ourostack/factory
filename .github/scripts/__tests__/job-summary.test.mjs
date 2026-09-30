@@ -37,3 +37,24 @@ test("compareJobs puts a censored row with a null lead time last", () => {
   ]
   assert.deepEqual(rows.sort(compareJobs).map((r) => r.id), ["m1", "c5", "cnull"])
 })
+
+test("jobSummary flags time shared with other jobs", () => {
+  const shared = jobSummary(
+    {
+      formulas: {
+        active_time_ms: { value: 136759587, partial: true, partial_reasons: ["worker_shared"] },
+        flow_efficiency: { value: 0.79, partial: true, partial_reasons: ["worker_split", "worker_shared"] },
+      },
+    },
+    "a.json",
+  )
+  assert.equal(shared.active_time_shared, true)
+  assert.equal(shared.flow_efficiency_shared, true)
+  const split = jobSummary(
+    { formulas: { active_time_ms: { value: 5, partial: true, partial_reasons: ["worker_split"] }, flow_efficiency: { value: 0.5 } } },
+    "b.json",
+  )
+  assert.equal(split.active_time_shared, false)
+  assert.equal(split.flow_efficiency_shared, false)
+  assert.equal(jobSummary({}, "c.json").active_time_shared, false)
+})

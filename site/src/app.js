@@ -591,8 +591,12 @@
         : fmtDuration(j.lead_time_ms);
       const cells = [
         leadTime,
-        fmtDuration(j.active_time_ms),
-        fmtPct(j.flow_efficiency),
+        j.active_time_shared && j.active_time_ms != null
+          ? `≤ ${fmtDuration(j.active_time_ms)} (shared)`
+          : fmtDuration(j.active_time_ms),
+        j.flow_efficiency_shared && j.flow_efficiency != null
+          ? `≤ ${fmtPct(j.flow_efficiency)} (shared)`
+          : fmtPct(j.flow_efficiency),
         fmtNum(j.tool_failures),
         fmtNum(j.tool_retries),
         j.sessions_bound != null ? `${j.sessions_bound} bound` : "unavailable",
@@ -604,6 +608,9 @@
         td.textContent = val;
         if (i === 0 && j.lead_time_censored) {
           td.title = "Still open or no valid status: lower bound, not a measured lead time";
+        }
+        if ((i === 1 && j.active_time_shared) || (i === 2 && j.flow_efficiency_shared)) {
+          td.title = "Includes time from a session shared with other jobs: an upper bound, not this job's own measured time";
         }
         tr.appendChild(td);
       });
