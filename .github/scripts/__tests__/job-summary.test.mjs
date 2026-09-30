@@ -58,3 +58,14 @@ test("jobSummary flags time shared with other jobs", () => {
   assert.equal(split.flow_efficiency_shared, false)
   assert.equal(jobSummary({}, "c.json").active_time_shared, false)
 })
+
+test("jobSummary flags pull requests withheld from shared workers", () => {
+  const shared = jobSummary(
+    { formulas: { references: { value: { public_prs: 0 }, partial: true, partial_reasons: ["worker_shared"] } } },
+    "a.json",
+  )
+  assert.equal(shared.public_prs, 0)
+  assert.equal(shared.public_prs_shared, true)
+  const plain = jobSummary({ formulas: { references: { value: { public_prs: 3 } } } }, "b.json")
+  assert.equal(plain.public_prs_shared, false)
+})

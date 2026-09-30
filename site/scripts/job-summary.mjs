@@ -27,12 +27,14 @@ export function jobSummary(d, f) {
     hosts: F.sessions_by_host?.value ?? {},
     concurrent_agents_max: F.concurrent_agents?.value?.maximum ?? null,
     public_prs: F.references?.value?.public_prs ?? 0,
+    public_prs_shared: sharedTime(F.references),
   };
 }
 
-// True when a job's time includes a worker, usually the controlling session,
-// that other jobs share: the pipeline marks such a measure partial with the
-// reason `worker_shared` instead of splitting it, so it is an upper bound.
+// True when a job's measure involves a worker, usually the controlling
+// session, that other jobs share: the pipeline marks it partial with the
+// reason `worker_shared`. Shared time is copied, so it is an upper bound;
+// shared pull requests are withheld, so the count is a lower bound.
 function sharedTime(formula) {
   return Array.isArray(formula?.partial_reasons) && formula.partial_reasons.includes("worker_shared");
 }
