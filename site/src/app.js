@@ -92,6 +92,53 @@
   // matching the dataviz mark spec (thin bar, rounded end, hover response).
   // rows: [{ label, value, secondaryValue?, color?, tooltipRows? }]
 
+  // Harness breakdown. Every string is untrusted data, so it goes in through
+  // textContent only (el helper), never innerHTML.
+  const UNPROVEN_LABEL = "(unproven)";
+
+  function countsText(obj) {
+    const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+    return entries.length ? entries.map(([k, n]) => `${k} (${fmtNum(n)})`).join(", ") : "none recorded";
+  }
+
+  function renderHarnesses(container, harnesses) {
+    container.innerHTML = "";
+    if (!Array.isArray(harnesses) || !harnesses.length) {
+      emptyState(container, "No harness data recorded yet.");
+      return;
+    }
+    for (const h of harnesses) {
+      const card = el("div", "harness");
+      const head = el("h4", "harness-name", h.host);
+      if (h.unproven) head.appendChild(el("span", "harness-unproven", ` ${UNPROVEN_LABEL}`));
+      card.appendChild(head);
+      const facts = el("dl", "harness-facts");
+      const add = (k, v) => {
+        facts.appendChild(el("dt", null, k));
+        facts.appendChild(el("dd", null, v));
+      };
+      add("Sessions", fmtNum(h.sessions));
+      add("Versions", countsText(h.versions));
+      add("Workers", fmtNum(h.workers));
+      add("Subagents", fmtNum(h.subagents));
+      add("Max depth", String(h.max_depth));
+      add("Models", countsText(h.models));
+      if (h.agent_types && Object.keys(h.agent_types).length) {
+        add("Agent types", countsText(h.agent_types));
+      }
+      if (h.requested_vs_resolved && h.requested_vs_resolved.length) {
+        add(
+          "Requested vs resolved",
+          h.requested_vs_resolved
+            .map((p) => `${p.requested} \u2192 ${p.resolved ?? "unknown"} (${fmtNum(p.workers)})`)
+            .join(", "),
+        );
+      }
+      card.appendChild(facts);
+      container.appendChild(card);
+    }
+  }
+
   function renderBarList(container, rows, opts) {
     container.innerHTML = "";
     if (!rows.length) {
@@ -812,6 +859,8 @@
       formatValue: (r) => fmtCompact(r.value),
       emptyText: "No model usage recorded yet.",
     });
+
+    renderHarnesses(document.getElementById("harnesses"), data.harnesses);
 
     const bucketOrder = ["0", "1-2", "3-5", "6+"];
     const subagentRows = bucketOrder.map((k) => ({
