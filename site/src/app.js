@@ -583,6 +583,13 @@
 
   // --------------------------------------------------------------- jobs
 
+  // A count measure that covers only some of a job's sessions renders as a
+  // lower bound with its reason, never as a bare number.
+  function fmtCount(value, qualifier) {
+    if (value == null || !qualifier) return fmtNum(value);
+    return `≥ ${fmtNum(value)} (${qualifier})`;
+  }
+
   function renderJobsTable(container, jobs) {
     container.innerHTML = "";
     if (!jobs.length) {
@@ -644,10 +651,10 @@
         j.flow_efficiency_shared && j.flow_efficiency != null
           ? `≤ ${fmtPct(j.flow_efficiency)} (shared)`
           : fmtPct(j.flow_efficiency),
-        fmtNum(j.tool_failures),
-        fmtNum(j.tool_retries),
+        fmtCount(j.tool_failures, j.tool_failures_partial),
+        fmtCount(j.tool_retries, j.tool_retries_partial),
         j.sessions_bound != null ? `${j.sessions_bound} bound` : "unavailable",
-        j.public_prs_shared ? `≥ ${fmtNum(j.public_prs)} (shared)` : fmtNum(j.public_prs),
+        fmtCount(j.public_prs, j.public_prs_partial),
       ];
       cells.forEach((val, i) => {
         const td = document.createElement("td");
@@ -659,8 +666,9 @@
         if ((i === 1 && j.active_time_shared) || (i === 2 && j.flow_efficiency_shared)) {
           td.title = "Includes time from a session shared with other jobs: an upper bound, not this job's own measured time";
         }
-        if (i === 6 && j.public_prs_shared) {
-          td.title = "Pull requests from a session shared with other jobs are not counted for any of them: a lower bound";
+        const partial = i === 3 ? j.tool_failures_partial : i === 4 ? j.tool_retries_partial : i === 6 ? j.public_prs_partial : null;
+        if (partial) {
+          td.title = "Counts only the sessions that could supply it (" + partial + "): a lower bound, not this job's whole count";
         }
         tr.appendChild(td);
       });
@@ -709,7 +717,7 @@
     // 1. Proof
     renderFeatured(document.getElementById("featured-grid"), data.featured);
 
-    // 2. Work design — scoped to substantial sessions (ran at least 5
+    // 2. Work design — scoped to substantial sessions (active at least 5
     // minutes, or bound to a tracked job), since that is real work rather
     // than a launcher blip or a scripted check. Published sessions withhold
     // which plugins they ran by default, so plugin data cannot tell "Desk
@@ -747,14 +755,14 @@
     }
     const scopeContextEl = document.getElementById("scope-context");
     if (scopeContextEl && data.scope) {
-      const minutes = Math.round((data.scope.substantial_duration_ms ?? 300000) / 60000);
+      const minutes = Math.round((data.scope.substantial_active_ms ?? 300000) / 60000);
       scopeContextEl.textContent =
         `${fmtNum(data.scope.sessions_total)} sessions are published in total. Everything above and below in this section is scoped to the ` +
-        `${fmtNum(data.scope.sessions_scoped)} that ran at least ${minutes} minutes or are bound to a tracked job (${entrypointPhrase(data.scope.entrypoints_scoped)}) — ` +
+        `${fmtNum(data.scope.sessions_scoped)} that were active at least ${minutes} minutes (turns, tools and subagents, not waiting) or are bound to a tracked job (${entrypointPhrase(data.scope.entrypoints_scoped)}) — ` +
         `real, substantial work, not a launcher blip or a scripted check. The other ${fmtNum(data.scope.sessions_other)} sessions on contributing machines ` +
-        `(${entrypointPhrase(data.scope.entrypoints_other)}) are shorter and unbound, shown here as context, not folded into any measure. A published session ` +
+        `(${entrypointPhrase(data.scope.entrypoints_other)}) were active for less time and are unbound, shown here as context, not folded into any measure. A published session ` +
         `withholds which plugins it ran by default; only a session whose publisher separately marks each plugin name public would show one, so this page cannot ` +
-        `identify "Desk sessions" specifically and does not claim to — it scopes by session length and job binding instead, both of which every published session carries.`;
+        `identify "Desk sessions" specifically and does not claim to — it scopes by active time and job binding instead, both of which every published session carries.`;
     }
 
     renderTakeaways(document.getElementById("takeaways"), data.takeaways);

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { test } from "node:test"
 
-import { compareJobs, jobSummary } from "../../../site/scripts/job-summary.mjs"
+import { compareJobs, jobSummary, partialQualifier } from "../../../site/scripts/job-summary.mjs"
 
 test("jobSummary carries the censored flag", () => {
   const censored = jobSummary(
@@ -68,4 +69,31 @@ test("jobSummary flags pull requests withheld from shared workers", () => {
   assert.equal(shared.public_prs_shared, true)
   const plain = jobSummary({ formulas: { references: { value: { public_prs: 3 } } } }, "b.json")
   assert.equal(plain.public_prs_shared, false)
+})
+
+test("partial count measures carry their qualifier", () => {
+  const d = {
+    formulas: {
+      rework_signals: {
+        tool_failures: { class: "inferred", partial: true, partial_reasons: ["worker_split"], value: 21 },
+        tool_retries: { class: "inferred", value: 3 },
+      },
+      references: { class: "measured", partial: true, partial_reasons: ["worker_shared"], value: { public_prs: 2 } },
+    },
+  }
+  const s = jobSummary(d, "x.json")
+  assert.equal(s.tool_failures, 21)
+  assert.equal(s.tool_failures_partial, "split")
+  assert.equal(s.tool_retries_partial, null)
+  assert.equal(s.public_prs_partial, "shared")
+  assert.equal(partialQualifier({ partial: true, uncovered_sessions: 1 }), "partial")
+  assert.equal(partialQualifier({ partial: true, partial_reasons: ["worker_split", "worker_shared"] }), "split, shared")
+  assert.equal(partialQualifier(undefined), null)
+})
+
+test("the jobs table renders partial counts with their qualifier, never bare", () => {
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  assert.match(app, /fmtCount\(j\.tool_failures, j\.tool_failures_partial\)/)
+  assert.match(app, /fmtCount\(j\.tool_retries, j\.tool_retries_partial\)/)
+  assert.match(app, /fmtCount\(j\.public_prs, j\.public_prs_partial\)/)
 })
