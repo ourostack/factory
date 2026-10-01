@@ -34,14 +34,14 @@ export function harnessSummary(factFiles) {
       h = {
         host,
         unproven: UNPROVEN_HOSTS.has(host),
-        versions: {},
+        versions: Object.create(null),
         sessions: 0,
         workers: 0,
         subagents: 0,
         max_depth: 0,
-        models: {},
+        models: Object.create(null),
         requested_vs_resolved: [],
-        agent_types: {},
+        agent_types: Object.create(null),
         _pairs: new Map(),
       }
       hosts.set(host, h)
@@ -73,6 +73,11 @@ export function harnessSummary(factFiles) {
   return [...hosts.values()]
     .map(({ _pairs, ...h }) => ({
       ...h,
+      // Counted on prototype-free maps; Object.fromEntries keeps a store
+      // value such as "__proto__" or "constructor" as an ordinary key.
+      versions: Object.fromEntries(Object.entries(h.versions)),
+      models: Object.fromEntries(Object.entries(h.models)),
+      agent_types: Object.fromEntries(Object.entries(h.agent_types)),
       requested_vs_resolved: [..._pairs.entries()]
         .map(([k, workers]) => {
           const [requested, resolved] = JSON.parse(k)

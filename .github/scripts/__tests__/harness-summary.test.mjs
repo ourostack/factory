@@ -77,3 +77,19 @@ test("a parent cycle does not loop forever", () => {
   ])
   assert.ok(Number.isFinite(h.max_depth))
 })
+
+test("store values named like Object properties count as plain keys", () => {
+  const f = {
+    session: { host: "claude-code", host_version: "constructor" },
+    agents: [
+      { n: 0, parent: null, model: "__proto__", agent_type: "constructor" },
+      { n: 1, parent: 0, model: "toString", agent_type: "constructor" },
+    ],
+  }
+  const [h] = harnessSummary([f])
+  assert.equal(h.versions.constructor, 1)
+  assert.ok(Object.hasOwn(h.models, "__proto__"))
+  assert.equal(h.models.toString, 1)
+  assert.equal(h.agent_types.constructor, 2)
+  assert.equal(JSON.stringify(h.models), '{"__proto__":1,"toString":1}')
+})
