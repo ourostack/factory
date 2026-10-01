@@ -12,6 +12,10 @@ on:
     paths:
       - ".github/fixtures/reconcile/**"
       - ".github/workflows/reconcile-fixture.yml"
+  # Desk's reconcile can change without a change here, which the `paths:`
+  # filter never sees. A weekly run on main catches that within a week.
+  schedule:
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 permissions:
