@@ -21,6 +21,7 @@ import {
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { compareJobs, jobSummary } from "./job-summary.mjs";
+import { harnessSummary } from "./harness-summary.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -187,6 +188,7 @@ const modelTotals = new Map(); // scoped to substantial sessions
 let subagentDispatches = 0; // scoped to substantial sessions
 let scopedSessionsWithSubagents = 0;
 const subagentBuckets = { "0": 0, "1-2": 0, "3-5": 0, "6+": 0 };
+const scopedFacts = []; // same substantial-session scope, for the harness section
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
@@ -197,6 +199,7 @@ for (const f of factFiles) {
   const long = (d.session?.duration_ms ?? 0) >= SUBSTANTIAL_DURATION_MS;
   if (!long && !bound) continue;
 
+  scopedFacts.push(d);
   scopedSessionCount += 1;
   scopedEntrypoints[entrypoint] = (scopedEntrypoints[entrypoint] || 0) + 1;
   if (bound) scopedBoundCount += 1;
@@ -640,6 +643,7 @@ const data = {
   job_status_counts: jobStatusCounts,
   jobs: jobs.sort(compareJobs),
   models,
+  harnesses: harnessSummary(scopedFacts),
   subagents: {
     root_sessions: scopedSessionCount,
     subagent_dispatches: subagentDispatches,
