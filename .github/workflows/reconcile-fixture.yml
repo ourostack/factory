@@ -1,0 +1,60 @@
+# Runs Desk's `factory reconcile` on a fixture desk built at test time, so a
+# change to Desk's reconcile output shape or reason codes shows up here.
+#
+# The fixture is a throwaway Git repository with dated commits, one mass
+# commit and one housekeeping-only task (`.github/fixtures/reconcile/`). The
+# run uses a fixture HOME, so it reads no real factory state. It has a
+# read-only token and no secrets, and it only reads Desk main (public).
+name: reconcile-fixture
+
+on:
+  pull_request:
+    paths:
+      - ".github/fixtures/reconcile/**"
+      - ".github/workflows/reconcile-fixture.yml"
+  # Desk's reconcile can change without a change here, which the `paths:`
+  # filter never sees. A weekly run on main catches that within a week.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile-fixture:
+    name: reconcile-fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out this repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
+
+      - name: Build the fixture desk
+        run: |
+          set -euo pipefail
+          node .github/fixtures/reconcile/make-desk.mjs "$RUNNER_TEMP/fixture-desk"
+
+      - name: Run reconcile and check the report
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fixture-home"
+          HOME="$RUNNER_TEMP/fixture-home" XDG_STATE_HOME="" \
+            node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" reconcile \
+              --desk "$RUNNER_TEMP/fixture-desk" \
+              --since 2026-09-10T00:00:00Z --until 2026-09-13T00:00:00Z \
+              > "$RUNNER_TEMP/reconcile.json"
+          node .github/fixtures/reconcile/check.mjs < "$RUNNER_TEMP/reconcile.json"

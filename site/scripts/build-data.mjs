@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { compareJobs, jobSummary } from "./job-summary.mjs";
 import { harnessSummary } from "./harness-summary.mjs";
+import { SUBSTANTIAL_ACTIVE_MS, inScope, isBound } from "./active-time.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -166,14 +167,13 @@ const scopedFlowEfficiency = {
 // way, so `plugins` cannot answer "did this session use Desk" for the
 // store as a whole, and this page never claims to identify Desk sessions.
 //
-// What the public facts always carry is session length and job binding, so
-// this section studies the sessions that ran at least 5 minutes or are
+// What the public facts always carry is active time and job binding, so
+// this section studies the sessions that were active for at least 5 minutes
+// (the union of turn, tool and subagent time, waits excluded) or are
 // bound to a tracked job: real, substantial work, not a launcher blip or a
 // scripted check. Every other session is reported once, plainly, as
 // population context, never folded into a finding about the work.
 // ---------------------------------------------------------------------------
-
-const SUBSTANTIAL_DURATION_MS = 5 * 60 * 1000;
 
 const factsDir = join(mainDir, "facts");
 const factFiles = listJSON(factsDir);
@@ -195,9 +195,8 @@ for (const f of factFiles) {
   const entrypoint = d.session?.entrypoint || "unknown";
   allEntrypoints[entrypoint] = (allEntrypoints[entrypoint] || 0) + 1;
 
-  const bound = Array.isArray(d.jobs) && d.jobs.length > 0;
-  const long = (d.session?.duration_ms ?? 0) >= SUBSTANTIAL_DURATION_MS;
-  if (!long && !bound) continue;
+  const bound = isBound(d);
+  if (!inScope(d)) continue;
 
   scopedFacts.push(d);
   scopedSessionCount += 1;
@@ -521,7 +520,7 @@ const kaizenResolved = kaizenIssues.filter((i) => i.state === "closed").length;
 // Takeaways: every number here is read from the data above, not typed in.
 // Re-running this script against a later store rebuild changes the numbers
 // and the sentences together. Anything describing the work itself is scoped
-// to the substantial sessions (ran at least 5 minutes, or bound to a
+// to the substantial sessions (active at least 5 minutes, or bound to a
 // tracked job), since that is real work rather than a launcher blip or a
 // scripted check; other sessions on contributing machines are reported
 // once, as population context, never folded into a "finding" about the
@@ -629,7 +628,7 @@ const data = {
     sessions_scoped: scopedSessionCount,
     sessions_scoped_bound: scopedBoundCount,
     sessions_other: otherSessionCount,
-    substantial_duration_ms: SUBSTANTIAL_DURATION_MS,
+    substantial_active_ms: SUBSTANTIAL_ACTIVE_MS,
     entrypoints_scoped: scopedEntrypoints,
     entrypoints_other: otherEntrypoints,
   },
