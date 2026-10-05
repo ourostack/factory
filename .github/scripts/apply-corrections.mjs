@@ -23,11 +23,18 @@
 // correction to apply", which would silently leave a session's stale data
 // standing, or like "apply it anyway", which would silently write
 // unvalidated data into the store's output. The same is true of a record
-// whose target facts file is gone from `facts/`: that is a stale record,
-// not "nothing to do", and it stops the run and names the file rather than
-// being quietly dropped from the result. Removing a stale record is a
-// deliberate edit to `corrections/`, reviewed like any other change there —
-// never an inference this script makes on its own.
+// whose target facts file is gone from `facts/` is different, and is not an
+// error: any client's intake can remove a facts file at any time (a
+// retraction), so a correction that outlives its target is a normal state of
+// this store. There is nothing published to correct, so the record is moot:
+// it is listed under `moot` in the result, the run goes on and applies every
+// other record, and if the facts file comes back (a republish) the same
+// record applies again with no further step. Stopping the line for it would
+// need a maintainer who is never told, and it once did: the report build
+// and the site build failed on a stale record for days. The record itself
+// stays in `corrections/`: `main` accepts no commit outside a pull request,
+// and removing it is not worth a new automated path, so it is reported in
+// the build output instead.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -54,12 +61,12 @@ export class CorrectionsInvalidError extends Error {
 }
 
 /**
- * `applyCorrectionsToStore({ storeDir, ... }) -> { checked, applied, unchanged }`.
- * `applied`/`unchanged` list facts file names (not paths). Throws
- * `CorrectionsInvalidError` (never returns partial results, never writes
- * anything) when any correction record under `<storeDir>/corrections/`
- * fails schema validation, or when any schema-valid record names a facts
- * file that is not present under `<storeDir>/facts/`.
+ * `applyCorrectionsToStore({ storeDir, ... }) -> { checked, applied, unchanged, moot }`.
+ * `applied`/`unchanged`/`moot` list facts file names (not paths); `moot` is
+ * sorted and names records whose facts file is not present under
+ * `<storeDir>/facts/`. Throws `CorrectionsInvalidError` (never returns
+ * partial results, never writes anything) when any correction record under
+ * `<storeDir>/corrections/` fails schema validation.
  */
 export function applyCorrectionsToStore({
   storeDir,
@@ -91,20 +98,15 @@ export function applyCorrectionsToStore({
   }
   if (problems.length > 0) throw new CorrectionsInvalidError(problems)
 
-  // A schema-valid record whose target facts file is gone is stale, not
-  // "nothing to apply": fail the whole run before writing anything, rather
-  // than silently dropping it from the result. Checked as its own pass, so
-  // one missing target never lets an earlier record's write happen while a
-  // later record's target is still missing.
-  const missingProblems = records
-    .filter((record) => !exists(path.join(factsDir, record.file)))
-    .map((record) => ({ file: record.file, errors: [{ code: "correction_facts_missing", path: record.file }] }))
-  if (missingProblems.length > 0) throw new CorrectionsInvalidError(missingProblems)
-
   const applied = []
   const unchanged = []
+  const moot = []
   for (const record of records) {
     const factsPath = path.join(factsDir, record.file)
+    if (!exists(factsPath)) {
+      moot.push(record.file)
+      continue
+    }
     const current = JSON.parse(readText(factsPath))
     if (!correctionChanges(current, record)) {
       unchanged.push(record.file)
@@ -115,7 +117,7 @@ export function applyCorrectionsToStore({
     applied.push(record.file)
   }
 
-  return { checked: records.length, applied, unchanged }
+  return { checked: records.length, applied, unchanged, moot: moot.sort() }
 }
 
 export async function main({ argv = process.argv.slice(2), write = (text) => process.stdout.write(text), logError = (text) => process.stderr.write(text) } = {}) {

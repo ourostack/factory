@@ -219,35 +219,53 @@ test("a facts file with no correction record is left alone", () => {
   assert.deepEqual(store.writes, [])
 })
 
-test("a correction whose target facts file is missing fails loudly and names the file, applying nothing", () => {
+test("a correction whose target facts file is gone is moot: reported, not an error, and nothing is written", () => {
   const storeDir = "/store"
   const store = memoryStore({
     [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord()),
   })
 
-  assert.throws(
-    () => applyCorrectionsToStore({ storeDir, ...store }),
-    (error) => {
-      assert.ok(error instanceof CorrectionsInvalidError)
-      assert.ok(error.problems.some((problem) => problem.file === FILE_NAME
-        && problem.errors.some((e) => e.code === "correction_facts_missing" && e.path === FILE_NAME)))
-      return true
-    },
-  )
-  assert.deepEqual(store.writes, [], "nothing is written when a correction's target facts file is gone")
+  const result = applyCorrectionsToStore({ storeDir, ...store })
+
+  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [], moot: [FILE_NAME] })
+  assert.deepEqual(store.writes, [])
 })
 
-test("a missing target still fails loudly even when another record's target is present", () => {
+test("a moot record does not stop the others: every other record still applies, and moot is sorted", () => {
   const storeDir = "/store"
   const otherFile = "claude-code-00000000-0000-4000-8000-000000000000.json"
+  const lateFile = "claude-code-ffffffff-0000-4000-8000-000000000000.json"
   const store = memoryStore({
+    [`${storeDir}/corrections/${lateFile}`]: JSON.stringify(validRecord({ file: lateFile })),
     [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord()),
     [`${storeDir}/corrections/${otherFile}`]: JSON.stringify(validRecord({ file: otherFile })),
-    [`${storeDir}/facts/${otherFile}`]: JSON.stringify({ schema: "desk.factory.published/1", jobs: [] }),
+    [`${storeDir}/facts/${otherFile}`]: JSON.stringify({ schema: "desk.factory.published/1", jobs: [1, 2, 3] }),
   })
 
-  assert.throws(() => applyCorrectionsToStore({ storeDir, ...store }), CorrectionsInvalidError)
-  assert.deepEqual(store.writes, [], "the present target is not written either: nothing applies until every target exists")
+  const result = applyCorrectionsToStore({ storeDir, ...store })
+
+  assert.equal(result.checked, 3)
+  assert.deepEqual(result.applied, [otherFile])
+  assert.deepEqual(result.moot, [FILE_NAME, lateFile].sort())
+  assert.equal(store.writes.length, 1)
+})
+
+test("a record that is moot while its facts file is gone applies again when the file returns", () => {
+  const storeDir = "/store"
+  const factsPath = `${storeDir}/facts/${FILE_NAME}`
+  const store = memoryStore({
+    [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord()),
+  })
+
+  const gone = applyCorrectionsToStore({ storeDir, ...store })
+  assert.deepEqual(gone.moot, [FILE_NAME])
+
+  store.store.set(factsPath, JSON.stringify({ schema: "desk.factory.published/1", jobs: [1, 2, 3] }))
+  const back = applyCorrectionsToStore({ storeDir, ...store })
+
+  assert.deepEqual(back.moot, [])
+  assert.deepEqual(back.applied, [FILE_NAME])
+  assert.equal(store.writes.length, 1)
 })
 
 test("a malformed correction record fails loudly and applies nothing", () => {
