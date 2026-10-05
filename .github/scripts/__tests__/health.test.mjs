@@ -3,6 +3,7 @@ import { test } from "node:test"
 
 import {
   EMPTY_SLOTS,
+  REQUIRED_EVIDENCE,
   STALE_AFTER_HOURS,
   buildHealth,
   intakeClass,
@@ -74,7 +75,7 @@ test("precedence: broken over stale over unknown over alive", () => {
   assert.equal(buildHealth({ ...base(), lastBuild: unk, newestIntake: "over_7_days" }).verdict.status, "stale")
   assert.equal(buildHealth({ ...base(), lastBuild: unk }).verdict.status, "unknown")
   assert.equal(buildHealth({ ...base(), reportsReadable: false, lastBuild: unk }).verdict.status, "broken")
-  assert.equal(buildHealth({ ...base(), newestIntake: null }).verdict.status, "alive")
+  assert.equal(buildHealth({ ...base(), newestIntake: null }).verdict.status, "unknown")
 })
 
 test("the health document has named empty slots that say not recorded yet", () => {
@@ -88,4 +89,21 @@ test("the health document has named empty slots that say not recorded yet", () =
   assert.equal(h.facts_by_host[0].host, "claude-code")
   assert.equal(h.facts_by_host[0].files.value, 248)
   assert.equal(h.last_data_build.value, base().builtAt)
+})
+
+test("alive needs every required piece of evidence; each missing piece gives unknown", () => {
+  assert.ok(REQUIRED_EVIDENCE.length >= 4)
+  assert.equal(buildHealth(base()).verdict.status, "alive")
+  const missing = {
+    newest_intake: { ...base(), newestIntake: null },
+    facts_by_host: { ...base(), factsByHost: {} },
+    reports: { ...base(), reportsReadable: undefined },
+    factory_build: { ...base(), lastBuild: undefined },
+  }
+  for (const [name, input] of Object.entries(missing)) {
+    const h = buildHealth(input)
+    assert.equal(h.verdict.status, "unknown", name)
+    assert.match(h.verdict.reason, /cannot be told/, name)
+  }
+  for (const piece of REQUIRED_EVIDENCE) assert.ok(piece.name && typeof piece.present === "function")
 })

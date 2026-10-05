@@ -32,11 +32,28 @@ const ROLLUP_PATHS = [
   /^headlines\[\d+\]\.number$/,
   /^takeaways\[\d+\]\.slots\.(median|rate|calls|failures|share|with|dispatches)$/,
 ];
+// Paths that must hold a stated number of some kind (not an empty object, a
+// string or anything else that would make the formatter throw).
+const NUMBER_PATHS = [
+  /^jobs\[\d+\]\.(lead_time_ms|active_time_ms|flow_efficiency|queue_before_start_ms|human_wait_ms|api_retry_ms|tool_failures|tool_retries|sessions_bound|public_prs)$/,
+  /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
+  /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
+  ...ROLLUP_PATHS,
+];
 // Headlines that are plain counts of files or jobs, not rollups.
 const COUNT_HEADLINES = new Set(["substantial_sessions", "jobs_tracked", "kaizen"]);
 
 // A string that stands for a value that is missing or bad.
-const BAD_STRING = /^(nan|null|undefined|-?infinity|-?\d+(\.\d+)?)?$/i;
+// Any form: surrounding spaces, exponent, hex, signs, non-ASCII digits, empty.
+const BAD_STRING = {
+  test(s) {
+    const t = s.trim();
+    if (t === "") return true;
+    if (/^[+-]?(nan|null|undefined|infinity)$/i.test(t)) return true;
+    if (/^[+-]?[\p{Nd}.,_]+$/u.test(t)) return true;
+    return Number.isFinite(Number(t));
+  },
+};
 const FREE_KEYS = new Set(["id", "session_id", "ref"]);
 
 function isStated(node) {
@@ -103,6 +120,9 @@ export function checkNumbers(data) {
   }
 
   function walk(node, path, top) {
+    if (!isStated(node) && NUMBER_PATHS.some((re) => re.test(path))) {
+      bad(path, ROLLUP_PATHS.some((re) => re.test(path)) ? "rollup_expected" : "number_expected");
+    }
     if (node === null) return bad(path, "null_value");
     if (node === undefined) return bad(path, "undefined_value");
     if (typeof node === "number") return bad(path, Number.isFinite(node) ? "bare_number" : "non_finite");

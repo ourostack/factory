@@ -192,6 +192,15 @@
   // alive.
   const STATUSES = ["alive", "stale", "broken", "unknown"];
 
+  // Everything `alive` rests on, as the page reads it from the file. A missing
+  // piece gives `unknown`. A new slot is a new row here.
+  const REQUIRED_EVIDENCE = [
+    { name: "last_data_build", label: "the build record", present: (h) => h.last_data_build.state === "measured" },
+    { name: "factory_build", label: "the last factory-build run", present: (h) => h.factory_build.state === "measured" && h.factory_build.value === "success" },
+    { name: "newest_intake", label: "the age of the newest intake", present: (h) => h.newest_intake.state === "measured" && typeof h.newest_intake.value === "string" },
+    { name: "facts_by_host", label: "the facts count by host", present: (h) => h.facts_by_host.length > 0 },
+  ];
+
   function wellFormed(h) {
     const obj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
     return (
@@ -221,6 +230,7 @@
       return { status: "unknown", reason: "the build stamp could not be read", ageHours: null };
     }
     const ageHours = (nowMs - built) / 3600000;
+    if (health.verdict.status === "broken") return { status: "broken", reason: health.verdict.reason, ageHours };
     if (ageHours < -CLOCK_SKEW_HOURS) {
       return { status: "unknown", reason: "the build stamp is in the future, so its age cannot be told", ageHours };
     }
@@ -231,8 +241,13 @@
       return { status: "stale", reason: `the site was last built ${age} ago; it is meant to rebuild at least every ${STALE_AFTER_HOURS} hours`, ageHours };
     }
     if (file.status === "stale") return { status: "stale", reason: file.reason, ageHours };
-    if (file.status === "unknown" || health.factory_build.state !== "measured" || health.factory_build.value !== "success") {
-      return { status: "unknown", reason: file.status === "unknown" ? file.reason : "the last factory-build run was not read as green, so health cannot be told", ageHours };
+    const missing = REQUIRED_EVIDENCE.filter((e) => !e.present(health));
+    if (file.status === "unknown" || missing.length) {
+      return {
+        status: "unknown",
+        reason: file.status === "unknown" && !missing.length ? file.reason : `${missing.map((e) => e.label).join(", ")} could not be checked, so health cannot be told`,
+        ageHours,
+      };
     }
     return { status: "alive", reason: file.reason, ageHours };
   }
@@ -241,8 +256,8 @@
   // request, issue or workflow run. Anything else is shown as text.
   const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(pull|issues|actions\/runs)\/\d+$/;
   function safeGithubUrl(u) {
-    return typeof u === "string" && GITHUB_URL.test(u) ? u : null;
+    return typeof u === "string" && GITHUB_URL.test(u) && !u.split("/").some((seg) => seg === "." || seg === "..") ? u : null;
   }
 
-  return { describe, toText, render, reasonText, pageVerdict, safeGithubUrl, STALE_AFTER_HOURS, KINDS: Object.keys(KINDS) };
+  return { describe, toText, render, reasonText, pageVerdict, safeGithubUrl, STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

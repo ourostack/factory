@@ -27,7 +27,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { compareJobs, jobSummary } from "./job-summary.mjs";
+import { compareJobs, jobSummary, scopeMember } from "./job-summary.mjs";
 import { harnessSummary } from "./harness-summary.mjs";
 import { SUBSTANTIAL_ACTIVE_MS, inScope, isBound } from "./active-time.mjs";
 import {
@@ -153,13 +153,7 @@ const jobStatus = Object.fromEntries(Object.entries(jobStatusCounts).map(([k, v]
 // chosen subset.
 // ---------------------------------------------------------------------------
 
-function inCaptureScope(j) {
-  return j.status === "done" && j.queue_before_start_ms.state === "measured" && j.queue_before_start_ms.value === 0;
-}
-
-function jobMember(j, key) {
-  return inCaptureScope(j) ? j[key] : unavailable(["outside_capture_scope"]);
-}
+const jobMember = scopeMember;
 
 const timeRollups = (key) => {
   const members = jobs.map((j) => jobMember(j, key));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { compareJobs, jobSummary } from "../../../site/scripts/job-summary.mjs"
+import { compareJobs, jobSummary, scopeMember } from "../../../site/scripts/job-summary.mjs"
 
 test("a censored lead time is a partial lower bound, a plain one is measured", () => {
   const censored = jobSummary(
@@ -94,4 +94,26 @@ test("job ids and status stay plain labels", () => {
   const s = jobSummary({ job: "abc123", formulas: { status: { class: "declared", value: "done" } } }, "f.json")
   assert.equal(s.id, "abc123")
   assert.equal(s.status, "done")
+})
+
+const job = (over) => ({
+  status: "done",
+  queue_before_start_ms: { state: "measured", value: 0, reasons: [] },
+  active_time_ms: { state: "measured", value: 5, reasons: [] },
+  ...over,
+})
+
+test("scope: only a job genuinely outside capture is out of scope; lost data keeps its own reason", () => {
+  assert.equal(scopeMember(job(), "active_time_ms").value, 5)
+  assert.deepEqual(scopeMember(job({ status: "processing" }), "active_time_ms").reasons, ["outside_capture_scope"])
+  assert.deepEqual(scopeMember(job({ status: "cancelled" }), "active_time_ms").reasons, ["outside_capture_scope"])
+  assert.deepEqual(
+    scopeMember(job({ queue_before_start_ms: { state: "measured", value: 9, reasons: [] } }), "active_time_ms").reasons,
+    ["outside_capture_scope"],
+  )
+  assert.deepEqual(scopeMember(job({ status: "unavailable" }), "active_time_ms").reasons, ["status_unavailable"])
+  assert.deepEqual(
+    scopeMember(job({ queue_before_start_ms: { state: "unavailable", reasons: ["job_offsets_unavailable"] } }), "active_time_ms").reasons,
+    ["job_offsets_unavailable"],
+  )
 })

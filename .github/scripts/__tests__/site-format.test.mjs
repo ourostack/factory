@@ -99,12 +99,19 @@ test("a file that cannot be trusted never shows alive", () => {
   }
   assert.equal(status(goodHealth({ verdict: { status: "unknown", reason: "x" } })), "unknown")
   assert.equal(status(goodHealth({ factory_build: { state: "unavailable", reasons: ["x"] } })), "unknown")
+  // every piece of evidence alive rests on must be present and measured
+  assert.equal(status(goodHealth({ newest_intake: { state: "unavailable", reasons: ["no_intake_found"] } })), "unknown")
+  assert.equal(status(goodHealth({ facts_by_host: [] })), "unknown")
+  assert.equal(status(goodHealth({ last_data_build: { state: "unavailable", reasons: ["x"] } })), "unknown")
+  assert.ok(F.REQUIRED_EVIDENCE.length >= 4)
+  // a broken file with a future stamp is still broken
+  assert.equal(status(goodHealth({ built_at: "2030-01-01T00:00:00Z", verdict: { status: "broken", reason: "red" } })), "broken")
 })
 
 test("safeGithubUrl allows only a github pull request, issue or run link", () => {
   const ok = ["https://github.com/o/r/pull/12", "https://github.com/o-1/r.x/issues/3", "https://github.com/o/r/actions/runs/99"]
   for (const u of ok) assert.equal(F.safeGithubUrl(u), u)
-  for (const u of ["javascript:alert(1)", "http://github.com/o/r/pull/1", "https://evil.com/o/r/pull/1", "https://github.com/o/r/pull/x", "https://github.com/o/r/blob/main/x", "https://github.com.evil.com/o/r/pull/1", "https://github.com/o/r/pull/1?x=1", "", null, 5, undefined]) {
+  for (const u of ["javascript:alert(1)", "http://github.com/o/r/pull/1", "https://evil.com/o/r/pull/1", "https://github.com/o/r/pull/x", "https://github.com/o/r/blob/main/x", "https://github.com.evil.com/o/r/pull/1", "https://github.com/o/r/pull/1?x=1", "https://github.com/a/../pull/1", "https://github.com/../b/pull/1", "https://github.com/./b/pull/1", "", null, 5, undefined]) {
     assert.equal(F.safeGithubUrl(u), null, String(u))
   }
 })

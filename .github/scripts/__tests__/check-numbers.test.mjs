@@ -121,7 +121,7 @@ test("a bare number or NaN nested inside a stated node is refused", () => {
 })
 
 test("strings standing for missing values are refused anywhere", () => {
-  for (const bad of ["NaN", "null", "undefined", "", "0", "12.5", "Infinity", "-Infinity"]) {
+  for (const bad of ["NaN", "null", "undefined", "", "0", "12.5", "Infinity", "-Infinity", " 12 ", "1e3", "0x10", "\u0661\u0662", "+5", " ", "\t"]) {
     const d = good()
     d.jobs[0].lead_time_ms = { state: "measured", value: bad, reasons: [] }
     assert.ok(codes(d).length > 0, JSON.stringify(bad))
@@ -141,4 +141,13 @@ test("measured with any reason, partial without one, and unavailable with a hidd
   const f = good()
   f.jobs[0].active_time_ms = { state: "unavailable", reasons: ["x"], zero: 0 }
   assert.ok(codes(f).includes("unknown_key"))
+})
+
+test("an empty object where a number belongs is refused", () => {
+  const d = good()
+  d.jobs[0].lead_time_ms = {}
+  assert.ok(codes(d).length > 0)
+  const e = good()
+  e.time_breakdown[0].median = {}
+  assert.ok(codes(e).includes("rollup_expected"))
 })

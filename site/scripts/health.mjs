@@ -55,6 +55,20 @@ export function lastBuildFromRuns(body) {
     : n;
 }
 
+// Everything `alive` rests on. Alive requires every piece to be present; a
+// missing piece gives `unknown`. Adding a slot later means adding a row here,
+// and no row can be skipped by a caller: the verdict reads this list.
+export const REQUIRED_EVIDENCE = [
+  { name: "reports", label: "the reports branch", present: (i) => i.reportsReadable === true },
+  {
+    name: "factory_build",
+    label: "the last factory-build run",
+    present: (i) => i.lastBuild?.state === "measured" && i.lastBuild.value === "success",
+  },
+  { name: "newest_intake", label: "the age of the newest intake", present: (i) => typeof i.newestIntake === "string" && i.newestIntake !== "" },
+  { name: "facts_by_host", label: "the facts count by host", present: (i) => Object.keys(i.factsByHost || {}).length > 0 },
+];
+
 export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, reportsReadable }) {
   const hosts = Object.entries(factsByHost || {})
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -65,8 +79,9 @@ export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, rep
   //            was read is red;
   //   stale    the data is old: no new session for over seven days (the
   //            browser adds "the site itself has not rebuilt in 36 hours");
-  //   unknown  the build status could not be read, so it cannot be told;
-  //   alive    a green last build that was actually read, and fresh data.
+  //   unknown  any piece of evidence in REQUIRED_EVIDENCE is missing;
+  //   alive    every piece present: a green last build that was actually
+  //            read, a known intake age, a facts count, readable reports.
   // `alive` is never the answer to missing evidence.
   let verdict;
   if (reportsReadable === false) {
@@ -75,10 +90,12 @@ export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, rep
     verdict = { status: "broken", reason: `the last factory-build run ended as ${lastBuild.value}` };
   } else if (newestIntake === "over_7_days") {
     verdict = { status: "stale", reason: "no new session has been published for over seven days" };
-  } else if (lastBuild?.state !== "measured") {
-    verdict = { status: "unknown", reason: "the last factory-build run could not be checked, so health cannot be told" };
   } else {
-    verdict = { status: "alive", reason: "the last factory-build run was green and the site data built" };
+    const input = { reportsReadable, lastBuild, newestIntake, factsByHost };
+    const missing = REQUIRED_EVIDENCE.filter((e) => !e.present(input));
+    verdict = missing.length
+      ? { status: "unknown", reason: `${missing.map((e) => e.label).join(", ")} could not be checked, so health cannot be told` }
+      : { status: "alive", reason: "the last factory-build run was green, the newest intake is recent and the site data built" };
   }
 
   return {

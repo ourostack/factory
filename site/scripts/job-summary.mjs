@@ -5,7 +5,7 @@
 // null, and a formula the report lacks is unavailable (`not_recorded`),
 // never zero.
 
-import { fromFormula, withBound } from "./state.mjs";
+import { fromFormula, unavailable, withBound } from "./state.mjs";
 
 // Which way a partial figure lies. A time that includes a worker shared with
 // other jobs is copied, so it is an upper bound. A count that covers only the
@@ -47,6 +47,21 @@ export function jobSummary(d, f) {
     sessions_bound: fromFormula(bound),
     public_prs: bounded(prs, "count"),
   };
+}
+
+// A job's membership in a rollup over finished jobs whose whole life sits
+// inside capture. Only a job that is KNOWN to be unfinished, or known to
+// predate capture, is out of scope (by design). A job whose status or whose
+// start offset could not be told is lost data, not out of scope: it keeps its
+// own reason, stays in N and makes the figure partial.
+export function scopeMember(j, key) {
+  if (j.status === "unavailable") return unavailable(["status_unavailable"]);
+  if (j.status !== "done") return unavailable(["outside_capture_scope"]);
+  const q = j.queue_before_start_ms;
+  if (q.state === "unavailable") return unavailable(q.reasons);
+  if (q.state !== "measured") return unavailable(["queue_start_not_whole"]);
+  if (q.value !== 0) return unavailable(["outside_capture_scope"]);
+  return j[key];
 }
 
 // Measured lead times first (longest first), then partial ones (a lower
