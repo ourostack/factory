@@ -8,8 +8,15 @@
 //                     dates, since published facts carry no clock time)
 // and writes one JSON file (--out) the static page fetches at runtime.
 //
+// It writes two files next to each other: data.json (every number with its
+// state, see state.mjs) and health.json (the site's own health, see
+// health.mjs). Before writing, it runs the numbers check (check-numbers.mjs);
+// a violation fails the build and nothing is written.
+//
 // No npm dependencies: Node 22 built-ins only (fs, path, child_process,
 // global fetch). Safe to run locally for a preview build or in CI.
+// FACTORY_SITE_OFFLINE=1 skips every GitHub call (those numbers are then
+// unavailable, with a reason), for tests and offline previews.
 
 import {
   readFileSync,
@@ -20,9 +27,23 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { compareJobs, jobSummary } from "./job-summary.mjs";
+import { compareJobs, jobSummary, scopeMember } from "./job-summary.mjs";
 import { harnessSummary } from "./harness-summary.mjs";
 import { SUBSTANTIAL_ACTIVE_MS, inScope, isBound } from "./active-time.mjs";
+import {
+  COVERAGE_NOT_RECORDED,
+  LOW_COVERAGE_BELOW,
+  THIN_SAMPLE_MIN,
+  declareRollup,
+  measured,
+  partial,
+  rollup,
+  trust,
+  unavailable,
+} from "./state.mjs";
+import { featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
+import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
+import { checkNumbers } from "./check-numbers.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -63,45 +84,37 @@ function percentile(sorted, p) {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
-function medianP75(values) {
-  const clean = values.filter((v) => v !== null && v !== undefined).sort((a, b) => a - b);
-  return { jobs_counted: clean.length, median: percentile(clean, 50), p75: percentile(clean, 75) };
+const OFFLINE = process.env.FACTORY_SITE_OFFLINE === "1";
+const sum = (v) => v.reduce((a, b) => a + b, 0);
+const medianOf = (v) => percentile([...v].sort((a, b) => a - b), 50);
+const p75Of = (v) => percentile([...v].sort((a, b) => a - b), 75);
+
+// A count the reports supply, or unavailable: a missing or non-numeric field
+// is "not recorded", never zero.
+function counted(v) {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? measured(v) : unavailable(["not_recorded"]);
+}
+
+// Trust for a headline that is a plain count of files or jobs: its sample is
+// the count itself.
+function countTrust(number) {
+  const n = number.state === "unavailable" ? 0 : number.value;
+  return trust({ state: number.state, n, N: n });
 }
 
 // ---------------------------------------------------------------------------
 // Rollups (already computed by factory-build; we read them, never re-derive)
 // ---------------------------------------------------------------------------
 
-const coverageRaw = readJSON(join(reportsDir, "rollups/coverage.json"), {});
-const measuresRaw = readJSON(join(reportsDir, "rollups/measures.json"), {
-  groupings: {},
-});
-const mudaRaw = readJSON(join(reportsDir, "rollups/muda.json"), {
-  groupings: {},
-  wastes: [],
-});
-
-const overallMeasures = measuresRaw.groupings?.overall?.all?.measures || {};
-
-function measure(key) {
-  const m = overallMeasures[key];
-  if (!m) return { jobs_counted: 0, median: null, p75: null };
-  return { jobs_counted: m.jobs_counted, median: m.median, p75: m.p75 };
-}
-
-// Rework signal counts (tool_failures, tool_retries) are per-job totals
-// against whatever sessions a job has, not a lead-time ratio, so the
-// pre-capture gap described below does not distort them; read straight
-// from the rollup.
-const toolFailuresMeasure = measure("tool_failures");
-const toolRetriesMeasure = measure("tool_retries");
-
-const mudaOverall = mudaRaw.groupings?.overall?.all || {
-  jobs: 0,
-  jobs_labeled: 0,
-  jobs_excluded: [],
-  wastes: [],
-};
+const coverageFile = readJSON(join(reportsDir, "rollups/coverage.json"), null);
+const measuresFile = readJSON(join(reportsDir, "rollups/measures.json"), null);
+const mudaFile = readJSON(join(reportsDir, "rollups/muda.json"), null);
+// If the reports branch is missing its rollups, the site says so (health
+// verdict `broken`) and every number the rollups would supply is unavailable.
+const reportsReadable = coverageFile !== null && measuresFile !== null && mudaFile !== null;
+const coverageRaw = coverageFile ?? {};
+const mudaRaw = mudaFile ?? {};
+const mudaOverall = mudaRaw.groupings?.overall?.all ?? null;
 
 // ---------------------------------------------------------------------------
 // Per-job summaries, straight from each job's own formulas envelope
@@ -116,6 +129,7 @@ const jobStatusCounts = {};
 for (const j of jobs) {
   jobStatusCounts[j.status] = (jobStatusCounts[j.status] || 0) + 1;
 }
+const jobStatus = Object.fromEntries(Object.entries(jobStatusCounts).map(([k, v]) => [k, measured(v)]));
 
 // ---------------------------------------------------------------------------
 // Flow efficiency and "where time goes", scoped to jobs whose whole life
@@ -124,35 +138,44 @@ for (const j of jobs) {
 // A job's lead time is measured on the job's own clock, starting at 0 when
 // its card was created. `queue_before_start_ms` is the offset of the first
 // captured session bound to that job. When a card was created before the
-// store had any way to capture the work already happening on it (or before
-// the operator started that work), that offset can be large: days of lead
-// time with no session recorded for them, which is not real waiting and
-// drags flow efficiency toward zero for a reason that has nothing to do with
-// how the work actually went. A job whose first bound session starts at or
-// before its recorded start (`queue_before_start_ms === 0`) has no such gap.
+// store had any way to capture the work already happening on it, that offset
+// can be large: days of lead time with no session recorded for them, which
+// is not real waiting and drags flow efficiency toward zero for a reason that
+// has nothing to do with how the work went. A job whose first bound session
+// starts at or before its recorded start (`queue_before_start_ms` measured
+// as 0) has no such gap. The job must also have reached `done`: an open job's
+// lead time so far is a running total, not a result.
 //
-// A second, separate censoring problem: an open job's lead time so far is
-// not its real lead time, only a running total that will keep growing, and
-// mixing that into a median with jobs that actually finished would be its
-// own artifact. So this also requires the job to have reached `done`: a
-// concluded life, entirely inside capture. This recomputes on every build,
-// so it tracks the store as more jobs finish and as capture grows.
+// Every job is a member of each rollup below. A job outside this scope is an
+// unmeasured member (reason `outside_capture_scope`), and a job inside it
+// whose own value is partial or unavailable is excluded the same way. The
+// rollup is then "median of n of N jobs", never a median over a quietly
+// chosen subset.
 // ---------------------------------------------------------------------------
 
-const fullyCapturedJobs = jobs.filter(
-  (j) => j.queue_before_start_ms === 0 && j.status === "done",
-);
+const jobMember = scopeMember;
+
+const timeRollups = (key) => {
+  const members = jobs.map((j) => jobMember(j, key));
+  return {
+    median: rollup(members, { of: "finished jobs", reduce: medianOf }),
+    p75: rollup(members, { of: "finished jobs", reduce: p75Of }),
+  };
+};
 
 const scopedTimeBreakdown = [
-  { key: "active_time", label: "Active work", values: fullyCapturedJobs.map((j) => j.active_time_ms) },
-  { key: "human_wait", label: "Waiting on a human", values: fullyCapturedJobs.map((j) => j.human_wait_ms) },
-  { key: "api_retry_wait", label: "Waiting on API retries", values: fullyCapturedJobs.map((j) => j.api_retry_ms) },
-].map(({ key, label, values }) => ({ key, label, ...medianP75(values) }));
+  { key: "active_time", label: "Active work", field: "active_time_ms" },
+  { key: "human_wait", label: "Waiting on a human", field: "human_wait_ms" },
+  { key: "api_retry_wait", label: "Waiting on API retries", field: "api_retry_ms" },
+].map(({ key, label, field }) => {
+  const r = timeRollups(field);
+  return { key, label, ...r, trust: trust(r.median) };
+});
 
+const flowRollups = timeRollups("flow_efficiency");
 const scopedFlowEfficiency = {
-  ...medianP75(fullyCapturedJobs.map((j) => j.flow_efficiency)),
-  eligible_jobs: fullyCapturedJobs.length,
-  jobs_total: jobs.length,
+  ...flowRollups,
+  trust: trust(flowRollups.median),
 };
 
 // ---------------------------------------------------------------------------
@@ -161,18 +184,12 @@ const scopedFlowEfficiency = {
 //
 // Published facts name no person, machine or time of day, so this is safe
 // to aggregate. A published session withholds which plugins it ran by
-// default (`plugins: []`, with only a private count at `refs.private.plugins`);
-// only a session whose publisher separately marked each plugin name public
-// shows one. Most sessions, including real, substantial work, publish this
-// way, so `plugins` cannot answer "did this session use Desk" for the
-// store as a whole, and this page never claims to identify Desk sessions.
-//
-// What the public facts always carry is active time and job binding, so
-// this section studies the sessions that were active for at least 5 minutes
-// (the union of turn, tool and subagent time, waits excluded) or are
-// bound to a tracked job: real, substantial work, not a launcher blip or a
-// scripted check. Every other session is reported once, plainly, as
-// population context, never folded into a finding about the work.
+// default, so this page never claims to identify Desk sessions. What the
+// public facts always carry is active time and job binding, so this section
+// studies the sessions that were active for at least 5 minutes (the union of
+// turn, tool and subagent time, waits excluded) or are bound to a tracked
+// job. Every other session is reported once, plainly, as population context,
+// never folded into a finding about the work.
 // ---------------------------------------------------------------------------
 
 const factsDir = join(mainDir, "facts");
@@ -180,20 +197,17 @@ const factFiles = listJSON(factsDir);
 
 const allEntrypoints = {};
 const scopedEntrypoints = {};
+const factsByHost = {};
 let scopedSessionCount = 0;
 let scopedBoundCount = 0;
-
-const toolKindTotals = new Map(); // scoped to substantial sessions
-const modelTotals = new Map(); // scoped to substantial sessions
-let subagentDispatches = 0; // scoped to substantial sessions
-let scopedSessionsWithSubagents = 0;
-const subagentBuckets = { "0": 0, "1-2": 0, "3-5": 0, "6+": 0 };
-const scopedFacts = []; // same substantial-session scope, for the harness section
+const scopedFacts = []; // same substantial-session scope, for every fact-level number
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
   const entrypoint = d.session?.entrypoint || "unknown";
   allEntrypoints[entrypoint] = (allEntrypoints[entrypoint] || 0) + 1;
+  const host = typeof d.session?.host === "string" && d.session.host ? d.session.host : "unknown";
+  factsByHost[host] = (factsByHost[host] || 0) + 1;
 
   const bound = isBound(d);
   if (!inScope(d)) continue;
@@ -202,63 +216,28 @@ for (const f of factFiles) {
   scopedSessionCount += 1;
   scopedEntrypoints[entrypoint] = (scopedEntrypoints[entrypoint] || 0) + 1;
   if (bound) scopedBoundCount += 1;
-
-  for (const [tool, calls] of Object.entries(d.counts?.tool_calls || {})) {
-    const cur = toolKindTotals.get(tool) || { tool, calls: 0, failures: 0, sessions: 0 };
-    cur.calls += calls;
-    cur.sessions += 1;
-    toolKindTotals.set(tool, cur);
-  }
-  for (const [tool, failures] of Object.entries(d.counts?.tool_failures || {})) {
-    const cur = toolKindTotals.get(tool) || { tool, calls: 0, failures: 0, sessions: 0 };
-    cur.failures += failures;
-    toolKindTotals.set(tool, cur);
-  }
-
-  for (const m of d.models || []) {
-    const cur =
-      modelTotals.get(m.id) ||
-      { id: m.id, requests: 0, input: 0, output: 0, cache_read: 0, cache_write: 0 };
-    cur.requests += m.requests || 0;
-    cur.input += m.tokens?.input || 0;
-    cur.output += m.tokens?.output || 0;
-    cur.cache_read += m.tokens?.cache_read || 0;
-    cur.cache_write += m.tokens?.cache_write || 0;
-    modelTotals.set(m.id, cur);
-  }
-
-  const agents = Array.isArray(d.agents) ? d.agents : [];
-  const subCount = agents.filter((a) => a.parent !== null && a.parent !== undefined).length;
-  subagentDispatches += subCount;
-  if (subCount > 0) scopedSessionsWithSubagents += 1;
-  const bucket = subCount === 0 ? "0" : subCount <= 2 ? "1-2" : subCount <= 5 ? "3-5" : "6+";
-  subagentBuckets[bucket] += 1;
 }
 
-const toolKinds = [...toolKindTotals.values()]
-  .map((t) => ({ ...t, failure_rate: t.calls > 0 ? t.failures / t.calls : null }))
-  .sort((a, b) => b.calls - a.calls);
-
-const models = [...modelTotals.values()].sort((a, b) => b.requests - a.requests);
-const totalModelRequests = models.reduce((s, m) => s + m.requests, 0);
+const toolRollups = toolKindRollups(scopedFacts);
+const modelRolls = modelRollups(scopedFacts);
+const subagentRolls = subagentRollups(scopedFacts);
 
 const otherSessionCount = factFiles.length - scopedSessionCount;
 const otherEntrypoints = {};
 for (const [k, v] of Object.entries(allEntrypoints)) {
   otherEntrypoints[k] = v - (scopedEntrypoints[k] || 0);
 }
+const asMeasured = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, measured(v)]));
 
 // ---------------------------------------------------------------------------
 // Featured long-horizon sessions: the proof that, given durable context and
 // an engineering lifecycle, an agent can carry a real task to a merged,
 // reviewed result over a long span. This draws from every published session
 // (any entrypoint, any duration, bound or not) with a real public pull
-// request reference, not only the substantial-session population above,
-// since the claim here is about agent capability in general.
-// This reads facts directly rather than through job attribution, so a job
-// hash that several sessions share can never distort which sessions are
-// picked; each candidate is a single session's own record. It recomputes on
-// every build, so it stays accurate as the store's data changes.
+// request reference. Each candidate is a single session's own record.
+//
+// Nothing here names a person: a pull request is shown as a link and its
+// number, never with its repository owner, author or avatar.
 // ---------------------------------------------------------------------------
 
 const FEATURED_COUNT = 3;
@@ -269,31 +248,10 @@ for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
   const prs = d.refs?.prs || [];
   if (d.session?.ended !== true || prs.length === 0) continue;
-  const agents = Array.isArray(d.agents) ? d.agents : [];
-  const humanWaitMs = (d.intervals || [])
-    .filter((iv) => iv.kind === "human_wait")
-    .reduce((s, iv) => s + Math.max(0, (iv.end_ms ?? 0) - (iv.start_ms ?? 0)), 0);
-  const toolCallsTotal = Object.values(d.counts?.tool_calls || {}).reduce((a, b) => a + b, 0);
-  const toolFailuresTotal = Object.values(d.counts?.tool_failures || {}).reduce((a, b) => a + b, 0);
-  const prRepoCounts = new Map();
-  for (const pr of prs) {
-    prRepoCounts.set(pr.repo, (prRepoCounts.get(pr.repo) || 0) + 1);
-  }
-  candidateSessions.push({
-    session_id: d.session.id,
-    host: d.session.host,
-    duration_ms: d.session.duration_ms,
-    active_ms: Math.max(0, d.session.duration_ms - humanWaitMs),
-    subagent_count: agents.filter((a) => a.parent !== null && a.parent !== undefined).length,
-    tool_calls_total: toolCallsTotal,
-    tool_failures_total: toolFailuresTotal,
-    models: (d.models || []).map((m) => ({ id: m.id, requests: m.requests })).sort((a, b) => b.requests - a.requests),
-    pr_repos: [...prRepoCounts.entries()].map(([repo, count]) => ({ repo, count })),
-    prs,
-  });
+  candidateSessions.push({ d, prs, duration: Number.isFinite(d.session.duration_ms) ? d.session.duration_ms : -1 });
 }
 
-candidateSessions.sort((a, b) => b.duration_ms - a.duration_ms);
+candidateSessions.sort((a, b) => b.duration - a.duration);
 const featuredCandidates = candidateSessions.slice(0, FEATURED_COUNT);
 
 const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
@@ -302,20 +260,24 @@ const ghHeaders = {
   "User-Agent": "factory-site-build",
   ...(ghToken ? { Authorization: `Bearer ${ghToken}` } : {}),
 };
-// The store repo itself, for the kaizen/andon issue lookups below. In CI
-// this is always the checked-out repo (GITHUB_REPOSITORY); the literal is
-// only a local-run fallback.
+// The store repo itself, for the kaizen/andon issue lookups and the build
+// status below. In CI this is always the checked-out repo (GITHUB_REPOSITORY);
+// the literal is only a local-run fallback.
 const GITHUB_REPO = process.env.GITHUB_REPOSITORY || "ourostack/factory";
 
-async function checkMerged(repo, number) {
+async function ghGet(url) {
+  if (OFFLINE) return null;
   try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/pulls/${number}`, { headers: ghHeaders });
-    if (!res.ok) return null;
-    const body = await res.json();
-    return { merged: body.merged === true, merged_at: body.merged_at, url: body.html_url };
+    const res = await fetch(url, { headers: ghHeaders, signal: AbortSignal.timeout(20000) });
+    return res.ok ? await res.json() : null;
   } catch {
     return null;
   }
+}
+
+async function checkMerged(repo, number) {
+  const body = await ghGet(`https://api.github.com/repos/${repo}/pulls/${number}`);
+  return body ? { merged: body.merged === true, url: body.html_url } : null;
 }
 
 // Bounded, mildly-concurrent PR merge-state verification.
@@ -334,102 +296,94 @@ async function mapLimit(items, limit, fn) {
 
 let prLookupsUsed = 0;
 const featured = [];
-for (const s of featuredCandidates) {
-  const prsToCheck = s.prs.slice(0, Math.max(0, MAX_PR_LOOKUPS - prLookupsUsed));
+for (const { d, prs } of featuredCandidates) {
+  const prsToCheck = prs.slice(0, Math.max(0, MAX_PR_LOOKUPS - prLookupsUsed));
   prLookupsUsed += prsToCheck.length;
   const results = await mapLimit(prsToCheck, 8, (pr) => checkMerged(pr.repo, pr.number));
   const checked = results.filter((r) => r !== null);
   const merged = checked.filter((r) => r.merged).length;
 
   // One representative merged PR per repo (the highest-numbered = most
-  // recent in that repo), so the page can link to concrete, clickable proof
-  // without needing to name a session.
+  // recent in that repo), as a link and a number only.
   const byRepoLatest = new Map();
   results.forEach((r, idx) => {
-    if (!r || !r.merged) return;
+    if (!r || !r.merged || typeof r.url !== "string" || !r.url.startsWith("https://github.com/")) return;
     const pr = prsToCheck[idx];
     const cur = byRepoLatest.get(pr.repo);
-    if (!cur || pr.number > cur.number) {
-      byRepoLatest.set(pr.repo, { repo: pr.repo, number: pr.number, url: r.url });
-    }
+    if (!cur || pr.number > cur.number) byRepoLatest.set(pr.repo, { number: pr.number, url: r.url });
   });
 
+  const models = [];
+  for (const m of [...(d.models || [])].sort((a, b) => (b.requests ?? -1) - (a.requests ?? -1))) {
+    if (m && typeof m.id === "string") models.push(m.id);
+  }
+
   featured.push({
-    session_id: s.session_id,
-    host: s.host,
-    duration_ms: s.duration_ms,
-    active_ms: s.active_ms,
-    subagent_count: s.subagent_count,
-    tool_calls_total: s.tool_calls_total,
-    tool_failures_total: s.tool_failures_total,
-    models: s.models,
-    pr_repos: s.pr_repos,
-    prs_total: s.prs.length,
-    prs_checked: checked.length,
-    prs_merged: merged,
-    sample_merged_prs: [...byRepoLatest.values()],
-    verification: checked.length === s.prs.length ? "verified" : checked.length > 0 ? "partial" : "unavailable",
+    session_id: d.session.id,
+    host: d.session.host,
+    ...featuredNumbers(d),
+    models: models.slice(0, 2),
+    prs_total: measured(prs.length),
+    prs_checked: measured(checked.length),
+    prs_merged: checked.length > 0 ? (checked.length < prs.length ? partial(merged, ["not_every_pull_request_checked"]) : measured(merged)) : unavailable(["github_api_unavailable"]),
+    sample_merged_prs: [...byRepoLatest.values()]
+      .sort((a, b) => b.number - a.number)
+      .map((p) => ({ ref: `#${p.number}`, url: p.url })),
+    verification: checked.length === prs.length ? "verified" : checked.length > 0 ? "partial" : "unavailable",
   });
 }
 
 // ---------------------------------------------------------------------------
 // Intake over time: published facts carry no clock time by design ("no
 // when"), but the commit that first adds a facts file to `main` is a public,
-// ordinary Git fact (same as any GitHub contribution, visible on any pull
-// request) and is the only legitimate source for a "sessions over time"
-// panel. Bucketed by hour: the store's whole history so far spans under two
-// days, so daily buckets would flatten the one trend there is to see.
+// ordinary Git fact and is the only legitimate source for a "sessions over
+// time" panel. It is bucketed by UTC day, no finer: an hourly series joined
+// with the public pull requests would tie a contributor's account to the
+// hours they work. The newest intake feeds the health panel as a coarse age
+// class only.
 // ---------------------------------------------------------------------------
 
 let intakeOverTime = [];
+let newestIntakeMs = null;
 try {
   const log = execFileSync(
     "git",
-    [
-      "-C",
-      mainDir,
-      "log",
-      "--diff-filter=A",
-      "--name-only",
-      "--pretty=format:C|%cI",
-      "--",
-      "facts/",
-    ],
+    ["-C", mainDir, "log", "--diff-filter=A", "--name-only", "--pretty=format:C|%ct", "--", "facts/"],
     { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
-  const hourCounts = new Map();
-  let currentHour = null;
+  const dayCounts = new Map();
+  let currentDay = null;
   for (const line of log.split("\n")) {
     if (line.startsWith("C|")) {
-      currentHour = line.slice(2, 15); // YYYY-MM-DDTHH
-    } else if (line.trim().startsWith("facts/") && currentHour) {
-      hourCounts.set(currentHour, (hourCounts.get(currentHour) || 0) + 1);
+      const ms = Number(line.slice(2)) * 1000;
+      currentDay = Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : null;
+      // The fixed-metadata bootstrap commit has no real time.
+      if (currentDay && currentDay.startsWith("1970-01-01")) currentDay = null;
+      if (currentDay && (newestIntakeMs === null || ms > newestIntakeMs)) newestIntakeMs = ms;
+    } else if (line.trim().startsWith("facts/") && currentDay) {
+      dayCounts.set(currentDay, (dayCounts.get(currentDay) || 0) + 1);
     }
   }
-  intakeOverTime = [...hourCounts.entries()]
-    .filter(([hour]) => !hour.startsWith("1970-01-01")) // the fixed-metadata bootstrap commit
+  intakeOverTime = [...dayCounts.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([hour, count]) => ({ hour: `${hour}:00`, count }));
+    .map(([day, count]) => ({ day, count: measured(count) }));
 } catch {
   intakeOverTime = [];
+  newestIntakeMs = null;
 }
 
 // ---------------------------------------------------------------------------
-// Kaizen / andon issues: best-effort, unauthenticated-friendly reads of the
-// public repo's issues. Never blocks the build if the network is
-// unavailable. For a closed issue, the resolution names the countermeasure
-// pull request when one is on the card (`countermeasure: <url>` in the
-// auto-filed body) or, failing that, the first pull request linked in the
-// closing comment - both live-checked for merge state, same as the featured
-// sessions above.
-//
-// A failed fetch (rate limit, network) and a genuine zero look identical as
-// a bare array, so `fetchIssues` carries its own verification state back
-// (same "verified"/"unavailable" vocabulary as the featured sessions'
-// merge-check above) rather than collapsing a failure into a true zero.
+// Kaizen / andon issues: best-effort reads of the public repo's issues. A
+// failed fetch (rate limit, network, offline) is unavailable, never a zero:
+// `fetchIssues` carries its own verification state back. An issue is shown
+// as a link and its number; its title is shown only when it matches the
+// auto-filed form, so a title a person typed never reaches the page, and no
+// author, login or avatar is read at all.
 // ---------------------------------------------------------------------------
 
 const PR_URL_RE = /https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/;
+const AUTOFILED_TITLE_RE = /^(Kaizen|Andon): [A-Za-z0-9_ ,.:()/-]{1,120}$/;
+const ISSUE_PAGE_SIZE = 50;
 
 function firstPrLink(text) {
   if (!text) return null;
@@ -446,160 +400,179 @@ function extractCountermeasure(body) {
 }
 
 async function fetchIssues(label) {
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/issues?state=all&labels=${encodeURIComponent(label)}&per_page=50`,
-      { headers: ghHeaders },
-    );
-    if (!res.ok) return { verification: "unavailable", issues: [] };
-    const items = await res.json();
-    return {
-      verification: "verified",
-      issues: items
-        .filter((i) => !i.pull_request)
-        .map((i) => ({
-          number: i.number,
-          title: i.title,
-          state: i.state,
-          url: i.html_url,
-          created_at: i.created_at,
-          body: i.body || "",
-        })),
-    };
-  } catch {
-    return { verification: "unavailable", issues: [] };
-  }
+  const items = await ghGet(
+    `https://api.github.com/repos/${GITHUB_REPO}/issues?state=all&labels=${encodeURIComponent(label)}&per_page=${ISSUE_PAGE_SIZE}`,
+  );
+  if (!Array.isArray(items)) return { verification: "unavailable", issues: [] };
+  return {
+    verification: "verified",
+    // Only the first page is read: a full page may hide more.
+    truncated: items.length >= ISSUE_PAGE_SIZE,
+    issues: items
+      .filter((i) => !i.pull_request)
+      .map((i) => ({
+        number: i.number,
+        title: typeof i.title === "string" && AUTOFILED_TITLE_RE.test(i.title) ? i.title : null,
+        state: i.state,
+        url: i.html_url,
+        body: i.body || "",
+      })),
+  };
 }
 
 async function fetchLastComment(number) {
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/issues/${number}/comments?per_page=50`,
-      { headers: ghHeaders },
-    );
-    if (!res.ok) return null;
-    const items = await res.json();
-    return items.length ? items[items.length - 1].body || "" : null;
-  } catch {
-    return null;
-  }
+  const items = await ghGet(`https://api.github.com/repos/${GITHUB_REPO}/issues/${number}/comments?per_page=50`);
+  if (!Array.isArray(items)) return null;
+  return items.length ? items[items.length - 1].body || "" : null;
 }
 
 async function enrichIssue(issue) {
-  const { body, ...rest } = issue;
-  if (issue.state !== "closed") return { ...rest, resolution: null };
+  const { body, number, title, state, url } = issue;
+  const base = { ref: `#${number}`, ...(title ? { title } : {}), issue_state: state, url };
+  if (state !== "closed") return { ...base, resolution: { kind: "open" } };
   let link = extractCountermeasure(body);
-  if (!link) {
-    const lastComment = await fetchLastComment(issue.number);
-    link = firstPrLink(lastComment);
-  }
-  if (!link) return { ...rest, resolution: { kind: "closed" } };
+  if (!link) link = firstPrLink(await fetchLastComment(number));
+  if (!link) return { ...base, resolution: { kind: "closed" } };
   const merge = await checkMerged(link.repo, link.number);
   return {
-    ...rest,
+    ...base,
     resolution: {
       kind: "countermeasure",
-      repo: link.repo,
-      number: link.number,
+      ref: `#${link.number}`,
       url: merge?.url || `https://github.com/${link.repo}/pull/${link.number}`,
-      merged: merge?.merged ?? null,
+      merged: merge ? merge.merged : "unknown",
     },
   };
 }
 
-const [kaizenFetch, andonFetch] = await Promise.all([
-  fetchIssues("kaizen"),
-  fetchIssues("andon"),
-]);
+const [kaizenFetch, andonFetch] = await Promise.all([fetchIssues("kaizen"), fetchIssues("andon")]);
 const kaizenIssues = await mapLimit(kaizenFetch.issues, 4, enrichIssue);
 const andonIssues = await mapLimit(andonFetch.issues, 4, enrichIssue);
-const kaizenRaised = kaizenIssues.length;
-const kaizenResolved = kaizenIssues.filter((i) => i.state === "closed").length;
+
+const kaizenRaised =
+  kaizenFetch.verification === "unavailable"
+    ? unavailable(["github_api_unavailable"])
+    : kaizenFetch.truncated
+      ? partial(kaizenIssues.length, ["first_page_only"])
+      : measured(kaizenIssues.length);
+const kaizenResolved =
+  kaizenFetch.verification === "unavailable"
+    ? unavailable(["github_api_unavailable"])
+    : kaizenFetch.truncated
+      ? partial(kaizenIssues.filter((i) => i.issue_state === "closed").length, ["first_page_only"])
+      : measured(kaizenIssues.filter((i) => i.issue_state === "closed").length);
 
 // ---------------------------------------------------------------------------
-// Takeaways: every number here is read from the data above, not typed in.
-// Re-running this script against a later store rebuild changes the numbers
-// and the sentences together. Anything describing the work itself is scoped
-// to the substantial sessions (active at least 5 minutes, or bound to a
-// tracked job), since that is real work rather than a launcher blip or a
-// scripted check; other sessions on contributing machines are reported
-// once, as population context, never folded into a "finding" about the
-// work.
+// Headlines: each is a stated number plus a trust state. Takeaways are
+// sentence templates with slots, so no number is typed into prose.
 // ---------------------------------------------------------------------------
 
-function pct(n, digits = 0) {
-  return `${(n * 100).toFixed(digits)}%`;
-}
+const jobsTracked = counted(coverageRaw.jobs);
+const jobsOpen = counted(coverageRaw.jobs_open);
+const scoped = measured(scopedSessionCount);
+const totalSessions = measured(factFiles.length);
+
+const headlines = [
+  { id: "substantial_sessions", label: "Substantial sessions", number: scoped, note: { template: "of {total} published", slots: { total: totalSessions } }, trust: countTrust(scoped) },
+  { id: "jobs_tracked", label: "Jobs tracked", number: jobsTracked, note: { template: "{open} open", slots: { open: jobsOpen } }, trust: countTrust(jobsTracked) },
+  { id: "subagent_dispatches", label: "Subagent dispatches", number: subagentRolls.dispatches, note: { template: "substantial sessions", slots: {} }, trust: trust(subagentRolls.dispatches) },
+  { id: "tool_calls", label: "Tool calls recorded", number: toolRollups.total_calls, note: { template: "substantial sessions", slots: {} }, trust: trust(toolRollups.total_calls) },
+  { id: "model_requests", label: "Model requests", number: modelRolls.total_requests, note: { template: "substantial sessions", slots: {} }, trust: trust(modelRolls.total_requests) },
+  { id: "kaizen", label: "Kaizen issues", number: kaizenRaised, note: { template: "{resolved} resolved", slots: { resolved: kaizenResolved } }, trust: countTrust(kaizenRaised) },
+];
 
 const takeaways = [];
 
-if (scopedSessionCount > 0) {
-  takeaways.push({
-    id: "attribution",
-    text: `Of the ${scopedSessionCount} substantial sessions, ${scopedBoundCount} are bound to a tracked job; the rest ran without a job attribution.`,
-    n: scopedSessionCount,
-    small_sample: scopedSessionCount < 15,
-  });
-}
+takeaways.push({
+  id: "attribution",
+  template: "Of the {scoped} substantial sessions, {bound} are bound to a tracked job; the rest ran without a job attribution.",
+  slots: { scoped, bound: measured(scopedBoundCount) },
+  trust: countTrust(scoped),
+});
 
-if (scopedFlowEfficiency.jobs_counted > 0) {
-  const n = scopedFlowEfficiency.jobs_counted;
-  takeaways.push({
-    id: "flow_efficiency",
-    text: `Only ${n} of the ${jobs.length} tracked jobs both finished and had their whole life inside capture (no gap before the first recorded session); across just those ${n}, flow efficiency has a median of ${pct(scopedFlowEfficiency.median)}. Most jobs' cards predate capture, so their flow efficiency would be an artifact of that gap, not a real measure, and is left out here.`,
-    n,
-    small_sample: true,
-  });
-} else {
-  takeaways.push({
-    id: "flow_efficiency",
-    text: `No job yet has both finished and had its whole life inside capture, so flow efficiency cannot be computed without the pre-capture gap distorting it. Check back as more jobs finish inside capture.`,
-    n: 0,
-    small_sample: true,
-  });
-}
+takeaways.push({
+  id: "flow_efficiency",
+  template:
+    "{scope} of the {total} tracked jobs both finished and had their whole life inside capture (no gap before the first recorded session); across the {n} of those with a fully measured flow efficiency, the median is {median}. Most jobs' cards predate capture, so their flow efficiency would be an artifact of that gap, not a real measure, and is left out here.",
+  slots: { scope: measured(flowRollups.median.N), n: measured(flowRollups.median.n), total: jobsTracked, median: flowRollups.median },
+  trust: scopedFlowEfficiency.trust,
+});
 
 {
-  const eligible = toolKinds.filter((t) => t.calls >= 20);
-  const worst = [...eligible].sort((a, b) => b.failure_rate - a.failure_rate)[0];
+  const eligible = toolRollups.kinds.filter(
+    (t) => t.tool !== "other" && t.calls.state !== "unavailable" && t.calls.value >= 20 && t.failure_rate.state !== "unavailable",
+  );
+  const worst = [...eligible].sort((a, b) => b.failure_rate.value - a.failure_rate.value)[0];
   if (worst) {
     takeaways.push({
       id: "tool_failures",
-      text: `Among the substantial sessions, "${worst.tool}" calls fail most often of the tool kinds used at least 20 times: ${pct(worst.failure_rate, 1)} of ${worst.calls.toLocaleString()} calls (${worst.failures.toLocaleString()} failures).`,
-      n: worst.calls,
-      small_sample: worst.calls < 100,
+      template: 'Among the substantial sessions, "{tool}" calls fail most often of the tool kinds used at least {min_calls} times: {rate} of {calls} calls ({failures} failures).',
+      slots: { tool: worst.tool, min_calls: measured(20), rate: worst.failure_rate, calls: worst.calls, failures: worst.failures },
+      trust: trust(worst.calls),
     });
   }
 }
 
-if (models.length > 0 && totalModelRequests > 0) {
-  const top = models[0];
+if (modelRolls.models.length > 0 && modelRolls.total_requests.state !== "unavailable") {
+  const top = modelRolls.models[0];
+  const topMember = (d) => {
+    const sess = modelRollups([d]);
+    const row = sess.models.find((m) => m.id === top.id);
+    const tot = sess.total_requests;
+    if (tot.state !== "measured") return unavailable(tot.reasons);
+    return { ...(row ? row.requests : measured(0)), aux: tot.value };
+  };
+  const share = rollup(scopedFacts.map(topMember), {
+    of: "sessions",
+    reduce: (v, ms) => {
+      const all = sum(ms.map((m) => m.aux));
+      return all > 0 ? sum(v) / all : NaN;
+    },
+  });
   takeaways.push({
     id: "model_concentration",
-    text: `Among the substantial sessions, ${top.id} accounts for ${pct(top.requests / totalModelRequests)} of the ${totalModelRequests.toLocaleString()} model requests recorded.`,
-    n: totalModelRequests,
-    small_sample: false,
+    template: "Among the substantial sessions, {model} accounts for {share} of the {total} model requests recorded.",
+    slots: { model: top.id, share, total: modelRolls.total_requests },
+    trust: trust(share),
   });
 }
 
-if (scopedSessionCount > 0) {
-  const share = scopedSessionsWithSubagents / scopedSessionCount;
+if (subagentRolls.sessions_with_subagents.state !== "unavailable") {
+  const w = subagentRolls.sessions_with_subagents;
   takeaways.push({
     id: "subagents",
-    text: `${scopedSessionsWithSubagents} of the ${scopedSessionCount} substantial sessions (${pct(share)}) dispatch at least one subagent, ${subagentDispatches.toLocaleString()} dispatches in total.`,
-    n: scopedSessionCount,
-    small_sample: scopedSessionCount < 15,
+    template: "{with} substantial sessions dispatch at least one subagent, {dispatches} dispatches in total; sessions whose subagent logs could not be read are left out.",
+    slots: { with: w, dispatches: subagentRolls.dispatches },
+    trust: trust(w),
   });
 }
 
-if (mudaOverall.jobs_labeled === 0) {
+if (mudaOverall && mudaOverall.jobs_labeled === 0) {
+  const jobsLabeled = measured(0);
   takeaways.push({
     id: "waste_not_labeled",
-    text: `Labeling has just started: 0 of ${mudaOverall.jobs ?? jobs.length} jobs are fully labeled for waste yet, though session-level labels already exist. A job's waste breakdown appears here once every one of its sessions is evaluated.`,
-    n: mudaOverall.jobs ?? jobs.length,
-    small_sample: true,
+    template: "Labeling has just started: {labeled} of {jobs} jobs are fully labeled for waste yet, though session-level labels already exist. A job's waste breakdown appears here once every one of its sessions is evaluated.",
+    slots: { labeled: jobsLabeled, jobs: counted(mudaOverall.jobs) },
+    trust: trust({ state: "partial", n: 0, N: counted(mudaOverall.jobs).state === "measured" ? counted(mudaOverall.jobs).value : 0 }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Waste: the pipeline's own rollup over labeled jobs, kept with its n of N.
+// ---------------------------------------------------------------------------
+
+const wasteJobsTotal = mudaOverall ? counted(mudaOverall.jobs) : unavailable(["not_recorded"]);
+const wasteJobsLabeled = mudaOverall ? counted(mudaOverall.jobs_labeled) : unavailable(["not_recorded"]);
+const wasteN = wasteJobsLabeled.state === "measured" ? wasteJobsLabeled.value : 0;
+const wasteN_total = wasteJobsTotal.state === "measured" ? wasteJobsTotal.value : 0;
+const wasteBreakdown = (mudaOverall?.wastes ?? [])
+  .filter((w) => w && typeof w.waste === "string")
+  .map((w) => ({
+    waste: w.waste,
+    total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs" }),
+    jobs: counted(w.jobs),
+    share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs" }),
+  }));
 
 // ---------------------------------------------------------------------------
 // Assemble and write
@@ -609,54 +582,76 @@ let reportsCommit = null;
 try {
   reportsCommit = execFileSync("git", ["-C", reportsDir, "rev-parse", "HEAD"], {
     encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
   }).trim();
 } catch {
   reportsCommit = null;
 }
 
+const builtAt = new Date().toISOString();
+
+const harnesses = harnessSummary(scopedFacts).map((h) => ({
+  host: h.host,
+  unproven: h.unproven,
+  sessions: measured(h.sessions),
+  workers: measured(h.workers),
+  subagents: measured(h.subagents),
+  max_depth: measured(h.max_depth),
+  versions: asMeasured(h.versions),
+  models: asMeasured(h.models),
+  agent_types: asMeasured(h.agent_types),
+  requested_vs_resolved: h.requested_vs_resolved.map((p) => ({
+    requested: p.requested,
+    resolved: p.resolved ?? "unknown",
+    workers: measured(p.workers),
+  })),
+}));
+
 const data = {
-  schema: "factory-site/2",
-  built_at: new Date().toISOString(),
-  reports_commit: reportsCommit,
+  schema: "factory-site/3",
+  built_at: builtAt,
+  ...(reportsCommit ? { reports_commit: reportsCommit } : {}),
+  config: {
+    thin_sample_min: THIN_SAMPLE_MIN,
+    substantial_active_ms: SUBSTANTIAL_ACTIVE_MS,
+    stale_after_hours: STALE_AFTER_HOURS,
+    low_coverage_below: LOW_COVERAGE_BELOW,
+  },
   coverage: {
-    sessions_with_facts: coverageRaw.sessions_with_facts ?? factFiles.length,
-    jobs: coverageRaw.jobs ?? jobs.length,
-    jobs_open: coverageRaw.jobs_open ?? null,
+    sessions_with_facts: counted(coverageRaw.sessions_with_facts ?? factFiles.length),
+    jobs: jobsTracked,
+    jobs_open: jobsOpen,
+    capture: COVERAGE_NOT_RECORDED,
   },
   scope: {
-    sessions_total: factFiles.length,
-    sessions_scoped: scopedSessionCount,
-    sessions_scoped_bound: scopedBoundCount,
-    sessions_other: otherSessionCount,
-    substantial_active_ms: SUBSTANTIAL_ACTIVE_MS,
-    entrypoints_scoped: scopedEntrypoints,
-    entrypoints_other: otherEntrypoints,
+    sessions_total: totalSessions,
+    sessions_scoped: scoped,
+    sessions_scoped_bound: measured(scopedBoundCount),
+    sessions_other: measured(otherSessionCount),
+    entrypoints_scoped: asMeasured(scopedEntrypoints),
+    entrypoints_other: asMeasured(otherEntrypoints),
   },
-  tool_kinds: toolKinds,
+  headlines,
+  tool_kinds: toolRollups.kinds,
+  tool_calls_total: toolRollups.total_calls,
   time_breakdown: scopedTimeBreakdown,
   flow_efficiency: scopedFlowEfficiency,
-  rework: {
-    tool_failures: toolFailuresMeasure,
-    tool_retries: toolRetriesMeasure,
-  },
-  job_status_counts: jobStatusCounts,
+  job_status_counts: jobStatus,
   jobs: jobs.sort(compareJobs),
-  models,
-  harnesses: harnessSummary(scopedFacts),
+  models: modelRolls.models,
+  harnesses,
   subagents: {
-    root_sessions: scopedSessionCount,
-    subagent_dispatches: subagentDispatches,
-    sessions_with_subagents: scopedSessionsWithSubagents,
-    buckets: subagentBuckets,
+    dispatches: subagentRolls.dispatches,
+    sessions_with_subagents: subagentRolls.sessions_with_subagents,
+    buckets: subagentRolls.buckets,
   },
   intake_over_time: intakeOverTime,
   waste: {
-    wastes: mudaRaw.wastes || [],
-    jobs_total: mudaOverall.jobs ?? jobs.length,
-    jobs_labeled: mudaOverall.jobs_labeled ?? 0,
-    jobs_excluded: mudaOverall.jobs_excluded ?? [],
-    label_files: coverageRaw.labels?.files ?? 0,
-    breakdown: mudaOverall.wastes ?? [],
+    wastes: Array.isArray(mudaRaw.wastes) ? mudaRaw.wastes : [],
+    jobs_total: wasteJobsTotal,
+    jobs_labeled: wasteJobsLabeled,
+    label_files: counted(coverageRaw.labels?.files),
+    breakdown: wasteBreakdown,
   },
   kaizen: { raised: kaizenRaised, resolved: kaizenResolved, verification: kaizenFetch.verification },
   kaizen_issues: kaizenIssues,
@@ -666,9 +661,32 @@ const data = {
   takeaways,
 };
 
+// The site's own health, built beside the data.
+const buildRuns = await ghGet(
+  `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/build.yml/runs?status=completed&branch=main&per_page=10`,
+);
+const lastBuild = buildRuns ? lastBuildFromRuns(buildRuns) : unavailable(["github_api_unavailable"]);
+const health = buildHealth({
+  builtAt,
+  factsByHost,
+  newestIntake: intakeClass(newestIntakeMs, Date.parse(builtAt)),
+  lastBuild,
+  reportsReadable,
+});
+
+// The numbers regression check. It runs before anything is written, so a
+// number that lost its state fails the build and the old site stays up.
+const violations = [...checkNumbers(data).map((v) => ({ ...v, file: "data.json" })), ...checkNumbers(health).map((v) => ({ ...v, file: "health.json" }))];
+if (violations.length) {
+  for (const v of violations.slice(0, 50)) console.error(`numbers-check: ${v.code} at ${v.file}:${v.path}`);
+  console.error(`numbers-check: ${violations.length} violation(s); data not written`);
+  process.exit(1);
+}
+
 mkdirSync(dirname(outFile), { recursive: true });
 writeFileSync(outFile, JSON.stringify(data), "utf8");
+writeFileSync(join(dirname(outFile), "health.json"), JSON.stringify(health), "utf8");
 
 console.log(
-  `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${scopedSessionCount} substantial), ${toolKinds.length} tool kinds, ${models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups) -> ${outFile}`,
+  `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${scopedSessionCount} substantial), ${toolRollups.kinds.length} tool kinds, ${modelRolls.models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups), verdict ${health.verdict.status} -> ${outFile}`,
 );

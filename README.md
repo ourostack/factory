@@ -2,6 +2,26 @@
 
 This is the public factory store for [Desk](https://github.com/ourostack/desk). It holds published session facts and the job reports built from them. It measures how agent work flows, never the people who do it.
 
+## What this is for
+
+This store is for anyone deciding how to get more accepted outcomes for less human attention: an operator, a team lead, or an agent improving its own system. The value it cares about is an outcome a human accepted. Everything measured here serves one question: how much human attention does an accepted outcome cost, and where does the rest go? Agent time, tokens and tool calls are inputs; they matter only because they help explain that ratio.
+
+**Designed for many desks; proven on one so far.**
+
+## How the public site shows numbers
+
+The [public site](https://ourostack.github.io/factory/) shows every number with its state, so a missing measurement never looks like a zero.
+
+- **Measured** figures show plainly. A measured zero is a zero.
+- **Partial** figures carry the word "partial", a bound sign where the direction is known (at least, at most), and the reason on hover and in text for screen readers.
+- **No data** figures say "no data" with the reason beside them. They never show a digit.
+- **Totals** (sums, medians, shares) count only measured members and say how many: "4 of 7 finished jobs · 36 out of scope". Jobs a measure does not apply to by design (not finished, start before capture, host does not record) are not in the denominator and are counted beside it; missing data inside scope stays in it and makes the total partial. Figures taken from a task card are labeled "declared".
+- **Trust** on each headline is `ok`, `thin sample` (fewer than 5 measured members) or `partial`, with the reason. Capture coverage per host is not recorded yet, so the site says "coverage: not recorded yet" and never invents a percentage.
+- **Health**: a panel shows the last successful data build, the coarse age of the newest intake, facts files by host, whether the last `factory-build` run was green, and one verdict with the reason. `broken` when the last build read is red (or the reports are unreadable); `stale` when the data is older than the threshold (the site itself not rebuilt in 36 hours, judged by the browser from the build stamp, or no new session for over seven days); `unknown` when it cannot be told (the build status could not be read, or the health file is missing, malformed or future-dated); `alive` only when a green last build was actually read and the stamp is fresh. When more than one holds, `broken` wins, then `stale`, then `unknown`. The page does not trust the health file: its own threshold is a constant in the page code. Pages rebuilds only after a green `factory-build`, so a red store build leaves the site quiet and the browser reads `stale` once the stamp passes the threshold. Slots for capture coverage, open improvement items and unsigned deliveries read "not recorded yet" until those records exist.
+- **A regression check** runs in the site build and fails it if any number in `data.json` lacks a state, any total lacks its `n` of `N`, or any value is `NaN` or `null`.
+
+The site names no person: pull requests appear as links with their number, issue titles appear only when auto-filed, and intake appears by day, never by hour.
+
 ## No who, no when, just how
 
 A published facts file says how one agent session went: how long it lasted, how its time split between turns, tools, subagents and waits, which tool kinds it used and how often they failed or retried, which plugin and model versions ran, and which public pull requests and commits it touched. It never says who did the work or when.

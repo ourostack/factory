@@ -31,6 +31,32 @@
 
 <main id="main">
 
+  <!-- ============ 0. PURPOSE AND HEALTH ============ -->
+  <section id="purpose" aria-labelledby="purpose-title">
+    <div class="wrap">
+      <h2 class="section-title" id="purpose-title">What this is for</h2>
+      <p class="purpose-text">
+        This store is for anyone deciding how to get more accepted outcomes for less human attention: an operator, a team lead, or an agent improving its own system.
+        The value it cares about is an outcome a human accepted. Everything measured here serves one question: how much human attention does an accepted outcome cost, and where does the rest go?
+        Agent time, tokens and tool calls are inputs; they matter only because they help explain that ratio.
+      </p>
+      <p class="limit-text"><strong>Designed for many desks; proven on one so far.</strong></p>
+      <p class="purpose-text">
+        How to read the numbers: a plain figure was measured. A figure marked <span class="num num-partial"><span class="num-value">12</span><span class="num-flag">partial</span></span> was only partly measured, and its reason is on hover and in the text for screen readers.
+        A figure shown as <span class="num num-unavailable"><span class="num-value">no data</span><span class="num-reason">(with its reason)</span></span> was not measured at all, and is never shown as zero.
+        Every total says how many of its members it rests on, for example "12 of 31 jobs".
+      </p>
+    </div>
+  </section>
+
+  <section id="health" aria-labelledby="health-title">
+    <div class="wrap">
+      <h2 class="section-title" id="health-title">Is this site healthy?</h2>
+      <p class="section-sub">This panel is read in your browser. If the site stops rebuilding, it says so by itself.</p>
+      <div id="health-panel" class="health-panel"><p class="chart-empty">Loading&hellip;</p></div>
+    </div>
+  </section>
+
   <!-- ============ 1. THE PROOF ============ -->
   <section id="proof" aria-labelledby="proof-title">
     <div class="wrap">
@@ -67,7 +93,7 @@
       <div class="chart-grid cols-2">
         <div class="chart-card">
           <h3>Where time goes</h3>
-          <p class="chart-caption">Median and 75th-percentile duration per job, computed only over finished jobs whose whole life sits inside capture &mdash; no gap between the job's recorded start and its first captured session. Every other job's card predates capture, so counting that gap as lead time would be an artifact, not a finding, and it is left out here. Flow efficiency, referenced in the takeaways above and in the jobs table below, is active time divided by lead time; a higher share means less of the job's time was spent waiting. Bar length is log-scaled so seconds and days both stay visible; the label always shows the real duration.</p>
+          <p class="chart-caption">Median and 75th-percentile duration per job, computed only over finished jobs whose whole life sits inside capture &mdash; no gap between the job's recorded start and its first captured session &mdash; and whose own figure is fully measured. Every other job is left out and counted in the "n of N" beside each figure: a job whose card predates capture would add a gap that is not real waiting, and a job whose figure is partial or missing would add a number nobody measured. Flow efficiency, referenced in the takeaways above and in the jobs table below, is active time divided by lead time; a higher share means less of the job's time was spent waiting. Bar length is log-scaled so seconds and days both stay visible; the label always shows the real duration.</p>
           <p class="chart-caption" id="time-breakdown-note"></p>
           <div class="legend">
             <span class="legend-item"><span class="legend-swatch" style="background:var(--series-1);"></span>Median</span>
@@ -101,7 +127,7 @@
       <div class="chart-grid cols-2">
         <div class="chart-card">
           <h3>Sessions published, cumulative</h3>
-          <p class="chart-caption">Published facts carry no clock time by design ("no when"). This uses the one legitimate public timestamp available: when each facts file first landed on <code>main</code>, the same information visible on any GitHub pull request. Shown as a running total, not a per-hour count: the store's history so far is short enough that its first hour was a one-time flush of sessions already sitting on contributing machines when the store went live, not a burst of new work, and a per-hour bar chart would read that flush as a spike.</p>
+          <p class="chart-caption">Published facts carry no clock time by design ("no when"). This uses the one legitimate public timestamp available: the day each facts file first landed on <code>main</code>, never finer than a day. Shown as a running total, not a per-day count: the store's first day was a one-time flush of sessions already sitting on contributing machines when the store went live, not a burst of new work, and a per-day bar chart would read that flush as a spike.</p>
           <div id="chart-intake"></div>
         </div>
         <div class="chart-card">
@@ -114,7 +140,7 @@
       <div class="chart-grid cols-2" style="margin-top:20px;">
         <div class="chart-card">
           <h3>Tool calls by kind</h3>
-          <p class="chart-caption">Total calls recorded across the substantial sessions.</p>
+          <p class="chart-caption">Total calls recorded across the substantial sessions whose tool counts are whole.</p>
           <div id="chart-tool-calls"></div>
         </div>
         <div class="chart-card">
@@ -127,12 +153,12 @@
       <div class="chart-grid cols-2" style="margin-top:20px;">
         <div class="chart-card">
           <h3>Model requests</h3>
-          <p class="chart-caption">Requests by model, summed across the substantial sessions.</p>
+          <p class="chart-caption">Requests by model, summed over the substantial sessions that recorded their models. A session that recorded none is not counted as zero requests; it is left out and shown in the "n of N".</p>
           <div id="chart-models"></div>
         </div>
         <div class="chart-card">
           <h3>Subagent fan-out</h3>
-          <p class="chart-caption">Subagents dispatched per session, across the substantial sessions.</p>
+          <p class="chart-caption">Subagents dispatched per session, across the substantial sessions. A session whose subagent logs could not be read is left out of every bucket, including "0", and shown in the "n of N".</p>
           <div id="chart-subagents"></div>
         </div>
       </div>
@@ -145,7 +171,7 @@
 
       <div class="chart-card" style="margin-top:20px;">
         <h3>Every job</h3>
-        <p class="chart-caption">One row per job the store tracks. "Unavailable" means the store could not measure that figure yet, never zero.</p>
+        <p class="chart-caption">One row per job the store tracks. A figure marked "partial" covers only part of the job (hover for why; a bound sign shows which way the true figure lies), and "no data" means the store could not measure it, with the reason beside it. Zero appears only when zero was measured.</p>
         <div id="jobs-table"></div>
       </div>
     </div>
@@ -228,6 +254,7 @@
 </footer>
 
 <div id="tooltip" class="tooltip" role="tooltip"></div>
+<script src="format.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
