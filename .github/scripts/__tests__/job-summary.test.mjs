@@ -1,46 +1,61 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import { test } from "node:test"
 
-import { compareJobs, jobSummary, partialQualifier } from "../../../site/scripts/job-summary.mjs"
+import { compareJobs, jobSummary } from "../../../site/scripts/job-summary.mjs"
 
-test("jobSummary carries the censored flag", () => {
+test("a censored lead time is a partial lower bound, a plain one is measured", () => {
   const censored = jobSummary(
     { formulas: { lead_time_ms: { value: 8335518596, class: "measured", censored: true } } },
     "b2b5d3c9.json",
   )
-  assert.equal(censored.lead_time_censored, true)
-  assert.equal(censored.lead_time_ms, 8335518596)
+  assert.equal(censored.lead_time_ms.state, "partial")
+  assert.equal(censored.lead_time_ms.bound, "lower")
+  assert.equal(censored.lead_time_ms.value, 8335518596)
 
-  const measured = jobSummary(
-    { formulas: { lead_time_ms: { value: 5, class: "measured" } } },
-    "abc.json",
-  )
-  assert.equal(measured.lead_time_censored, false)
-  assert.equal(measured.lead_time_ms, 5)
+  const plain = jobSummary({ formulas: { lead_time_ms: { value: 5, class: "measured" } } }, "abc.json")
+  assert.equal(plain.lead_time_ms.state, "measured")
+  assert.equal("bound" in plain.lead_time_ms, false)
 })
 
-test("compareJobs puts measured before censored and null last", () => {
+test("nothing in the summary defaults to zero or null: a missing formula is unavailable", () => {
+  const s = jobSummary({}, "empty.json")
+  for (const k of [
+    "lead_time_ms",
+    "active_time_ms",
+    "flow_efficiency",
+    "queue_before_start_ms",
+    "human_wait_ms",
+    "api_retry_ms",
+    "tool_failures",
+    "tool_retries",
+    "sessions_bound",
+    "public_prs",
+  ]) {
+    assert.equal(s[k].state, "unavailable", k)
+    assert.deepEqual(s[k].reasons, ["not_recorded"], k)
+    assert.equal("value" in s[k], false, k)
+  }
+  assert.equal(s.status, "unavailable")
+})
+
+test("a pipeline-unavailable formula keeps its reason", () => {
+  const s = jobSummary({ formulas: { active_time_ms: { class: "unavailable", reason: "job_offsets_unavailable", value: null } } }, "a.json")
+  assert.deepEqual(s.active_time_ms.reasons, ["job_offsets_unavailable"])
+})
+
+test("compareJobs puts measured before censored and unavailable last", () => {
+  const mk = (id, lead) => ({ id, lead_time_ms: lead })
   const rows = [
-    { id: "m10", lead_time_ms: 10, lead_time_censored: false },
-    { id: "c1000", lead_time_ms: 1000, lead_time_censored: true },
-    { id: "m50", lead_time_ms: 50, lead_time_censored: false },
-    { id: "null", lead_time_ms: null, lead_time_censored: false },
+    mk("m10", { state: "measured", value: 10, reasons: [] }),
+    mk("c1000", { state: "partial", value: 1000, reasons: ["censored"], bound: "lower" }),
+    mk("m50", { state: "measured", value: 50, reasons: [] }),
+    mk("none", { state: "unavailable", reasons: ["x"] }),
   ]
-  assert.deepEqual(rows.sort(compareJobs).map((r) => r.id), ["m50", "m10", "c1000", "null"])
+  assert.deepEqual(rows.sort(compareJobs).map((r) => r.id), ["m50", "m10", "c1000", "none"])
 })
 
-test("compareJobs puts a censored row with a null lead time last", () => {
-  const rows = [
-    { id: "cnull", lead_time_ms: null, lead_time_censored: true },
-    { id: "c5", lead_time_ms: 5, lead_time_censored: true },
-    { id: "m1", lead_time_ms: 1, lead_time_censored: false },
-  ]
-  assert.deepEqual(rows.sort(compareJobs).map((r) => r.id), ["m1", "c5", "cnull"])
-})
-
-test("jobSummary flags time shared with other jobs", () => {
-  const shared = jobSummary(
+test("time shared with other jobs is a partial upper bound", () => {
+  const s = jobSummary(
     {
       formulas: {
         active_time_ms: { value: 136759587, partial: true, partial_reasons: ["worker_shared"] },
@@ -49,51 +64,34 @@ test("jobSummary flags time shared with other jobs", () => {
     },
     "a.json",
   )
-  assert.equal(shared.active_time_shared, true)
-  assert.equal(shared.flow_efficiency_shared, true)
-  const split = jobSummary(
-    { formulas: { active_time_ms: { value: 5, partial: true, partial_reasons: ["worker_split"] }, flow_efficiency: { value: 0.5 } } },
-    "b.json",
-  )
-  assert.equal(split.active_time_shared, false)
-  assert.equal(split.flow_efficiency_shared, false)
-  assert.equal(jobSummary({}, "c.json").active_time_shared, false)
+  assert.equal(s.active_time_ms.state, "partial")
+  assert.equal(s.active_time_ms.bound, "upper")
+  assert.deepEqual(s.flow_efficiency.reasons, ["worker_split", "worker_shared"])
+  assert.equal(s.flow_efficiency.bound, "upper")
+  const split = jobSummary({ formulas: { active_time_ms: { value: 5, partial: true, partial_reasons: ["worker_split"] } } }, "b.json")
+  assert.equal("bound" in split.active_time_ms, false)
 })
 
-test("jobSummary flags pull requests withheld from shared workers", () => {
-  const shared = jobSummary(
-    { formulas: { references: { value: { public_prs: 0 }, partial: true, partial_reasons: ["worker_shared"] } } },
-    "a.json",
-  )
-  assert.equal(shared.public_prs, 0)
-  assert.equal(shared.public_prs_shared, true)
-  const plain = jobSummary({ formulas: { references: { value: { public_prs: 3 } } } }, "b.json")
-  assert.equal(plain.public_prs_shared, false)
-})
-
-test("partial count measures carry their qualifier", () => {
+test("partial counts are lower bounds with their reasons; a zero is only a measured zero", () => {
   const d = {
     formulas: {
       rework_signals: {
         tool_failures: { class: "inferred", partial: true, partial_reasons: ["worker_split"], value: 21 },
-        tool_retries: { class: "inferred", value: 3 },
+        tool_retries: { class: "inferred", value: 0 },
       },
-      references: { class: "measured", partial: true, partial_reasons: ["worker_shared"], value: { public_prs: 2 } },
+      references: { class: "measured", partial: true, partial_reasons: ["worker_shared"], value: { public_prs: 0 } },
     },
   }
   const s = jobSummary(d, "x.json")
-  assert.equal(s.tool_failures, 21)
-  assert.equal(s.tool_failures_partial, "split")
-  assert.equal(s.tool_retries_partial, null)
-  assert.equal(s.public_prs_partial, "shared")
-  assert.equal(partialQualifier({ partial: true, uncovered_sessions: 1 }), "partial")
-  assert.equal(partialQualifier({ partial: true, partial_reasons: ["worker_split", "worker_shared"] }), "split, shared")
-  assert.equal(partialQualifier(undefined), null)
+  assert.deepEqual(s.tool_failures, { state: "partial", value: 21, reasons: ["worker_split"], bound: "lower" })
+  assert.deepEqual(s.tool_retries, { state: "measured", value: 0, reasons: [] })
+  assert.equal(s.public_prs.state, "partial")
+  assert.equal(s.public_prs.value, 0)
+  assert.equal(s.public_prs.bound, "lower")
 })
 
-test("the jobs table renders partial counts with their qualifier, never bare", () => {
-  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
-  assert.match(app, /fmtCount\(j\.tool_failures, j\.tool_failures_partial\)/)
-  assert.match(app, /fmtCount\(j\.tool_retries, j\.tool_retries_partial\)/)
-  assert.match(app, /fmtCount\(j\.public_prs, j\.public_prs_partial\)/)
+test("job ids and status stay plain labels", () => {
+  const s = jobSummary({ job: "abc123", formulas: { status: { class: "declared", value: "done" } } }, "f.json")
+  assert.equal(s.id, "abc123")
+  assert.equal(s.status, "done")
 })
