@@ -41,11 +41,14 @@ export function intakeClass(newestMs, nowMs) {
 // REST API's run list. Reading public run metadata needs no extra permission
 // on a public repository; on a private one the workflow would need
 // `actions: read`.
+const DECISIVE = new Set(["success", "failure", "timed_out", "startup_failure", "action_required"]);
+
 export function lastBuildFromRuns(body) {
-  const run = Array.isArray(body?.workflow_runs) ? body.workflow_runs[0] : null;
-  if (!run || typeof run.conclusion !== "string" || !run.conclusion) {
-    return unavailable(["no_completed_run_found"]);
-  }
+  // A skipped or cancelled run says nothing about whether the build is
+  // green, so the newest run that actually passed or failed is the signal.
+  const runs = Array.isArray(body?.workflow_runs) ? body.workflow_runs : [];
+  const run = runs.find((r) => r && typeof r.conclusion === "string" && DECISIVE.has(r.conclusion));
+  if (!run) return unavailable(["no_decisive_run_found"]);
   const n = measured(run.conclusion);
   return typeof run.html_url === "string" && run.html_url.startsWith("https://github.com/")
     ? { ...n, run_url: run.html_url }

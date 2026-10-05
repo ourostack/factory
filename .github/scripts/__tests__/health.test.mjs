@@ -23,6 +23,9 @@ test("newest intake is a coarse class, never a timestamp", () => {
 test("the last factory-build run is read from the API's run list", () => {
   assert.equal(lastBuildFromRuns({ workflow_runs: [{ conclusion: "success", html_url: "https://github.com/o/r/actions/runs/1" }] }).value, "success")
   assert.equal(lastBuildFromRuns({ workflow_runs: [{ conclusion: "failure" }] }).value, "failure")
+  const skipped = lastBuildFromRuns({ workflow_runs: [{ conclusion: "skipped" }, { conclusion: "cancelled" }, { conclusion: "failure" }] })
+  assert.equal(skipped.value, "failure")
+  assert.equal(lastBuildFromRuns({ workflow_runs: [{ conclusion: "skipped" }] }).state, "unavailable")
   const none = lastBuildFromRuns({ workflow_runs: [] })
   assert.equal(none.state, "unavailable")
   assert.equal(lastBuildFromRuns(null).state, "unavailable")

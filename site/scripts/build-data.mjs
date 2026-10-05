@@ -434,7 +434,7 @@ async function fetchLastComment(number) {
 
 async function enrichIssue(issue) {
   const { body, number, title, state, url } = issue;
-  const base = { ref: `#${number}`, title, issue_state: state, url };
+  const base = { ref: `#${number}`, ...(title ? { title } : {}), issue_state: state, url };
   if (state !== "closed") return { ...base, resolution: { kind: "open" } };
   let link = extractCountermeasure(body);
   if (!link) link = firstPrLink(await fetchLastComment(number));
@@ -669,7 +669,7 @@ const data = {
 
 // The site's own health, built beside the data.
 const buildRuns = await ghGet(
-  `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/build.yml/runs?status=completed&branch=main&per_page=1`,
+  `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/build.yml/runs?status=completed&branch=main&per_page=10`,
 );
 const lastBuild = buildRuns ? lastBuildFromRuns(buildRuns) : unavailable(["github_api_unavailable"]);
 const health = buildHealth({
@@ -694,5 +694,5 @@ writeFileSync(outFile, JSON.stringify(data), "utf8");
 writeFileSync(join(dirname(outFile), "health.json"), JSON.stringify(health), "utf8");
 
 console.log(
-  `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${scopedSessionCount} substantial), ${toolRollups.kinds.length} tool kinds, ${modelRolls.models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups), verdict ${health.verdict.state} -> ${outFile}`,
+  `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${scopedSessionCount} substantial), ${toolRollups.kinds.length} tool kinds, ${modelRolls.models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups), verdict ${health.verdict.status} -> ${outFile}`,
 );
