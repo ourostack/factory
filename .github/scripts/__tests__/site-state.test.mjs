@@ -3,6 +3,7 @@ import { test } from "node:test"
 
 import {
   THIN_SAMPLE_MIN,
+  declareRollup,
   fromFormula,
   measured,
   partial,
@@ -107,4 +108,24 @@ test("trust can take a coverage record without changing its callers", () => {
   const r = rollup(Array(6).fill(measured(1)), { of: "jobs", reduce: (v) => v[0] })
   const low = trust(r, { coverage: { state: "measured", value: 0.2, reasons: [] } })
   assert.equal(low.state, "low_coverage")
+})
+
+test("a ratio of sums can carry an aux number through a rollup", () => {
+  const r = rollup([{ ...measured(1), aux: 4 }, { ...measured(3), aux: 4 }, unavailable(["x"])], {
+    of: "sessions",
+    reduce: (v, ms) => v.reduce((a, b) => a + b, 0) / ms.reduce((a, m) => a + m.aux, 0),
+  })
+  assert.equal(r.value, 0.5)
+  assert.equal(r.n, 2)
+  assert.equal(r.N, 3)
+})
+
+test("a rollup declared by the pipeline keeps its own n of N and states itself", () => {
+  assert.equal(declareRollup({ value: 5, n: 3, N: 3, of: "jobs" }).state, "measured")
+  assert.equal(declareRollup({ value: 5, n: 2, N: 3, of: "jobs" }).state, "partial")
+  const none = declareRollup({ value: 0, n: 0, N: 3, of: "jobs" })
+  assert.equal(none.state, "unavailable")
+  assert.equal("value" in none, false)
+  assert.equal(declareRollup({ value: 5, n: 4, N: 3, of: "jobs" }).state, "unavailable")
+  assert.equal(declareRollup({ value: 0, n: 3, N: 3, of: "jobs" }).value, 0)
 })

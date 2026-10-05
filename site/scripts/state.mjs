@@ -70,7 +70,8 @@ export function withBound(number, bound) {
 }
 
 // Build a rollup over `members` (numbers with a state). `reduce` receives the
-// values of the measured members only.
+// values of the measured members only, and the members themselves as a second
+// argument (a member may carry an `aux` number for a ratio of sums).
 export function rollup(members, { of, reduce }) {
   const list = Array.isArray(members) ? members : [];
   const usable = list.filter((m) => m && m.state === "measured");
@@ -88,7 +89,7 @@ export function rollup(members, { of, reduce }) {
   if (usable.length === 0) {
     return { ...unavailable(["no_measured_members", ...reasons]), ...base, excluded };
   }
-  const value = reduce(usable.map((m) => m.value));
+  const value = reduce(usable.map((m) => m.value), usable);
   if (!(typeof value === "number" && Number.isFinite(value)) && typeof value !== "string") {
     return { ...unavailable(["no_measured_members"]), ...base, excluded };
   }
@@ -118,4 +119,18 @@ export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   };
   const reason = state === "ok" ? `${n} of ${N} measured` : reasons.map((r) => text[r]).join("; ");
   return { state, reason, reasons, coverage };
+}
+
+// A rollup the pipeline already computed, with its own n of N (for example a
+// waste total over the jobs that are fully labeled). `n` of `N` must be
+// integers with n <= N.
+export function declareRollup({ value, n, N, of, reasons = [] }) {
+  if (!Number.isInteger(n) || !Number.isInteger(N) || n < 0 || n > N) {
+    return { ...unavailable(["no_members"]), n: 0, N: Number.isInteger(N) && N >= 0 ? N : 0, of };
+  }
+  const base = { n, N, of };
+  const ok = (typeof value === "number" && Number.isFinite(value)) || typeof value === "string";
+  if (n === 0 || !ok) return { ...unavailable(["no_measured_members", ...reasons]), ...base };
+  if (n < N) return { state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base };
+  return { state: "measured", value, reasons: [], ...base };
 }
