@@ -111,7 +111,7 @@ jobs:
   report:
     name: report
     needs: [build, deploy]
-    if: ${{ always() && needs.build.result != 'cancelled' && needs.deploy.result != 'cancelled' }}
+    if: ${{ always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.build.result != 'cancelled' && needs.deploy.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -126,8 +126,10 @@ jobs:
     steps:
       - name: Report the failed site build
         if: needs.build.result == 'failure' || needs.deploy.result == 'failure'
+        continue-on-error: true
         run: |
           set -euo pipefail
+          trap 'echo "::warning::The build alarm step failed; the build result is unchanged."' ERR
           steps="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '[.jobs[] | select(.conclusion == "failure") | .name as $job | .steps[] | select(.conclusion == "failure") | "\($job): \(.name)"] | join(", ")')"
           body="The public site build failed in $RUN_URL at: ${steps:-unknown step}. The site stays at its last good deploy until a run succeeds. Open the failed step in the run to see why; the next successful run closes this issue."
           gh label create "$ISSUE_LABEL" --repo "$GITHUB_REPOSITORY" --color B60205 --description "A factory build is failing" --force
@@ -140,8 +142,10 @@ jobs:
 
       - name: Close the issue after a green deploy
         if: needs.build.result == 'success' && needs.deploy.result == 'success'
+        continue-on-error: true
         run: |
           set -euo pipefail
+          trap 'echo "::warning::The build alarm step failed; the build result is unchanged."' ERR
           for number in $(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$ISSUE_LABEL" --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[].number'); do
             gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Resolved: $RUN_URL built and deployed the site."
           done

@@ -268,6 +268,18 @@ test("a record that is moot while its facts file is gone applies again when the 
   assert.equal(store.writes.length, 1)
 })
 
+test("an invalid record alongside a moot one still stops the run and writes nothing", () => {
+  const storeDir = "/store"
+  const badFile = "claude-code-00000000-0000-4000-8000-000000000000.json"
+  const store = memoryStore({
+    [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord()),
+    [`${storeDir}/corrections/${badFile}`]: "{not json",
+  })
+
+  assert.throws(() => applyCorrectionsToStore({ storeDir, ...store }), CorrectionsInvalidError)
+  assert.deepEqual(store.writes, [])
+})
+
 test("a malformed correction record fails loudly and applies nothing", () => {
   const storeDir = "/store"
   const goodFile = FILE_NAME

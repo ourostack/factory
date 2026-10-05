@@ -51,7 +51,10 @@
 # `issue-checks` fails on a run that is not an issue event, the `report` job
 # opens one issue titled "Factory build needs attention" (label
 # `build-failing`) or comments on it if it is already open, and the next run
-# in which both jobs succeed closes it. The issue names the failing step and
+# in which both jobs succeed closes it. The alarm steps use `continue-on-error`
+# and a warning annotation, so a failed `gh` call never turns a green build
+# red (which would skip the `pages` deploy); the job result stays success.
+# The job only acts on the default branch. The issue names the failing step and
 # the run URL and carries no facts or session content. Issue events are left
 # out because anyone can trigger them with a card that fails the check.
 name: factory-build
@@ -204,7 +207,7 @@ jobs:
   report:
     name: report
     needs: [factory-build, issue-checks]
-    if: ${{ always() && github.event_name != 'issues' && needs.factory-build.result != 'cancelled' && needs.issue-checks.result != 'cancelled' }}
+    if: ${{ always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'issues' && needs.factory-build.result != 'cancelled' && needs.issue-checks.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -219,10 +222,12 @@ jobs:
     steps:
       - name: Report the failed build
         if: needs.factory-build.result == 'failure' || needs.issue-checks.result == 'failure'
+        continue-on-error: true
         run: |
           set -euo pipefail
+          trap 'echo "::warning::The build alarm step failed; the build result is unchanged."' ERR
           steps="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '[.jobs[] | select(.conclusion == "failure") | .name as $job | .steps[] | select(.conclusion == "failure") | "\($job): \(.name)"] | join(", ")')"
-          body="The factory build failed in $RUN_URL at: ${steps:-unknown step}. The public reports and site stay at their last good build until a run succeeds. Open the failed step in the run to see why; the next successful run closes this issue."
+          body="The factory build failed in $RUN_URL at: ${steps:-unknown step}. If the failed step is in factory-build, the public reports and site stay at their last good build until a run succeeds; if only issue-checks failed, the reports were still published and the failure is in the kaizen or andon checks. Open the failed step in the run to see why; the next successful run closes this issue."
           gh label create "$ISSUE_LABEL" --repo "$GITHUB_REPOSITORY" --color B60205 --description "The factory build is failing" --force
           number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$ISSUE_LABEL" --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty')"
           if [ -n "$number" ]; then
@@ -233,8 +238,10 @@ jobs:
 
       - name: Close the issue after a green build
         if: needs.factory-build.result == 'success' && needs.issue-checks.result == 'success'
+        continue-on-error: true
         run: |
           set -euo pipefail
+          trap 'echo "::warning::The build alarm step failed; the build result is unchanged."' ERR
           for number in $(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$ISSUE_LABEL" --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[].number'); do
             gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Resolved: $RUN_URL built the reports and passed the issue checks."
           done
