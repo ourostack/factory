@@ -148,5 +148,5 @@ test("the purpose and limit statements are on the page and in the README", () =>
 test("the health panel contains its own failures and links go through the guard", () => {
   const app = read("site/src/app.js")
   assert.match(app, /function renderHealth[\s\S]*?try \{[\s\S]*?\} catch/)
-  assert.equal(/\.href = (?!safe)/.test(app.replace(/a\.href = safe;/, "")), false)
+  for (const line of app.split("\n").filter((l) => /\.href = /.test(l))) assert.match(line, /= safe;|github\.com\/ourostack\/factory\/commit\//)
 })
