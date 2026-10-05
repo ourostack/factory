@@ -73,3 +73,29 @@ test("the page decides staleness itself from the build stamp", () => {
   assert.equal(F.pageVerdict(null, NOW).status, "broken")
   assert.equal(F.pageVerdict({ built_at: "nonsense", config: { stale_after_hours: 36 }, verdict: { status: "alive", reason: "" } }, NOW).status, "broken")
 })
+
+import { readFileSync } from "node:fs"
+
+const read = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8")
+
+test("no call site formats a number on its own: app.js has no number formatting", () => {
+  const app = read("site/src/app.js")
+  for (const banned of [/\.toFixed\(/, /\.toLocaleString\((?!undefined, \{ dateStyle)/, /\bfmt[A-Z]\w*\(/, /\|\| 0\b/, /\?\? 0\b/]) {
+    assert.equal(banned.test(app), false, String(banned))
+  }
+})
+
+test("the page loads the formatter before the renderer, and the deploy copies it", () => {
+  const html = read("site/src/index.html")
+  assert.ok(html.indexOf('src="format.js"') > 0 && html.indexOf('src="format.js"') < html.indexOf('src="app.js"'))
+  assert.match(read(".github/workflows/pages.yml"), /cp [^\n]*site\/src\/format\.js/)
+})
+
+test("the purpose and limit statements are on the page and in the README", () => {
+  const html = read("site/src/index.html")
+  const readme = read("README.md")
+  for (const text of [html, readme]) {
+    assert.match(text, /how much human attention does an accepted outcome cost/)
+    assert.match(text, /Designed for many desks; proven on one so far\./)
+  }
+})
