@@ -29,7 +29,7 @@ test("unavailable needs a reason, and a bare NaN is refused", () => {
 
 test("fromFormula keeps the pipeline's own state and reasons", () => {
   assert.deepEqual(fromFormula({ class: "measured", value: 7 }), measured(7))
-  assert.deepEqual(fromFormula({ class: "declared", value: 7 }), measured(7))
+  assert.deepEqual(fromFormula({ class: "declared", value: 7 }), { ...measured(7), basis: "declared" })
   assert.deepEqual(
     fromFormula({ class: "measured", value: 7, partial: true, partial_reasons: ["worker_shared"] }),
     partial(7, ["worker_shared"]),
@@ -60,6 +60,7 @@ test("rollup counts only measured members and carries n of N", () => {
   })
   assert.equal(r.n, 2)
   assert.equal(r.N, 4)
+  assert.equal(r.out_of_scope, 0)
   assert.equal(r.of, "jobs")
   assert.equal(r.value, 4)
   assert.equal(r.state, "partial")
@@ -80,6 +81,7 @@ test("a rollup of all measured members is measured; of none is unavailable, neve
   const empty = rollup([], { of: "jobs", reduce: () => 0 })
   assert.equal(empty.state, "unavailable")
   assert.equal(empty.N, 0)
+  assert.equal(empty.out_of_scope, 0)
 })
 
 test("a measured zero stays a measured zero", () => {
@@ -129,4 +131,38 @@ test("a rollup declared by the pipeline keeps its own n of N and states itself",
   assert.equal("value" in none, false)
   assert.equal(declareRollup({ value: 5, n: 4, N: 3, of: "jobs" }).state, "unavailable")
   assert.equal(declareRollup({ value: 0, n: 3, N: 3, of: "jobs" }).value, 0)
+})
+
+import { NOT_APPLICABLE_REASONS, isNotApplicable } from "../../../site/scripts/state.mjs"
+
+test("members out of scope by design are not in N and are reported beside it", () => {
+  const r = rollup(
+    [measured(1), measured(3), unavailable(["outside_capture_scope"]), unavailable(["host_does_not_record"]), unavailable(["outside_capture_scope"])],
+    { of: "finished jobs", reduce: (v) => v[0] },
+  )
+  assert.equal(r.N, 2)
+  assert.equal(r.n, 2)
+  assert.equal(r.out_of_scope, 3)
+  assert.equal(r.state, "measured")
+  assert.equal(r.kind, "rollup")
+})
+
+test("missing data inside scope stays in N and makes the figure partial", () => {
+  const r = rollup([measured(1), unavailable(["job_offsets_unavailable"]), unavailable(["outside_capture_scope"])], { of: "jobs", reduce: (v) => v[0] })
+  assert.equal(r.N, 2)
+  assert.equal(r.state, "partial")
+  assert.equal(r.out_of_scope, 1)
+})
+
+test("an unavailable member with a mix of by-design and lost reasons is not out of scope", () => {
+  assert.equal(isNotApplicable(unavailable(["outside_capture_scope", "log_truncated"])), false)
+  assert.equal(isNotApplicable(unavailable(["host_does_not_record"])), true)
+  assert.ok(NOT_APPLICABLE_REASONS.has("outside_capture_scope"))
+})
+
+test("all members out of scope: unavailable with N of zero", () => {
+  const r = rollup([unavailable(["outside_capture_scope"])], { of: "jobs", reduce: (v) => v[0] })
+  assert.equal(r.state, "unavailable")
+  assert.equal(r.N, 0)
+  assert.equal(r.out_of_scope, 1)
 })

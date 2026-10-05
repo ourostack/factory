@@ -24,6 +24,10 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
+  // The page's own limit for a stale site. The health file cannot change it.
+  const STALE_AFTER_HOURS = 36;
+  const CLOCK_SKEW_HOURS = 0.1;
+
   const REASON_TEXT = {
     not_recorded: "the store has no record of this",
     not_recorded_yet: "not recorded yet",
@@ -50,6 +54,7 @@
     no_decisive_run_found: "no passed or failed run was found",
     no_intake_found: "no intake was found",
     not_checked: "not checked",
+    no_applicable_members: "the measure applies to no job yet",
   };
 
   function reasonText(code) {
@@ -103,10 +108,12 @@
     const reason = number.reasons.map(reasonText).join("; ");
     const nofn =
       Number.isInteger(number.n) && Number.isInteger(number.N) && typeof number.of === "string"
-        ? `${number.n} of ${number.N} ${number.of}`
+        ? `${number.n} of ${number.N} ${number.of}` +
+          (Number.isInteger(number.out_of_scope) && number.out_of_scope > 0 ? ` \u00b7 ${number.out_of_scope} out of scope` : "")
         : null;
+    const basis = number.basis === "declared" || number.basis === "inferred" ? number.basis : null;
     if (number.state === "unavailable") {
-      return { state: "unavailable", text: "no data", marker: null, reason, nofn };
+      return { state: "unavailable", text: "no data", marker: null, reason, nofn, basis: null };
     }
     if (typeof number.value !== "number" && typeof number.value !== "string") {
       throw new TypeError("FactoryFormat: a " + number.state + " number needs a value");
@@ -115,9 +122,9 @@
       throw new TypeError("FactoryFormat: non-finite value");
     }
     const body = KINDS[kind](number.value);
-    if (number.state === "measured") return { state: "measured", text: body, marker: null, reason: "", nofn };
+    if (number.state === "measured") return { state: "measured", text: body, marker: null, reason: "", nofn, basis };
     const sign = number.bound === "lower" ? "≥ " : number.bound === "upper" ? "≤ " : "";
-    return { state: "partial", text: sign + body, marker: "partial", reason, nofn };
+    return { state: "partial", text: sign + body, marker: "partial", reason, nofn, basis };
   }
 
   // The same, as one line of text, for tooltips and labels.
@@ -126,6 +133,7 @@
     let s = d.text;
     if (d.state === "partial") s += ` (partial: ${d.reason})`;
     if (d.state === "unavailable") s += ` (${d.reason})`;
+    if (d.basis) s += ` (${d.basis})`;
     if (d.nofn) s += ` [${d.nofn}]`;
     return s;
   }
@@ -142,6 +150,7 @@
     wrap.appendChild(value);
     if (d.state === "partial") {
       wrap.title = `Partial: ${d.reason}`;
+      if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
       flag.className = "num-flag";
       flag.textContent = d.marker;
@@ -150,12 +159,20 @@
       sr.textContent = `: ${d.reason}`;
       flag.appendChild(sr);
       wrap.appendChild(flag);
+      }
     } else if (d.state === "unavailable") {
       wrap.title = `No data: ${d.reason}`;
       const why = doc.createElement("span");
       why.className = "num-reason";
       why.textContent = `(${d.reason})`;
       wrap.appendChild(why);
+    }
+    if (d.basis) {
+      const b = doc.createElement("span");
+      b.className = "num-basis";
+      b.textContent = d.basis;
+      b.title = d.basis === "declared" ? "Declared on a task card, not measured from a session" : "Computed from other measures";
+      wrap.appendChild(b);
     }
     if (showNofn && d.nofn) {
       const n = doc.createElement("span");
@@ -168,25 +185,64 @@
 
   // What the page says about the site's own health. The build writes a
   // verdict into health.json, but a site that stopped rebuilding cannot
-  // update it, so the browser also judges the build stamp against the
-  // published threshold: a stuck site looks stale by itself.
+  // update it, so the browser judges the build stamp itself, against a limit
+  // that lives here, not in the file. The file is not trusted: anything
+  // missing, malformed, future-dated or unrecognized reads `unknown` and can
+  // never show `alive`. Precedence: broken, then stale, then unknown, then
+  // alive.
+  const STATUSES = ["alive", "stale", "broken", "unknown"];
+
+  function wellFormed(h) {
+    const obj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+    return (
+      obj(h) &&
+      obj(h.verdict) &&
+      STATUSES.includes(h.verdict.status) &&
+      typeof h.verdict.reason === "string" &&
+      typeof h.built_at === "string" &&
+      obj(h.last_data_build) &&
+      obj(h.newest_intake) &&
+      typeof h.newest_intake.state === "string" &&
+      Array.isArray(h.facts_by_host) &&
+      h.facts_by_host.every((x) => obj(x) && typeof x.host === "string" && isStated(x.files)) &&
+      obj(h.factory_build) &&
+      typeof h.factory_build.state === "string" &&
+      obj(h.slots) &&
+      Object.values(h.slots).every(isStated)
+    );
+  }
+
   function pageVerdict(health, nowMs) {
-    if (!health || typeof health !== "object" || !health.verdict) {
-      return { status: "broken", reason: "the health record could not be loaded", ageHours: null };
+    if (!wellFormed(health)) {
+      return { status: "unknown", reason: "the health record is missing, malformed or incomplete, so health cannot be told", ageHours: null };
     }
     const built = Date.parse(health.built_at);
     if (!Number.isFinite(built)) {
-      return { status: "broken", reason: "the build stamp could not be read", ageHours: null };
+      return { status: "unknown", reason: "the build stamp could not be read", ageHours: null };
     }
     const ageHours = (nowMs - built) / 3600000;
-    const limit = health.config && Number.isFinite(health.config.stale_after_hours) ? health.config.stale_after_hours : 36;
-    if (health.verdict.status === "broken") return { ...health.verdict, ageHours };
-    if (ageHours > limit) {
-      const age = ageHours >= 48 ? `${Math.floor(ageHours / 24)} days` : `${Math.floor(ageHours)} hours`;
-      return { status: "stale", reason: `the site was last built ${age} ago; it is meant to rebuild at least every ${limit} hours`, ageHours };
+    if (ageHours < -CLOCK_SKEW_HOURS) {
+      return { status: "unknown", reason: "the build stamp is in the future, so its age cannot be told", ageHours };
     }
-    return { ...health.verdict, ageHours };
+    const file = health.verdict;
+    if (file.status === "broken") return { status: "broken", reason: file.reason, ageHours };
+    if (ageHours > STALE_AFTER_HOURS) {
+      const age = ageHours >= 48 ? `${Math.floor(ageHours / 24)} days` : `${Math.floor(ageHours)} hours`;
+      return { status: "stale", reason: `the site was last built ${age} ago; it is meant to rebuild at least every ${STALE_AFTER_HOURS} hours`, ageHours };
+    }
+    if (file.status === "stale") return { status: "stale", reason: file.reason, ageHours };
+    if (file.status === "unknown" || health.factory_build.state !== "measured" || health.factory_build.value !== "success") {
+      return { status: "unknown", reason: file.status === "unknown" ? file.reason : "the last factory-build run was not read as green, so health cannot be told", ageHours };
+    }
+    return { status: "alive", reason: file.reason, ageHours };
   }
 
-  return { describe, toText, render, reasonText, pageVerdict, KINDS: Object.keys(KINDS) };
+  // The only shapes the page will turn into a link from data: a GitHub pull
+  // request, issue or workflow run. Anything else is shown as text.
+  const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(pull|issues|actions\/runs)\/\d+$/;
+  function safeGithubUrl(u) {
+    return typeof u === "string" && GITHUB_URL.test(u) ? u : null;
+  }
+
+  return { describe, toText, render, reasonText, pageVerdict, safeGithubUrl, STALE_AFTER_HOURS, KINDS: Object.keys(KINDS) };
 });

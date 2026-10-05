@@ -60,6 +60,14 @@ export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, rep
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([host, files]) => ({ host, files: measured(files) }));
 
+  // Precedence when more than one holds (each verdict must be true):
+  //   broken   the reports are unreadable, or the last factory-build run that
+  //            was read is red;
+  //   stale    the data is old: no new session for over seven days (the
+  //            browser adds "the site itself has not rebuilt in 36 hours");
+  //   unknown  the build status could not be read, so it cannot be told;
+  //   alive    a green last build that was actually read, and fresh data.
+  // `alive` is never the answer to missing evidence.
   let verdict;
   if (reportsReadable === false) {
     verdict = { status: "broken", reason: "the reports branch could not be read, so the job reports are missing" };
@@ -68,7 +76,7 @@ export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, rep
   } else if (newestIntake === "over_7_days") {
     verdict = { status: "stale", reason: "no new session has been published for over seven days" };
   } else if (lastBuild?.state !== "measured") {
-    verdict = { status: "alive", reason: "the site data built; the last factory-build run could not be checked" };
+    verdict = { status: "unknown", reason: "the last factory-build run could not be checked, so health cannot be told" };
   } else {
     verdict = { status: "alive", reason: "the last factory-build run was green and the site data built" };
   }

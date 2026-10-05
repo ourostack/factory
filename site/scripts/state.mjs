@@ -23,6 +23,21 @@ export const COVERAGE_NOT_RECORDED = Object.freeze({
   reasons: ["not_recorded_yet"],
 });
 
+// Reasons that mean "this measure does not apply here, by design", not "the
+// data was lost". A member unavailable only for these reasons is not in a
+// rollup's N; it is counted beside it as `out_of_scope`. Missing data inside
+// scope stays in N and makes the figure partial. One named set.
+export const NOT_APPLICABLE_REASONS = new Set(["outside_capture_scope", "host_does_not_record"]);
+
+export function isNotApplicable(member) {
+  return (
+    member?.state === "unavailable" &&
+    Array.isArray(member.reasons) &&
+    member.reasons.length > 0 &&
+    member.reasons.every((r) => NOT_APPLICABLE_REASONS.has(r))
+  );
+}
+
 function checkValue(value) {
   const ok = (typeof value === "number" && Number.isFinite(value)) || typeof value === "string";
   if (!ok) throw new TypeError(`a measured or partial number needs a finite value, got ${String(value)}`);
@@ -60,6 +75,9 @@ export function fromFormula(f) {
   // A censored value is a lower bound on something still running; it is not
   // a measurement of the finished quantity.
   if (f.censored === true) return partial(v, ["censored"]);
+  // `declared` (taken from a task card, not measured from a session) keeps
+  // its evidence class so the page can say so.
+  if (f.class === "declared") return { ...measured(v), basis: f.class };
   return measured(v);
 }
 
@@ -73,7 +91,9 @@ export function withBound(number, bound) {
 // values of the measured members only, and the members themselves as a second
 // argument (a member may carry an `aux` number for a ratio of sums).
 export function rollup(members, { of, reduce }) {
-  const list = Array.isArray(members) ? members : [];
+  const all = Array.isArray(members) ? members : [];
+  const outOfScope = all.filter(isNotApplicable).length;
+  const list = all.filter((m) => !isNotApplicable(m));
   const usable = list.filter((m) => m && m.state === "measured");
   const excluded = {};
   const reasons = new Set();
@@ -84,8 +104,8 @@ export function rollup(members, { of, reduce }) {
       for (const r of m?.reasons ?? []) reasons.add(r);
     }
   }
-  const base = { n: usable.length, N: list.length, of };
-  if (list.length === 0) return { ...unavailable(["no_members"]), ...base };
+  const base = { kind: "rollup", n: usable.length, N: list.length, of, out_of_scope: outOfScope };
+  if (list.length === 0) return { ...unavailable(["no_applicable_members"]), ...base };
   if (usable.length === 0) {
     return { ...unavailable(["no_measured_members", ...reasons]), ...base, excluded };
   }
@@ -124,11 +144,18 @@ export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
 // A rollup the pipeline already computed, with its own n of N (for example a
 // waste total over the jobs that are fully labeled). `n` of `N` must be
 // integers with n <= N.
-export function declareRollup({ value, n, N, of, reasons = [] }) {
+export function declareRollup({ value, n, N, of, reasons = [], outOfScope = 0 }) {
   if (!Number.isInteger(n) || !Number.isInteger(N) || n < 0 || n > N) {
-    return { ...unavailable(["no_members"]), n: 0, N: Number.isInteger(N) && N >= 0 ? N : 0, of };
+    return {
+      ...unavailable(["no_members"]),
+      kind: "rollup",
+      n: 0,
+      N: Number.isInteger(N) && N >= 0 ? N : 0,
+      of,
+      out_of_scope: outOfScope,
+    };
   }
-  const base = { n, N, of };
+  const base = { kind: "rollup", n, N, of, out_of_scope: outOfScope };
   const ok = (typeof value === "number" && Number.isFinite(value)) || typeof value === "string";
   if (n === 0 || !ok) return { ...unavailable(["no_measured_members", ...reasons]), ...base };
   if (n < N) return { state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base };

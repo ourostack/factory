@@ -164,8 +164,8 @@ function jobMember(j, key) {
 const timeRollups = (key) => {
   const members = jobs.map((j) => jobMember(j, key));
   return {
-    median: rollup(members, { of: "jobs", reduce: medianOf }),
-    p75: rollup(members, { of: "jobs", reduce: p75Of }),
+    median: rollup(members, { of: "finished jobs", reduce: medianOf }),
+    p75: rollup(members, { of: "finished jobs", reduce: p75Of }),
   };
 };
 
@@ -274,7 +274,7 @@ const GITHUB_REPO = process.env.GITHUB_REPOSITORY || "ourostack/factory";
 async function ghGet(url) {
   if (OFFLINE) return null;
   try {
-    const res = await fetch(url, { headers: ghHeaders });
+    const res = await fetch(url, { headers: ghHeaders, signal: AbortSignal.timeout(20000) });
     return res.ok ? await res.json() : null;
   } catch {
     return null;
@@ -506,7 +506,7 @@ takeaways.push({
 
 {
   const eligible = toolRollups.kinds.filter(
-    (t) => t.calls.state !== "unavailable" && t.calls.value >= 20 && t.failure_rate.state !== "unavailable",
+    (t) => t.tool !== "other" && t.calls.state !== "unavailable" && t.calls.value >= 20 && t.failure_rate.state !== "unavailable",
   );
   const worst = [...eligible].sort((a, b) => b.failure_rate.value - a.failure_rate.value)[0];
   if (worst) {
@@ -559,7 +559,7 @@ if (mudaOverall && mudaOverall.jobs_labeled === 0) {
     id: "waste_not_labeled",
     template: "Labeling has just started: {labeled} of {jobs} jobs are fully labeled for waste yet, though session-level labels already exist. A job's waste breakdown appears here once every one of its sessions is evaluated.",
     slots: { labeled: jobsLabeled, jobs: counted(mudaOverall.jobs) },
-    trust: trust({ state: "measured", n: 0, N: 1 }),
+    trust: trust({ state: "partial", n: 0, N: counted(mudaOverall.jobs).state === "measured" ? counted(mudaOverall.jobs).value : 0 }),
   });
 }
 

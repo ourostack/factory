@@ -132,3 +132,10 @@ test("featured session numbers carry state", () => {
   )
   assert.equal(flagged.active_ms.state, "partial")
 })
+
+test("a session with no agents list and no flag is unmeasured for subagents, not zero", () => {
+  const d = session()
+  delete d.agents
+  const r = subagentRollups([d])
+  assert.equal(r.dispatches.state, "unavailable")
+})

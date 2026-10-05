@@ -58,20 +58,65 @@ test("an unknown reason code is still readable", () => {
   assert.equal(F.reasonText("some_new_reason"), "some new reason")
 })
 
-test("the page decides staleness itself from the build stamp", () => {
-  const NOW = Date.parse("2026-10-05T12:00:00Z")
-  const health = (builtAt, status = "alive") => ({
-    built_at: builtAt,
-    config: { stale_after_hours: 36 },
-    verdict: { status, reason: "ok" },
-  })
-  assert.equal(F.pageVerdict(health("2026-10-05T10:00:00Z"), NOW).status, "alive")
-  const stale = F.pageVerdict(health("2026-10-03T10:00:00Z"), NOW)
+const NOW = Date.parse("2026-10-05T12:00:00Z")
+const goodHealth = (over = {}) => ({
+  schema: "factory-health/1",
+  built_at: "2026-10-05T10:00:00Z",
+  verdict: { status: "alive", reason: "ok" },
+  last_data_build: { state: "measured", value: "2026-10-05T10:00:00Z", reasons: [] },
+  newest_intake: { state: "measured", value: "under_1_day", reasons: [] },
+  facts_by_host: [{ host: "claude-code", files: { state: "measured", value: 3, reasons: [] } }],
+  factory_build: { state: "measured", value: "success", reasons: [] },
+  slots: {},
+  ...over,
+})
+
+test("the page decides staleness itself, with its own threshold", () => {
+  assert.equal(F.STALE_AFTER_HOURS, 36)
+  assert.equal(F.pageVerdict(goodHealth(), NOW).status, "alive")
+  const stale = F.pageVerdict(goodHealth({ built_at: "2026-10-03T10:00:00Z" }), NOW)
   assert.equal(stale.status, "stale")
   assert.match(stale.reason, /last built/)
-  assert.equal(F.pageVerdict(health("2026-10-03T10:00:00Z", "broken"), NOW).status, "broken")
-  assert.equal(F.pageVerdict(null, NOW).status, "broken")
-  assert.equal(F.pageVerdict({ built_at: "nonsense", config: { stale_after_hours: 36 }, verdict: { status: "alive", reason: "" } }, NOW).status, "broken")
+  // a file cannot loosen the limit
+  assert.equal(F.pageVerdict(goodHealth({ built_at: "2026-10-03T10:00:00Z", config: { stale_after_hours: 99999 } }), NOW).status, "stale")
+  assert.equal(F.pageVerdict(goodHealth({ built_at: "2026-10-03T10:00:00Z", verdict: { status: "broken", reason: "red" } }), NOW).status, "broken")
+})
+
+test("a file that cannot be trusted never shows alive", () => {
+  const status = (h) => F.pageVerdict(h, NOW).status
+  assert.equal(status(null), "unknown")
+  assert.equal(status(undefined), "unknown")
+  assert.equal(status("text"), "unknown")
+  assert.equal(status(goodHealth({ built_at: "2026-10-06T10:00:00Z" })), "unknown")
+  assert.equal(status(goodHealth({ built_at: "nonsense" })), "unknown")
+  assert.equal(status(goodHealth({ verdict: { reason: "x" } })), "unknown")
+  assert.equal(status(goodHealth({ verdict: { status: "foo", reason: "x" } })), "unknown")
+  assert.equal(status(goodHealth({ verdict: "alive" })), "unknown")
+  for (const field of ["verdict", "built_at", "newest_intake", "facts_by_host", "factory_build", "slots", "last_data_build"]) {
+    const h = goodHealth()
+    delete h[field]
+    assert.notEqual(status(h), "alive", field)
+  }
+  assert.equal(status(goodHealth({ verdict: { status: "unknown", reason: "x" } })), "unknown")
+  assert.equal(status(goodHealth({ factory_build: { state: "unavailable", reasons: ["x"] } })), "unknown")
+})
+
+test("safeGithubUrl allows only a github pull request, issue or run link", () => {
+  const ok = ["https://github.com/o/r/pull/12", "https://github.com/o-1/r.x/issues/3", "https://github.com/o/r/actions/runs/99"]
+  for (const u of ok) assert.equal(F.safeGithubUrl(u), u)
+  for (const u of ["javascript:alert(1)", "http://github.com/o/r/pull/1", "https://evil.com/o/r/pull/1", "https://github.com/o/r/pull/x", "https://github.com/o/r/blob/main/x", "https://github.com.evil.com/o/r/pull/1", "https://github.com/o/r/pull/1?x=1", "", null, 5, undefined]) {
+    assert.equal(F.safeGithubUrl(u), null, String(u))
+  }
+})
+
+test("a rollup shows n of N and what is out of scope; declared shows its basis", () => {
+  const r = { kind: "rollup", state: "partial", value: 1, reasons: ["unmeasured_members"], n: 4, N: 7, of: "finished jobs", out_of_scope: 36 }
+  assert.equal(F.describe(r, "count").nofn, "4 of 7 finished jobs \u00b7 36 out of scope")
+  const none = { ...r, out_of_scope: 0 }
+  assert.equal(F.describe(none, "count").nofn, "4 of 7 finished jobs")
+  const d = F.describe({ state: "measured", value: 5, reasons: [], basis: "declared" }, "count")
+  assert.equal(d.basis, "declared")
+  assert.match(F.toText({ state: "measured", value: 5, reasons: [], basis: "declared" }, "count"), /declared/)
 })
 
 import { readFileSync } from "node:fs"
@@ -98,4 +143,10 @@ test("the purpose and limit statements are on the page and in the README", () =>
     assert.match(text, /how much human attention does an accepted outcome cost/)
     assert.match(text, /Designed for many desks; proven on one so far\./)
   }
+})
+
+test("the health panel contains its own failures and links go through the guard", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /function renderHealth[\s\S]*?try \{[\s\S]*?\} catch/)
+  assert.equal(/\.href = (?!safe)/.test(app.replace(/a\.href = safe;/, "")), false)
 })

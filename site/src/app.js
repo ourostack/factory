@@ -19,6 +19,20 @@
     return F.render(document, number, kind, opts);
   }
 
+  // A link built from data: only a GitHub pull request, issue or run URL
+  // becomes a link; anything else is shown as plain text.
+  function safeLink(text, url, className) {
+    const safe = F.safeGithubUrl(url);
+    if (!safe) return el("span", className, text);
+    const a = document.createElement("a");
+    if (className) a.className = className;
+    a.href = safe;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = text;
+    return a;
+  }
+
   function el(tag, className, text) {
     const e = document.createElement(tag);
     if (className) e.className = className;
@@ -334,8 +348,11 @@
 
   // A sentence with {slots}. A slot holding a stated number goes through the
   // formatter; a string slot is text.
-  function templated(template, slots, kinds) {
+  // In a sentence a rollup shows its n of N once (on the first one) and no
+  // partial flag: the trust line beside the sentence carries the state.
+  function templated(template, slots, kinds, sentence) {
     const out = el("span");
+    let shownNofn = false;
     const parts = template.split(/(\{[a-z_]+\})/);
     for (const part of parts) {
       const m = part.match(/^\{([a-z_]+)\}$/);
@@ -345,7 +362,11 @@
       }
       const v = slots[m[1]];
       if (typeof v === "string") out.appendChild(document.createTextNode(v));
-      else out.appendChild(num(v, (kinds && kinds[m[1]]) || "count"));
+      else if (sentence) {
+        const isRollup = v && v.kind === "rollup";
+        out.appendChild(num(v, (kinds && kinds[m[1]]) || "count", { flag: false, nofn: isRollup && !shownNofn }));
+        if (isRollup) shownNofn = true;
+      } else out.appendChild(num(v, (kinds && kinds[m[1]]) || "count"));
     }
     return out;
   }
@@ -395,7 +416,7 @@
       const textEl = el("span", "takeaway-text");
       // The model-request total is a compact count; everything else is a count
       // or a share. The slot's own name picks the kind.
-      textEl.appendChild(templated(t.template, t.slots, TAKEAWAY_KINDS));
+      textEl.appendChild(templated(t.template, t.slots, TAKEAWAY_KINDS, true));
       const tr = el("span", "takeaway-trust");
       tr.appendChild(trustNode(t.trust));
       textEl.appendChild(tr);
@@ -460,12 +481,7 @@
         const list = el("ul", "pr-repo-list");
         for (const pr of f.sample_merged_prs) {
           const li = document.createElement("li");
-          const a = document.createElement("a");
-          a.href = pr.url;
-          a.target = "_blank";
-          a.rel = "noopener";
-          a.textContent = `merged pull request ${pr.ref}`;
-          li.appendChild(a);
+          li.appendChild(safeLink(`merged pull request ${pr.ref}`, pr.url));
           list.appendChild(li);
         }
         card.appendChild(list);
@@ -561,13 +577,8 @@
         const dot = el("span", "status-dot");
         dot.style.background = issue.issue_state === "open" ? "var(--status-warning)" : "var(--status-good)";
         left.appendChild(dot);
-        const a = document.createElement("a");
-        a.href = issue.url;
-        a.target = "_blank";
-        a.rel = "noopener";
         // Only an auto-filed title is published; anything else is the number.
-        a.textContent = issue.title || `Issue ${issue.ref}`;
-        left.appendChild(a);
+        left.appendChild(safeLink(issue.title || `Issue ${issue.ref}`, issue.url));
         li.appendChild(left);
 
         const right = el("span", "issue-right");
@@ -577,12 +588,7 @@
           const resLine = document.createElement("span");
           resLine.className = "issue-resolution";
           resLine.appendChild(document.createTextNode(res.merged === true ? "fixed by " : "closed, references "));
-          const ra = document.createElement("a");
-          ra.href = res.url;
-          ra.target = "_blank";
-          ra.rel = "noopener";
-          ra.textContent = `pull request ${res.ref}`;
-          resLine.appendChild(ra);
+          resLine.appendChild(safeLink(`pull request ${res.ref}`, res.url));
           if (res.merged === false) resLine.appendChild(document.createTextNode(" (not yet merged)"));
           if (res.merged === "unknown") resLine.appendChild(document.createTextNode(" (merge state not checked)"));
           right.appendChild(resLine);
@@ -675,8 +681,8 @@
 
   // -------------------------------------------------------------- health
 
-  const VERDICT_WORD = { alive: "Alive", stale: "Stale", broken: "Broken" };
-  const VERDICT_MARK = { alive: "●", stale: "◐", broken: "■" };
+  const VERDICT_WORD = { alive: "Alive", stale: "Stale", broken: "Broken", unknown: "Unknown" };
+  const VERDICT_MARK = { alive: "\u25cf", stale: "\u25d0", broken: "\u25a0", unknown: "?" };
   const INTAKE_CLASS = {
     under_1_day: "under a day ago",
     "1_to_3_days": "one to three days ago",
@@ -696,23 +702,38 @@
     dl.appendChild(dd);
   }
 
+  function banner(container, status, reason) {
+    const b = el("div", `verdict verdict-${status}`);
+    b.setAttribute("role", "status");
+    b.appendChild(el("span", "verdict-mark", VERDICT_MARK[status]));
+    b.appendChild(el("strong", "verdict-word", VERDICT_WORD[status]));
+    b.appendChild(el("span", "verdict-reason", ` \u2014 ${reason}`));
+    container.appendChild(b);
+  }
+
+  // The health panel. A failure here is contained: it downgrades the panel
+  // to Unknown and never stops the rest of the page from drawing.
   function renderHealth(container, health, dataLoaded, loadError) {
     container.innerHTML = "";
-    const v = F.pageVerdict(health, Date.now());
-    let status = v.status;
-    let reason = v.reason;
-    if (!dataLoaded) {
-      status = "broken";
-      reason = `the site data could not be loaded (${loadError}); ${reason}`;
+    try {
+      const v = F.pageVerdict(health, Date.now());
+      let status = v.status;
+      let reason = v.reason;
+      if (!dataLoaded) {
+        status = "broken";
+        reason = `the site data could not be loaded (${loadError}); ${reason}`;
+      }
+      banner(container, status, reason);
+      if (v.ageHours === null && status !== "broken") return;
+      if (!health || !Array.isArray(health.facts_by_host)) return;
+      drawHealthDetails(container, health, v);
+    } catch (err) {
+      container.innerHTML = "";
+      banner(container, "unknown", "the health record could not be drawn, so health cannot be told");
     }
-    const banner = el("div", `verdict verdict-${status}`);
-    banner.setAttribute("role", "status");
-    banner.appendChild(el("span", "verdict-mark", VERDICT_MARK[status] || "?"));
-    banner.appendChild(el("strong", "verdict-word", VERDICT_WORD[status] || status));
-    banner.appendChild(el("span", "verdict-reason", ` — ${reason}`));
-    container.appendChild(banner);
-    if (!health) return;
+  }
 
+  function drawHealthDetails(container, health, v) {
     const dl = el("dl", "health-facts");
     const builtDate = new Date(health.built_at);
     row(
@@ -723,19 +744,15 @@
         : "no data (the build stamp could not be read)",
     );
     const ni = health.newest_intake;
-    row(dl, "Newest intake", ni.state === "unavailable" ? num(ni, "text") : `${INTAKE_CLASS[ni.value] || ni.value} (at the last build)`);
+    row(dl, "Newest intake", ni.state === "unavailable" ? num(ni, "text") : `${INTAKE_CLASS[ni.value] || "unrecognized"} (at the last build)`);
     const fb = health.factory_build;
     const fbNode = el("span");
     if (fb.state === "unavailable") fbNode.appendChild(num(fb, "text"));
     else {
       fbNode.appendChild(document.createTextNode(fb.value === "success" ? "green" : `not green (${fb.value})`));
-      if (fb.run_url) {
-        fbNode.appendChild(document.createTextNode(" · "));
-        const a = el("a", null, "run");
-        a.href = fb.run_url;
-        a.target = "_blank";
-        a.rel = "noopener";
-        fbNode.appendChild(a);
+      if (F.safeGithubUrl(fb.run_url)) {
+        fbNode.appendChild(document.createTextNode(" \u00b7 "));
+        fbNode.appendChild(safeLink("run", fb.run_url));
       }
     }
     row(dl, "Last factory-build run", fbNode);
@@ -779,6 +796,7 @@
       return;
     }
     renderHealth(document.getElementById("health-panel"), health, true, "");
+    // (main continues even if the health panel failed: renderHealth contains its own errors)
 
     // Build metadata footer
     const built = new Date(data.built_at);
@@ -789,7 +807,7 @@
         `Built ${built.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} from the store's public data`,
       ),
     );
-    if (data.reports_commit) {
+    if (typeof data.reports_commit === "string" && /^[0-9a-f]{7,40}$/.test(data.reports_commit)) {
       meta.appendChild(document.createTextNode(", reports commit "));
       const a = document.createElement("a");
       a.href = `https://github.com/ourostack/factory/commit/${data.reports_commit}`;

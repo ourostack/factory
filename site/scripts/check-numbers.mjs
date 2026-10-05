@@ -14,6 +14,30 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const STATES = new Set(["measured", "partial", "unavailable"]);
+const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
+const ROLLUP_KEYS = ["n", "N", "of", "out_of_scope", "excluded"];
+
+// Paths in data.json that must be rollups (they sum, take a median or a
+// share over a population). A rollup that lost its marker and its counts is
+// caught here, by where it sits, not by what it still carries.
+const ROLLUP_PATHS = [
+  /^time_breakdown\[\d+\]\.(median|p75)$/,
+  /^flow_efficiency\.(median|p75)$/,
+  /^tool_calls_total$/,
+  /^tool_kinds\[\d+\]\.(calls|failures|sessions|failure_rate)$/,
+  /^models\[\d+\]\.(requests|input|output|cache_read|cache_write)$/,
+  /^subagents\.(dispatches|sessions_with_subagents)$/,
+  /^subagents\.buckets\.[^.]+$/,
+  /^waste\.breakdown\[\d+\]\.(total_ms|share)$/,
+  /^headlines\[\d+\]\.number$/,
+  /^takeaways\[\d+\]\.slots\.(median|rate|calls|failures|share|with|dispatches)$/,
+];
+// Headlines that are plain counts of files or jobs, not rollups.
+const COUNT_HEADLINES = new Set(["substantial_sessions", "jobs_tracked", "kaizen"]);
+
+// A string that stands for a value that is missing or bad.
+const BAD_STRING = /^(nan|null|undefined|-?infinity|-?\d+(\.\d+)?)?$/i;
+const FREE_KEYS = new Set(["id", "session_id", "ref"]);
 
 function isStated(node) {
   return node && typeof node === "object" && !Array.isArray(node) && ("state" in node || "reasons" in node);
@@ -23,26 +47,40 @@ export function checkNumbers(data) {
   const out = [];
   const bad = (path, code) => out.push({ path, code });
 
-  function stated(node, path) {
-    if (typeof node.state !== "string") return bad(path, "missing_state");
-    if (!STATES.has(node.state)) return bad(path, "bad_state");
+  function stated(node, path, isTop) {
+    if (typeof node.state !== "string") bad(path, "missing_state");
+    else if (!STATES.has(node.state)) bad(path, "bad_state");
     if (!Array.isArray(node.reasons)) bad(path, "missing_reasons");
-    else if (node.state !== "measured" && node.reasons.length === 0) bad(path, "missing_reasons");
+    else {
+      if (node.state === "measured" && node.reasons.length > 0) bad(path, "measured_with_reasons");
+      if ((node.state === "partial" || node.state === "unavailable") && node.reasons.length === 0) bad(path, "missing_reasons");
+      if (node.reasons.some((r) => typeof r !== "string" || !r)) bad(path, "bad_reason");
+    }
     if (node.state === "unavailable") {
       if ("value" in node) bad(path, "value_on_unavailable");
-    } else if (!("value" in node)) {
-      bad(path, "missing_value");
+    } else if (node.state === "measured" || node.state === "partial") {
+      if (!("value" in node)) bad(path, "missing_value");
     }
     if ("value" in node) {
       const v = node.value;
       if (v === null || v === undefined) bad(path, "null_value");
       else if (typeof v === "number" && !Number.isFinite(v)) bad(path, "non_finite");
+      else if (typeof v === "string" && BAD_STRING.test(v)) bad(path, "bad_string_value");
       else if (typeof v !== "number" && typeof v !== "string") bad(path, "bad_value_type");
     }
-    const hasRollupKey = "n" in node || "N" in node || "of" in node;
-    if (hasRollupKey) {
-      const { n, N, of } = node;
-      if (!Number.isInteger(n) || !Number.isInteger(N) || typeof of !== "string" || !of) {
+    if ("bound" in node && node.bound !== "lower" && node.bound !== "upper") bad(path, "bad_bound");
+    if ("basis" in node && node.basis !== "declared" && node.basis !== "inferred") bad(path, "bad_basis");
+    if ("run_url" in node && !(typeof node.run_url === "string" && node.run_url.startsWith("https://github.com/"))) bad(path, "bad_url");
+    for (const [k, v] of Object.entries(node)) {
+      if (!STATED_KEYS.has(k)) {
+        bad(`${path}.${k}`, "unknown_key");
+        walk(v, `${path}.${k}`, false);
+      }
+    }
+    const hasRollupKey = ROLLUP_KEYS.some((k) => k in node);
+    if (node.kind === "rollup") {
+      const { n, N, of, out_of_scope: oos } = node;
+      if (!Number.isInteger(n) || !Number.isInteger(N) || !Number.isInteger(oos) || oos < 0 || typeof of !== "string" || !of) {
         bad(path, "rollup_missing_n");
       } else if (n > N) {
         bad(path, "rollup_n_exceeds_N");
@@ -50,14 +88,28 @@ export function checkNumbers(data) {
         const want = n === 0 ? "unavailable" : n < N ? "partial" : "measured";
         if (node.state !== want) bad(path, "rollup_state_mismatch");
       }
+      if ("excluded" in node) {
+        const ex = node.excluded;
+        if (!ex || typeof ex !== "object" || Object.values(ex).some((c) => !Number.isInteger(c) || c < 0)) bad(path, "bad_excluded");
+      }
+    } else if (hasRollupKey || "kind" in node) {
+      bad(path, "rollup_missing_kind");
+    }
+    if (!isTop && node.kind !== "rollup" && ROLLUP_PATHS.some((re) => re.test(path))) {
+      const m = path.match(/^headlines\[(\d+)\]\.number$/);
+      const id = m ? data.headlines?.[Number(m[1])]?.id : null;
+      if (!(m && COUNT_HEADLINES.has(id))) bad(path, "rollup_expected");
     }
   }
 
   function walk(node, path, top) {
     if (node === null) return bad(path, "null_value");
     if (node === undefined) return bad(path, "undefined_value");
-    if (typeof node === "number") {
-      return bad(path, Number.isFinite(node) ? "bare_number" : "non_finite");
+    if (typeof node === "number") return bad(path, Number.isFinite(node) ? "bare_number" : "non_finite");
+    if (typeof node === "string") {
+      const key = path.split(".").pop().replace(/\[\d+\]$/, "");
+      if (BAD_STRING.test(node) && !FREE_KEYS.has(key)) bad(path, "bad_string_value");
+      return;
     }
     if (typeof node !== "object") return;
     if (Array.isArray(node)) {
@@ -65,7 +117,7 @@ export function checkNumbers(data) {
       return;
     }
     if (isStated(node)) {
-      stated(node, path);
+      stated(node, path, false);
       return;
     }
     for (const [k, v] of Object.entries(node)) {

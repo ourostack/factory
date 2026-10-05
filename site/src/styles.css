@@ -960,3 +960,11 @@ footer a {
   .health-facts { grid-template-columns: 1fr; }
   .health-facts dt { margin-top: 6px; }
 }
+.verdict-unknown { border-style: dotted; border-width: 4px; border-color: var(--text-secondary); }
+.num-basis {
+  display: inline-block;
+  margin-left: 0.4em;
+  font-size: 0.62em;
+  font-style: italic;
+  color: var(--text-secondary);
+}

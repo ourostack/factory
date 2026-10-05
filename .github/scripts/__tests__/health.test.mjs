@@ -59,10 +59,22 @@ test("stale when no intake has landed for over a week", () => {
   assert.equal(buildHealth({ ...base(), newestIntake: "over_7_days" }).verdict.status, "stale")
 })
 
-test("an unreadable build status is shown as unavailable, and the verdict says it does not know", () => {
+test("an unreadable build status is unknown, never alive", () => {
   const h = buildHealth({ ...base(), lastBuild: { state: "unavailable", reasons: ["github_api_unavailable"] } })
   assert.equal(h.factory_build.state, "unavailable")
+  assert.equal(h.verdict.status, "unknown")
   assert.match(h.verdict.reason, /could not be checked/)
+  assert.equal(buildHealth({ ...base(), lastBuild: undefined }).verdict.status, "unknown")
+})
+
+test("precedence: broken over stale over unknown over alive", () => {
+  const red = { state: "measured", value: "failure", reasons: [] }
+  const unk = { state: "unavailable", reasons: ["x"] }
+  assert.equal(buildHealth({ ...base(), lastBuild: red, newestIntake: "over_7_days" }).verdict.status, "broken")
+  assert.equal(buildHealth({ ...base(), lastBuild: unk, newestIntake: "over_7_days" }).verdict.status, "stale")
+  assert.equal(buildHealth({ ...base(), lastBuild: unk }).verdict.status, "unknown")
+  assert.equal(buildHealth({ ...base(), reportsReadable: false, lastBuild: unk }).verdict.status, "broken")
+  assert.equal(buildHealth({ ...base(), newestIntake: null }).verdict.status, "alive")
 })
 
 test("the health document has named empty slots that say not recorded yet", () => {

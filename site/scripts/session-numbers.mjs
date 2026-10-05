@@ -46,7 +46,9 @@ function subagentCount(d) {
   if (flagged.length) return unavailable(flagged);
   const reasons = incompleteReasons(d, SUBAGENT_FIELDS);
   if (reasons.length) return unavailable(reasons);
-  const agents = Array.isArray(d.agents) ? d.agents : [];
+  // No agents list at all (and no flag) is not "no subagents": nothing was recorded.
+  if (!Array.isArray(d.agents)) return unavailable(["not_recorded"]);
+  const agents = d.agents;
   return measured(agents.filter((a) => a && a.parent !== null && a.parent !== undefined).length);
 }
 
