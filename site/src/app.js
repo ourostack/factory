@@ -329,6 +329,10 @@
     return STATUS_COLOR[status] || "var(--text-muted)";
   }
 
+  function measuredCount(v) {
+    return { state: "measured", value: v, reasons: [] };
+  }
+
   // ----------------------------------------------------- trust and slots
 
   const TRUST_LABEL = { ok: "ok", thin_sample: "thin sample", partial: "partial", low_coverage: "low coverage" };
@@ -869,11 +873,10 @@
     if (timeBreakdownNoteEl && data.flow_efficiency) {
       const fe = data.flow_efficiency.median;
       timeBreakdownNoteEl.innerHTML = "";
-      timeBreakdownNoteEl.appendChild(document.createTextNode("Only "));
-      timeBreakdownNoteEl.appendChild(num({ state: "measured", value: fe.n, reasons: [] }, "count"));
+      timeBreakdownNoteEl.appendChild(num(measuredCount(fe.N), "count"));
       timeBreakdownNoteEl.appendChild(document.createTextNode(" of "));
-      timeBreakdownNoteEl.appendChild(num({ state: "measured", value: fe.N, reasons: [] }, "count"));
-      timeBreakdownNoteEl.appendChild(document.createTextNode(" tracked jobs qualify right now (finished, whole life inside capture, and measured) — each figure below says how many it rests on."));
+      timeBreakdownNoteEl.appendChild(num(data.coverage.jobs, "count", { nofn: false }));
+      timeBreakdownNoteEl.appendChild(document.createTextNode(" tracked jobs apply here (finished, whole life inside capture); each figure below says how many of those it rests on and how many jobs are out of scope."));
     }
 
     const timeBreakdownRows = data.time_breakdown.map((r) => ({

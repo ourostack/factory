@@ -499,8 +499,8 @@ takeaways.push({
 takeaways.push({
   id: "flow_efficiency",
   template:
-    "Only {n} of the {total} tracked jobs both finished and had their whole life inside capture (no gap before the first recorded session); across just those, flow efficiency has a median of {median}. Most jobs' cards predate capture, so their flow efficiency would be an artifact of that gap, not a real measure, and is left out here.",
-  slots: { n: measured(flowRollups.median.n), total: jobsTracked, median: flowRollups.median },
+    "{scope} of the {total} tracked jobs both finished and had their whole life inside capture (no gap before the first recorded session); across the {n} of those with a fully measured flow efficiency, the median is {median}. Most jobs' cards predate capture, so their flow efficiency would be an artifact of that gap, not a real measure, and is left out here.",
+  slots: { scope: measured(flowRollups.median.N), n: measured(flowRollups.median.n), total: jobsTracked, median: flowRollups.median },
   trust: scopedFlowEfficiency.trust,
 });
 
