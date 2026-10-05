@@ -101,24 +101,24 @@ export function rollup(members, { of, reduce }) {
 
 // Trust state for a headline: `ok`, `thin_sample`, `partial`, or (once a
 // coverage record exists) `low_coverage`. `reasons` lists every cause that
-// applies; `state` is the first that does, in that order of severity.
+// applies; `status` is the first that does, in that order of severity.
 export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   const n = Number.isInteger(headline?.n) ? headline.n : headline?.state === "measured" ? 1 : 0;
   const N = Number.isInteger(headline?.N) ? headline.N : n;
-  const reasons = [];
+  const causes = [];
   if (coverage?.state === "measured" && typeof coverage.value === "number" && coverage.value < LOW_COVERAGE_BELOW) {
-    reasons.push("low_coverage");
+    causes.push("low_coverage");
   }
-  if (n < THIN_SAMPLE_MIN) reasons.push("thin_sample");
-  if (n < N || headline?.state === "partial") reasons.push("partial");
-  const state = reasons[0] ?? "ok";
+  if (n < THIN_SAMPLE_MIN) causes.push("thin_sample");
+  if (n < N || headline?.state === "partial") causes.push("partial");
+  const status = causes[0] ?? "ok";
   const text = {
     low_coverage: "capture coverage is low",
     thin_sample: `only ${n} measured (fewer than ${THIN_SAMPLE_MIN})`,
     partial: `${n} of ${N} measured`,
   };
-  const reason = state === "ok" ? `${n} of ${N} measured` : reasons.map((r) => text[r]).join("; ");
-  return { state, reason, reasons, coverage };
+  const reason = status === "ok" ? `${n} of ${N} measured` : causes.map((r) => text[r]).join("; ");
+  return { status, reason, causes, coverage };
 }
 
 // A rollup the pipeline already computed, with its own n of N (for example a

@@ -38,22 +38,22 @@ const base = () => ({
 
 test("alive when the build is green and intake is recent", () => {
   const h = buildHealth(base())
-  assert.equal(h.verdict.state, "alive")
+  assert.equal(h.verdict.status, "alive")
   assert.ok(h.verdict.reason.length > 10)
 })
 
 test("broken when the last factory-build run failed", () => {
   const h = buildHealth({ ...base(), lastBuild: { state: "measured", value: "failure", reasons: [] } })
-  assert.equal(h.verdict.state, "broken")
+  assert.equal(h.verdict.status, "broken")
   assert.match(h.verdict.reason, /factory-build/)
 })
 
 test("broken when the reports could not be read", () => {
-  assert.equal(buildHealth({ ...base(), reportsReadable: false }).verdict.state, "broken")
+  assert.equal(buildHealth({ ...base(), reportsReadable: false }).verdict.status, "broken")
 })
 
 test("stale when no intake has landed for over a week", () => {
-  assert.equal(buildHealth({ ...base(), newestIntake: "over_7_days" }).verdict.state, "stale")
+  assert.equal(buildHealth({ ...base(), newestIntake: "over_7_days" }).verdict.status, "stale")
 })
 
 test("an unreadable build status is shown as unavailable, and the verdict says it does not know", () => {

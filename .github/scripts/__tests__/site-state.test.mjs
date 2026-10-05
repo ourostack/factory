@@ -92,22 +92,22 @@ test("trust: thin sample under the named constant, partial, ok; coverage never i
   assert.equal(THIN_SAMPLE_MIN, 5)
   const mk = (n, N) =>
     rollup([...Array(n).fill(measured(1)), ...Array(N - n).fill(unavailable(["x"]))], { of: "jobs", reduce: (v) => v[0] })
-  assert.equal(trust(mk(4, 4)).state, "thin_sample")
-  assert.equal(trust(mk(0, 3)).state, "thin_sample")
-  assert.equal(trust(mk(5, 5)).state, "ok")
+  assert.equal(trust(mk(4, 4)).status, "thin_sample")
+  assert.equal(trust(mk(0, 3)).status, "thin_sample")
+  assert.equal(trust(mk(5, 5)).status, "ok")
   const p = trust(mk(6, 9))
-  assert.equal(p.state, "partial")
+  assert.equal(p.status, "partial")
   assert.ok(p.reason.length > 0)
   const both = trust(mk(2, 9))
-  assert.equal(both.state, "thin_sample")
-  assert.ok(both.reasons.includes("partial"))
+  assert.equal(both.status, "thin_sample")
+  assert.ok(both.causes.includes("partial"))
   assert.deepEqual(trust(mk(5, 5)).coverage, { state: "unavailable", reasons: ["not_recorded_yet"] })
 })
 
 test("trust can take a coverage record without changing its callers", () => {
   const r = rollup(Array(6).fill(measured(1)), { of: "jobs", reduce: (v) => v[0] })
   const low = trust(r, { coverage: { state: "measured", value: 0.2, reasons: [] } })
-  assert.equal(low.state, "low_coverage")
+  assert.equal(low.status, "low_coverage")
 })
 
 test("a ratio of sums can carry an aux number through a rollup", () => {
@@ -121,6 +121,7 @@ test("a ratio of sums can carry an aux number through a rollup", () => {
 })
 
 test("a rollup declared by the pipeline keeps its own n of N and states itself", () => {
+  assert.deepEqual(declareRollup({ value: 5, n: 2, N: 3, of: "jobs" }).reasons, ["unmeasured_members"])
   assert.equal(declareRollup({ value: 5, n: 3, N: 3, of: "jobs" }).state, "measured")
   assert.equal(declareRollup({ value: 5, n: 2, N: 3, of: "jobs" }).state, "partial")
   const none = declareRollup({ value: 0, n: 0, N: 3, of: "jobs" })

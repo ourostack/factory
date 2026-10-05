@@ -80,7 +80,7 @@ test("the build writes data.json and health.json that pass the numbers check", (
   assert.deepEqual(checkNumbers(data), [])
   const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
   assert.deepEqual(checkNumbers(health), [])
-  assert.ok(["alive", "stale", "broken"].includes(health.verdict.state))
+  assert.ok(["alive", "stale", "broken"].includes(health.verdict.status))
   assert.equal(health.facts_by_host[0].files.value, 3)
   assert.equal(health.newest_intake.value, "under_1_day")
   assert.equal(health.factory_build.state, "unavailable")
@@ -106,7 +106,7 @@ test("rollups over jobs take only measured members and show n of N", () => {
   assert.equal(active.median.N, 3)
   assert.equal(active.median.value, 500)
   assert.equal(active.median.state, "partial")
-  assert.equal(active.trust.state, "thin_sample")
+  assert.equal(active.trust.status, "thin_sample")
 })
 
 test("every headline carries a trust state and coverage that says not recorded yet", () => {
@@ -115,7 +115,7 @@ test("every headline carries a trust state and coverage that says not recorded y
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   assert.ok(data.headlines.length >= 5)
   for (const h of data.headlines) {
-    assert.ok(["ok", "thin_sample", "partial", "low_coverage"].includes(h.trust.state), h.id)
+    assert.ok(["ok", "thin_sample", "partial", "low_coverage"].includes(h.trust.status), h.id)
     assert.ok(h.trust.reason.length > 0, h.id)
     assert.deepEqual(h.trust.coverage.reasons, ["not_recorded_yet"], h.id)
   }

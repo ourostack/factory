@@ -59,15 +59,15 @@ export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, rep
 
   let verdict;
   if (reportsReadable === false) {
-    verdict = { state: "broken", reason: "the reports branch could not be read, so the job reports are missing" };
+    verdict = { status: "broken", reason: "the reports branch could not be read, so the job reports are missing" };
   } else if (lastBuild?.state === "measured" && lastBuild.value !== "success") {
-    verdict = { state: "broken", reason: `the last factory-build run ended as ${lastBuild.value}` };
+    verdict = { status: "broken", reason: `the last factory-build run ended as ${lastBuild.value}` };
   } else if (newestIntake === "over_7_days") {
-    verdict = { state: "stale", reason: "no new session has been published for over seven days" };
+    verdict = { status: "stale", reason: "no new session has been published for over seven days" };
   } else if (lastBuild?.state !== "measured") {
-    verdict = { state: "alive", reason: "the site data built; the last factory-build run could not be checked" };
+    verdict = { status: "alive", reason: "the site data built; the last factory-build run could not be checked" };
   } else {
-    verdict = { state: "alive", reason: "the last factory-build run was green and the site data built" };
+    verdict = { status: "alive", reason: "the last factory-build run was green and the site data built" };
   }
 
   return {
