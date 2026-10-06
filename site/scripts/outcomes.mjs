@@ -65,6 +65,7 @@ function unsignedOf(raw, published) {
   if (!published) return none(published === null ? NOT_YET : ["signoff_not_published"], JOBS_SIGNED)
   if (![raw.jobs, raw.not_recorded, raw.not_delivered, raw.no_record, raw.delivered_unsigned].every(isCount)) return none(["not_recorded"], JOBS_SIGNED)
   const N = Math.max(0, raw.jobs - raw.not_recorded - raw.not_delivered)
+  if (N === 0) return none(["no_signoff_records"], JOBS_SIGNED, 0, raw.no_record + raw.not_recorded + raw.not_delivered)
   return declareRollup({ value: raw.delivered_unsigned, n: N, N, of: JOBS_SIGNED, measure: "sum", outOfScope: raw.no_record + raw.not_recorded + raw.not_delivered })
 }
 

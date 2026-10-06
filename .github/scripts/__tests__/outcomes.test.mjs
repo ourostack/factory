@@ -102,6 +102,10 @@ test("unsigned deliveries count jobs with a sign-off record, with jobs that pred
   assert.equal(s.unsigned.state, "measured")
   assert.equal(s.unsigned.N, 5)
   assert.equal(s.unsigned.out_of_scope, 5)
+  // With no delivered job on record the reason says so, not "no member was measured".
+  const empty = outcomesSummary(file({ signoff: signoff({ jobs: 4, not_recorded: 4, not_delivered: 0, no_record: 0, delivered_unsigned: 0, accepted: 0, accepted_unverified: 0, refused: 0 }) })).unsigned
+  assert.equal(empty.state, "unavailable")
+  assert.deepEqual(empty.reasons, ["no_signoff_records"])
   // A job not delivered yet cannot be unsigned, so it is out of scope.
   const pending = outcomesSummary(file({ signoff: signoff({ not_delivered: 2 }) })).unsigned
   assert.equal(pending.N, 3)
