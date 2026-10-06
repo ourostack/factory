@@ -641,22 +641,26 @@
       emptyState(container, "Sign-off is not part of this build's data.");
       return;
     }
-    const grid = el("div", "chart-grid cols-2");
+    const grid = el("div", "outcome-tiles");
 
-    const head = el("div", "outcome-block");
+    const head = el("div", "stat-tile outcome-block");
     head.appendChild(el("h4", null, "Human attention per accepted outcome"));
     const v = el("p", "stat-value");
     v.appendChild(num(o.attention.headline, "duration"));
     head.appendChild(v);
-    head.appendChild(el("p", "stat-note", "An estimate of the time a human spent reading and answering, over the outcomes they accepted."));
+    head.appendChild(el("div", "stat-note", "An estimate of the time a human spent reading and answering, over the outcomes they accepted."));
     const turns = el("p", "stat-note");
     turns.appendChild(document.createTextNode("Human turns per accepted outcome: "));
     turns.appendChild(num(o.attention.turns_per_accepted, "count"));
     head.appendChild(turns);
-    const t = el("p", "stat-trust");
-    t.appendChild(trustNode(o.attention.trust));
-    head.appendChild(t);
+    // A trust line speaks of a figure; with no figure there is nothing to trust.
+    if (o.attention.headline.state !== "unavailable") {
+      const t = el("p", "stat-trust");
+      t.appendChild(trustNode(o.attention.trust));
+      head.appendChild(t);
+    }
     grid.appendChild(head);
+    container.appendChild(grid);
 
     const so = el("div", "outcome-block");
     so.appendChild(el("h4", null, "Sign-off"));
@@ -685,9 +689,8 @@
     figure(dl, "Delivered before sign-off was recorded", o.signoff.not_recorded);
     figure(dl, "Jobs with no sign-off record", o.signoff.no_record);
     so.appendChild(dl);
-    grid.appendChild(so);
 
-    const fp = el("div", "outcome-block");
+    const fp = el("div", "stat-tile outcome-block");
     fp.appendChild(el("h4", null, "First-pass yield"));
     const fv = el("p", "stat-value");
     fv.appendChild(num(o.first_pass_yield, "pct"));
@@ -698,6 +701,7 @@
     figure(fdl, "Passed, with only changed-ask returns", o.first_pass_counts.changed_ask_only);
     fp.appendChild(fdl);
     grid.appendChild(fp);
+    container.appendChild(so);
 
     const rw = el("div", "outcome-block");
     rw.appendChild(el("h4", null, "What was sent back, and where it was caught"));
@@ -721,18 +725,18 @@
     figure(rdl, "Returns because the ask changed (not counted against yield)", o.rework.changed_ask);
     const check = el("span");
     check.appendChild(num(o.rework.reason_check.disagree, "count"));
-    check.appendChild(document.createTextNode(" of "));
-    check.appendChild(num(o.rework.reason_check.compared, "count"));
-    check.appendChild(document.createTextNode(" refusals, "));
-    check.appendChild(num(o.rework.reason_check.compared_verified, "count"));
-    check.appendChild(document.createTextNode(" of them witnessed"));
+    if (o.rework.reason_check.compared.state !== "unavailable") {
+      check.appendChild(document.createTextNode(" of "));
+      check.appendChild(num(o.rework.reason_check.compared, "count"));
+      check.appendChild(document.createTextNode(" refusals, "));
+      check.appendChild(num(o.rework.reason_check.compared_verified, "count"));
+      check.appendChild(document.createTextNode(" of them witnessed"));
+    }
     row(rdl, "Agent's and human's reasons disagreed", check);
     figure(rdl, "Defect time caught inside the task", o.rework.defects.in_task_ms, "duration");
     figure(rdl, "Defect time with no catch point", o.rework.defects.not_placed_ms, "duration");
     rw.appendChild(rdl);
-    grid.appendChild(rw);
-
-    container.appendChild(grid);
+    container.appendChild(rw);
   }
 
   // --------------------------------------------------------------- jobs
@@ -974,7 +978,19 @@
     });
     row(dl, "Facts files by host", hostsNode);
     for (const [key, number] of Object.entries(health.slots || {})) {
-      row(dl, SLOT_LABEL[key] || key, num(number, "count"));
+      const node = el("span");
+      node.appendChild(num(number, "count"));
+      const detail = health.details && Array.isArray(health.details[key]) ? health.details[key] : [];
+      if (key !== "capture_coverage" && detail.length && number.state !== "unavailable") {
+        const per = el("span", "slot-detail");
+        for (const d of detail) {
+          if (!d || typeof d.label !== "string" || !d.number) continue;
+          per.appendChild(document.createTextNode(` \u00b7 ${d.label}: `));
+          per.appendChild(num(d.number, d.kind || "count", { nofn: false }));
+        }
+        node.appendChild(per);
+      }
+      row(dl, SLOT_LABEL[key] || key, node);
     }
     container.appendChild(dl);
   }

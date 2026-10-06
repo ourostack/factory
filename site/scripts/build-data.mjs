@@ -747,7 +747,7 @@ const health = buildHealth({
   lastBuild,
   reportsReadable,
   slots: { unsigned_deliveries: outcomes.unsigned },
-  details: { unsigned_deliveries: [{ label: "longest waiting", number: outcomes.oldest_unsigned_wait }] },
+  details: { unsigned_deliveries: [{ label: "longest", kind: "text", number: outcomes.oldest_unsigned_wait }] },
 });
 
 // The numbers regression check. It runs before anything is written, so a
