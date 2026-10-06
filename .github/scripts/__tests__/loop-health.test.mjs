@@ -177,3 +177,10 @@ test("a blocked headless evaluator on any machine raises the headless_blocked al
     assert.deepEqual(summarizeLoop({ files: [file(rec(loop({ headless: code })))], nowMs: NOW }).alarms, [], code)
   }
 })
+
+test("the store's capture gate allows exactly the loop slot keys the site reads", async () => {
+  const { readFileSync } = await import("node:fs")
+  const gate = readFileSync(new URL("../check-capture.sh", import.meta.url), "utf8")
+  const listed = gate.match(/keys - \[("v"[^\]]*)\]/)[1].split(",").map((k) => JSON.parse(k.trim()))
+  assert.deepEqual([...listed].sort(), [...LOOP_KEYS].sort())
+})
