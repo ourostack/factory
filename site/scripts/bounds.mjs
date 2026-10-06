@@ -67,6 +67,12 @@ export const DIRECTIONS = Object.freeze({
   returns: FROM,
   reason_disagree: "lower",
   attention_per_accepted: "lower",
+  // One job's attention estimate and the human turns it rests on: a
+  // partial estimate misses turns, so it is at least this.
+  attention_ms: "lower",
+  human_turns: "lower",
+  // One job's labeled time per waste, with some of its sessions not labeled.
+  job_waste_ms: "lower",
   turns_per_accepted: "lower",
   // Rollups the site computes over measured members, and the pipeline's
   // totals (which add sessions the host records partly as a lower bound).

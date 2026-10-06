@@ -658,7 +658,7 @@
 
   // ------------------------------------------------------------ outcomes
   // Sign-off, first-pass yield, rework and attention, each a stated number
-  // from the reports. An unwitnessed answer is never an acceptance here.
+  // from the reports. An acceptance is the operator's word, as the agent recorded it.
 
   const REFUSAL_WORD = {
     not_what_was_asked: "not what was asked",
@@ -704,8 +704,7 @@
     const so = el("div", "outcome-block");
     so.appendChild(el("h4", null, "Sign-off"));
     const dl = el("dl", "health-facts");
-    figure(dl, "Accepted, witnessed", o.signoff.accepted);
-    figure(dl, "Accepted, not witnessed", o.signoff.accepted_unverified);
+    figure(dl, "Accepted (recorded by the agent on the operator's word)", o.signoff.accepted);
     const waiting = el("span");
     waiting.appendChild(num(o.unsigned, "count"));
     if (o.oldest_unsigned_wait.state !== "unavailable") {
@@ -724,7 +723,6 @@
       });
     }
     row(dl, "Sent back", refused);
-    figure(dl, "Sent back, not witnessed (part of sent back)", o.signoff.refused_unverified);
     figure(dl, "Delivered before sign-off was recorded", o.signoff.not_recorded);
     figure(dl, "Jobs with no sign-off record", o.signoff.no_record);
     so.appendChild(dl);
@@ -774,9 +772,7 @@
     if (o.rework.reason_check.compared.state !== "unavailable") {
       check.appendChild(document.createTextNode(" of "));
       check.appendChild(num(o.rework.reason_check.compared, "count"));
-      check.appendChild(document.createTextNode(" refusals, "));
-      check.appendChild(num(o.rework.reason_check.compared_verified, "count"));
-      check.appendChild(document.createTextNode(" of them witnessed"));
+      check.appendChild(document.createTextNode(" refusals"));
     }
     row(rdl, "Agent's and human's reasons disagreed", check);
     figure(rdl, "Defect time caught inside the task", o.rework.defects.in_task_ms, "duration");
@@ -787,121 +783,361 @@
 
   // --------------------------------------------------------------- jobs
 
+  // --------------------------------------------------------- task names
+  // Private desks publish only anonymous job keys. On the operator's own
+  // machine a `local-names.json` beside the page may name them:
+  // { version: 1, jobs: { "<job key>": { title, track, task } } }. A missing
+  // or malformed file is the public view, silently. Names go in as text only.
+
+  let localNames = {};
+  // What to do about each kind of waste, from the build (fix-next.mjs).
+  let wasteActions = {};
+
+  async function loadLocalNames() {
+    try {
+      const res = await fetch("./local-names.json", { cache: "no-store" });
+      if (!res.ok) return;
+      const file = await res.json();
+      if (file && file.version === 1 && file.jobs && typeof file.jobs === "object" && !Array.isArray(file.jobs)) localNames = file.jobs;
+    } catch (err) {
+      localNames = {};
+    }
+  }
+
+  function localName(id) {
+    const n = Object.prototype.hasOwnProperty.call(localNames, id) ? localNames[id] : null;
+    return n && typeof n.title === "string" && n.title.trim() ? n : null;
+  }
+
+  function jobLabel(j) {
+    const n = localName(j.id);
+    return n ? n.title : `Task ${j.id.slice(0, 10)}`;
+  }
+
+  function jobLink(id, text) {
+    const a = document.createElement("a");
+    const safe = F.safeAnchor(`job-${id}`);
+    if (safe) a.href = safe;
+    a.textContent = text;
+    return a;
+  }
+
+  // --------------------------------------------------------------- tasks
+
+  const OUTCOME_WORD = {
+    accepted: "Accepted",
+    sent_back: "Sent back",
+    awaiting_signoff: "Delivered, waiting for an answer",
+    delivered: "Delivered, no sign-off record",
+    in_progress: "In progress",
+    cancelled: "Cancelled",
+    unknown: "Status not recorded",
+  };
+  const OUTCOME_COLOR = {
+    accepted: "var(--status-good)",
+    sent_back: "var(--status-critical)",
+    awaiting_signoff: "var(--status-warning)",
+    delivered: "var(--series-1)",
+    in_progress: "var(--text-muted)",
+    cancelled: "var(--text-muted)",
+    unknown: "var(--text-muted)",
+  };
+
+  function outcomeNode(j) {
+    const span = el("span", "outcome");
+    const dot = el("span", "status-dot");
+    dot.style.background = OUTCOME_COLOR[j.outcome] || "var(--text-muted)";
+    span.appendChild(dot);
+    let word = OUTCOME_WORD[j.outcome] || j.status;
+    if (j.outcome === "in_progress" && j.status !== "unavailable") word += ` (${j.status})`;
+    span.appendChild(document.createTextNode(word));
+    return span;
+  }
+
+  // The task's largest labeled waste, or why there is none.
+  function topWasteNode(j) {
+    const rows = (j.waste && j.waste.rows) || [];
+    const top = rows.find((r) => r.kind === "waste" || r.kind === "unknown");
+    if (!top) {
+      return el("span", "muted", rows.length ? "none labeled" : "not labeled yet");
+    }
+    const span = el("span");
+    span.appendChild(document.createTextNode(`${WASTE_NAMES[top.key] || top.key} `));
+    span.appendChild(num(top.total_ms, "duration"));
+    return span;
+  }
+
+  // A dense table says "no data" in each cell and gives the reasons once,
+  // under the table, per column: "Operator turns, 43 tasks: <reason>".
+  function tableCell(tr, notes, label, number, kind, cls) {
+    const td = el("td", cls);
+    td.dataset.label = label;
+    td.appendChild(num(number, kind, { reason: false, nofn: false }));
+    if (number.state !== "measured") {
+      const why = F.describe(number, kind).reason;
+      const what = number.state === "partial" ? `${label} (partial)` : label;
+      const key = `${what}\u0000${why}`;
+      notes.set(key, { label: what, why, count: (notes.get(key) || { count: 0 }).count + 1 });
+    }
+    tr.appendChild(td);
+  }
+
+  function tableNotes(container, notes, noun) {
+    if (!notes.size) return;
+    const ul = el("ul", "table-notes");
+    ul.appendChild(el("li", "table-notes-head", "Why some cells say no data or partial:"));
+    for (const n of notes.values()) ul.appendChild(el("li", null, `${n.label}, ${n.count === 1 ? `one ${noun}` : `${n.count} ${noun}s`}: ${n.why}.`));
+    container.appendChild(ul);
+  }
+
   function renderJobsTable(container, jobs) {
     container.innerHTML = "";
     if (!jobs.length) {
       emptyState(container, "No jobs tracked yet.");
       return;
     }
-    const wrap = el("div", "table-wrap");
     const table = document.createElement("table");
-    table.className = "data-table";
+    table.className = "data-table task-table";
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    const cols = ["Job", "Status", "Sign-off", "Lead time", "Active time", "Flow eff.", "Tool failures", "Tool retries", "Sessions", "Public PRs"];
-    for (const c of cols) {
-      const th = document.createElement("th");
-      th.textContent = c;
-      if (c === "Flow eff.") th.title = "Active time ÷ lead time. Higher means less of the job's time was spent waiting.";
-      if (c !== "Job" && c !== "Status" && c !== "Sign-off") th.className = "num";
+    const cols = [
+      ["Task", ""],
+      ["Status", ""],
+      ["Elapsed", "num"],
+      ["Agent time", "num"],
+      ["Operator turns", "num"],
+      ["Sent back", "num"],
+      ["Largest waste", ""],
+      ["Public PRs", "num"],
+    ];
+    for (const [c, cls] of cols) {
+      const th = el("th", cls, c);
+      th.scope = "col";
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
+    const notes = new Map();
     for (const j of jobs) {
       const tr = document.createElement("tr");
-
-      const idTd = document.createElement("td");
-      const link = document.createElement("a");
-      const safe = F.safeAnchor(`job-${j.id}`);
-      if (safe) link.href = safe;
-      link.title = `Open the job page for ${j.id}`;
-      const code = document.createElement("code");
-      code.textContent = j.id.slice(0, 10);
-      link.appendChild(code);
-      idTd.appendChild(link);
-      tr.appendChild(idTd);
-
-      const statusTd = document.createElement("td");
-      const dot = el("span", "status-dot");
-      dot.style.background = statusColor(j.status);
-      statusTd.appendChild(dot);
-      statusTd.appendChild(document.createTextNode(j.status));
-      tr.appendChild(statusTd);
-
-      const signTd = document.createElement("td");
-      signTd.appendChild(num(j.signoff, "text"));
-      tr.appendChild(signTd);
-
-      const cells = [
-        [j.lead_time_ms, "duration"],
-        [j.active_time_ms, "duration"],
-        [j.flow_efficiency, "pct"],
-        [j.tool_failures, "count"],
-        [j.tool_retries, "count"],
-        [j.sessions_bound, "count"],
-        [j.public_prs, "count"],
-      ];
-      cells.forEach(([number, kind], i) => {
-        const td = document.createElement("td");
-        td.className = "num";
-        td.appendChild(num(number, kind));
-        if (i === 5 && number.state !== "unavailable") td.appendChild(document.createTextNode(" bound"));
+      const cell = (label, node, cls) => {
+        const td = el("td", cls);
+        td.dataset.label = label;
+        td.appendChild(node);
         tr.appendChild(td);
-      });
-
+      };
+      const name = el("span", "task-name");
+      name.appendChild(jobLink(j.id, jobLabel(j)));
+      cell("Task", name, "task-cell");
+      cell("Status", outcomeNode(j));
+      tableCell(tr, notes, "Elapsed", j.lead_time_ms, "duration", "num");
+      tableCell(tr, notes, "Agent time", j.active_time_ms, "duration", "num");
+      tableCell(tr, notes, "Operator turns", j.human_turns, "count", "num");
+      tableCell(tr, notes, "Sent back", j.returns, "count", "num");
+      cell("Largest waste", topWasteNode(j));
+      tableCell(tr, notes, "Public PRs", j.public_prs, "count", "num");
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
-    wrap.appendChild(table);
-    container.appendChild(wrap);
+    container.appendChild(table);
+    tableNotes(container, notes, "task");
   }
 
-  // ------------------------------------------------------------ job page
-  // One job's every measure, each with its state in words and its reason in
-  // text beside it, not only on hover. Opened from the jobs table; its
-  // address is #job-<id>, so a job page can be linked.
+  // ----------------------------------------------------------- fix next
+
+  const SEVERITY_WORD = { alarm: "Alarm", act: "Act", improve: "Improve", signal: "Signal" };
+
+  function renderFixNext(container, items, jobs) {
+    container.innerHTML = "";
+    if (!items || !items.length) {
+      container.appendChild(el("li", "chart-empty", "Nothing to fix: no alarm, nothing waiting, no labeled waste and no open card."));
+      return;
+    }
+    const byId = new Map(jobs.map((j) => [j.id, j]));
+    for (const item of items) {
+      const li = el("li", `fix-item fix-${item.severity}`);
+      const head = el("p", "fix-head");
+      head.appendChild(el("span", `fix-tag fix-tag-${item.severity}`, SEVERITY_WORD[item.severity] || item.severity));
+      head.appendChild(el("strong", "fix-title", item.title));
+      if (item.count) {
+        const c = el("span", "fix-count");
+        c.appendChild(document.createTextNode(" · "));
+        c.appendChild(num(item.count, "count"));
+        c.appendChild(document.createTextNode(item.links.length ? " open" : item.examples.length ? (item.count.value === 1 ? " task" : " tasks") : ""));
+        head.appendChild(c);
+      }
+      li.appendChild(head);
+      const act = el("p", "fix-action");
+      act.appendChild(el("span", "fix-do", "Do: "));
+      act.appendChild(document.createTextNode(item.action));
+      li.appendChild(act);
+      if (item.examples.length) {
+        const ul = el("ul", "fix-examples");
+        for (const e of item.examples) {
+          const j = byId.get(e.job);
+          const ex = document.createElement("li");
+          ex.appendChild(jobLink(e.job, j ? jobLabel(j) : `Task ${e.job.slice(0, 10)}`));
+          ex.appendChild(document.createTextNode(" — "));
+          ex.appendChild(num(e.figure, e.kind));
+          ul.appendChild(ex);
+        }
+        li.appendChild(ul);
+      }
+      if (item.links.length) {
+        const ul = el("ul", "fix-examples");
+        for (const l of item.links) {
+          const ex = document.createElement("li");
+          ex.appendChild(safeLink(l.title || `Issue ${l.ref}`, l.url));
+          ex.appendChild(document.createTextNode(" — open "));
+          ex.appendChild(num(l.age_days, "count"));
+          ex.appendChild(document.createTextNode(" days"));
+          ul.appendChild(ex);
+        }
+        li.appendChild(ul);
+      }
+      container.appendChild(li);
+    }
+  }
+
+  // ------------------------------------------------------------ glance
+
+  function tile(container, label, valueNode, notes, cls) {
+    const t = el("div", `stat-tile glance-tile${cls ? ` ${cls}` : ""}`);
+    t.appendChild(el("p", "stat-label", label));
+    const v = el("p", "stat-value");
+    v.appendChild(valueNode);
+    t.appendChild(v);
+    for (const n of notes) {
+      const p = el("p", "stat-note");
+      p.appendChild(typeof n === "string" ? document.createTextNode(n) : n);
+      t.appendChild(p);
+    }
+    container.appendChild(t);
+    return t;
+  }
+
+  function words(...parts) {
+    const span = el("span");
+    for (const p of parts) span.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
+    return span;
+  }
+
+  function renderGlance(container, data, health) {
+    container.innerHTML = "";
+    let v;
+    try {
+      v = F.pageVerdict(health, Date.now());
+    } catch (err) {
+      v = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
+    }
+    tile(container, "The factory is", el("span", `verdict-inline verdict-inline-${v.status}`, `${VERDICT_MARK[v.status]} ${VERDICT_WORD[v.status]}`), [v.reason], `glance-${v.status}`);
+    const cov = data.capture_coverage && data.capture_coverage.share;
+    tile(container, "Real work captured", num(cov || { state: "unavailable", reasons: ["not_recorded_yet"] }, "pct", { nofn: false }), [
+      "of sessions still on disk",
+      words(num(data.scope.sessions_total, "count"), " sessions published; ", num(data.coverage.jobs, "count", { nofn: false }), " tasks tracked"),
+    ]);
+    const loop = data.loop_health || {};
+    tile(container, "Improvement loop", words(num(data.kaizen.resolved, "count", { nofn: false }), " of ", num(data.kaizen.raised, "count", { nofn: false })), [
+      "kaizen cards closed",
+      words("Open items now: ", num(loop.open || { state: "unavailable", reasons: ["not_recorded_yet"] }, "count", { nofn: false })),
+      words("Closed this month with the fix confirmed: ", num(loop.closed_confirmed_month || { state: "unavailable", reasons: ["not_recorded_yet"] }, "count", { nofn: false })),
+    ]);
+    const waitNotes = ["deliveries waiting for the operator's answer"];
+    if (data.outcomes.oldest_unsigned_wait.state !== "unavailable") waitNotes.push(words("Longest: ", num(data.outcomes.oldest_unsigned_wait, "text")));
+    tile(container, "Waiting on the operator", num(data.outcomes.unsigned, "count", { nofn: false }), waitNotes);
+  }
+
+  // ------------------------------------------------------------ answer
+
+  function renderAnswer(container, o) {
+    container.innerHTML = "";
+    const head = tile(container, "Operator attention per accepted outcome", num(o.attention.headline, "duration", { nofn: false }), [
+      "An estimate of the time the operator spent reading and answering, over the outcomes accepted.",
+      words("Operator turns per accepted outcome: ", num(o.attention.turns_per_accepted, "count", { nofn: false })),
+    ], "answer-headline");
+    if (o.attention.headline.state !== "unavailable") {
+      const t = el("p", "stat-trust");
+      t.appendChild(trustNode(o.attention.trust));
+      head.appendChild(t);
+    }
+    tile(container, "Accepted", num(o.signoff.accepted, "count", { nofn: false }), ["recorded by the agent on the operator's word"]);
+    tile(container, "Waiting for an answer", num(o.unsigned, "count", { nofn: false }), ["delivered, not answered yet"]);
+    tile(container, "Sent back", num(o.signoff.refused, "count", { nofn: false }), [words("Delivered before sign-off was recorded: ", num(o.signoff.not_recorded, "count", { nofn: false }))]);
+    tile(container, "First-pass yield", num(o.first_pass_yield, "pct"), ["deliveries accepted with nothing sent back"]);
+  }
+
+  // ------------------------------------------------------------- trend
+
+  function renderTrend(container, trend) {
+    container.innerHTML = "";
+    if (!Array.isArray(trend) || !trend.length) {
+      emptyState(container, "No release grouping is in this build's data yet.");
+      return;
+    }
+    const table = el("table", "data-table task-table trend-table");
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (const [c, cls] of [["Desk release", ""], ["Tasks", "num"], ["Accepted", "num"], ["Sent back", "num"], ["First-pass yield", "num"], ["Attention per accepted", "num"], ["Flow efficiency (median)", "num"]]) hr.appendChild(el("th", cls, c));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    const notes = new Map();
+    for (const r of trend) {
+      const tr = document.createElement("tr");
+      const cell = (label, node, cls) => {
+        const td = el("td", cls);
+        td.dataset.label = label;
+        td.appendChild(node);
+        tr.appendChild(td);
+      };
+      cell("Desk release", el("span", "task-name", r.version === "mixed" ? "several releases" : r.version), "task-cell");
+      tableCell(tr, notes, "Tasks", r.jobs, "count", "num");
+      tableCell(tr, notes, "Accepted", r.accepted, "count", "num");
+      tableCell(tr, notes, "Sent back", r.sent_back, "count", "num");
+      tableCell(tr, notes, "First-pass yield", r.first_pass_yield, "pct", "num");
+      tableCell(tr, notes, "Attention per accepted", r.attention, "duration", "num");
+      tableCell(tr, notes, "Flow efficiency (median)", r.flow_efficiency, "pct", "num");
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    container.appendChild(table);
+    tableNotes(container, notes, "release");
+  }
+
+  // ------------------------------------------------------------ task page
+  // One task: what was asked, where it stands, what it cost, its waste with
+  // confidence, its pull requests and its sessions. Its address is
+  // #job-<key>, so a task page can be linked.
 
   // Which entry of data.scopes each captioned section reads.
   const SCOPE_OF = { headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" };
 
   const STATE_WORD = { measured: "measured", partial: "partial", unavailable: "no data" };
   const JOB_ID = /^[0-9A-Za-z_-]{1,64}$/;
+  const ROW_NAME = { value: "Value-adding work", support: "Necessary support" };
 
-  function jobIdFromHash() {
-    const m = /^#job-(.+)$/.exec(window.location.hash || "");
+  function idFromHash(prefix) {
+    const m = new RegExp(`^#${prefix}-(.+)$`).exec(window.location.hash || "");
     return m && JOB_ID.test(m[1]) ? m[1] : null;
   }
 
-  function renderJobDetail(container, jobs, id) {
-    container.innerHTML = "";
-    const j = id ? jobs.find((x) => x.id === id) : null;
-    const card = container.closest(".chart-card") || container;
-    if (!j) {
-      card.hidden = true;
-      return;
-    }
-    card.hidden = false;
-    container.appendChild(el("h3", null, `Job ${j.id.slice(0, 10)}`));
-    container.appendChild(
-      el(
-        "p",
-        "chart-caption",
-        `Status: ${j.status}. Every measure the store's report holds for this job. "Measured" is the whole figure, and a zero here is a measured zero. "Partial" covers only part of the job ("at least" or "at most" says which way the true figure lies, when that is known). "No data" means the store could not measure it. The reason is beside each.`,
-      ),
-    );
-    const wrap = el("div", "table-wrap");
-    const table = document.createElement("table");
-    table.className = "data-table job-detail-table";
+  function jobIdFromHash() {
+    return idFromHash("job");
+  }
+
+  function confidenceWords(r) {
+    const c = r.confidence || {};
+    if (!c.high_ms || c.high_ms.state === "unavailable") return "confidence not recorded";
+    const parts = ["high", "medium", "low"].filter((k) => c[`${k}_ms`].value > 0);
+    return parts.length ? `confidence: ${parts.join(", ")}` : "confidence: none recorded";
+  }
+
+  function detailsTable(j) {
+    const table = el("table", "data-table job-detail-table");
     const head = document.createElement("tr");
-    for (const c of ["Measure", "Figure", "State", "Why"]) {
-      const th = document.createElement("th");
-      th.textContent = c;
-      if (c === "Figure") th.className = "num";
-      head.appendChild(th);
-    }
+    for (const c of ["Measure", "Figure", "State", "Why"]) head.appendChild(el("th", c === "Figure" ? "num" : "", c));
     const thead = document.createElement("thead");
     thead.appendChild(head);
     table.appendChild(thead);
@@ -921,23 +1157,219 @@
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
+    const wrap = el("div", "table-wrap");
     wrap.appendChild(table);
-    container.appendChild(wrap);
-    const back = document.createElement("a");
-    const safe = F.safeAnchor("jobs-table");
-    back.href = safe;
-    back.textContent = "Back to every job";
-    container.appendChild(back);
+    return wrap;
   }
 
-  function showJobFromHash(jobs) {
-    const container = document.getElementById("job-detail");
-    if (!container) return;
-    const id = jobIdFromHash();
-    renderJobDetail(container, jobs, id);
-    if (id && !container.closest(".chart-card").hidden) container.closest(".chart-card").scrollIntoView({ block: "start" });
+  function renderJobDetail(container, jobs, id, sessions) {
+    container.innerHTML = "";
+    const j = id ? jobs.find((x) => x.id === id) : null;
+    if (!j) {
+      container.appendChild(el("h2", "section-title", "Task not found"));
+      container.appendChild(el("p", "section-sub", "No task in this build has that key. It may have been re-derived or withdrawn."));
+      return;
+    }
+    const name = localName(j.id);
+    container.appendChild(el("h2", "section-title", jobLabel(j)));
+    container.appendChild(el("p", "task-key", name ? `${name.track || ""}${name.track && name.task ? " / " : ""}${name.task || ""} · key ${j.id}` : `Anonymous task key ${j.id}`));
+
+    const asked = el("div", "chart-card task-asked");
+    asked.appendChild(el("h3", null, "What was asked"));
+    asked.appendChild(el("p", null, name ? name.title : "The task's name stays private on the operator's machine; the store publishes only this anonymous key."));
+    const where = el("p", null);
+    where.appendChild(outcomeNode(j));
+    if (j.signoff.state !== "unavailable") {
+      where.appendChild(document.createTextNode(" · sign-off: "));
+      where.appendChild(num(j.signoff, "text"));
+      if (j.outcome === "accepted" || j.outcome === "sent_back") where.appendChild(el("span", "muted", " (recorded by the agent on the operator's word)"));
+      if (j.signoff_wait.state !== "unavailable") {
+        where.appendChild(document.createTextNode(" · "));
+        where.appendChild(num(j.signoff_wait, "text"));
+      }
+    } else {
+      where.appendChild(document.createTextNode(" · sign-off: "));
+      where.appendChild(num(j.signoff, "text"));
+    }
+    asked.appendChild(where);
+    container.appendChild(asked);
+
+    const tiles = el("div", "answer-tiles task-tiles");
+    tile(tiles, "Elapsed", num(j.lead_time_ms, "duration"), ["from the task card to its last session"]);
+    tile(tiles, "Agent time", num(j.active_time_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
+    tile(tiles, "Operator attention", num(j.attention_ms, "duration"), [words("over ", num(j.human_turns, "count"), " operator turns")]);
+    tile(tiles, "Sent back", num(j.returns, "count"), [words("first pass: ", num(j.first_pass, "pass"))]);
+    tile(tiles, "Waiting on the operator", num(j.human_wait_ms, "duration"), ["gaps between prompts inside sessions"]);
+    container.appendChild(tiles);
+
+    // Waste, with confidence.
+    const waste = el("div", "chart-card");
+    waste.appendChild(el("h3", null, "Where the time went"));
+    const rows = (j.waste && j.waste.rows) || [];
+    const cap = el("p", "chart-caption");
+    cap.appendChild(document.createTextNode("Labeled by the independent waste evaluator: "));
+    cap.appendChild(num(j.waste ? j.waste.sessions_labeled : { state: "unavailable", reasons: ["not_labeled"] }, "count"));
+    cap.appendChild(document.createTextNode(" of "));
+    cap.appendChild(num(j.sessions_bound, "count"));
+    cap.appendChild(document.createTextNode(" sessions."));
+    waste.appendChild(cap);
+    if (!rows.length) {
+      waste.appendChild(el("p", "chart-empty", "Not labeled yet, so this task's waste is no data, not zero. Do: run the waste evaluator on this task's sessions."));
+    } else {
+      const barRows = rows.map((r) => ({
+        label: ROW_NAME[r.key] || WASTE_NAMES[r.key] || r.key,
+        flag: r.kind === "value" || r.kind === "support" ? "" : confidenceWords(r),
+        color: r.kind === "value" ? "var(--status-good)" : r.kind === "support" ? "var(--series-1)" : r.kind === "unknown" ? "var(--text-muted)" : "var(--series-8)",
+        number: r.total_ms,
+      }));
+      const bars = el("div");
+      renderBarList(bars, barRows, { kind: "duration" });
+      waste.appendChild(bars);
+      const advice = rows.filter((r) => r.kind === "waste" || r.kind === "unknown").slice(0, 1);
+      for (const r of advice) {
+        const p = el("p", "fix-action");
+        p.appendChild(el("span", "fix-do", "Do: "));
+        p.appendChild(document.createTextNode(wasteActions[r.key] || "Look at the labeled stretches and remove the cause."));
+        waste.appendChild(p);
+      }
+    }
+    container.appendChild(waste);
+
+    // Pull requests.
+    const prs = el("div", "chart-card");
+    prs.appendChild(el("h3", null, "Pull requests"));
+    const prLine = el("p", "chart-caption");
+    prLine.appendChild(document.createTextNode("Public pull requests the task's sessions referenced: "));
+    prLine.appendChild(num(j.public_prs, "count"));
+    prs.appendChild(prLine);
+    if (j.pull_requests.length) {
+      const ul = el("ul", "pr-list");
+      for (const p of j.pull_requests) {
+        const li = document.createElement("li");
+        li.appendChild(safeLink(`pull request ${p.ref}`, p.url));
+        ul.appendChild(li);
+      }
+      prs.appendChild(ul);
+    }
+    container.appendChild(prs);
+
+    // Sessions.
+    const ses = el("div", "chart-card");
+    ses.appendChild(el("h3", null, "Sessions"));
+    const byId = new Map((sessions || []).map((s) => [s.session_id, s]));
+    if (!j.sessions.length) {
+      ses.appendChild(el("p", "chart-empty", "No session is on this task's timeline."));
+    } else {
+      const table = el("table", "data-table task-table");
+      const hr = document.createElement("tr");
+      for (const [c, cls] of [["Session", ""], ["Length", "num"], ["Agent time", "num"], ["Tool calls", "num"], ["Failed calls", "num"], ["Subagents", "num"]]) hr.appendChild(el("th", cls, c));
+      const thead = document.createElement("thead");
+      thead.appendChild(hr);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const s of j.sessions) {
+        const f = byId.get(s.session_id);
+        const tr = document.createElement("tr");
+        const cell = (label, node, cls) => {
+          const td = el("td", cls);
+          td.dataset.label = label;
+          td.appendChild(node);
+          tr.appendChild(td);
+        };
+        const link = document.createElement("a");
+        const safe = F.safeAnchor(`session-${s.session_id}`);
+        if (safe) link.href = safe;
+        link.textContent = `${s.host} · ${s.session_id.slice(0, 8)}`;
+        cell("Session", link, "task-cell");
+        const none = { state: "unavailable", reasons: ["facts_missing"] };
+        cell("Length", num(f ? f.duration_ms : none, "duration"), "num");
+        cell("Agent time", num(f ? f.active_ms : none, "duration"), "num");
+        cell("Tool calls", num(f ? f.tool_calls_total : none, "count"), "num");
+        cell("Failed calls", num(f ? f.tool_failures_total : none, "count"), "num");
+        cell("Subagents", num(f ? f.subagent_count : none, "count"), "num");
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      ses.appendChild(table);
+    }
+    container.appendChild(ses);
+
+    const all = el("details", "more-details");
+    all.appendChild(el("summary", null, "Every measure, with its state and reason"));
+    all.appendChild(
+      el(
+        "p",
+        "chart-caption",
+        `Every measure the store's report holds for this task. "Measured" is the whole figure, and a zero here is a measured zero. "Partial" covers only part of the task ("at least" or "at most" says which way the true figure lies, when that is known). "No data" means the store could not measure it.`,
+      ),
+    );
+    all.appendChild(detailsTable(j));
+    const report = el("p", "chart-caption");
+    report.appendChild(safeLink("The task's full report on the reports branch", `https://github.com/ourostack/factory/blob/reports/jobs/${j.id}.md`));
+    all.appendChild(report);
+    container.appendChild(all);
   }
 
+  // --------------------------------------------------------- session page
+
+  function renderSessionDetail(container, sessions, jobs, id) {
+    container.innerHTML = "";
+    const s = id ? (sessions || []).find((x) => x.session_id === id) : null;
+    if (!s) {
+      container.appendChild(el("h2", "section-title", "Session not found"));
+      container.appendChild(el("p", "section-sub", "This build has no published facts for that session."));
+      return;
+    }
+    container.appendChild(el("h2", "section-title", `Session ${s.session_id.slice(0, 8)}`));
+    container.appendChild(el("p", "task-key", `${s.host} · ${s.entrypoint} · ${s.session_id}`));
+    const tiles = el("div", "answer-tiles task-tiles");
+    tile(tiles, "Length", num(s.duration_ms, "duration"), ["from the session's first record to its last"]);
+    tile(tiles, "Agent time", num(s.active_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
+    tile(tiles, "Tool calls", num(s.tool_calls_total, "count"), [words("failed: ", num(s.tool_failures_total, "count"))]);
+    tile(tiles, "Subagents", num(s.subagent_count, "count"), [s.models.length ? `models: ${s.models.join(", ")}` : "models: none recorded"]);
+    container.appendChild(tiles);
+    const card = el("div", "chart-card");
+    card.appendChild(el("h3", null, "Tasks this session worked on"));
+    const ul = el("ul", "pr-list");
+    const known = new Set(jobs.map((j) => j.id));
+    for (const ref of s.jobs) {
+      const li = document.createElement("li");
+      const j = jobs.find((x) => x.id === ref.id);
+      if (known.has(ref.id)) li.appendChild(jobLink(ref.id, jobLabel(j)));
+      else li.appendChild(document.createTextNode(`Task ${ref.id.slice(0, 10)} (no report in this build)`));
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    const raw = el("p", "chart-caption");
+    raw.appendChild(safeLink("The session's published facts file", s.facts_url));
+    card.appendChild(raw);
+    container.appendChild(card);
+  }
+
+  // ------------------------------------------------------------- routing
+  // #job-<key> shows one task, #session-<id> one session; anything else is
+  // the overview (and an in-page anchor there).
+
+  function route(data) {
+    const jobId = idFromHash("job");
+    const sessionId = idFromHash("session");
+    const views = { overview: !jobId && !sessionId, job: !!jobId, session: !!sessionId };
+    for (const [name, on] of Object.entries(views)) document.getElementById(`view-${name}`).hidden = !on;
+    document.body.dataset.view = jobId ? "job" : sessionId ? "session" : "overview";
+    if (jobId) renderJobDetail(document.getElementById("job-detail"), data.jobs, jobId, data.sessions);
+    if (sessionId) renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, sessionId);
+    if (jobId || sessionId) window.scrollTo(0, 0);
+    else {
+      // Coming back from a task, the anchor was hidden when the browser looked for it.
+      const anchor = /^#([A-Za-z][A-Za-z0-9_-]{0,40})$/.exec(window.location.hash || "");
+      const target = anchor && document.getElementById(anchor[1]);
+      if (target) target.scrollIntoView({ block: "start" });
+    }
+  }
+
+  function showJobFromHash(data) {
+    route(data);
+  }
   // -------------------------------------------------------------- health
 
   const VERDICT_WORD = { alive: "Alive", stale: "Stale", broken: "Broken", unknown: "Unknown" };
@@ -1285,10 +1717,19 @@
       renderHealth(document.getElementById("health-panel"), health, false, err.message);
       const msg = "This page could not load the store's data (" + err.message + "). Try reloading, or check the reports branch directly.";
       emptyState(document.getElementById("featured-grid"), msg);
+      emptyState(document.getElementById("glance-tiles"), msg);
       return;
     }
     renderHealth(document.getElementById("health-panel"), health, true, "");
     // (main continues even if the health panel failed: renderHealth contains its own errors)
+
+    // The overview: at a glance, the answer, the trend, what to fix next.
+    await loadLocalNames();
+    wasteActions = data.waste_actions && typeof data.waste_actions === "object" ? data.waste_actions : {};
+    renderGlance(document.getElementById("glance-tiles"), data, health);
+    renderAnswer(document.getElementById("answer-tiles"), data.outcomes);
+    renderTrend(document.getElementById("trend"), data.trend);
+    renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs);
 
     // Build metadata footer
     const built = new Date(data.built_at);
@@ -1488,8 +1929,8 @@
     });
 
     renderJobsTable(document.getElementById("jobs-table"), data.jobs);
-    showJobFromHash(data.jobs);
-    window.addEventListener("hashchange", () => showJobFromHash(data.jobs));
+    showJobFromHash(data);
+    window.addEventListener("hashchange", () => showJobFromHash(data));
   }
 
   main();
