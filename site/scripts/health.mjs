@@ -69,7 +69,11 @@ export const REQUIRED_EVIDENCE = [
   { name: "facts_by_host", label: "the facts count by host", present: (i) => Object.keys(i.factsByHost || {}).length > 0 },
 ];
 
-export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, reportsReadable }) {
+// `slots` fills any of EMPTY_SLOTS with the stated number its package
+// publishes; a slot left out still reads "not recorded yet". `details` holds
+// stated numbers that explain a slot (for example a share per host), keyed
+// by the slot's name.
+export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, reportsReadable, slots = {}, details = {} }) {
   const hosts = Object.entries(factsByHost || {})
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([host, files]) => ({ host, files: measured(files) }));
@@ -107,6 +111,7 @@ export function buildHealth({ builtAt, factsByHost, newestIntake, lastBuild, rep
     newest_intake: newestIntake ? measured(newestIntake) : unavailable(["no_intake_found"]),
     facts_by_host: hosts,
     factory_build: lastBuild ?? unavailable(["not_checked"]),
-    slots: { ...EMPTY_SLOTS },
+    slots: { ...EMPTY_SLOTS, ...Object.fromEntries(Object.entries(slots).filter(([k]) => k in EMPTY_SLOTS)) },
+    details: Object.fromEntries(Object.entries(details).filter(([k]) => k in EMPTY_SLOTS)),
   };
 }

@@ -31,6 +31,25 @@
   const REASON_TEXT = {
     not_recorded: "the store has no record of this",
     not_recorded_yet: "not recorded yet",
+    // Sign-off, first-pass yield and rework (Desk's rollups/outcomes.json).
+    signoff_not_published: "no published session carries a sign-off record yet",
+    signoff_not_recorded: "the job was delivered before sign-off was recorded",
+    history_not_recorded: "the job's history was not recorded from the start (an adopted card)",
+    not_delivered: "the job has not been delivered",
+    returns_not_fully_recorded: "some of the job's returns could not be read, so the count is a lower bound",
+    awaiting_signoff: "the delivery still awaits the human's answer, so it counts as a pass so far",
+    signoff_unverified: "the acceptance was not witnessed by a human prompt",
+    no_delivered_jobs: "no job with a sign-off record has been delivered yet",
+    no_refusals: "no delivery has been sent back",
+    no_labels: "no job is labeled for waste yet",
+    not_all_labeled: "not every finished job is labeled for waste",
+    active_time_unavailable: "a job's active time could not be measured",
+    catch_point_not_recorded: "some defect time has no recorded catch point",
+    no_finished_jobs: "no job has finished",
+    none_unsigned: "no delivery is waiting for sign-off",
+    refusal_unverified: "some refusals were not witnessed, so the disagreement is at least this",
+    no_accepted_outcomes: "no accepted outcomes yet",
+    no_segments: "no session time could be placed on a job",
     host_does_not_record: "the host does not record this",
     not_collected_in_slice_1: "not collected yet",
     worker_split: "a session's work is split across jobs, so only part of it is counted here",
@@ -116,6 +135,7 @@
     pct: (v) => `${(v * 100).toFixed(0)}%`,
     pct1: (v) => `${(v * 100).toFixed(1)}%`,
     text: (v) => String(v),
+    pass: (v) => (v === 1 ? "passed first time" : v === 0 ? "sent back" : String(v)),
   };
 
   function isStated(n) {

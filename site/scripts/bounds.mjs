@@ -14,6 +14,8 @@
 //   unknown           no direction
 //   lower_if_censored a lower bound only when the job is still open
 //   from_reasons      read from the reasons (below)
+//   upper_if_awaiting an upper bound when every reason is a sign-off still
+//                     awaited or unwitnessed, else unknown
 //
 // `from_reasons`: a shared worker's time and counts are counted for every
 // job that shares it, so `worker_shared` pulls the figure up (upper). Every
@@ -28,6 +30,7 @@
 // session whose start was lost can only make it shorter: an upper bound.
 
 const FROM = "from_reasons";
+const AWAITING = new Set(["awaiting_signoff", "signoff_unverified"]);
 
 export const DIRECTIONS = Object.freeze({
   // Per-job report measures (jobs table and job page).
@@ -55,6 +58,16 @@ export const DIRECTIONS = Object.freeze({
   tokens_cache_read: FROM,
   tokens_cache_write: FROM,
   sessions_bound: "lower",
+  // Sign-off and rework. A first pass that awaits a witnessed sign-off may
+  // still be sent back (upper); with returns lost too, it can go either way.
+  // Returns counted with some lost are at least that many; so is a reason
+  // disagreement counted over unwitnessed refusals.
+  first_pass_job: "upper_if_awaiting",
+  first_pass_yield: "upper_if_awaiting",
+  returns: FROM,
+  reason_disagree: "lower",
+  attention_per_accepted: "lower",
+  turns_per_accepted: "lower",
   // Rollups the site computes over measured members, and the pipeline's
   // totals (which add sessions the host records partly as a lower bound).
   sum: "lower",
@@ -84,6 +97,7 @@ export function directionOf(measure, reasons) {
   if (!Object.hasOwn(DIRECTIONS, measure)) throw new Error(`no bound direction for the measure ${measure}`);
   const rule = DIRECTIONS[measure];
   if (rule === FROM) return fromReasons(reasons);
+  if (rule === "upper_if_awaiting") return reasons.length > 0 && reasons.every((r) => AWAITING.has(r)) ? "upper" : "unknown";
   if (rule === "lower_if_censored") return reasons.length > 0 && reasons.every((r) => r === "censored") ? "lower" : "unknown";
   return rule;
 }

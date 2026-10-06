@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { DIRECTIONS, direct } from "../../../site/scripts/bounds.mjs"
+import { DIRECTIONS, direct, directionOf } from "../../../site/scripts/bounds.mjs"
 import { measured, partial, rollup, unavailable } from "../../../site/scripts/state.mjs"
 import { jobSummary } from "../../../site/scripts/job-summary.mjs"
 
@@ -15,7 +15,7 @@ test("a measure with no row in the direction table cannot be made partial: the b
 
 test("every row in the table names a known rule", () => {
   for (const [measure, rule] of Object.entries(DIRECTIONS)) {
-    assert.ok(["lower", "upper", "unknown", "from_reasons", "lower_if_censored"].includes(rule), measure)
+    assert.ok(["lower", "upper", "unknown", "from_reasons", "lower_if_censored", "upper_if_awaiting"].includes(rule), measure)
   }
 })
 
@@ -72,4 +72,11 @@ test("every partial measure a job summary or job page shows carries a direction"
   }, "j.json")
   for (const d of s.details) if (d.number.state === "partial") assert.ok(["lower", "upper", "unknown"].includes(d.number.bound), d.key)
   for (const k of ["queue_before_start_ms", "human_wait_ms", "api_retry_ms", "flow_efficiency"]) assert.ok(s[k].bound, k)
+})
+
+test("a first pass that only awaits a witnessed sign-off is an upper bound; with lost returns too, its direction is unknown", () => {
+  assert.equal(directionOf("first_pass_yield", ["awaiting_signoff"]), "upper")
+  assert.equal(directionOf("first_pass_yield", ["awaiting_signoff", "signoff_unverified"]), "upper")
+  assert.equal(directionOf("first_pass_yield", ["awaiting_signoff", "returns_not_fully_recorded"]), "unknown")
+  assert.equal(directionOf("returns", ["returns_not_fully_recorded"]), "lower")
 })

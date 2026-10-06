@@ -192,7 +192,7 @@ test("the job page lists every measure with its state: measured, partial and no 
   assert.equal(by.session_retouches.number.value, 1)
   for (const d of s.details) {
     assert.equal(typeof d.label, "string", d.key)
-    assert.ok(["duration", "count", "compact", "pct"].includes(d.kind), d.key)
+    assert.ok(["duration", "count", "compact", "pct", "text", "pass"].includes(d.kind), d.key)
   }
 })
 

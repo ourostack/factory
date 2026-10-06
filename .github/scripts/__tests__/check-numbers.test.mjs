@@ -191,3 +191,18 @@ test("every partial number says which way it lies; a whole number carries no bou
   d.jobs[0].lead_time_ms = { state: "measured", value: 5, reasons: [], bound: "lower" }
   assert.ok(codes(d).includes("bound_on_whole_number"))
 })
+
+test("the numbers check fails a build whose outcome figure has no state or no n of N", () => {
+  const c = codes({ outcomes: { signoff: { accepted: 2 }, unsigned: measured(1), first_pass_yield: 0.75 }, jobs: [{ id: "a", signoff: "accepted" }] })
+  assert.ok(c.includes("bare_number"))
+  assert.ok(c.includes("rollup_expected"))
+  assert.ok(c.includes("number_expected"))
+})
+
+test("the numbers check fails a headline that has a value and zero accepted outcomes", () => {
+  const headline = { state: "measured", value: 60000, reasons: [], kind: "rollup", n: 1, N: 1, of: "accepted outcomes", out_of_scope: 0 }
+  const d = { outcomes: { signoff: { accepted: measured(0) }, attention: { headline } } }
+  assert.ok(codes(d).includes("value_without_accepted_outcome"))
+  d.outcomes.signoff.accepted = measured(1)
+  assert.deepEqual(checkNumbers(d), [])
+})
