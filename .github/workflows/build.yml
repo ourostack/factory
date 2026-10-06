@@ -81,7 +81,7 @@ jobs:
   factory-build:
     name: factory-build
     if: github.event_name != 'issues' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
@@ -149,7 +149,7 @@ jobs:
     name: issue-checks
     needs: factory-build
     if: ${{ !cancelled() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -208,7 +208,7 @@ jobs:
     name: report
     needs: [factory-build, issue-checks]
     if: ${{ always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'issues' && needs.factory-build.result != 'cancelled' && needs.issue-checks.result != 'cancelled' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       # Only to read this run's step results and to open, comment on and close the one issue.

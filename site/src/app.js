@@ -1115,6 +1115,111 @@
     container.appendChild(al);
   }
 
+  // ------------------------------------------------------ improvement loop
+  // Whether found problems get fixed by themselves: open and in-progress
+  // improvement items, the oldest one's age, what closed this month, and the
+  // loop's own alarms. Each figure is the largest any one machine reports
+  // (machines can share a desk, so counts are never added), with n of N.
+
+  const LOOP_ROWS = [
+    ["open", "Open, not yet taken"],
+    ["in_progress", "Taken, fixed or being checked"],
+    ["oldest_open_age_days", "Oldest open item, in days"],
+    ["closed_confirmed_month", "Closed in the last 30 days, fix confirmed by data"],
+    ["closed_unverified_month", "Closed in the last 30 days without a confirming measure"],
+    ["loop_alarms_open", "The loop's own alarms open"],
+    ["steps_stale", "Loop steps that stopped succeeding"],
+  ];
+  const LOOP_ALARM = {
+    improvement_age: "an improvement item has been open for a week or more",
+    loop_alarms_open: "the loop has raised an alarm about itself",
+    steps_stale: "a loop step has stopped succeeding",
+  };
+  const LOOP_NOTICE = {
+    headless_blocked: (n) => `the waste evaluator is blocked on ${n} machine${n === 1 ? "" : "s"} (no agent command, not signed in, or host not supported); Desk opens a card after two days`,
+    headless_unknown: (n) => `whether the waste evaluator can run could not be told on ${n} machine${n === 1 ? "" : "s"} (its sign-in could not be read)`,
+  };
+  const LOOP_FIGURE = {
+    oldest_open_age_days: "the oldest open item's age",
+    loop_alarms_open: "the loop's own alarms",
+    steps_stale: "whether every loop step is succeeding",
+  };
+  const HEADLESS_WORD = {
+    idle: "idle",
+    ran: "ran today",
+    no_agent_cli: "no agent command found",
+    no_credentials: "not signed in",
+    disabled_would_bill: "off: it would bill an account",
+    sign_in_unknown: "sign-in could not be told",
+    budget_exhausted: "today's budget spent",
+    disabled: "switched off",
+    unsupported_host: "host not supported",
+    unavailable: "not known today",
+  };
+
+  function renderLoop(container, loop) {
+    container.innerHTML = "";
+    if (!loop || !loop.open) {
+      emptyState(container, "The improvement loop is not part of this build's data.");
+      return;
+    }
+    const dl = el("dl", "health-facts");
+    for (const [key, label] of LOOP_ROWS) row(dl, label, num(loop[key], "count"));
+    const evalNode = el("span");
+    if (!loop.headless.length) evalNode.appendChild(document.createTextNode("no data (no machine said)"));
+    loop.headless.forEach((h, i) => {
+      if (i) evalNode.appendChild(document.createTextNode(", "));
+      evalNode.appendChild(document.createTextNode(`${HEADLESS_WORD[h.code] || h.code.replace(/_/g, " ")} on `));
+      evalNode.appendChild(num(h.machines, "count"));
+      evalNode.appendChild(document.createTextNode(" machine(s)"));
+    });
+    row(dl, "Waste evaluator, run by itself", evalNode);
+    const m = loop.machines;
+    const machinesNode = el("span");
+    machinesNode.appendChild(num(m.reporting, "count"));
+    machinesNode.appendChild(document.createTextNode(" reporting, "));
+    machinesNode.appendChild(num(m.without_loop, "count"));
+    machinesNode.appendChild(document.createTextNode(" on a Desk that does not send it yet, "));
+    machinesNode.appendChild(num(m.quiet, "count"));
+    machinesNode.appendChild(document.createTextNode(" quiet for over three days (their ages are counted from their last record)"));
+    if (m.stale) {
+      machinesNode.appendChild(document.createTextNode(", "));
+      machinesNode.appendChild(num(m.stale, "count"));
+      machinesNode.appendChild(document.createTextNode(" with a record older than 45 days, not read as current"));
+    }
+    row(dl, "Machines", machinesNode);
+    container.appendChild(dl);
+    const alarms = Array.isArray(loop.alarms) ? loop.alarms : [];
+    const al = el("p", alarms.length ? "capture-alarms capture-alarms-on" : "capture-alarms");
+    // The healthy sentence only when every figure it rests on is measured
+    // from current records; otherwise say which are not recorded, and why.
+    const verdict = loop.verdict || { status: "cannot_tell", missing: [] };
+    const count = (x) => (x && x.state === "measured" ? x.value : 0);
+    const silent = [];
+    if (count(verdict.quiet)) silent.push(`${count(verdict.quiet)} machine${count(verdict.quiet) === 1 ? " has" : "s have"} sent nothing for over three days`);
+    if (count(verdict.stale)) silent.push(`${count(verdict.stale)} machine${count(verdict.stale) === 1 ? "'s record is" : "s' records are"} older than 45 days`);
+    if (alarms.length) {
+      al.textContent = `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`;
+    } else if (verdict.status === "healthy") {
+      al.textContent = "No loop alarm: nothing has been open for a week, the loop has no alarm of its own, and every loop step is succeeding.";
+    } else if (verdict.missing.length && verdict.missing.every((x) => x.codes.length === 1 && x.codes[0] === "no_records")) {
+      al.textContent = "No alarm can be told until a machine sends its loop's health.";
+    } else {
+      const parts = verdict.missing.map((x) => `${LOOP_FIGURE[x.figure] || x.figure} (${x.codes.map((c) => F.reasonText(c)).join("; ")})`);
+      const why = [];
+      if (parts.length) why.push(`not recorded: ${parts.join("; ")}`);
+      if (silent.length) why.push(`${silent.join(", and ")}, so their figures may not hold today`);
+      al.textContent = `No alarm is raised, but the loop's health cannot be told: ${why.join("; ")}.`;
+    }
+    container.appendChild(al);
+    const notices = Array.isArray(loop.notices) ? loop.notices : [];
+    if (notices.length) {
+      const note = el("p", "capture-notes");
+      note.textContent = `Notice: ${notices.map((x) => (LOOP_NOTICE[x.code] ? LOOP_NOTICE[x.code](count(x.machines)) : x.code)).join("; ")}.`;
+      container.appendChild(note);
+    }
+  }
+
   // ---------------------------------------------------------------- main
 
   async function loadJSON(url) {
@@ -1211,6 +1316,7 @@
     }
 
     renderCaptureCoverage(document.getElementById("capture-coverage"), data.capture_coverage);
+    renderLoop(document.getElementById("loop-health"), data.loop_health);
     renderTakeaways(document.getElementById("takeaways"), data.takeaways);
 
     const timeBreakdownNoteEl = document.getElementById("time-breakdown-note");

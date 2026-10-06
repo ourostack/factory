@@ -45,6 +45,7 @@ const ROLLUP_PATHS = [
   /^waste\.breakdown\[\d+\]\.(total_ms|share)$/,
   /^headlines\[\d+\]\.number$/,
   /^capture_coverage\.share$/,
+  /^loop_health\.(open|in_progress|not_closed|oldest_open_age_days|closed_confirmed_month|closed_unverified_month|loop_alarms_open|steps_stale)$/,
   /^capture_coverage\.hosts\[\d+\]\.(on_disk|derived|held|frozen|pending|not_seen|not_in_a_desk|share|capturable_share)$/,
   /^takeaways\[\d+\]\.slots\.(median|rate|calls|failures|share|with|dispatches)$/,
 ];
@@ -59,6 +60,9 @@ const NUMBER_PATHS = [
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
   /^capture_coverage\.machines\.(counted|empty|stale|invalid|over_limit|files)$/,
   /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines)$/,
+  /^loop_health\.machines\.(reporting|without_loop|unreadable_loop|quiet|stale)$/,
+  /^loop_health\.(headless|notices)\[\d+\]\.machines$/,
+  /^loop_health\.verdict\.(quiet|stale)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
   ...ROLLUP_PATHS,
 ];
