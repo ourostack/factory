@@ -35,7 +35,7 @@ test("with no capture record, every loop figure is no data, never zero", () => {
   const l = summarizeLoop({ files: [], nowMs: NOW })
   for (const key of ["open", "in_progress", "oldest_open_age_days", "closed_confirmed_month", "loop_alarms_open", "steps_stale"]) {
     assert.equal(l[key].state, "unavailable", key)
-    assert.deepEqual(l[key].reasons, ["no_records"], key)
+    assert.deepEqual(l[key].reasons, ["no_loop_records"], key)
   }
   assert.deepEqual(l.alarms, [])
   assert.deepEqual(checkNumbers({ loop_health: l }), [])

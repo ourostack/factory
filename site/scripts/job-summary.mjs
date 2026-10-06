@@ -56,7 +56,7 @@ const DETAILS = [
   ["tokens_cache_write", "Cache write tokens", "compact", (F) => bounded(F.tokens_total?.cache_write, "tokens_cache_write")],
   ["signoff", "Sign-off", "text", signoffOf],
   ["signoff_wait", "Wait for sign-off", "text", signoffWaitOf],
-  ["first_pass", "First pass", "pass", (F) => firstPassOf(F)],
+  ["first_pass", "First pass", "pass", (F) => bounded(F.first_pass_yield, "first_pass_job")],
   ["returns", "Times sent back", "count", returnsOf],
 ];
 
@@ -68,9 +68,8 @@ const SIGNOFF_WORDS = {
   reopened: "reopened",
   not_delivered: "not delivered yet",
 };
-// Acceptance is the agent's record of the operator's word: an old record's
-// `verified` field is read past, so an accepted job reads accepted with or
-// without it.
+// The job's sign-off state in words. Acceptance is the agent's record of the
+// operator's word; the site reads only the state, never a `verified` field.
 function signoffOf(F) {
   const n = fromFormula(F.signoff);
   if (n.state === "unavailable") return n;
@@ -135,20 +134,6 @@ function signoffWaitOf(F) {
   const words = waitWords(F.signoff?.wait);
   return words ? measured(words) : unavailable(["not_delivered"]);
 }
-// A first pass whose only doubt is an unwitnessed sign-off is final: the
-// agent recorded the answer on the operator's word.
-function firstPassOf(F) {
-  const f = F.first_pass_yield;
-  if (f && typeof f === "object" && Array.isArray(f.reasons) && f.reasons.includes("signoff_unverified")) {
-    const reasons = f.reasons.filter((r) => r !== "signoff_unverified");
-    const partialReasons = Array.isArray(f.partial_reasons) ? f.partial_reasons.filter((r) => r !== "signoff_unverified") : f.partial_reasons;
-    const rest = { ...f, reasons, partial_reasons: partialReasons, partial: reasons.length > 0 };
-    if (!reasons.length && f.state === "partial") rest.state = "measured";
-    return bounded(rest, "first_pass_job");
-  }
-  return bounded(f, "first_pass_job");
-}
-
 // All returns of the job, whichever catch point caught them.
 function returnsOf(F) {
   const r = F.rework;
@@ -187,7 +172,7 @@ export function jobSummary(d, f) {
     public_prs: bounded(prs, "public_prs"),
     signoff: signoffOf(F),
     signoff_wait: signoffWaitOf(F),
-    first_pass: firstPassOf(F),
+    first_pass: bounded(F.first_pass_yield, "first_pass_job"),
     returns: returnsOf(F),
     outcome: outcomeOf(statusValue, F),
     attention_ms: attentionOf(F),

@@ -67,6 +67,9 @@ export const DIRECTIONS = Object.freeze({
   returns: FROM,
   reason_disagree: "lower",
   attention_per_accepted: "lower",
+  // A mean over the delivered tasks whose estimate is whole: the tasks left
+  // out could cost more or less.
+  attention_per_delivered: "unknown",
   // One job's attention estimate and the human turns it rests on: a
   // partial estimate misses turns, so it is at least this.
   attention_ms: "lower",

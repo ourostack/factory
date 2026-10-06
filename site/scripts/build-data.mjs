@@ -45,9 +45,9 @@ import { direct } from "./bounds.mjs";
 import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
-import { outcomesSummary, releaseTrend } from "./outcomes.mjs";
+import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
-import { compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, qualifiersOf } from "./waste.mjs";
+import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, labeledWaste, qualifiersOf } from "./waste.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 
@@ -198,6 +198,8 @@ const jobsDir = join(reportsDir, "jobs");
 const jobFiles = listJSON(jobsDir);
 
 const jobs = jobFiles.map((f) => jobSummary(readJSON(join(jobsDir, f), {}), f));
+// Until an outcome is accepted, the band answers per delivered task instead.
+outcomes.attention.per_delivered = attentionPerDelivered(jobs);
 
 // Each job's labeled time, from the evaluator's label files on main
 // (labels/<job>/<session>.json).
@@ -205,7 +207,7 @@ const labelsDir = join(mainDir, "labels");
 for (const j of jobs) {
   const dir = join(labelsDir, j.id);
   const docs = /^[0-9A-Za-z_-]{1,64}$/.test(j.id) ? listJSON(dir).map((f) => readJSON(join(dir, f), null)).filter((d) => d && d.job === j.id) : [];
-  j.waste = jobWaste(docs, j.sessions_bound);
+  j.waste = jobWaste(docs, j.sessions.map((x) => x.session_id));
 }
 
 const jobStatusCounts = {};
@@ -839,6 +841,9 @@ const data = {
   trend,
   sessions,
   waste_actions: WASTE_ACTIONS,
+  waste_names: WASTE_NAMES,
+  // The one waste overview, from the same per-job labels the task pages show.
+  labeled_waste: labeledWaste(jobs),
   fix_next: fixNext({ jobs, outcomes, kaizenIssues, andonIssues, capture: captureCoverage, loop: loopHealth }),
 };
 
