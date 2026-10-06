@@ -334,7 +334,7 @@
   };
 
   const WASTE_QUALIFIER_TEXT = {
-    unknown_label: "the evaluator looked at this time and could not tell what kind of waste it was. It is shown as its own row, is not counted as any other waste, and is not counted in the waste total because it is not known to be waste. It is part of the labeled time the shares are taken of.",
+    unknown_label: "the evaluator looked at this time and could not tell what kind of waste it was. It is shown as its own row, is not counted as any other waste, and is not counted in the waste total because it is not known to be waste. It is part of the waste and unknown time the shares are taken of.",
     low_confidence: "some of this time rests on labels the evaluator marked low confidence, so do not rely on it.",
     confidence_not_recorded: "the evaluator's confidence was not recorded, so this is not shown as sound.",
   };
@@ -551,7 +551,7 @@
           tooltipRows: [
             { label: "Time lost", value: F.toText(w.total_ms, "duration") },
             { label: "Jobs affected", value: F.toText(w.jobs, "count") },
-            { label: "Share of labeled time (unknown included)", value: F.toText(w.share, "pct1") },
+            { label: "Share of waste and unknown time", value: F.toText(w.share, "pct1") },
             { label: "Evaluator versions", value: w.evaluator_versions && w.evaluator_versions.state !== "unavailable" ? String(w.evaluator_versions.value) : "not recorded" },
             confRow("Resting on high-confidence labels", "high_ms"),
             confRow("Resting on medium-confidence labels", "medium_ms"),

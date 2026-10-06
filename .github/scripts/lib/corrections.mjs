@@ -109,8 +109,7 @@ const INTERVAL_KINDS = Object.freeze([
   "turn", "tool", "subagent", "human_wait", "permission_wait", "api_retry", "compaction",
 ]);
 const OUTCOMES = Object.freeze(["ok", "error", "denied", "interrupted", "timeout"]);
-// Published facts (`desk.factory.published/1`, `/2`, and `/3` once Desk
-// publishes it). Desk's validator checks every version against this one
+// Published facts (`desk.factory.published/1`, `/2` and `/3`). Desk's validator checks every version against this one
 // vocabulary (the version-only parts are the `human_turns` list, a `/2`
 // field that is not correctable, and the `/3` commit time and `outcomes`
 // flag, which `checkCorrectionAgainstFacts` keeps off older files), so there
@@ -124,8 +123,7 @@ const PUBLISHED_UNAVAILABLE_FIELDS = Object.freeze([
   "compaction_waits", "agents", "prs", "reasoning_tokens", "entrypoint", "tool_outcomes", "job_segments",
   "job_offsets", "human_turns",
   // A session with more than 256 outcomes cut (Desk's `LIMITS.outcomes`) is flagged
-  // `outcomes` / `capped` instead of silently truncated. The store lists it before
-  // Desk does (store first, the version-skew rule); see STORE_AHEAD_OF_DESK.
+  // `outcomes` / `capped` instead of silently truncated.
   "outcomes",
 ]);
 const UNAVAILABLE_REASONS = Object.freeze([
@@ -631,8 +629,6 @@ const MIRRORED_VOCABULARY = Object.freeze({
 // the store's list holds a value Desk's does not. The comparison with Desk
 // allows exactly these and nothing else; a value Desk lacks and that is not
 // listed here is a drift. Remove an entry once Desk main has the value.
-const STORE_AHEAD_OF_DESK = Object.freeze({
-  publishedUnavailableField: Object.freeze(["outcomes"]),
-});
+const STORE_AHEAD_OF_DESK = Object.freeze({});
 
 export { MIRRORED_VOCABULARY, STORE_AHEAD_OF_DESK, CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };
