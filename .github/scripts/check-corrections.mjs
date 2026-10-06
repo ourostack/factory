@@ -18,7 +18,7 @@
 import { execFileSync } from "node:child_process"
 import { pathToFileURL } from "node:url"
 
-import { validateCorrectionRecord } from "./lib/corrections.mjs"
+import { checkCorrectionAgainstFacts, validateCorrectionRecord } from "./lib/corrections.mjs"
 
 const GIT_REF = /^[0-9a-f]{40}$/u
 const CORRECTIONS_PATH = /^corrections\/([^/]+\.json)$/u
@@ -61,7 +61,18 @@ export function checkCorrections({ base, head, runGit = git }) {
       continue
     }
     const { ok, errors } = validateCorrectionRecord(record, match[1])
-    if (!ok) for (const error of errors) codes.add(error.code)
+    if (!ok) {
+      for (const error of errors) codes.add(error.code)
+      continue
+    }
+    // Against the facts file it would change, when the head holds one.
+    let current = null
+    try {
+      current = JSON.parse(runGit(["cat-file", "blob", `${head}:facts/${record.file}`]))
+    } catch {
+      current = null
+    }
+    if (current !== null) for (const error of checkCorrectionAgainstFacts(current, record)) codes.add(error.code)
   }
 
   return { ok: codes.size === 0, codes: [...codes].sort() }

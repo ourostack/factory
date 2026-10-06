@@ -39,7 +39,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
 
-import { applyCorrection, correctionChanges, validateCorrectionRecord } from "./lib/corrections.mjs"
+import { applyCorrection, checkCorrectionAgainstFacts, correctionChanges, validateCorrectionRecord } from "./lib/corrections.mjs"
 
 function parseArgs(argv) {
   const options = new Map()
@@ -98,6 +98,19 @@ export function applyCorrectionsToStore({
       continue
     }
     records.push(record)
+  }
+  // A correction may not write what its target file's own schema version does not allow.
+  for (const record of records) {
+    const factsPath = path.join(factsDir, record.file)
+    if (!exists(factsPath)) continue
+    let current
+    try {
+      current = JSON.parse(readText(factsPath))
+    } catch {
+      continue
+    }
+    const errors = checkCorrectionAgainstFacts(current, record)
+    if (errors.length > 0) problems.push({ file: record.file, errors })
   }
   if (problems.length > 0) throw new CorrectionsInvalidError(problems)
 

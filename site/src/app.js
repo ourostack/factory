@@ -167,6 +167,12 @@
       rowEl.tabIndex = 0;
       const labelEl = el("span", "bar-label", row.label);
       labelEl.title = row.label;
+      if (row.flag) {
+        // The doubt must stay readable: let the label wrap rather than cut it off.
+        labelEl.appendChild(el("span", "bar-flag", ` (${row.flag})`));
+        labelEl.style.whiteSpace = "normal";
+        labelEl.style.overflow = "visible";
+      }
       const trackEl = el("div", "bar-track");
       if (typeof raw(row.secondary) === "number") {
         const secEl = el("div", "bar-fill secondary");
@@ -323,6 +329,14 @@
     inventory: "Inventory",
     motion: "Motion",
     extra_processing: "Extra processing",
+    // A real label: the evaluator looked and could not tell. Never folded into another.
+    unknown: "Unknown (the evaluator could not tell)",
+  };
+
+  const WASTE_QUALIFIER_TEXT = {
+    unknown_label: "the evaluator looked at this time and could not tell what kind of waste it was. It is shown as its own row, is not counted as any other waste, and is not counted in the waste total because it is not known to be waste. It is part of the labeled time the shares are taken of.",
+    low_confidence: "some of this time rests on labels the evaluator marked low confidence, so do not rely on it.",
+    confidence_not_recorded: "the evaluator's confidence was not recorded, so this is not shown as sound.",
   };
 
   function statusColor(status) {
@@ -524,16 +538,43 @@
 
     panelEl.innerHTML = "";
     if (isPositive(labeled) && waste.breakdown && waste.breakdown.length) {
-      const rows = waste.breakdown.map((w) => ({
-        label: WASTE_NAMES[w.waste] || w.waste,
-        number: w.total_ms,
-        tooltipRows: [
-          { label: "Time lost", value: F.toText(w.total_ms, "duration") },
-          { label: "Jobs affected", value: F.toText(w.jobs, "count") },
-          { label: "Share of labeled waste", value: F.toText(w.share, "pct1") },
-        ],
-      }));
+      const nameOf = (w) => WASTE_NAMES[w.waste] || w.waste;
+      const rows = waste.breakdown.map((w) => {
+        const q = Array.isArray(w.qualifiers) ? w.qualifiers : ["confidence_not_recorded"];
+        const conf = w.confidence || {};
+        const confRow = (label, key) => ({ label, value: conf[key] ? F.toText(conf[key], "duration") : "not recorded" });
+        return {
+          label: nameOf(w),
+          flag: q.length ? "not sound" : "",
+          color: w.waste === "unknown" ? "var(--text-muted)" : undefined,
+          number: w.total_ms,
+          tooltipRows: [
+            { label: "Time lost", value: F.toText(w.total_ms, "duration") },
+            { label: "Jobs affected", value: F.toText(w.jobs, "count") },
+            { label: "Share of labeled time (unknown included)", value: F.toText(w.share, "pct1") },
+            { label: "Evaluator versions", value: w.evaluator_versions && w.evaluator_versions.state !== "unavailable" ? String(w.evaluator_versions.value) : "not recorded" },
+            confRow("Resting on high-confidence labels", "high_ms"),
+            confRow("Resting on medium-confidence labels", "medium_ms"),
+            confRow("Resting on low-confidence labels", "low_ms"),
+          ],
+        };
+      });
       renderBarList(panelEl, rows, { color: "var(--series-8)", kind: "duration" });
+      // The same facts in plain, always-visible words: a hover is not the only place a doubt is stated.
+      const notes = el("ul", "waste-notes");
+      for (const w of waste.breakdown) {
+        const q = Array.isArray(w.qualifiers) ? w.qualifiers : ["confidence_not_recorded"];
+        for (const code of q) notes.appendChild(el("li", "", `${nameOf(w)}: ${WASTE_QUALIFIER_TEXT[code] || code.replace(/_/g, " ")}`));
+      }
+      if (notes.children.length) panelEl.appendChild(notes);
+      else panelEl.appendChild(el("p", "chart-caption", "Every row above rests on labels whose confidence was recorded and none of it low."));
+      const known = waste.breakdown.filter((w) => w.evaluator_versions && w.evaluator_versions.state !== "unavailable");
+      const unrecorded = waste.breakdown.filter((w) => !(w.evaluator_versions && w.evaluator_versions.state !== "unavailable")).map(nameOf);
+      const versions = [...new Set(known.flatMap((w) => String(w.evaluator_versions.value).split(", ")))];
+      const said = [];
+      if (versions.length) said.push(`Labels assigned by evaluator version ${versions.join(", ")}.`);
+      if (unrecorded.length) said.push(`The evaluator version was not recorded for: ${unrecorded.join(", ")}.`);
+      panelEl.appendChild(el("p", "chart-caption", said.join(" ")));
       return;
     }
 

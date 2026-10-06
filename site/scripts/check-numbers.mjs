@@ -54,6 +54,7 @@ const ROLLUP_PATHS = [
 const NUMBER_PATHS = [
   /^jobs\[\d+\]\.(lead_time_ms|active_time_ms|flow_efficiency|queue_before_start_ms|human_wait_ms|api_retry_ms|tool_failures|tool_retries|sessions_bound|public_prs|signoff|signoff_wait|first_pass|returns)$/,
   /^outcomes\.signoff\.[a-z_]+$/,
+  /^waste\.breakdown\[\d+\]\.confidence\.(high|medium|low)_ms$/,
   /^outcomes\.(oldest_unsigned_wait|first_pass_counts\.[a-z_]+)$/,
   /^outcomes\.rework\.reason_check\.(compared|disagree|compared_verified)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,

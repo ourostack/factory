@@ -46,6 +46,7 @@ import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollu
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
 import { outcomesSummary } from "./outcomes.mjs";
+import { confidenceFigures, confidenceOf, evaluatorVersionsFigure, qualifiersOf } from "./waste.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 
@@ -688,12 +689,21 @@ const wasteN = wasteJobsLabeled.state === "measured" ? wasteJobsLabeled.value : 
 const wasteN_total = wasteJobsTotal.state === "measured" ? wasteJobsTotal.value : 0;
 const wasteBreakdown = (mudaOverall?.wastes ?? [])
   .filter((w) => w && typeof w.waste === "string")
-  .map((w) => ({
-    waste: w.waste,
-    total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs", measure: "sum" }),
-    jobs: counted(w.jobs),
-    share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs", measure: "share" }),
-  }));
+  .map((w) => {
+    const confidence = confidenceOf(w);
+    return {
+      waste: w.waste,
+      total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs", measure: "sum" }),
+      jobs: counted(w.jobs),
+      share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs", measure: "share" }),
+      // How far the row may be trusted (waste.mjs): an `unknown` row, a row
+      // with time on low-confidence labels and a row with no recorded
+      // confidence are never shown as sound.
+      confidence: confidenceFigures(confidence),
+      evaluator_versions: evaluatorVersionsFigure(w.evaluator_versions),
+      qualifiers: qualifiersOf(w.waste, confidence),
+    };
+  });
 
 // ---------------------------------------------------------------------------
 // Assemble and write

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
@@ -10,6 +10,7 @@ import {
   UNAVAILABLE_LIMIT,
   UNAVAILABLE_REASONS,
   applyCorrection,
+  checkCorrectionAgainstFacts,
   correctionChanges,
   validateCorrectionRecord,
 } from "../lib/corrections.mjs"
@@ -479,10 +480,11 @@ const V2_REASONS = [
 
 test("the unavailable list limit is every field with every reason once, computed from the two lists, and human_turns is a field", () => {
   assert.ok(PUBLISHED_UNAVAILABLE_FIELDS.includes("human_turns"))
-  assert.deepEqual([...PUBLISHED_UNAVAILABLE_FIELDS].sort(), [...V2_FIELDS, "human_turns"].sort())
+  assert.ok(PUBLISHED_UNAVAILABLE_FIELDS.includes("outcomes"))
+  assert.deepEqual([...PUBLISHED_UNAVAILABLE_FIELDS].sort(), [...V2_FIELDS, "human_turns", "outcomes"].sort())
   assert.deepEqual([...UNAVAILABLE_REASONS].sort(), [...V2_REASONS].sort())
   assert.equal(UNAVAILABLE_LIMIT, PUBLISHED_UNAVAILABLE_FIELDS.length * UNAVAILABLE_REASONS.length)
-  assert.equal(UNAVAILABLE_LIMIT, 231)
+  assert.equal(UNAVAILABLE_LIMIT, 242)
 })
 
 test("a correction may carry every /2 unavailable field and reason, every pair at once", () => {
@@ -519,7 +521,7 @@ test("a correction may restore a null token or request counter: null is not reco
 
 import { existsSync } from "node:fs"
 import { pathToFileURL } from "node:url"
-import { MIRRORED_VOCABULARY } from "../lib/corrections.mjs"
+import { MIRRORED_VOCABULARY, STORE_AHEAD_OF_DESK } from "../lib/corrections.mjs"
 
 test("a correction for a Codex job is accepted, not refused by the file name or the host", () => {
   const file = `codex-cli-${SESSION}.json`
@@ -547,10 +549,93 @@ test("a job whose basis is spawn_brief or inherited is accepted; an unknown basi
 const deskSchema = process.env.DESK_DIR ? path.join(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/schema.js") : null
 const deskSchemaReachable = Boolean(deskSchema && existsSync(deskSchema))
 
-test("the mirror's vocabulary equals Desk's, list for list", { skip: deskSchemaReachable || process.env.FACTORY_REQUIRE_DESK === "1" ? false : "Desk is not reachable: set DESK_DIR to a Desk checkout" }, async () => {
+test("the mirror's vocabulary equals Desk's, list for list, except values the store accepts first", { skip: deskSchemaReachable || process.env.FACTORY_REQUIRE_DESK === "1" ? false : "Desk is not reachable: set DESK_DIR to a Desk checkout" }, async () => {
   assert.ok(deskSchemaReachable, "FACTORY_REQUIRE_DESK is set but DESK_DIR does not hold Desk's schema.js")
   const { ENUMS } = await import(pathToFileURL(deskSchema).href)
   for (const [name, mirrored] of Object.entries(MIRRORED_VOCABULARY)) {
-    assert.deepEqual([...mirrored].sort(), [...ENUMS[name]].sort(), `the mirror's ${name} list differs from Desk's`)
+    const ahead = new Set(STORE_AHEAD_OF_DESK[name] ?? [])
+    // Desk has a value the store lacks: the store must catch up (a drift, andon).
+    assert.deepEqual([...ENUMS[name]].filter((value) => !mirrored.includes(value)), [], `Desk's ${name} list has a value the mirror lacks`)
+    // A store-first value Desk already has must leave the allowance (andon): it would otherwise hide a later drift.
+    assert.deepEqual([...ahead].filter((value) => ENUMS[name].includes(value)), [], `Desk's ${name} list now has ${[...ahead].filter((value) => ENUMS[name].includes(value)).join(", ")}: remove it from STORE_AHEAD_OF_DESK in lib/corrections.mjs`)
+    // The store has a value Desk lacks and it is not a declared store-first value: a drift.
+    assert.deepEqual(mirrored.filter((value) => !ENUMS[name].includes(value) && !ahead.has(value)), [], `the mirror's ${name} list has a value Desk lacks and STORE_AHEAD_OF_DESK does not allow`)
   }
+})
+
+test("every store-first value is in the mirror, and the allowance names only vocabularies the mirror holds", () => {
+  for (const [name, values] of Object.entries(STORE_AHEAD_OF_DESK)) {
+    assert.ok(Object.hasOwn(MIRRORED_VOCABULARY, name), name)
+    for (const value of values) assert.ok(MIRRORED_VOCABULARY[name].includes(value), `${name} ${value}`)
+  }
+})
+
+test("a correction may restore the outcomes flag, and a session that cut outcomes can say so", () => {
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { unavailable: [{ field: "outcomes", reason: "capped" }] } }), FILE_NAME)
+  assert.deepEqual(errors, [])
+  assert.equal(ok, true)
+})
+
+test("a correction's refs accept a commit with or without a time, a PR with or without its worker and time, and nothing more", () => {
+  const sha = "a".repeat(40)
+  const refs = (extra) => ({ prs: [], commits: [{ repo: "ourostack/desk", sha, ...extra }], private: { prs: 0, commits: 0 } })
+  const check = (value) => validateCorrectionRecord(validRecord({ fields: { refs: value } }), FILE_NAME)
+  assert.deepEqual(check(refs({})).errors, [])
+  assert.deepEqual(check(refs({ at_ms: 1234 })).errors, [])
+  assert.ok(check(refs({ at_ms: -1 })).errors.some((e) => e.code === "correction_field_integer"))
+  assert.ok(check(refs({ at_ms: "5" })).errors.some((e) => e.code === "correction_field_integer"))
+  assert.ok(check(refs({ at: 5 })).errors.some((e) => e.code === "correction_field_unknown_key"))
+  const pr = (extra) => ({ prs: [{ repo: "ourostack/desk", number: 7, ...extra }], commits: [], private: { prs: 0, commits: 0 } })
+  assert.deepEqual(check(pr({})).errors, [])
+  assert.deepEqual(check(pr({ agent: 2, at_ms: 99 })).errors, [])
+  assert.ok(check(pr({ who: "x" })).errors.some((e) => e.code === "correction_field_unknown_key"))
+})
+
+test("a correction may not write a commit time or an outcomes flag into a /1 or /2 file, nor a PR time into a /1 file", () => {
+  const sha = "a".repeat(40)
+  const rec = (fields) => validRecord({ fields })
+  const commit = rec({ refs: { prs: [], commits: [{ repo: "ourostack/desk", sha, at_ms: 5 }], private: { prs: 0, commits: 0 } } })
+  const bare = rec({ refs: { prs: [], commits: [{ repo: "ourostack/desk", sha }], private: { prs: 0, commits: 0 } } })
+  const pr = rec({ refs: { prs: [{ repo: "ourostack/desk", number: 1, at_ms: 5 }], commits: [], private: { prs: 0, commits: 0 } } })
+  const flag = rec({ unavailable: [{ field: "outcomes", reason: "capped" }] })
+  const at = (n) => ({ schema: `desk.factory.published/${n}` })
+  const codes = (current, record) => checkCorrectionAgainstFacts(current, record).map((e) => e.code)
+  for (const r of [commit, flag]) {
+    assert.deepEqual(codes(at(1), r), ["correction_version_mismatch"])
+    assert.deepEqual(codes(at(2), r), ["correction_version_mismatch"])
+    assert.deepEqual(codes(at(3), r), [])
+  }
+  assert.deepEqual(codes(at(1), pr), ["correction_version_mismatch"])
+  assert.deepEqual(codes(at(2), pr), [])
+  for (const n of [1, 2, 3]) assert.deepEqual(codes(at(n), bare), [], "the old form is accepted in every version")
+  assert.deepEqual(codes({}, commit), ["correction_version_mismatch"], "an unreadable version is not assumed to be new")
+  assert.deepEqual(codes({}, bare), [])
+})
+
+test("applying corrections stops on a correction the target file's version does not allow, and writes nothing", async () => {
+  const { dir, cleanup } = (() => { const d = mkdtempSync(path.join(tmpdir(), "ver-")); return { dir: d, cleanup: () => rmSync(d, { recursive: true, force: true }) } })()
+  try {
+    mkdirSync(path.join(dir, "facts"), { recursive: true })
+    mkdirSync(path.join(dir, "corrections"), { recursive: true })
+    const original = JSON.stringify({ schema: "desk.factory.published/2", unavailable: [] })
+    writeFileSync(path.join(dir, "facts", FILE_NAME), original)
+    writeFileSync(path.join(dir, "corrections", FILE_NAME), JSON.stringify(validRecord({ fields: { unavailable: [{ field: "outcomes", reason: "capped" }] } })))
+    assert.throws(() => applyCorrectionsToStore({ storeDir: dir }), (err) => err instanceof CorrectionsInvalidError && err.problems[0].errors[0].code === "correction_version_mismatch")
+    assert.equal(readFileSync(path.join(dir, "facts", FILE_NAME), "utf8"), original)
+  } finally {
+    cleanup()
+  }
+})
+
+test("the pull request check also refuses a correction the target facts file's version does not allow", () => {
+  const record = JSON.stringify(validRecord({ fields: { unavailable: [{ field: "outcomes", reason: "capped" }] } }))
+  const run = (schema) => (args) => {
+    if (args[0] === "diff") return `corrections/${FILE_NAME}\0`
+    if (args[1] === "blob" && args[2].includes(":corrections/")) return record
+    if (args[1] === "blob" && args[2].includes(":facts/")) return JSON.stringify({ schema })
+    throw new Error("unexpected")
+  }
+  const base = "a".repeat(40)
+  assert.deepEqual(checkCorrections({ base, head: base, runGit: run("desk.factory.published/2") }).codes, ["correction_version_mismatch"])
+  assert.deepEqual(checkCorrections({ base, head: base, runGit: run("desk.factory.published/3") }).codes, [])
 })
