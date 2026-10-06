@@ -269,3 +269,9 @@ test("the capture table keeps the whole marker visible and shows a scroll cue wh
   assert.match(table, /scroll-cue/)
   assert.match(table, /wrap\.scrollWidth > wrap\.clientWidth/)
 })
+
+test("the machines without a loop slot are not said to be on a Desk that does not send it yet", () => {
+  assert.doesNotMatch(F.WITHOUT_LOOP_WORDS, /does not send|yet/)
+  assert.match(F.WITHOUT_LOOP_WORDS, /older Desk/)
+  assert.match(F.WITHOUT_LOOP_WORDS, /not measured for over three days/)
+})

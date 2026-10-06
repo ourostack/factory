@@ -442,5 +442,8 @@
     return "coverage: not recorded yet";
   }
 
-  return { recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  // The machines whose capture record carries no loop slot: an older Desk, or a Desk whose loop has not measured for over three days. The record cannot tell them apart, so the words are true for both.
+  const WITHOUT_LOOP_WORDS = " sent no loop health (an older Desk, or a loop that has not measured for over three days), ";
+
+  return { WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });
