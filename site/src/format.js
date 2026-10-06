@@ -128,6 +128,8 @@
     no_loop_records: "no machine has sent its improvement loop's health yet",
     machine_sent_no_loop_record: "some machines did not send this figure and are left out",
     none_open: "no improvement item is open",
+    // One job's labeled time (the page's per-task waste).
+    some_sessions_not_labeled: "some of the job's sessions are not labeled yet, so this is at least this much",
   };
 
   // Every reason that can reach the page has words. The site build stops on
@@ -253,7 +255,18 @@
     wrap.appendChild(value);
     if (d.state === "partial") {
       wrap.title = `Partial: ${d.reason}`;
-      if (!(opts && opts.flag === false)) {
+      if (opts && opts.flag === "short") {
+        // In a dense table or a list the cell says "partial" and the reason
+        // sits in its title and in one note for the whole table.
+        const flag = doc.createElement("span");
+        flag.className = "num-flag";
+        flag.textContent = d.marker.startsWith("unverified") ? "unverified" : "partial";
+        const sr = doc.createElement("span");
+        sr.className = "sr-only";
+        sr.textContent = `: ${d.reason}`;
+        flag.appendChild(sr);
+        wrap.appendChild(flag);
+      } else if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
       flag.className = "num-flag";
       // The whole marker, direction included, is visible text: a reader on a
@@ -275,11 +288,13 @@
     } else if (d.state === "unavailable") {
       wrap.title = `No data: ${d.reason}`;
       const why = doc.createElement("span");
-      why.className = "num-reason";
+      // In a dense table the caller states the reason once below the table
+      // (opts.reason === false); the cell keeps it for screen readers.
+      why.className = opts && opts.reason === false ? "sr-only" : "num-reason";
       why.textContent = `(${d.reason})`;
       wrap.appendChild(why);
     }
-    if (d.basis) {
+    if (d.basis && !(opts && opts.basis === false)) {
       const b = doc.createElement("span");
       b.className = "num-basis";
       b.textContent = d.basis;
@@ -365,8 +380,9 @@
   }
 
   // The only shapes the page will turn into a link from data: a GitHub pull
-  // request, issue or workflow run. Anything else is shown as text.
-  const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(pull|issues|actions\/runs)\/\d+$/;
+  // request, issue or workflow run, a session's facts file on main, or a job's
+  // report on the reports branch. Anything else is shown as text.
+  const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/((pull|issues|actions\/runs)\/\d+|blob\/main\/facts\/[A-Za-z0-9._-]+\.json|blob\/reports\/jobs\/[A-Za-z0-9_-]+\.md)$/;
   function safeGithubUrl(u) {
     return typeof u === "string" && GITHUB_URL.test(u) && !u.split("/").some((seg) => seg === "." || seg === "..") ? u : null;
   }
@@ -445,5 +461,30 @@
   // The machines whose capture record carries no loop slot: an older Desk, or a Desk whose loop has not measured for over three days. The record cannot tell them apart, so the words are true for both.
   const WITHOUT_LOOP_WORDS = " sent no loop health (an older Desk, or a loop that has not measured for over three days), ";
 
-  return { WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  // The private task names a desk may keep beside the page
+  // (local-names.json): { version: 1, jobs: { "<job key>": { title, track,
+  // task } } }. Anything else is the public view. Only own string fields are
+  // read; the page inserts them as text.
+  function parseLocalNames(file) {
+    const obj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+    if (!obj(file) || file.version !== 1 || !obj(file.jobs)) return {};
+    const out = Object.create(null);
+    for (const [key, n] of Object.entries(file.jobs)) {
+      if (!/^[0-9A-Za-z_-]{1,64}$/.test(key) || !obj(n) || typeof n.title !== "string" || !n.title.trim()) continue;
+      out[key] = {
+        title: n.title.trim().slice(0, 200),
+        track: typeof n.track === "string" ? n.track.slice(0, 120) : "",
+        task: typeof n.task === "string" ? n.task.slice(0, 120) : "",
+      };
+    }
+    return out;
+  }
+
+  // A job's label: its local name when there is one, else its short key.
+  function jobLabel(names, id) {
+    const n = names && Object.prototype.hasOwnProperty.call(names, id) ? names[id] : null;
+    return n ? n.title : `Task ${String(id).slice(0, 10)}`;
+  }
+
+  return { parseLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

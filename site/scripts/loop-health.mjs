@@ -88,7 +88,7 @@ function slotOf(loop) {
 function largest(members, valueOf) {
   const N = members.length
   const rollup = (reasons, n = 0) => ({ ...unavailable(reasons), kind: "rollup", n, N, of: MACHINES, out_of_scope: 0 })
-  if (N === 0) return rollup(["no_records"])
+  if (N === 0) return rollup(["no_loop_records"])
   const stale = members.filter((m) => m.stale).length
   const readable = members.filter((m) => !m.stale && m.slot)
   const values = readable.map((m) => valueOf(m.slot, m.ageDays)).filter((v) => v !== null)

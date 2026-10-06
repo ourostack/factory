@@ -454,3 +454,23 @@ test("with no loop slot anywhere the open improvement items slot is no data, nev
   assert.equal(health.slots.open_improvement_items.state, "unavailable")
   assert.ok(!("value" in health.slots.open_improvement_items))
 })
+
+test("the build gives each task its waste from its label files and its sessions, and adds the trend and what to fix next", () => {
+  const fx = fixture()
+  write(join(fx.reports, "jobs/a.json"), { ...job("a", "done"), timeline: { intervals: [{ session_id: "s1", host: "claude-code" }] } })
+  write(join(fx.main, "labels/a/s1.json"), { schema: "desk.factory.labels/1", job: "a", session: "s1", stretches: [{ start_ms: 0, end_ms: 1000, class: "muda", waste: "waiting" }] })
+  // A label file naming another job is not this job's.
+  write(join(fx.main, "labels/a/s9.json"), { schema: "desk.factory.labels/1", job: "b", session: "s9", stretches: [{ start_ms: 0, end_ms: 5, class: "muda", waste: "motion" }] })
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.deepEqual(checkNumbers(data), [])
+  const a = data.jobs.find((j) => j.id === "a")
+  assert.deepEqual(a.waste.rows.map((x) => [x.key, x.total_ms.value, x.total_ms.state]), [["waiting", 1000, "measured"]])
+  assert.deepEqual(data.jobs.find((j) => j.id === "b").waste.rows, [])
+  assert.deepEqual(data.sessions.map((s) => s.session_id), ["s1"])
+  assert.match(data.sessions[0].facts_url, /\/blob\/main\/facts\/claude-code-s1\.json$/)
+  assert.ok(Array.isArray(data.trend))
+  assert.ok(data.fix_next.some((i) => i.id === "waste_waiting" && i.examples[0].job === "a"))
+  assert.equal(typeof data.waste_actions.waiting, "string")
+})

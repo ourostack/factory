@@ -35,7 +35,7 @@ const ROLLUP_PATHS = [
   /^time_breakdown\[\d+\]\.(median|p75)$/,
   /^outcomes\.(unsigned|first_pass_yield)$/,
   /^outcomes\.rework\.(changed_ask|returns\[\d+\]\.total|defects\.[a-z_]+)$/,
-  /^outcomes\.attention\.(headline|turns_per_accepted)$/,
+  /^outcomes\.attention\.(headline|turns_per_accepted|per_delivered)$/,
   /^flow_efficiency\.(median|p75)$/,
   /^tool_calls_total$/,
   /^tool_kinds\[\d+\]\.(calls|failures|sessions|failure_rate)$/,
@@ -48,6 +48,7 @@ const ROLLUP_PATHS = [
   /^loop_health\.(open|in_progress|not_closed|oldest_open_age_days|closed_confirmed_month|closed_unverified_month|loop_alarms_open|steps_stale)$/,
   /^capture_coverage\.hosts\[\d+\]\.(on_disk|derived|held|frozen|pending|not_seen|not_in_a_desk|share|capturable_share)$/,
   /^takeaways\[\d+\]\.slots\.(median|rate|calls|failures|share|with|dispatches)$/,
+  /^trend\[\d+\]\.(first_pass_yield|attention)$/,
 ];
 // Paths that must hold a stated number of some kind (not an empty object, a
 // string or anything else that would make the formatter throw).
@@ -58,6 +59,13 @@ const NUMBER_PATHS = [
   /^outcomes\.(oldest_unsigned_wait|first_pass_counts\.[a-z_]+)$/,
   /^outcomes\.rework\.reason_check\.(compared|disagree|compared_verified)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
+  /^jobs\[\d+\]\.(attention_ms|human_turns)$/,
+  /^jobs\[\d+\]\.waste\.(sessions_labeled|sessions_on_timeline|foreign_sessions|rows\[\d+\]\.total_ms)$/,
+  /^labeled_waste\.(jobs_with_labels|jobs_finished|rows\[\d+\]\.(total_ms|jobs))$/,
+  /^trend\[\d+\]\.(jobs|accepted|sent_back|flow_efficiency)$/,
+  /^sessions\[\d+\]\.(duration_ms|active_ms|subagent_count|tool_calls_total|tool_failures_total)$/,
+  /^fix_next\[\d+\]\.count$/,
+  /^fix_next\[\d+\]\.examples\[\d+\]\.figure$/,
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
   /^capture_coverage\.machines\.(counted|empty|stale|invalid|over_limit|files)$/,
   /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines|not_counted_machines)$/,

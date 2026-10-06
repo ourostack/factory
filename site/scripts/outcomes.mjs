@@ -12,7 +12,7 @@
 // out of scope of the sign-off figures, counted beside them.
 
 import { direct } from "./bounds.mjs"
-import { declareRollup, measured, partial, trust, unavailable } from "./state.mjs"
+import { declareRollup, measured, partial, rollup, trust, unavailable } from "./state.mjs"
 
 const NOT_YET = ["not_recorded_yet"]
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
@@ -47,6 +47,8 @@ const JOBS_SIGNED = "delivered jobs with a sign-off record"
 const DELIVERED = "verdicts on delivered jobs are final"
 const HISTORY = "jobs with a recorded history"
 
+// The accepted count is Desk's own (`accepted`), the same population Desk
+// divides the attention headline by, so the two can never disagree.
 function signoffPart(raw, published) {
   const signoff = Object.fromEntries(SIGNOFF_KEYS.map((k) => [k, published ? count(raw[k]) : unavailable(published === null ? NOT_YET : ["signoff_not_published"])]))
   const refusal = published && isObject(raw.refusal_reasons) ? raw.refusal_reasons : {}
@@ -193,4 +195,41 @@ export function outcomesSummary(file, { coverage = null } = {}) {
     rework: reworkOf(f?.rework ?? null),
     attention: attentionOf(f?.attention ?? null, signoff.accepted, coverage),
   }
+}
+
+// The trend: the same outcome figures per Desk release, from the groupings
+// Desk already builds (`groupings.plugin_version` in outcomes.json and
+// measures.json), oldest release first. A job that ran under several
+// releases is in its own row, "mixed", last. Each figure keeps its state.
+// The interim answer until an outcome is accepted: the operator's attention
+// per delivered task, from the same per-task attention estimate Desk's
+// headline sums. A mean over the delivered tasks whose estimate is whole;
+// the rest are counted in its n of N.
+const DELIVERED_OUTCOMES = new Set(["delivered", "awaiting_signoff", "accepted", "sent_back"])
+export function attentionPerDelivered(jobs) {
+  const members = (Array.isArray(jobs) ? jobs : []).filter((j) => DELIVERED_OUTCOMES.has(j.outcome)).map((j) => j.attention_ms)
+  return rollup(members, { of: "delivered tasks", reduce: (v) => Math.round(v.reduce((a, b) => a + b, 0) / v.length), measure: "attention_per_delivered" })
+}
+
+export function releaseTrend(outcomesFile, measuresFile, compareVersions) {
+  const o = isObject(outcomesFile?.groupings?.plugin_version) ? outcomesFile.groupings.plugin_version : {}
+  const m = isObject(measuresFile?.groupings?.plugin_version) ? measuresFile.groupings.plugin_version : {}
+  const isRelease = (v) => /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?:-(?:alpha|beta|rc)\.[0-9]{1,4})?$/.test(v)
+  const keys = [...new Set([...Object.keys(o), ...Object.keys(m)])]
+  const versions = [...keys.filter(isRelease).sort(compareVersions), ...keys.filter((k) => k === "mixed")]
+  return versions.map((version) => {
+    const s = outcomesSummary(isObject(o[version]) ? o[version] : null)
+    const mv = isObject(m[version]) ? m[version] : {}
+    const fe = isObject(mv.measures?.flow_efficiency) ? mv.measures.flow_efficiency : null
+    const excluded = Array.isArray(fe?.jobs_excluded) ? fe.jobs_excluded.map((e) => e?.reason).filter((r) => typeof r === "string") : []
+    return {
+      version,
+      jobs: count(mv.jobs),
+      accepted: s.signoff.accepted,
+      sent_back: s.signoff.refused,
+      first_pass_yield: s.first_pass_yield,
+      attention: s.attention.headline,
+      flow_efficiency: fe ? declareRollup({ value: fe.median, n: fe.n, N: fe.N, of: "finished jobs", measure: "median", reasons: [...new Set(excluded)] }) : unavailable(NOT_YET),
+    }
+  })
 }
