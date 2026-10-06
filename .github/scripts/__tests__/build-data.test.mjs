@@ -412,3 +412,18 @@ test("an outcomes rollup fills sign-off, yield and the unsigned deliveries slot,
   assert.equal(health.slots.unsigned_deliveries.value, 1)
   assert.equal(health.details.unsigned_deliveries[0].number.value, "waiting at least 7 days")
 })
+
+test("the attention headline's trust rests on the same capture share as every other trust line", () => {
+  const fx = fixture()
+  commitCapture(fx.main, "eeeeeeeeeeeeeeee.json", captureRecord({ "claude-code": captureHost() }), new Date().toISOString())
+  write(join(fx.reports, "rollups/outcomes.json"), {
+    schema: "desk.factory.rollups/1",
+    signoff: { recorded: true, jobs: 1, accepted: 1, accepted_unverified: 0, delivered_unsigned: 0, refused: 0, refused_unverified: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 0, jobs_without_work_record: 0, refusal_reasons: {}, waits: { signed: { lt_1h: 1, lt_1d: 0, lt_7d: 0, ge_7d: 0 }, unsigned: { lt_1h: 0, lt_1d: 0, lt_7d: 0, ge_7d: 0 } } },
+    attention: { headline: { state: "measured", value: 60000, reasons: [], n: 1, N: 1 } },
+  })
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.capture_coverage.share.state, "measured")
+  assert.deepEqual(data.outcomes.attention.trust.coverage, data.capture_coverage.share)
+})

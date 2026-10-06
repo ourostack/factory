@@ -173,7 +173,7 @@ const totalsFile = readJSON(join(reportsDir, "rollups/totals.json"), null);
 const toolKindsFile = readJSON(join(reportsDir, "rollups/tool-kinds.json"), null);
 // Sign-off, first-pass yield and rework, from a Desk whose pipeline builds
 // rollups/outcomes.json. Absent, every outcome figure reads "not recorded yet".
-const outcomes = outcomesSummary(readJSON(join(reportsDir, "rollups/outcomes.json"), null));
+const outcomes = outcomesSummary(readJSON(join(reportsDir, "rollups/outcomes.json"), null), { coverage: captureCoverage.share });
 // If the reports branch is missing its rollups, the site says so (health
 // verdict `broken`) and every number the rollups would supply is unavailable.
 const reportsReadable = coverageFile !== null && measuresFile !== null && mudaFile !== null;
