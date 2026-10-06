@@ -394,3 +394,48 @@ test("checkCorrections ignores a pull request that never touches corrections/", 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// --- published facts /2: the unavailable vocabulary and its limit ------------
+
+// Desk's published schema /2 (`schema.js` ENUMS): 20 fields and 11 reasons.
+const V2_FIELDS = [
+  "tokens", "requests", "models", "turns", "tool_durations", "permission_waits",
+  "human_waits", "api_retries", "commits", "ci_runs", "plugins", "ended_at",
+  "compaction_waits", "agents", "prs", "reasoning_tokens", "entrypoint", "tool_outcomes", "job_segments",
+  "job_offsets",
+]
+const V2_REASONS = [
+  "host_does_not_record", "log_missing", "log_truncated", "session_open",
+  "not_collected_in_slice_1", "source_unreadable", "capped", "desk_public",
+  "field_absent", "host_records_partly", "withheld_public",
+]
+
+test("a correction may carry every /2 unavailable field and reason, all 220 pairs at once", () => {
+  const all = V2_FIELDS.flatMap((field) => V2_REASONS.map((reason) => ({ field, reason })))
+  assert.equal(all.length, 220)
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { unavailable: all } }), FILE_NAME)
+  assert.deepEqual(errors, [])
+  assert.equal(ok, true)
+})
+
+test("a correction's unavailable list over 220 entries is refused as too many", () => {
+  const all = V2_FIELDS.flatMap((field) => V2_REASONS.map((reason) => ({ field, reason })))
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { unavailable: [...all, all[0]] } }), FILE_NAME)
+  assert.equal(ok, false)
+  assert.ok(errors.some((e) => e.code === "correction_field_too_many"))
+})
+
+test("an unavailable field or reason outside the /2 vocabulary is still refused", () => {
+  for (const entry of [{ field: "tokens", reason: "made_up" }, { field: "made_up", reason: "field_absent" }]) {
+    const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { unavailable: [entry] } }), FILE_NAME)
+    assert.equal(ok, false)
+    assert.ok(errors.some((e) => e.code === "correction_field_enum"))
+  }
+})
+
+test("a correction may restore a null token or request counter: null is not recorded, not zero", () => {
+  const models = [{ id: "m1", requests: null, tokens: { input: null, output: null, cache_read: null, cache_write: null, reasoning: null } }]
+  const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { models } }), FILE_NAME)
+  assert.deepEqual(errors, [])
+  assert.equal(ok, true)
+})

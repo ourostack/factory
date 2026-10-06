@@ -33,7 +33,7 @@ A published facts file says how one agent session went: how long it lasted, how 
 
 ## What the store guarantees
 
-Every file under `facts/` passes the published schema, `desk.factory.published/1`, which Desk defines and this store's CI enforces on every pull request:
+Every file under `facts/` passes the published schema, `desk.factory.published/1` or `desk.factory.published/2`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored `/1` file stays valid and is never rewritten. In either version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most 220 entries: every field with every reason once) says which fields were not recorded and why:
 
 - the shape is exact, and any unknown key is rejected;
 - every string matches an enum or a strict pattern, and a string holding a date or a time of day is rejected;
