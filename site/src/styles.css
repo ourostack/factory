@@ -1003,3 +1003,11 @@ footer a {
 .capture-alarms-on { color: var(--text-primary); font-weight: 600; }
 .slot-detail { color: var(--text-secondary); }
 .capture-unverified { font-weight: 600; }
+.scroll-cue { margin: 0 0 6px; color: var(--text-secondary); font-size: 0.9em; }
+.scroll-cue[hidden] { display: none; }
+.capture-table td, .capture-table th { padding-left: 8px; padding-right: 8px; }
+/* The capture table fits a 1280 px window: headers and the records cell may
+   wrap, so no column needs a sideways scroll there. */
+table.capture-table th { white-space: normal; vertical-align: bottom; }
+table.capture-table td.capture-records { white-space: normal; min-width: 7em; }
+table.capture-table td .num-reason { display: block; white-space: normal; max-width: 9em; margin-left: auto; }

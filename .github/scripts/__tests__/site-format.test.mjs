@@ -248,3 +248,22 @@ test("the trust line names the population of the coverage share", () => {
   assert.equal(F.coverageWords({ state: "measured", value: 0.81, reasons: [] }), "coverage: 81% of sessions still on disk")
   assert.equal(F.coverageWords({ state: "unavailable", reasons: ["not_recorded_yet"] }), "coverage: not recorded yet")
 })
+
+test("a table cell can carry a short marker, with the direction kept in the tooltip", () => {
+  const doc = fakeDoc()
+  const share = { state: "partial", value: 0.25, reasons: ["unverified_host"], bound: "unknown" }
+  const node = F.render(doc, share, "pct", { shortMarker: true })
+  assert.equal(node.children.find((c) => c.className === "num-flag").textContent, "unverified")
+  assert.match(node.title, /which way the true figure lies is not known/)
+  const plain = F.render(doc, { state: "partial", value: 3, reasons: ["record_stale"], bound: "unknown" }, "count", { shortMarker: true })
+  assert.equal(plain.children.find((c) => c.className === "num-flag").textContent, "partial")
+})
+
+test("the capture table uses one-word markers and shows a scroll cue whenever it is wider than its card", async () => {
+  const { readFileSync } = await import("node:fs")
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const table = app.slice(app.indexOf("function renderCaptureCoverage"))
+  assert.match(table, /shortMarker: true/)
+  assert.match(table, /scroll-cue/)
+  assert.match(table, /wrap\.scrollWidth > wrap\.clientWidth/)
+})

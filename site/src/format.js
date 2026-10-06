@@ -238,7 +238,10 @@
       if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
       flag.className = "num-flag";
-      flag.textContent = d.marker;
+      // In a narrow table cell the marker is one word ("unverified" or
+      // "partial"); the direction stays in the tooltip, the screen-reader
+      // text and the sentences around the table.
+      flag.textContent = opts && opts.shortMarker ? d.marker.split(",")[0] : d.marker;
       const sr = doc.createElement("span");
       sr.className = "sr-only";
       sr.textContent = `: ${d.reason}`;

@@ -1073,15 +1073,26 @@
       tr.appendChild(el("td", unverified ? "capture-records capture-unverified" : "capture-records", records ? F.recordsWords(records, unverified) : "none"));
       for (const [key, , kind] of CAPTURE_COLUMNS) {
         const td = el("td", "num");
-        td.appendChild(num(h[key], kind, { nofn: false }));
+        td.appendChild(num(h[key], kind, { nofn: false, shortMarker: true }));
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
     wrap.appendChild(table);
+    // When the table is wider than its card (a phone, a narrow window), a
+    // visible cue says so; no column is hidden without one.
+    const cue = el("p", "scroll-cue", "The table is wider than the page: scroll it sideways to see every column.");
+    cue.hidden = true;
+    container.appendChild(cue);
     container.appendChild(wrap);
+    const showCue = () => {
+      cue.hidden = !(wrap.scrollWidth > wrap.clientWidth + 1);
+    };
+    showCue();
+    window.addEventListener("resize", showCue);
     const notes = el("ul", "capture-notes");
+    notes.appendChild(el("li", null, "A share marked unverified or partial could be higher or lower: an unverified host could not check its own session count. Point at a mark to read why."));
     for (const c of cov.caveats || []) notes.appendChild(el("li", null, c.text));
     const m = cov.machines || {};
     const parts = [["counted", "counted"], ["empty", "withdrawn"], ["stale", "older than 45 days"], ["invalid", "unreadable"], ["over_limit", "over the limit"]];
