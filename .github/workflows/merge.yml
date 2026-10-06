@@ -108,6 +108,12 @@ jobs:
               summary "factory-merge: #$number head moved; skipped"
               continue
             fi
+            # A maintainer holds any pull request, data or maintenance, by
+            # marking it draft or labeling it `hold`; it is left untouched.
+            if jq -e '.draft == true or ([.labels[].name] | index("hold") != null)' <<<"$pr" > /dev/null; then
+              summary "factory-merge: #$number is held (draft or labeled hold); left for a maintainer"
+              continue
+            fi
             # A maintenance pull request is looked at again: it may merge on
             # its own when it is on the allowlist (see the merge step).
             same_repo=false
@@ -183,6 +189,18 @@ jobs:
           set -euo pipefail
           summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
           unavailable=0
+          failed=0
+          # A merge call GitHub refuses (a conflict, a moved head) fails that
+          # pull request only; the others at this head are still handled, and
+          # the step fails at the end so the refusal is seen.
+          merge_at_head() {
+            if gh api -X PUT "repos/$REPOSITORY/pulls/$1/merge" -f merge_method=merge -f sha="$HEAD_SHA" > /dev/null 2>&1; then
+              return 0
+            fi
+            summary "factory-merge: #$1 merge_refused; left open"
+            failed=1
+            return 1
+          }
           while IFS=$'\t' read -r number association same_repo; do
             result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
@@ -197,9 +215,9 @@ jobs:
                 if [ "$association" = COLLABORATOR ] && [ "$same_repo" = true ] && [ "$CONCLUSION" = "success" ] \
                   && [ -f "$allow" ] && [ "$(cat "$allow")" = "ok" ]; then
                   # The sha parameter makes GitHub refuse the merge if the head moved.
-                  gh api -X PUT "repos/$REPOSITORY/pulls/$number/merge" \
-                    -f merge_method=merge -f sha="$HEAD_SHA" > /dev/null
-                  summary "factory-merge: #$number maintenance on the allowlist; merged at head $HEAD_SHA"
+                  if merge_at_head "$number"; then
+                    summary "factory-merge: #$number maintenance on the allowlist; merged at head $HEAD_SHA"
+                  fi
                   continue
                 fi
                 gh api -X POST "repos/$REPOSITORY/issues/$number/labels" -f 'labels[]=maintenance' > /dev/null
@@ -215,9 +233,9 @@ jobs:
                 continue
               fi
               # The sha parameter makes GitHub refuse the merge if the head moved.
-              gh api -X PUT "repos/$REPOSITORY/pulls/$number/merge" \
-                -f merge_method=merge -f sha="$HEAD_SHA" > /dev/null
-              summary "factory-merge: #$number merged at head $HEAD_SHA"
+              if merge_at_head "$number"; then
+                summary "factory-merge: #$number merged at head $HEAD_SHA"
+              fi
               continue
             fi
 
@@ -235,4 +253,7 @@ jobs:
             summary "factory-merge: #$number rejected and closed"
             summary "$codes"
           done < "$RUNNER_TEMP/factory-prs.tsv"
-          exit "$unavailable"
+          if [ "$unavailable" -ne 0 ] || [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          exit 0

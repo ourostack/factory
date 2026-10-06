@@ -135,5 +135,32 @@ test("merge.yml merges an allowed maintenance pull request only from the same re
   assert.match(block, /same_repo" = true/)
   assert.match(text, /CONCLUSION" = "success"/)
   // Every merge call passes the validated head as sha.
-  for (const call of text.match(/pulls\/\$number\/merge[^\n]*\n[^\n]*/g)) assert.match(call, /sha="\$HEAD_SHA"/)
+  const calls = text.match(/pulls\/\$[0-9a-z]+\/merge[^\n]*/g)
+  assert.ok(calls.length >= 1)
+  for (const call of calls) assert.match(call, /sha="\$HEAD_SHA"/)
+})
+
+test("merge.yml leaves a held pull request alone, and a refused merge fails only that pull request", () => {
+  const yml = readFileSync(new URL("../../workflows/merge.yml", import.meta.url), "utf8")
+  assert.match(yml, /\.draft == true or \(\[\.labels\[\]\.name\] \| index\("hold"\) != null\)/)
+  assert.match(yml, /merge_at_head\(\) \{/)
+  assert.doesNotMatch(yml, /gh api -X PUT "repos\/\$REPOSITORY\/pulls\/\$number\/merge"/)
+  assert.match(yml, /merge_refused; left open/)
+})
+
+test("every run block in merge.yml is valid bash", () => {
+  const lines = readFileSync(new URL("../../workflows/merge.yml", import.meta.url), "utf8").split("\n")
+  let blocks = 0
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(\s*)run: \|\s*$/)
+    if (!m) continue
+    const body = []
+    let j = i + 1
+    for (; j < lines.length && (lines[j].trim() === "" || lines[j].match(/^\s*/)[0].length > m[1].length); j++) body.push(lines[j])
+    const script = body.join("\n").replace(/\$\{\{[^}]*\}\}/g, "x")
+    const r = spawnSync("bash", ["-n"], { input: script, encoding: "utf8" })
+    assert.equal(r.status, 0, r.stderr)
+    blocks += 1
+  }
+  assert.ok(blocks >= 3)
 })
