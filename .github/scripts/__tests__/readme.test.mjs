@@ -22,5 +22,5 @@ test("the README explains how the loop closes, so the doc and the scripts cannot
 test("the README does not say Desk has yet to send the loop slot, and names why a record has none", () => {
   assert.doesNotMatch(README, /does not yet \(that delivery/)
   assert.match(README, /Desk sends each machine's loop health inside its capture record/)
-  assert.match(README, /an older Desk, or its loop has not measured for over three days/)
+  assert.match(README, /an older Desk, or its loop has not run yet or has not measured for over three days/)
 })
