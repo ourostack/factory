@@ -30,11 +30,11 @@ test("a measured number shows plainly, and a measured zero is a zero", () => {
 test("a partial number carries a marker word, its reason and its bound", () => {
   const d = F.describe(p(21, ["worker_split"], "lower"), "count")
   assert.equal(d.state, "partial")
-  assert.equal(d.text, "≥ 21")
+  assert.equal(d.text, "at least 21")
   assert.equal(d.marker, "partial")
   assert.match(d.reason, /split/)
   assert.match(F.toText(p(21, ["worker_split"], "lower"), "count"), /partial/)
-  assert.equal(F.describe(p(5, ["worker_shared"], "upper"), "count").text, "≤ 5")
+  assert.equal(F.describe(p(5, ["worker_shared"], "upper"), "count").text, "at most 5")
   assert.equal(F.describe(p(5, ["x"]), "count").text, "5")
 })
 
@@ -156,4 +156,49 @@ test("the health panel contains its own failures and links go through the guard"
   const app = read("site/src/app.js")
   assert.match(app, /function renderHealth[\s\S]*?try \{[\s\S]*?\} catch/)
   for (const line of app.split("\n").filter((l) => /\.href = /.test(l))) assert.match(line, /= safe;|github\.com\/ourostack\/factory\/commit\//)
+})
+
+// Every reason that can reach a page has plain text (Desk contract section 3).
+const FACTS_REASONS = [
+  "host_does_not_record", "log_missing", "log_truncated", "session_open",
+  "not_collected_in_slice_1", "source_unreadable", "capped", "desk_public",
+  "field_absent", "host_records_partly", "withheld_public",
+]
+const REPORT_ONLY_REASONS = [
+  "worker_split", "worker_shared", "censored", "mixed", "no_sessions", "partial", "open_job", "not_labeled",
+  "cancelled", "status_unavailable", "wait_fields_unavailable", "job_offsets_unavailable", "zero_lead_time",
+  "no_wait_intervals", "no_active_intervals", "not_reported_to_store", "not_in_published_facts", "facts_missing",
+  "no_facts", "facts_ambiguous",
+]
+
+test("every facts reason and every report-only reason has plain text", () => {
+  for (const r of [...FACTS_REASONS, ...REPORT_ONLY_REASONS]) {
+    assert.equal(F.hasReasonText(r), true, r)
+    assert.doesNotMatch(F.reasonText(r), /_/, r)
+  }
+  assert.equal(F.hasReasonText("a_reason_with_no_words"), false)
+})
+
+test("the job table opens a job page that shows each measure's state and reason in words", () => {
+  const src = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  assert.match(src, /function renderJobDetail\(/)
+  assert.match(src, /hashchange/)
+  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  assert.match(html, /id="job-detail"/)
+})
+
+test("safeAnchor allows only a plain in-page id", () => {
+  assert.equal(F.safeAnchor("job-abc_12"), "#job-abc_12")
+  for (const bad of ["javascript:alert(1)", "a b", "", "x/y", "#x", null, 5]) assert.equal(F.safeAnchor(bad), null, String(bad))
+})
+
+test("a bound reads in words, a partial duration under a second shows milliseconds, and a lower bound of zero says none recorded", () => {
+  assert.equal(F.describe(p(412, ["host_records_partly"], "lower"), "duration").text, "at least 412 ms")
+  assert.equal(F.describe(p(0, ["host_records_partly"], "lower"), "count").text, "none recorded")
+  assert.equal(F.describe(p(0, ["host_records_partly"], "lower"), "count").reason, "the host records only part of this, so the figure is a lower bound")
+  assert.equal(F.describe(p(9, ["log_truncated"], "upper"), "count").text, "at most 9")
+  const unknown = F.describe(p(0.5, ["log_truncated", "worker_shared"], "unknown"), "pct")
+  assert.equal(unknown.text, "50%")
+  assert.match(unknown.reason, /not known/)
+  assert.equal(F.describe(m(0), "duration").text, "0s")
 })

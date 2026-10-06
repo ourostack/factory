@@ -105,13 +105,19 @@ const INTERVAL_KINDS = Object.freeze([
   "turn", "tool", "subagent", "human_wait", "permission_wait", "api_retry", "compaction",
 ]);
 const OUTCOMES = Object.freeze(["ok", "error", "denied", "interrupted", "timeout"]);
+// Published facts /2 (`desk.factory.published/2`; `/1` files keep their
+// smaller vocabulary, a subset of this one). A field listed here was not
+// recorded: its value in the file is not a measured zero.
 const PUBLISHED_UNAVAILABLE_FIELDS = Object.freeze([
   "tokens", "requests", "models", "turns", "tool_durations", "permission_waits",
-  "human_waits", "api_retries", "commits", "ci_runs", "plugins", "ended_at", "job_offsets",
+  "human_waits", "api_retries", "commits", "ci_runs", "plugins", "ended_at",
+  "compaction_waits", "agents", "prs", "reasoning_tokens", "entrypoint", "tool_outcomes", "job_segments",
+  "job_offsets",
 ]);
 const UNAVAILABLE_REASONS = Object.freeze([
   "host_does_not_record", "log_missing", "log_truncated", "session_open",
   "not_collected_in_slice_1", "source_unreadable", "capped", "desk_public",
+  "field_absent", "host_records_partly", "withheld_public",
 ]);
 
 const JOB_ID_PATTERN = /^[0-9a-f]{32}$/u;
@@ -124,7 +130,10 @@ const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
 const SHAPE_LIMITS = Object.freeze({
   plugins: 64, models: 32, intervals: 100000, prs: 500, commits: 2000,
-  agents: 10000, jobs: 1000, jobTransitions: 1000, unavailable: 64,
+  agents: 10000, jobs: 1000, jobTransitions: 1000,
+  // Every field with every reason once (Desk computes the same from its
+  // enums), so no entry set can overflow when the vocabulary grows.
+  unavailable: PUBLISHED_UNAVAILABLE_FIELDS.length * UNAVAILABLE_REASONS.length,
 });
 
 const shapeLeaf = (check) => ({ check });

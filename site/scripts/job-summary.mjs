@@ -5,28 +5,64 @@
 // null, and a formula the report lacks is unavailable (`not_recorded`),
 // never zero.
 
-import { fromFormula, unavailable, withBound } from "./state.mjs";
+import { direct } from "./bounds.mjs";
+import { fromFormula, unavailable } from "./state.mjs";
 
-// Which way a partial figure lies. A time that includes a worker shared with
-// other jobs is copied, so it is an upper bound. A count that covers only the
-// sessions that could supply it is a lower bound. A censored lead time is a
-// lower bound on a job still running.
-function bounded(formula, kind) {
-  const n = fromFormula(formula);
-  if (n.state !== "partial") return n;
-  if (kind === "count") return withBound(n, "lower");
-  if (kind === "time") return n.reasons.includes("worker_shared") ? withBound(n, "upper") : n;
-  if (kind === "lead") return n.reasons.includes("censored") ? withBound(n, "lower") : n;
-  return n;
+// Every partial figure carries its direction from the one table in
+// bounds.mjs, keyed by the measure.
+function bounded(formula, measure) {
+  return direct(fromFormula(formula), measure);
+}
+
+// One part of the `references` result. A current report has `parts`, each
+// with its own state; an older one has only the composite, whose value
+// holds a 0 for a count the host does not record, so only its pull request
+// count (which every host records at least partly) is read from it.
+function referencePart(refs, key) {
+  if (refs?.parts && typeof refs.parts === "object") return refs.parts[key];
+  if (key !== "public_prs") return undefined;
+  return refs && refs.value && typeof refs.value === "object" && refs.class !== "unavailable"
+    ? { ...refs, value: refs.value.public_prs }
+    : refs;
+}
+
+// Every measure the job page shows, in order: what it is called, how its
+// value reads, and where it sits in the report. A measure the report lacks
+// is no data with the reason `not_recorded`.
+const DETAILS = [
+  ["lead_time_ms", "Lead time", "duration", (F) => bounded(F.lead_time_ms, "lead_time_ms")],
+  ["queue_before_start_ms", "Queue before the first session", "duration", (F) => bounded(F.queue_before_start_ms, "queue_before_start_ms")],
+  ["active_time_ms", "Active time", "duration", (F) => bounded(F.active_time_ms, "active_time_ms")],
+  ["busy_time_ms", "Busy time, all workers", "duration", (F) => bounded(F.busy_time_ms, "busy_time_ms")],
+  ["flow_efficiency", "Flow efficiency", "pct", (F) => bounded(F.flow_efficiency, "flow_efficiency")],
+  ["human_wait_ms", "Waiting on a human", "duration", (F) => bounded(F.waits?.human_wait_ms, "human_wait_ms")],
+  ["permission_wait_ms", "Waiting on a permission prompt", "duration", (F) => bounded(F.waits?.permission_wait_ms, "permission_wait_ms")],
+  ["api_retry_ms", "Waiting on API retries", "duration", (F) => bounded(F.waits?.api_retry_ms, "api_retry_ms")],
+  ["compaction_ms", "Waiting on context compaction", "duration", (F) => bounded(F.waits?.compaction_ms, "compaction_ms")],
+  ["tool_failures", "Tool failures", "count", (F) => bounded(F.rework_signals?.tool_failures, "tool_failures")],
+  ["tool_retries", "Tool retries", "count", (F) => bounded(F.rework_signals?.tool_retries, "tool_retries")],
+  ["api_retries", "API retries", "count", (F) => bounded(F.rework_signals?.api_retries, "api_retries")],
+  ["session_retouches", "Sessions that came back to it", "count", (F) => bounded(F.rework_signals?.session_retouches, "session_retouches")],
+  ["public_prs", "Public pull requests", "count", (F) => bounded(referencePart(F.references, "public_prs"), "public_prs")],
+  ["public_commits", "Public commits", "count", (F) => bounded(referencePart(F.references, "public_commits"), "public_commits")],
+  ["private_prs", "Private pull requests (counted only)", "count", (F) => bounded(referencePart(F.references, "private_prs"), "private_prs")],
+  ["private_commits", "Private commits (counted only)", "count", (F) => bounded(referencePart(F.references, "private_commits"), "private_commits")],
+  ["tokens_total", "Tokens, input plus output", "compact", (F) => bounded(F.tokens_total?.total, "tokens_total")],
+  ["tokens_input", "Input tokens", "compact", (F) => bounded(F.tokens_total?.input, "tokens_input")],
+  ["tokens_output", "Output tokens", "compact", (F) => bounded(F.tokens_total?.output, "tokens_output")],
+  ["tokens_reasoning", "Reasoning tokens (inside output)", "compact", (F) => bounded(F.tokens_total?.reasoning, "tokens_reasoning")],
+  ["tokens_cache_read", "Cache read tokens", "compact", (F) => bounded(F.tokens_total?.cache_read, "tokens_cache_read")],
+  ["tokens_cache_write", "Cache write tokens", "compact", (F) => bounded(F.tokens_total?.cache_write, "tokens_cache_write")],
+];
+
+export function jobDetails(F) {
+  return DETAILS.map(([key, label, kind, read]) => ({ key, label, kind, number: read(F || {}) }));
 }
 
 export function jobSummary(d, f) {
   const F = d?.formulas || {};
   const waits = F.waits || {};
-  const refs = F.references;
-  const prs = refs && refs.value && typeof refs.value === "object" && refs.class !== "unavailable"
-    ? { ...refs, value: refs.value.public_prs }
-    : refs;
+  const prs = referencePart(F.references, "public_prs");
   const sessions = F.sessions;
   const bound = sessions && sessions.value && typeof sessions.value === "object"
     ? { ...sessions, value: sessions.value.bound }
@@ -36,16 +72,17 @@ export function jobSummary(d, f) {
     id: d?.job || String(f).replace(/\.json$/, ""),
     status: statusValue,
     status_class: F.status?.class ?? "unavailable",
-    lead_time_ms: bounded(F.lead_time_ms, "lead"),
-    active_time_ms: bounded(F.active_time_ms, "time"),
-    flow_efficiency: bounded(F.flow_efficiency, "time"),
-    queue_before_start_ms: fromFormula(F.queue_before_start_ms),
-    human_wait_ms: fromFormula(waits.human_wait_ms),
-    api_retry_ms: fromFormula(waits.api_retry_ms),
-    tool_failures: bounded(F.rework_signals?.tool_failures, "count"),
-    tool_retries: bounded(F.rework_signals?.tool_retries, "count"),
-    sessions_bound: fromFormula(bound),
-    public_prs: bounded(prs, "count"),
+    lead_time_ms: bounded(F.lead_time_ms, "lead_time_ms"),
+    active_time_ms: bounded(F.active_time_ms, "active_time_ms"),
+    flow_efficiency: bounded(F.flow_efficiency, "flow_efficiency"),
+    queue_before_start_ms: bounded(F.queue_before_start_ms, "queue_before_start_ms"),
+    human_wait_ms: bounded(waits.human_wait_ms, "human_wait_ms"),
+    api_retry_ms: bounded(waits.api_retry_ms, "api_retry_ms"),
+    tool_failures: bounded(F.rework_signals?.tool_failures, "tool_failures"),
+    tool_retries: bounded(F.rework_signals?.tool_retries, "tool_retries"),
+    sessions_bound: bounded(bound, "sessions_bound"),
+    public_prs: bounded(prs, "public_prs"),
+    details: jobDetails(F),
   };
 }
 

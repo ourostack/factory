@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
+import { createRequire } from "node:module"
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -146,4 +147,177 @@ test("no author, login or avatar field reaches data.json", () => {
   build(fx)
   const text = readFileSync(fx.out, "utf8")
   for (const word of ['"user"', '"login"', '"author"', "avatar"]) assert.equal(text.includes(word), false, word)
+})
+
+// --- reports built by a Desk that writes state and reasons (published facts /2) ---
+
+const leaf = (over) => ({ N: 3, n: 3, reasons: [], state: "measured", value: 3, ...over })
+const totals = () => ({
+  schema: "desk.factory.rollups/1",
+  hosts: {},
+  all: {
+    sessions: leaf({}),
+    tool_calls: leaf({ n: 2, reasons: ["log_truncated"], state: "partial", value: 60 }),
+    tool_failures: leaf({ n: 2, reasons: ["log_truncated"], state: "partial", value: 6 }),
+    model_requests: leaf({ n: 1, reasons: ["field_absent"], state: "partial", value: 4 }),
+    tokens: { input: leaf({}), output: leaf({}), cache_read: leaf({}), cache_write: leaf({}), reasoning: leaf({ n: 0, reasons: ["host_does_not_record"], state: "unavailable", value: undefined }) },
+    subagent_dispatches: leaf({ value: 1 }),
+  },
+})
+
+test("headline totals come from the pipeline's totals, over every published session, with n of N", () => {
+  const fx = fixture()
+  write(join(fx.reports, "rollups/totals.json"), totals())
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  const h = Object.fromEntries(data.headlines.map((x) => [x.id, x.number]))
+  assert.deepEqual(
+    { state: h.model_requests.state, value: h.model_requests.value, n: h.model_requests.n, N: h.model_requests.N, reasons: h.model_requests.reasons, of: h.model_requests.of },
+    { state: "partial", value: 4, n: 1, N: 3, reasons: ["field_absent"], of: "published sessions" },
+  )
+  assert.equal(h.tool_calls.value, 60)
+  assert.equal(h.tool_calls.state, "partial")
+  assert.equal(h.subagent_dispatches.state, "measured")
+  assert.deepEqual(checkNumbers(data), [])
+})
+
+test("a malformed totals leaf is no data, and the build still passes its check", () => {
+  const fx = fixture()
+  const t = totals()
+  t.all.model_requests = { N: 3, n: 5, reasons: [], state: "measured", value: 0 }
+  write(join(fx.reports, "rollups/totals.json"), t)
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  const m = data.headlines.find((x) => x.id === "model_requests").number
+  assert.equal(m.state, "unavailable")
+  assert.equal("value" in m, false)
+})
+
+test("tool kinds come from the pipeline's rows when they carry a state; a row with no counts is no data", () => {
+  const fx = fixture()
+  write(join(fx.reports, "rollups/tool-kinds.json"), {
+    schema: "desk.factory.rollups/1",
+    sessions: 3,
+    tool_kinds: [
+      { N: 3, calls: 40, failures: 4, n: 2, reasons: ["log_truncated"], sessions: 3, state: "partial", tool: "shell" },
+      { N: 1, n: 0, reasons: ["capped"], sessions: 1, state: "unavailable", tool: "read" },
+    ],
+  })
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  const by = Object.fromEntries(data.tool_kinds.map((t) => [t.tool, t]))
+  assert.equal(by.shell.calls.value, 40)
+  assert.equal(by.shell.calls.n, 2)
+  assert.equal(by.shell.failure_rate.value, 0.1)
+  assert.equal(by.shell.failure_rate.state, "partial")
+  assert.equal(by.read.calls.state, "unavailable")
+  assert.deepEqual(by.read.calls.reasons, ["capped"])
+  assert.equal(by.read.failure_rate.state, "unavailable")
+  assert.deepEqual(checkNumbers(data), [])
+})
+
+test("a job report with state and reasons reaches the job page with all three states", () => {
+  const fx = fixture()
+  write(join(fx.reports, "jobs/d.json"), {
+    job: "d",
+    formulas: {
+      status: { class: "declared", reasons: [], state: "measured", value: "done" },
+      waits: {
+        human_wait_ms: { class: "measured", reasons: [], state: "measured", value: 0 },
+        permission_wait_ms: { class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null },
+        api_retry_ms: { class: "measured", partial: true, partial_reasons: ["host_records_partly"], reasons: ["host_records_partly"], state: "partial", value: 3 },
+      },
+    },
+  })
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  const d = data.jobs.find((j) => j.id === "d")
+  const states = new Set(d.details.map((x) => x.number.state))
+  assert.deepEqual([...states].sort(), ["measured", "partial", "unavailable"])
+  assert.deepEqual(checkNumbers(data), [])
+})
+
+test("harness worker counts say how many sessions they rest on", () => {
+  const fx = fixture()
+  write(join(fx.main, "facts/claude-code-s4.json"), facts("s4", { agents: [], unavailable: [{ field: "agents", reason: "source_unreadable" }] }))
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  const h = data.harnesses[0]
+  assert.equal(h.workers.kind, "rollup")
+  assert.equal(h.workers.N, h.sessions.value)
+  assert.ok(h.workers.n < h.workers.N)
+})
+
+// --- one stated population per caption ---
+
+const FMT = createRequire(import.meta.url)("../../../site/src/format.js")
+const WORD = { published: "published session", substantial: "substantial session" }
+const OF = { published: "published sessions", substantial: "substantial sessions" }
+
+function populationsAgree(data) {
+  const s = data.scopes
+  // Each caption names its section's population and not the other one.
+  for (const [section, key] of Object.entries({ headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" })) {
+    const text = FMT.caption(section, s[key])
+    const other = s[key] === "published" ? "substantial" : "published"
+    assert.ok(text.includes(WORD[s[key]]), `${section}: ${text}`)
+    assert.equal(text.includes(WORD[other]), false, `${section}: ${text}`)
+  }
+  // ...and each section's numbers count exactly that population.
+  for (const id of ["subagent_dispatches", "tool_calls", "model_requests"]) {
+    assert.equal(data.headlines.find((h) => h.id === id).number.of, OF[s.headlines], id)
+  }
+  for (const k of data.tool_kinds) for (const f of ["calls", "failures", "failure_rate"]) assert.equal(k[f].of, OF[s.tool_kinds], `${k.tool}.${f}`)
+  for (const m of data.models) assert.equal(m.requests.of, OF[s.models], m.id)
+  for (const b of Object.values(data.subagents.buckets)) assert.equal(b.of, OF[s.subagents])
+  for (const h of data.harnesses) assert.equal(h.workers.of, OF[s.harnesses], h.host)
+  // A takeaway names the population it reads, with its count shown.
+  for (const t of data.takeaways) {
+    if (t.id === "tool_failures") assert.ok(t.template.includes(s.tool_kinds === "published" ? "every published session" : "{scoped} substantial sessions"), t.template)
+    if (t.id === "model_concentration" || t.id === "subagents") assert.ok(t.template.includes("{scoped} substantial sessions"), t.template)
+  }
+}
+
+test("with the pipeline's totals and tool-kind rows, every caption names the population its numbers count", () => {
+  const fx = fixture()
+  write(join(fx.reports, "rollups/totals.json"), totals())
+  write(join(fx.reports, "rollups/tool-kinds.json"), {
+    schema: "desk.factory.rollups/1",
+    sessions: 3,
+    tool_kinds: [{ N: 3, calls: 40, failures: 4, n: 3, reasons: [], sessions: 3, state: "measured", tool: "shell" }],
+  })
+  assert.equal(build(fx).status, 0)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.scopes.headlines, "published")
+  assert.equal(data.scopes.tool_kinds, "published")
+  populationsAgree(data)
+})
+
+test("without them, every caption and number says substantial sessions", () => {
+  const fx = fixture()
+  assert.equal(build(fx).status, 0)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.scopes.headlines, "substantial")
+  assert.equal(data.scopes.tool_kinds, "substantial")
+  populationsAgree(data)
+})
+
+test("the page takes every section caption from the caption table, and the scope paragraph names the headline population", () => {
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  assert.match(app, /F\.caption\(section, data\.scopes\[SCOPE_OF\[section\]\]\)/)
+  assert.match(app, /F\.caption\("headlines", data\.scopes\.headlines\)/)
+  assert.doesNotMatch(app, /Everything above and below/)
+  // No blanket population claim: the takeaways each name their own.
+  assert.doesNotMatch(app, /Everything else in this section/)
+  assert.match(app, /Each takeaway names the sessions it counts/)
+  for (const section of FMT.CAPTION_SECTIONS.filter((x) => x !== "headlines")) {
+    assert.match(html, new RegExp(`<p class="chart-caption" id="caption-${section}"></p>`), section)
+  }
+  assert.doesNotMatch(html, /across the substantial sessions/)
 })

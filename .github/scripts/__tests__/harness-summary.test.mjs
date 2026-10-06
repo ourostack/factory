@@ -93,3 +93,13 @@ test("store values named like Object properties count as plain keys", () => {
   assert.equal(h.agent_types.constructor, 2)
   assert.equal(JSON.stringify(h.models), '{"__proto__":1,"toString":1}')
 })
+
+test("worker and subagent counts rest only on sessions whose agent list is whole, and say how many", () => {
+  const unread = { session: { host: "claude-code", host_version: "2.2.0" }, agents: [], unavailable: [{ field: "agents", reason: "source_unreadable" }] }
+  const none = { session: { host: "claude-code", host_version: "2.2.0" } }
+  const [h] = harnessSummary([old, rich, unread, none])
+  assert.equal(h.sessions, 4)
+  assert.equal(h.agents_recorded, 2)
+  assert.equal(h.workers, 4)
+  assert.equal(h.subagents, 2)
+})

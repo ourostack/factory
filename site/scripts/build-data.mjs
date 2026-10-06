@@ -35,13 +35,15 @@ import {
   LOW_COVERAGE_BELOW,
   THIN_SAMPLE_MIN,
   declareRollup,
+  fromTotalsLeaf,
   measured,
   partial,
   rollup,
   trust,
   unavailable,
 } from "./state.mjs";
-import { featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
+import { direct } from "./bounds.mjs";
+import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
 
@@ -109,6 +111,11 @@ function countTrust(number) {
 const coverageFile = readJSON(join(reportsDir, "rollups/coverage.json"), null);
 const measuresFile = readJSON(join(reportsDir, "rollups/measures.json"), null);
 const mudaFile = readJSON(join(reportsDir, "rollups/muda.json"), null);
+// Written by a Desk whose reports carry state and reasons (published facts
+// /2). An older reports branch has no totals.json and tool-kind rows without
+// a state; the site then computes those numbers from the facts itself.
+const totalsFile = readJSON(join(reportsDir, "rollups/totals.json"), null);
+const toolKindsFile = readJSON(join(reportsDir, "rollups/tool-kinds.json"), null);
 // If the reports branch is missing its rollups, the site says so (health
 // verdict `broken`) and every number the rollups would supply is unavailable.
 const reportsReadable = coverageFile !== null && measuresFile !== null && mudaFile !== null;
@@ -158,8 +165,8 @@ const jobMember = scopeMember;
 const timeRollups = (key) => {
   const members = jobs.map((j) => jobMember(j, key));
   return {
-    median: rollup(members, { of: "finished jobs", reduce: medianOf }),
-    p75: rollup(members, { of: "finished jobs", reduce: p75Of }),
+    median: rollup(members, { of: "finished jobs", measure: "median", reduce: medianOf }),
+    p75: rollup(members, { of: "finished jobs", measure: "p75", reduce: p75Of }),
   };
 };
 
@@ -204,7 +211,7 @@ const scopedFacts = []; // same substantial-session scope, for every fact-level 
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
-  const entrypoint = d.session?.entrypoint || "unknown";
+  const entrypoint = entrypointOf(d);
   allEntrypoints[entrypoint] = (allEntrypoints[entrypoint] || 0) + 1;
   const host = typeof d.session?.host === "string" && d.session.host ? d.session.host : "unknown";
   factsByHost[host] = (factsByHost[host] || 0) + 1;
@@ -218,9 +225,60 @@ for (const f of factFiles) {
   if (bound) scopedBoundCount += 1;
 }
 
-const toolRollups = toolKindRollups(scopedFacts);
+// Fact-level totals. The pipeline's own totals (rollups/totals.json) apply
+// every facts flag and host constant in one place and count every published
+// session, so the site reads them when they are there. Without them, the
+// site sums the substantial sessions itself, over measured sessions only.
+const PUBLISHED = "published sessions";
+const pipelineTotals = totalsFile && totalsFile.all && typeof totalsFile.all === "object" ? totalsFile.all : null;
+const pipelineKindRows =
+  Array.isArray(toolKindsFile?.tool_kinds) &&
+  toolKindsFile.tool_kinds.length > 0 &&
+  toolKindsFile.tool_kinds.every((r) => r && typeof r.tool === "string" && typeof r.state === "string")
+    ? toolKindsFile.tool_kinds
+    : null;
+
+// One pipeline tool-kind row as the site's rollups. `calls` and `failures`
+// sum the same n of N sessions, so their ratio is taken over those.
+function kindFromRow(row) {
+  const counts = (key) => {
+    const leaf = { N: row.N, n: row.n, reasons: row.reasons, state: row.state };
+    if (key in row) leaf.value = row[key];
+    return fromTotalsLeaf(leaf, PUBLISHED);
+  };
+  const calls = counts("calls");
+  const failures = counts("failures");
+  const sessions = fromTotalsLeaf({ N: row.N, n: row.N, reasons: [], state: "measured", value: row.sessions }, PUBLISHED);
+  const rate =
+    calls.state !== "unavailable" && failures.state === calls.state && calls.value > 0
+      ? { ...calls, value: failures.value / calls.value }
+      : { ...unavailable(calls.state === "unavailable" ? calls.reasons : ["no_calls"]), kind: "rollup", n: 0, N: calls.N, of: PUBLISHED, out_of_scope: 0 };
+  return { tool: row.tool, calls, failures, sessions, failure_rate: direct(rate, "rate") };
+}
+
+const siteToolRollups = toolKindRollups(scopedFacts);
+const toolRollups = pipelineKindRows
+  ? {
+      kinds: pipelineKindRows.map(kindFromRow).sort((a, b) => (b.calls.value ?? -1) - (a.calls.value ?? -1)),
+      total_calls: pipelineTotals ? fromTotalsLeaf(pipelineTotals.tool_calls, PUBLISHED) : siteToolRollups.total_calls,
+    }
+  : siteToolRollups;
+const toolKindsScope = pipelineKindRows ? "published" : "substantial";
 const modelRolls = modelRollups(scopedFacts);
 const subagentRolls = subagentRollups(scopedFacts);
+const headlineTotals = pipelineTotals
+  ? {
+      dispatches: fromTotalsLeaf(pipelineTotals.subagent_dispatches, PUBLISHED),
+      tool_calls: fromTotalsLeaf(pipelineTotals.tool_calls, PUBLISHED),
+      model_requests: fromTotalsLeaf(pipelineTotals.model_requests, PUBLISHED),
+      note: "every published session",
+    }
+  : {
+      dispatches: subagentRolls.dispatches,
+      tool_calls: siteToolRollups.total_calls,
+      model_requests: modelRolls.total_requests,
+      note: "substantial sessions",
+    };
 
 const otherSessionCount = factFiles.length - scopedSessionCount;
 const otherEntrypoints = {};
@@ -325,7 +383,7 @@ for (const { d, prs } of featuredCandidates) {
     models: models.slice(0, 2),
     prs_total: measured(prs.length),
     prs_checked: measured(checked.length),
-    prs_merged: checked.length > 0 ? (checked.length < prs.length ? partial(merged, ["not_every_pull_request_checked"]) : measured(merged)) : unavailable(["github_api_unavailable"]),
+    prs_merged: checked.length > 0 ? (checked.length < prs.length ? direct(partial(merged, ["not_every_pull_request_checked"]), "prs_merged") : measured(merged)) : unavailable(["github_api_unavailable"]),
     sample_merged_prs: [...byRepoLatest.values()]
       .sort((a, b) => b.number - a.number)
       .map((p) => ({ ref: `#${p.number}`, url: p.url })),
@@ -453,13 +511,13 @@ const kaizenRaised =
   kaizenFetch.verification === "unavailable"
     ? unavailable(["github_api_unavailable"])
     : kaizenFetch.truncated
-      ? partial(kaizenIssues.length, ["first_page_only"])
+      ? direct(partial(kaizenIssues.length, ["first_page_only"]), "issues_first_page")
       : measured(kaizenIssues.length);
 const kaizenResolved =
   kaizenFetch.verification === "unavailable"
     ? unavailable(["github_api_unavailable"])
     : kaizenFetch.truncated
-      ? partial(kaizenIssues.filter((i) => i.issue_state === "closed").length, ["first_page_only"])
+      ? direct(partial(kaizenIssues.filter((i) => i.issue_state === "closed").length, ["first_page_only"]), "issues_first_page")
       : measured(kaizenIssues.filter((i) => i.issue_state === "closed").length);
 
 // ---------------------------------------------------------------------------
@@ -475,9 +533,9 @@ const totalSessions = measured(factFiles.length);
 const headlines = [
   { id: "substantial_sessions", label: "Substantial sessions", number: scoped, note: { template: "of {total} published", slots: { total: totalSessions } }, trust: countTrust(scoped) },
   { id: "jobs_tracked", label: "Jobs tracked", number: jobsTracked, note: { template: "{open} open", slots: { open: jobsOpen } }, trust: countTrust(jobsTracked) },
-  { id: "subagent_dispatches", label: "Subagent dispatches", number: subagentRolls.dispatches, note: { template: "substantial sessions", slots: {} }, trust: trust(subagentRolls.dispatches) },
-  { id: "tool_calls", label: "Tool calls recorded", number: toolRollups.total_calls, note: { template: "substantial sessions", slots: {} }, trust: trust(toolRollups.total_calls) },
-  { id: "model_requests", label: "Model requests", number: modelRolls.total_requests, note: { template: "substantial sessions", slots: {} }, trust: trust(modelRolls.total_requests) },
+  { id: "subagent_dispatches", label: "Subagent dispatches", number: headlineTotals.dispatches, note: { template: headlineTotals.note, slots: {} }, trust: trust(headlineTotals.dispatches) },
+  { id: "tool_calls", label: "Tool calls recorded", number: headlineTotals.tool_calls, note: { template: headlineTotals.note, slots: {} }, trust: trust(headlineTotals.tool_calls) },
+  { id: "model_requests", label: "Model requests", number: headlineTotals.model_requests, note: { template: headlineTotals.note, slots: {} }, trust: trust(headlineTotals.model_requests) },
   { id: "kaizen", label: "Kaizen issues", number: kaizenRaised, note: { template: "{resolved} resolved", slots: { resolved: kaizenResolved } }, trust: countTrust(kaizenRaised) },
 ];
 
@@ -506,8 +564,8 @@ takeaways.push({
   if (worst) {
     takeaways.push({
       id: "tool_failures",
-      template: 'Among the substantial sessions, "{tool}" calls fail most often of the tool kinds used at least {min_calls} times: {rate} of {calls} calls ({failures} failures).',
-      slots: { tool: worst.tool, min_calls: measured(20), rate: worst.failure_rate, calls: worst.calls, failures: worst.failures },
+      template: `${toolKindsScope === "published" ? "Across every published session" : "Among the {scoped} substantial sessions"}, "{tool}" calls fail most often of the tool kinds used at least {min_calls} times: {rate} of {calls} calls ({failures} failures).`,
+      slots: { ...(toolKindsScope === "published" ? {} : { scoped }), tool: worst.tool, min_calls: measured(20), rate: worst.failure_rate, calls: worst.calls, failures: worst.failures },
       trust: trust(worst.calls),
     });
   }
@@ -523,7 +581,8 @@ if (modelRolls.models.length > 0 && modelRolls.total_requests.state !== "unavail
     return { ...(row ? row.requests : measured(0)), aux: tot.value };
   };
   const share = rollup(scopedFacts.map(topMember), {
-    of: "sessions",
+    of: SUBSTANTIAL,
+    measure: "share",
     reduce: (v, ms) => {
       const all = sum(ms.map((m) => m.aux));
       return all > 0 ? sum(v) / all : NaN;
@@ -531,8 +590,8 @@ if (modelRolls.models.length > 0 && modelRolls.total_requests.state !== "unavail
   });
   takeaways.push({
     id: "model_concentration",
-    template: "Among the substantial sessions, {model} accounts for {share} of the {total} model requests recorded.",
-    slots: { model: top.id, share, total: modelRolls.total_requests },
+    template: "Among the {scoped} substantial sessions, {model} accounts for {share} of the {total} model requests they recorded.",
+    slots: { scoped, model: top.id, share, total: modelRolls.total_requests },
     trust: trust(share),
   });
 }
@@ -541,8 +600,8 @@ if (subagentRolls.sessions_with_subagents.state !== "unavailable") {
   const w = subagentRolls.sessions_with_subagents;
   takeaways.push({
     id: "subagents",
-    template: "{with} substantial sessions dispatch at least one subagent, {dispatches} dispatches in total; sessions whose subagent logs could not be read are left out.",
-    slots: { with: w, dispatches: subagentRolls.dispatches },
+    template: "{with} of the {scoped} substantial sessions dispatch at least one subagent, {dispatches} dispatches in total across them; sessions whose subagent logs could not be read are left out.",
+    slots: { with: w, scoped, dispatches: subagentRolls.dispatches },
     trust: trust(w),
   });
 }
@@ -569,9 +628,9 @@ const wasteBreakdown = (mudaOverall?.wastes ?? [])
   .filter((w) => w && typeof w.waste === "string")
   .map((w) => ({
     waste: w.waste,
-    total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs" }),
+    total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs", measure: "sum" }),
     jobs: counted(w.jobs),
-    share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs" }),
+    share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs", measure: "share" }),
   }));
 
 // ---------------------------------------------------------------------------
@@ -594,9 +653,10 @@ const harnesses = harnessSummary(scopedFacts).map((h) => ({
   host: h.host,
   unproven: h.unproven,
   sessions: measured(h.sessions),
-  workers: measured(h.workers),
-  subagents: measured(h.subagents),
-  max_depth: measured(h.max_depth),
+  // Counted only over sessions whose agent list is whole: n of N says how many.
+  workers: declareRollup({ value: h.workers, n: h.agents_recorded, N: h.sessions, of: SUBSTANTIAL, measure: "sum" }),
+  subagents: declareRollup({ value: h.subagents, n: h.agents_recorded, N: h.sessions, of: SUBSTANTIAL, measure: "sum" }),
+  max_depth: declareRollup({ value: h.max_depth, n: h.agents_recorded, N: h.sessions, of: SUBSTANTIAL, measure: "max" }),
   versions: asMeasured(h.versions),
   models: asMeasured(h.models),
   agent_types: asMeasured(h.agent_types),
@@ -633,6 +693,15 @@ const data = {
   },
   headlines,
   tool_kinds: toolRollups.kinds,
+  // The population each captioned section counts; the page takes its
+  // captions from these (format.js `caption`).
+  scopes: {
+    headlines: pipelineTotals ? "published" : "substantial",
+    tool_kinds: toolKindsScope,
+    models: "substantial",
+    subagents: "substantial",
+    harnesses: "substantial",
+  },
   tool_calls_total: toolRollups.total_calls,
   time_breakdown: scopedTimeBreakdown,
   flow_efficiency: scopedFlowEfficiency,
