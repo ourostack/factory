@@ -47,6 +47,7 @@
     catch_point_not_recorded: "some defect time has no recorded catch point",
     no_finished_jobs: "no job has finished",
     none_unsigned: "no delivery is waiting for sign-off",
+    waits_incomplete: "some unsigned deliveries have no recorded wait",
     refusal_unverified: "some refusals were not witnessed, so the disagreement is at least this",
     no_accepted_outcomes: "no accepted outcomes yet",
     no_segments: "no session time could be placed on a job",

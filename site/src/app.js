@@ -695,6 +695,13 @@
     const fv = el("p", "stat-value");
     fv.appendChild(num(o.first_pass_yield, "pct"));
     fp.appendChild(fv);
+    // The counts the percentage is computed from, so a reader can rebuild it.
+    const c = o.first_pass_counts;
+    if (c.passed.state === "measured" && c.counted.state === "measured" && c.final.state === "measured") {
+      const how = el("p", "stat-note");
+      how.textContent = `${c.passed.value} of ${c.counted.value} delivered jobs with a verdict passed first time so far; ${c.final.value} of those ${c.counted.value} verdicts are final.`;
+      fp.appendChild(how);
+    }
     const fdl = el("dl", "health-facts");
     figure(fdl, "Passed first time (so far)", o.first_pass_counts.passed);
     figure(fdl, "Sent back at least once", o.first_pass_counts.returned);

@@ -18,7 +18,11 @@ const NOT_YET = ["not_recorded_yet"]
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
 const isCount = (x) => Number.isSafeInteger(x) && x >= 0
 const count = (x, reasons = ["not_recorded"]) => (isCount(x) ? measured(x) : unavailable(reasons))
-const none = (reasons, of, N = 0, outOfScope = 0) => ({ ...unavailable(reasons), kind: "rollup", n: 0, N, of, out_of_scope: outOfScope })
+// A figure whose source the reports do not carry yet has no population to
+// count, so it carries no n of N (never "0 of 0"); any other empty figure
+// says what it would count.
+const none = (reasons, of, N = 0, outOfScope = 0) =>
+  reasons.length === 1 && reasons[0] === NOT_YET[0] ? unavailable(NOT_YET) : { ...unavailable(reasons), kind: "rollup", n: 0, N, of, out_of_scope: outOfScope }
 
 export const WAIT_CLASSES = Object.freeze(["lt_1h", "lt_1d", "lt_7d", "ge_7d"])
 const SIGNED_WORDS = { lt_1h: "signed within an hour", lt_1d: "signed after 1 hour to a day", lt_7d: "signed after 1 to 7 days", ge_7d: "signed after 7 days or more" }
@@ -39,8 +43,8 @@ const RETURN_REASONS = ["agent_error", "changed_ask", "new_information", "extern
 // its desk does not publish it), no recorded history (an adopted card), not
 // delivered. Anything else excluded is lost data and stays in N.
 const OUT_OF_SCOPE = new Set(["not_recorded", "history_not_recorded", "not_delivered"])
-const JOBS_SIGNED = "jobs with a sign-off record"
-const DELIVERED = "delivered jobs with a final verdict"
+const JOBS_SIGNED = "delivered jobs with a sign-off record"
+const DELIVERED = "verdicts on delivered jobs are final"
 const HISTORY = "jobs with a recorded history"
 
 function signoffPart(raw, published) {
@@ -53,19 +57,25 @@ function signoffPart(raw, published) {
 }
 
 // Unsigned deliveries, for the health panel: jobs whose current record says
-// delivered and not signed, over the jobs with a sign-off record.
+// delivered and not signed, over the delivered jobs with a sign-off record.
+// Jobs with no record and jobs not delivered yet are out of scope.
 function unsignedOf(raw, published) {
   if (!published) return none(published === null ? NOT_YET : ["signoff_not_published"], JOBS_SIGNED)
-  if (![raw.jobs, raw.not_recorded, raw.no_record, raw.delivered_unsigned].every(isCount)) return none(["not_recorded"], JOBS_SIGNED)
-  const N = raw.jobs - raw.not_recorded
-  return declareRollup({ value: raw.delivered_unsigned, n: N, N, of: JOBS_SIGNED, measure: "sum", outOfScope: raw.no_record + raw.not_recorded })
+  if (![raw.jobs, raw.not_recorded, raw.not_delivered, raw.no_record, raw.delivered_unsigned].every(isCount)) return none(["not_recorded"], JOBS_SIGNED)
+  const N = Math.max(0, raw.jobs - raw.not_recorded - raw.not_delivered)
+  return declareRollup({ value: raw.delivered_unsigned, n: N, N, of: JOBS_SIGNED, measure: "sum", outOfScope: raw.no_record + raw.not_recorded + raw.not_delivered })
 }
 
 function oldestUnsigned(raw, published) {
   if (!published) return unavailable(published === null ? NOT_YET : ["signoff_not_published"])
   const unsigned = raw.waits?.unsigned
   if (!isObject(unsigned)) return unavailable(["not_recorded"])
-  const longest = [...WAIT_CLASSES].reverse().find((c) => isCount(unsigned[c]) && unsigned[c] > 0)
+  // Every unsigned delivery must sit in a wait class, or the longest wait
+  // could be one that is missing.
+  if (!WAIT_CLASSES.every((c) => isCount(unsigned[c]))) return unavailable(["not_recorded"])
+  const total = WAIT_CLASSES.reduce((s, c) => s + unsigned[c], 0)
+  if (isCount(raw.delivered_unsigned) && total !== raw.delivered_unsigned) return unavailable(["waits_incomplete"])
+  const longest = [...WAIT_CLASSES].reverse().find((c) => unsigned[c] > 0)
   if (longest) return measured(WAITING_WORDS[longest])
   return raw.delivered_unsigned === 0 ? unavailable(["none_unsigned"]) : unavailable(["not_recorded"])
 }
@@ -166,8 +176,15 @@ export function outcomesSummary(file) {
     unsigned: unsignedOf(raw, published),
     oldest_unsigned_wait: oldestUnsigned(raw, published),
     first_pass_yield: yieldOf(f?.first_pass_yield),
+    // The counts the yield is computed from (passed over counted), so the
+    // percentage can be rebuilt; `final` is the site's n, the verdicts that
+    // no longer await a witnessed answer.
     first_pass_counts: {
       passed: count(f?.first_pass_yield?.passed, f ? ["not_recorded"] : NOT_YET),
+      counted: count(f?.first_pass_yield?.N, f ? ["not_recorded"] : NOT_YET),
+      final: isObject(f?.first_pass_yield) && [f.first_pass_yield.N, f.first_pass_yield.awaiting_signoff, f.first_pass_yield.signoff_unverified].every(isCount)
+        ? measured(Math.max(0, f.first_pass_yield.N - f.first_pass_yield.awaiting_signoff - f.first_pass_yield.signoff_unverified))
+        : unavailable(f ? ["not_recorded"] : NOT_YET),
       returned: count(f?.first_pass_yield?.returned, f ? ["not_recorded"] : NOT_YET),
       changed_ask_only: count(f?.first_pass_yield?.changed_ask_only, f ? ["not_recorded"] : NOT_YET),
     },

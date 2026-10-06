@@ -140,7 +140,10 @@ export function checkNumbers(data) {
     } else if (hasRollupKey || "kind" in node) {
       bad(path, "rollup_missing_kind");
     }
-    if (!isTop && node.kind !== "rollup" && ROLLUP_PATHS.some((re) => re.test(path))) {
+    // A figure whose source is not recorded yet has no population, so it may
+    // stand at a rollup path with no n of N.
+    const notYet = node.state === "unavailable" && Array.isArray(node.reasons) && node.reasons.length === 1 && node.reasons[0] === "not_recorded_yet";
+    if (!isTop && !notYet && node.kind !== "rollup" && ROLLUP_PATHS.some((re) => re.test(path))) {
       const m = path.match(/^headlines\[(\d+)\]\.number$/);
       const id = m ? data.headlines?.[Number(m[1])]?.id : null;
       if (!(m && COUNT_HEADLINES.has(id))) bad(path, "rollup_expected");

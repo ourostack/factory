@@ -206,3 +206,9 @@ test("the numbers check fails a headline that has a value and zero accepted outc
   d.outcomes.signoff.accepted = measured(1)
   assert.deepEqual(checkNumbers(d), [])
 })
+
+test("a rollup path may say not recorded yet with no n of N, and nothing else may skip its n of N", () => {
+  assert.deepEqual(checkNumbers({ outcomes: { first_pass_yield: { state: "unavailable", reasons: ["not_recorded_yet"] } } }), [])
+  assert.ok(codes({ outcomes: { first_pass_yield: { state: "unavailable", reasons: ["no_delivered_jobs"] } } }).includes("rollup_expected"))
+  assert.ok(codes({ outcomes: { first_pass_yield: { state: "partial", value: 0.5, reasons: ["not_recorded_yet"] } } }).includes("rollup_expected"))
+})

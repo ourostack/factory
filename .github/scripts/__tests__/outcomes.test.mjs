@@ -72,6 +72,8 @@ test("with no outcomes file every outcome figure is not recorded yet and none is
     assert.equal(f.state, "unavailable")
     assert.ok(!("value" in f))
     assert.deepEqual(f.reasons, ["not_recorded_yet"])
+    // Nothing recorded means no population to count: no "0 of 0".
+    assert.ok(!("n" in f) && !("N" in f) && !("kind" in f))
   }
   assert.deepEqual(checkNumbers({ outcomes: s }), [])
 })
@@ -100,6 +102,10 @@ test("unsigned deliveries count jobs with a sign-off record, with jobs that pred
   assert.equal(s.unsigned.state, "measured")
   assert.equal(s.unsigned.N, 5)
   assert.equal(s.unsigned.out_of_scope, 5)
+  // A job not delivered yet cannot be unsigned, so it is out of scope.
+  const pending = outcomesSummary(file({ signoff: signoff({ not_delivered: 2 }) })).unsigned
+  assert.equal(pending.N, 3)
+  assert.equal(pending.out_of_scope, 7)
   assert.equal(s.oldest_unsigned_wait.value, "waiting at least 1 day")
   const none = outcomesSummary(file({ signoff: signoff({ delivered_unsigned: 0, waits: { signed: waits(), unsigned: waits() } }) }))
   assert.equal(none.unsigned.value, 0)
@@ -114,6 +120,10 @@ test("an awaiting-sign-off yield is an upper bound, with jobs that predate sign-
   assert.equal(y.n, 2)
   assert.equal(y.N, 4)
   assert.equal(y.out_of_scope, 5)
+  // The shown percentage can be rebuilt from counts shown beside it.
+  const c = outcomesSummary(file()).first_pass_counts
+  assert.equal(c.passed.value / c.counted.value, y.value)
+  assert.equal(c.final.value, y.n)
   const lost = outcomesSummary(file({ first_pass_yield: yieldRollup({ excluded: [{ reason: "returns_not_fully_recorded", jobs: 1 }] }) })).first_pass_yield
   assert.equal(lost.N, 5)
   assert.ok(lost.reasons.includes("returns_not_fully_recorded"))
@@ -160,6 +170,18 @@ test("a disagreement counted over unverified refusals is a lower bound", () => {
   assert.equal(r.reason_check.disagree.state, "partial")
   assert.equal(r.reason_check.disagree.bound, "lower")
   assert.deepEqual(r.reason_check.disagree.reasons, ["refusal_unverified"])
+})
+
+test("with sign-off published but no attention estimate, the headline says not recorded yet and shows no n of N", () => {
+  const s = outcomesSummary(file())
+  assert.equal(s.signoff.accepted.value, 2)
+  for (const f of [s.attention.headline, s.attention.turns_per_accepted]) {
+    assert.deepEqual(f, { state: "unavailable", reasons: ["not_recorded_yet"] })
+  }
+  assert.deepEqual(checkNumbers({ outcomes: s }), [])
+  const present = outcomesSummary(file({ attention: { headline: { state: "measured", value: 60000, reasons: [], n: 2, N: 2 } } }))
+  assert.equal(present.attention.headline.n, 2)
+  assert.equal(present.attention.headline.N, 2)
 })
 
 test("a headline with no accepted outcomes keeps its reason and shows no value", () => {
@@ -212,4 +234,32 @@ test("a censored wait reads waiting at least its lower edge; a signed one reads 
   assert.equal(waitWords({ class: "ge_7d", censored: true }), "waiting at least 7 days")
   assert.equal(waitWords({ class: "lt_7d", censored: false }), "signed after 1 to 7 days")
   assert.equal(waitWords({ class: "made_up", censored: false }), null)
+})
+
+test("unsigned waits that do not add up to the unsigned deliveries leave the longest wait unknown", () => {
+  const s = outcomesSummary(file())
+  const sum = s.waits.unsigned.reduce((a, w) => a + w.jobs.value, 0)
+  assert.equal(sum, s.unsigned.value)
+  const short = outcomesSummary(file({ signoff: signoff({ delivered_unsigned: 2 }) }))
+  assert.equal(short.oldest_unsigned_wait.state, "unavailable")
+  assert.deepEqual(short.oldest_unsigned_wait.reasons, ["waits_incomplete"])
+})
+
+test("a private desk's job carries nothing past the closed sign-off fields: no who, no when, no desk", () => {
+  // Desk never publishes a private desk's jobs; if any extra field ever
+  // reached the reports, the site passes on only its own closed words.
+  const j = jobSummary(
+    {
+      job: "p",
+      formulas: {
+        signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], verified: true, reason: null, wait: { class: "lt_1h", censored: false }, signed_by: "someone@example.com", signed_at: "2026-10-01T10:00:00Z", desk: "/Users/someone/private-desk" },
+      },
+    },
+    "p.json",
+  )
+  const out = JSON.stringify(j)
+  for (const leak of ["someone", "2026-10-01", "private-desk", "signed_by", "signed_at"]) assert.ok(!out.includes(leak), leak)
+  const s = outcomesSummary(file({ signoff: signoff({ by_person: { someone: 3 }, private_desks: ["x"] }) }))
+  const all = JSON.stringify(s)
+  for (const leak of ["someone", "by_person", "private_desks"]) assert.ok(!all.includes(leak), leak)
 })
