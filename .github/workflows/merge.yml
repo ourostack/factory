@@ -22,10 +22,17 @@
 # merge call passes that head as `sha`, so GitHub refuses the merge if the
 # head moved. It rejects only when the trusted validation fails and the head
 # is unchanged, with a comment of `factory-rejected: <code>` lines and nothing
-# else. Maintenance pull requests (changes outside the data paths facts/ and
-# labels/, including .github/, by a maintainer) are labeled `maintenance` and
-# left for a maintainer; the same changes from anyone else fail validation
-# with `path` and are rejected. A maintainer is the pull request author when
+# else. Maintenance pull requests (changes outside the data paths, including
+# .github/, by a maintainer) are labeled `maintenance` and left for a
+# maintainer, with one exception: a maintenance pull request whose head is
+# in this repository (not a fork), whose author maintains it, whose
+# factory-validate run passed, and which only adds or modifies correction
+# records (`corrections/*.json`, each passing check-corrections.mjs) or
+# `factory.json` (passing Desk main's parseStoreConfig) merges on its own,
+# at the validated head (`.github/scripts/maintenance-allowlist.mjs`, from
+# main). `intake.json`, `capture.json` and `.github/` stay with a maintainer.
+# The same changes from anyone else fail validation with `path` and are
+# rejected. A maintainer is the pull request author when
 # their permission on this repository is `admin` or `write`; any API error
 # means "not a maintainer".
 name: factory-merge
@@ -101,9 +108,11 @@ jobs:
               summary "factory-merge: #$number head moved; skipped"
               continue
             fi
-            if jq -e '[.labels[].name] | index("maintenance")' <<<"$pr" > /dev/null; then
-              summary "factory-merge: #$number is maintenance; left for a maintainer"
-              continue
+            # A maintenance pull request is looked at again: it may merge on
+            # its own when it is on the allowlist (see the merge step).
+            same_repo=false
+            if [ "$(jq -r '.head.repo.full_name // ""' <<<"$pr")" = "$REPOSITORY" ]; then
+              same_repo=true
             fi
             author=$(jq -r '.user.login' <<<"$pr")
             association=NONE
@@ -116,7 +125,7 @@ jobs:
                 summary "factory-merge: #$number maintainer_check_unavailable"
               fi
             fi
-            printf '%s\t%s\n' "$number" "$association" >> "$RUNNER_TEMP/factory-prs.tsv"
+            printf '%s\t%s\t%s\n' "$number" "$association" "$same_repo" >> "$RUNNER_TEMP/factory-prs.tsv"
           done
 
       - name: Validate with Desk main (no token)
@@ -132,7 +141,7 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
           base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
-          while IFS=$'\t' read -r number association; do
+          while IFS=$'\t' read -r number association same_repo; do
             node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
               > "$RUNNER_TEMP/factory-validate-$number.json" 2> /dev/null || true
@@ -152,6 +161,16 @@ jobs:
                 printf '%s' "$codes" | jq -R -s -c '{ok: false, errors: [split("\n")[] | select(length > 0) | {code: .}]}' > "$result"
               fi
             fi
+            # The maintenance allowlist, from main, for a maintenance pull
+            # request Desk passed whose head is in this repository and whose
+            # author maintains it: only correction records and factory.json,
+            # each valid. Its answer (ok or codes) decides the merge step.
+            if jq -e '.ok == true and .maintenance == true' "$result" > /dev/null 2>&1 \
+              && [ "$association" = COLLABORATOR ] && [ "$same_repo" = true ] \
+              && [ -f .github/scripts/maintenance-allowlist.mjs ]; then
+              node .github/scripts/maintenance-allowlist.mjs "$base_sha" "$HEAD_SHA" "$RUNNER_TEMP/desk" \
+                > "$RUNNER_TEMP/factory-allow-$number.txt" 2> /dev/null || true
+            fi
           done < "$RUNNER_TEMP/factory-prs.tsv"
 
       - name: Merge or reject
@@ -164,7 +183,7 @@ jobs:
           set -euo pipefail
           summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
           unavailable=0
-          while IFS=$'\t' read -r number association; do
+          while IFS=$'\t' read -r number association same_repo; do
             result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
               summary "factory-merge: #$number validator_unavailable; no action"
@@ -174,8 +193,21 @@ jobs:
 
             if jq -e '.ok == true' "$result" > /dev/null; then
               if jq -e '.maintenance == true' "$result" > /dev/null; then
+                allow="$RUNNER_TEMP/factory-allow-$number.txt"
+                if [ "$association" = COLLABORATOR ] && [ "$same_repo" = true ] && [ "$CONCLUSION" = "success" ] \
+                  && [ -f "$allow" ] && [ "$(cat "$allow")" = "ok" ]; then
+                  # The sha parameter makes GitHub refuse the merge if the head moved.
+                  gh api -X PUT "repos/$REPOSITORY/pulls/$number/merge" \
+                    -f merge_method=merge -f sha="$HEAD_SHA" > /dev/null
+                  summary "factory-merge: #$number maintenance on the allowlist; merged at head $HEAD_SHA"
+                  continue
+                fi
                 gh api -X POST "repos/$REPOSITORY/issues/$number/labels" -f 'labels[]=maintenance' > /dev/null
-                summary "factory-merge: #$number labeled maintenance; left for a maintainer"
+                if [ -s "$allow" ]; then
+                  summary "factory-merge: #$number labeled maintenance; left for a maintainer ($(grep -E '^[a-z][a-z0-9_]{0,63}$' "$allow" | tr '\n' ' '))"
+                else
+                  summary "factory-merge: #$number labeled maintenance; left for a maintainer"
+                fi
                 continue
               fi
               if [ "$CONCLUSION" != "success" ]; then
