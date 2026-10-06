@@ -146,6 +146,11 @@ test("merge.yml leaves a held pull request alone, and a refused merge fails only
   assert.match(yml, /merge_at_head\(\) \{/)
   assert.doesNotMatch(yml, /gh api -X PUT "repos\/\$REPOSITORY\/pulls\/\$number\/merge"/)
   assert.match(yml, /merge_refused; left open/)
+  // A maintainer's held pull request is skipped; anyone else's is still validated (and can be rejected) but never merged.
+  assert.match(yml, /\[ "\$held" = true \] && \[ "\$association" = COLLABORATOR \]/)
+  assert.match(yml, /passed but is held/)
+  assert.match(yml, /label_refused/)
+  assert.doesNotMatch(yml, /gh api -X POST "repos\/\$REPOSITORY\/issues\/\$number\/labels"[^\n]*> \/dev\/null$/m)
 })
 
 test("every run block in merge.yml is valid bash", () => {

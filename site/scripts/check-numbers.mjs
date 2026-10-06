@@ -61,7 +61,8 @@ const NUMBER_PATHS = [
   /^capture_coverage\.machines\.(counted|empty|stale|invalid|over_limit|files)$/,
   /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines)$/,
   /^loop_health\.machines\.(reporting|without_loop|unreadable_loop|quiet|stale)$/,
-  /^loop_health\.headless\[\d+\]\.machines$/,
+  /^loop_health\.(headless|notices)\[\d+\]\.machines$/,
+  /^loop_health\.verdict\.(quiet|stale)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
   ...ROLLUP_PATHS,
 ];

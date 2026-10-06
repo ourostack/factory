@@ -1134,7 +1134,10 @@
     improvement_age: "an improvement item has been open for a week or more",
     loop_alarms_open: "the loop has raised an alarm about itself",
     steps_stale: "a loop step has stopped succeeding",
-    headless_blocked: "the waste evaluator is blocked on a machine (no agent command, not signed in, host not supported, or sign-in could not be told)",
+  };
+  const LOOP_NOTICE = {
+    headless_blocked: (n) => `the waste evaluator is blocked on ${n} machine${n === 1 ? "" : "s"} (no agent command, not signed in, or host not supported); Desk opens a card after two days`,
+    headless_unknown: (n) => `whether the waste evaluator can run could not be told on ${n} machine${n === 1 ? "" : "s"} (its sign-in could not be read)`,
   };
   const LOOP_FIGURE = {
     oldest_open_age_days: "the oldest open item's age",
@@ -1191,6 +1194,10 @@
     // The healthy sentence only when every figure it rests on is measured
     // from current records; otherwise say which are not recorded, and why.
     const verdict = loop.verdict || { status: "cannot_tell", missing: [] };
+    const count = (x) => (x && x.state === "measured" ? x.value : 0);
+    const silent = [];
+    if (count(verdict.quiet)) silent.push(`${count(verdict.quiet)} machine${count(verdict.quiet) === 1 ? " has" : "s have"} sent nothing for over three days`);
+    if (count(verdict.stale)) silent.push(`${count(verdict.stale)} machine${count(verdict.stale) === 1 ? "'s record is" : "s' records are"} older than 45 days`);
     if (alarms.length) {
       al.textContent = `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`;
     } else if (verdict.status === "healthy") {
@@ -1199,9 +1206,18 @@
       al.textContent = "No alarm can be told until a machine sends its loop's health.";
     } else {
       const parts = verdict.missing.map((x) => `${LOOP_FIGURE[x.figure] || x.figure} (${x.codes.map((c) => F.reasonText(c)).join("; ")})`);
-      al.textContent = `No alarm is raised, but the loop's health cannot be told: not recorded: ${parts.join("; ")}.`;
+      const why = [];
+      if (parts.length) why.push(`not recorded: ${parts.join("; ")}`);
+      if (silent.length) why.push(`${silent.join(", and ")}, so their figures may not hold today`);
+      al.textContent = `No alarm is raised, but the loop's health cannot be told: ${why.join("; ")}.`;
     }
     container.appendChild(al);
+    const notices = Array.isArray(loop.notices) ? loop.notices : [];
+    if (notices.length) {
+      const note = el("p", "capture-notes");
+      note.textContent = `Notice: ${notices.map((x) => (LOOP_NOTICE[x.code] ? LOOP_NOTICE[x.code](count(x.machines)) : x.code)).join("; ")}.`;
+      container.appendChild(note);
+    }
   }
 
   // ---------------------------------------------------------------- main

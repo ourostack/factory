@@ -108,11 +108,12 @@ jobs:
               summary "factory-merge: #$number head moved; skipped"
               continue
             fi
-            # A maintainer holds any pull request, data or maintenance, by
-            # marking it draft or labeling it `hold`; it is left untouched.
+            # A draft or a `hold` label holds a pull request: it never merges
+            # while held. A maintainer's held pull request is left untouched;
+            # anyone else's is still validated and rejected if it fails.
+            held=false
             if jq -e '.draft == true or ([.labels[].name] | index("hold") != null)' <<<"$pr" > /dev/null; then
-              summary "factory-merge: #$number is held (draft or labeled hold); left for a maintainer"
-              continue
+              held=true
             fi
             # A maintenance pull request is looked at again: it may merge on
             # its own when it is on the allowlist (see the merge step).
@@ -131,7 +132,11 @@ jobs:
                 summary "factory-merge: #$number maintainer_check_unavailable"
               fi
             fi
-            printf '%s\t%s\t%s\n' "$number" "$association" "$same_repo" >> "$RUNNER_TEMP/factory-prs.tsv"
+            if [ "$held" = true ] && [ "$association" = COLLABORATOR ]; then
+              summary "factory-merge: #$number is held (draft or labeled hold); left for a maintainer"
+              continue
+            fi
+            printf '%s\t%s\t%s\t%s\n' "$number" "$association" "$same_repo" "$held" >> "$RUNNER_TEMP/factory-prs.tsv"
           done
 
       - name: Validate with Desk main (no token)
@@ -147,7 +152,7 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
           base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
-          while IFS=$'\t' read -r number association same_repo; do
+          while IFS=$'\t' read -r number association same_repo held; do
             node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
               > "$RUNNER_TEMP/factory-validate-$number.json" 2> /dev/null || true
@@ -201,7 +206,7 @@ jobs:
             failed=1
             return 1
           }
-          while IFS=$'\t' read -r number association same_repo; do
+          while IFS=$'\t' read -r number association same_repo held; do
             result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
               summary "factory-merge: #$number validator_unavailable; no action"
@@ -210,6 +215,10 @@ jobs:
             fi
 
             if jq -e '.ok == true' "$result" > /dev/null; then
+              if [ "$held" = true ]; then
+                summary "factory-merge: #$number passed but is held (draft or labeled hold); not merged"
+                continue
+              fi
               if jq -e '.maintenance == true' "$result" > /dev/null; then
                 allow="$RUNNER_TEMP/factory-allow-$number.txt"
                 if [ "$association" = COLLABORATOR ] && [ "$same_repo" = true ] && [ "$CONCLUSION" = "success" ] \
@@ -220,7 +229,11 @@ jobs:
                   fi
                   continue
                 fi
-                gh api -X POST "repos/$REPOSITORY/issues/$number/labels" -f 'labels[]=maintenance' > /dev/null
+                # A label GitHub refuses fails only this pull request.
+                if ! gh api -X POST "repos/$REPOSITORY/issues/$number/labels" -f 'labels[]=maintenance' > /dev/null 2>&1; then
+                  summary "factory-merge: #$number label_refused"
+                  failed=1
+                fi
                 if [ -s "$allow" ]; then
                   summary "factory-merge: #$number labeled maintenance; left for a maintainer ($(grep -E '^[a-z][a-z0-9_]{0,63}$' "$allow" | tr '\n' ' '))"
                 else

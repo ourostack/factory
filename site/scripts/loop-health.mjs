@@ -53,10 +53,12 @@ export const AGE_ALARM_DAYS = 7
 // A record not updated for this long is a quiet machine (no session started
 // there), shown as such, not an alarm.
 export const QUIET_AFTER_HOURS = 72
-// The headless evaluator states an agent can fix; Desk opens its
-// `loop_alarm:headless_blocked` card for these (after two blocked days on the
-// machine). The store raises the same alarm when any machine reports one.
-export const BLOCKING_HEADLESS = Object.freeze(["no_agent_cli", "no_credentials", "unsupported_host", "sign_in_unknown"])
+// Headless evaluator states that block it. The store shows them as a notice,
+// not an alarm: Desk opens its own `loop_alarm:headless_blocked` card after
+// two blocked days, and that card reaches the page through loop_alarms_open.
+// `sign_in_unknown` is "could not tell", not blocked.
+export const BLOCKING_HEADLESS = Object.freeze(["no_agent_cli", "no_credentials", "unsupported_host"])
+export const UNKNOWN_HEADLESS = Object.freeze(["sign_in_unknown"])
 // The figures the "no loop alarm" sentence rests on.
 export const HEALTHY_RESTS_ON = Object.freeze(["oldest_open_age_days", "loop_alarms_open", "steps_stale"])
 
@@ -162,14 +164,21 @@ export function summarizeLoop({ files, nowMs }) {
   if (over(oldest, AGE_ALARM_DAYS)) alarms.push({ code: "improvement_age" })
   if (over(figures.loop_alarms_open, 1)) alarms.push({ code: "loop_alarms_open" })
   if (over(figures.steps_stale, 1)) alarms.push({ code: "steps_stale" })
-  if (slots.some((s) => BLOCKING_HEADLESS.includes(s.headless))) alarms.push({ code: "headless_blocked" })
+  const notices = []
+  const blocked = slots.filter((s) => BLOCKING_HEADLESS.includes(s.headless)).length
+  if (blocked) notices.push({ code: "headless_blocked", machines: measured(blocked) })
+  const unsure = slots.filter((s) => UNKNOWN_HEADLESS.includes(s.headless)).length
+  if (unsure) notices.push({ code: "headless_unknown", machines: measured(unsure) })
 
   // The "no loop alarm" sentence is said only when every figure it rests on
   // is measured from current records; otherwise the page names the figures
   // that are not recorded, with why. "None open" is a measured fact.
   const known = (key) => figures[key].state === "measured" || (key === "oldest_open_age_days" && figures[key].reasons.length === 1 && figures[key].reasons[0] === "none_open")
   const missing = HEALTHY_RESTS_ON.filter((key) => !known(key)).map((key) => ({ figure: key, codes: [...figures[key].reasons] }))
-  const verdict = alarms.length ? "alarm" : missing.length ? "cannot_tell" : "healthy"
+  // A quiet or stale machine's figures are not known to be true today, so
+  // the loop cannot be called healthy while any machine in N is either.
+  const silent = quiet + stale
+  const verdict = alarms.length ? "alarm" : missing.length || silent ? "cannot_tell" : "healthy"
 
   return {
     contract: "loop_slot_v1",
@@ -183,6 +192,7 @@ export function summarizeLoop({ files, nowMs }) {
       stale: measured(stale),
     },
     alarms,
-    verdict: { status: verdict, missing },
+    notices,
+    verdict: { status: verdict, missing, quiet: measured(quiet), stale: measured(stale) },
   }
 }

@@ -117,6 +117,7 @@ test("a record sent 40 days ago that said oldest 5 days shows 45 days and raises
   const l = summarizeLoop({ files: [file(rec(loop({ oldest_open_age_days: 5 })), 40 * 24)], nowMs: NOW })
   assert.equal(l.oldest_open_age_days.value, 45)
   assert.deepEqual(l.alarms.map((a) => a.code), ["improvement_age"])
+  assert.equal(l.verdict.quiet.value, 1)
   assert.equal(l.verdict.status, "alarm")
 })
 
@@ -168,16 +169,34 @@ test("the no-alarm verdict is healthy only when every figure it rests on is meas
   assert.equal(none.verdict.status, "healthy")
 })
 
-test("a blocked headless evaluator on any machine raises the headless_blocked alarm; a person's own switch does not", () => {
+test("a blocked headless evaluator is a notice with a machine count, not an alarm; an unknown sign-in says could not tell", () => {
   for (const code of BLOCKING_HEADLESS) {
     const l = summarizeLoop({ files: [file(rec(loop({ headless: code })))], nowMs: NOW })
-    assert.deepEqual(l.alarms.map((a) => a.code), ["headless_blocked"], code)
+    assert.deepEqual(l.alarms, [], code)
+    assert.deepEqual(l.notices.map((n) => [n.code, n.machines.value]), [["headless_blocked", 1]], code)
   }
+  const unsure = summarizeLoop({ files: [file(rec(loop({ headless: "sign_in_unknown" })))], nowMs: NOW })
+  assert.deepEqual(unsure.notices.map((n) => n.code), ["headless_unknown"])
   for (const code of ["disabled", "disabled_would_bill", "budget_exhausted", "ran"]) {
-    assert.deepEqual(summarizeLoop({ files: [file(rec(loop({ headless: code })))], nowMs: NOW }).alarms, [], code)
+    const l = summarizeLoop({ files: [file(rec(loop({ headless: code })))], nowMs: NOW })
+    assert.deepEqual([l.alarms, l.notices], [[], []], code)
   }
+  assert.deepEqual(checkNumbers({ loop_health: unsure }), [])
 })
 
+test("a machine silent for 40 days with every figure at zero cannot read as healthy", () => {
+  const zero = loop({ improvement_open: 0, improvement_claimed: 0, improvement_shipped: 0, improvement_verifying: 0, oldest_open_age_days: null, loop_alarms_open: 0, steps_stale: 0 })
+  const l = summarizeLoop({ files: [file(rec(zero), 40 * 24)], nowMs: NOW })
+  assert.deepEqual(l.alarms, [])
+  assert.equal(l.verdict.status, "cannot_tell")
+  assert.equal(l.verdict.quiet.value, 1)
+  assert.equal(l.verdict.stale.value, 0)
+  const fresh = summarizeLoop({ files: [file(rec(zero))], nowMs: NOW })
+  assert.equal(fresh.verdict.status, "healthy")
+  const stale = summarizeLoop({ files: [file(rec(zero)), file(rec(zero), 46 * 24)], nowMs: NOW })
+  assert.equal(stale.verdict.status, "cannot_tell")
+  assert.equal(stale.verdict.stale.value, 1)
+})
 test("the store's capture gate allows exactly the loop slot keys the site reads", async () => {
   const { readFileSync } = await import("node:fs")
   const gate = readFileSync(new URL("../check-capture.sh", import.meta.url), "utf8")
