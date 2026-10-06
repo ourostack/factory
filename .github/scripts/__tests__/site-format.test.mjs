@@ -202,3 +202,35 @@ test("a bound reads in words, a partial duration under a second shows millisecon
   assert.match(unknown.reason, /not known/)
   assert.equal(F.describe(m(0), "duration").text, "0s")
 })
+
+// A minimal document: enough of the DOM for render() to build its nodes.
+function fakeDoc() {
+  const node = (tag) => ({
+    tag,
+    className: "",
+    textContent: "",
+    title: "",
+    children: [],
+    appendChild(c) {
+      this.children.push(c)
+      return c
+    },
+  })
+  return { createElement: node }
+}
+// What a sighted reader sees: every text that is not screen-reader only.
+function visible(n) {
+  if (n.className === "sr-only") return ""
+  return [n.textContent, ...n.children.map(visible)].join("")
+}
+
+test("a partial number whose direction is unknown says so in visible text, not only on hover", () => {
+  const n = p(0.4, ["worker_split", "worker_shared"], "unknown")
+  assert.match(visible(F.render(fakeDoc(), n, "pct")), /could be higher or lower/)
+  assert.match(visible(F.render(fakeDoc(), n, "pct", { flag: false })), /could be higher or lower/)
+  assert.equal(F.describe(n, "pct").marker, "partial, could be higher or lower")
+  // A known direction keeps its words in the figure and the plain marker.
+  const lower = p(21, ["worker_split"], "lower")
+  assert.doesNotMatch(visible(F.render(fakeDoc(), lower, "count")), /could be higher or lower/)
+  assert.equal(F.describe(lower, "count").marker, "partial")
+})

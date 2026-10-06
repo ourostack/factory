@@ -26,6 +26,7 @@
 
   // The page's own limit for a stale site. The health file cannot change it.
   const STALE_AFTER_HOURS = 36;
+  const UNKNOWN_DIRECTION = "could be higher or lower";
   const CLOCK_SKEW_HOURS = 0.1;
 
   const REASON_TEXT = {
@@ -63,6 +64,7 @@
     partial: "only partly measured",
     unmeasured_members: "some members were not measured and are left out",
     no_measured_members: "no member was measured",
+    only_partly_recorded: "every figure that exists here is only partly recorded, so no median or total is shown",
     no_members: "there is nothing to count yet",
     outside_capture_scope: "the job is unfinished or its start predates capture",
     counter_not_recorded: "the host does not record this counter",
@@ -196,7 +198,17 @@
       direction = "";
     }
     const unknownDirection = number.bound === "unknown";
-    return { state: "partial", text: direction + body, marker: "partial", reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason, nofn, basis };
+    // An unknown direction is said in the visible marker too, so a reader
+    // does not have to hover to learn the figure could be off either way.
+    return {
+      state: "partial",
+      text: direction + body,
+      marker: unknownDirection ? `partial, ${UNKNOWN_DIRECTION}` : "partial",
+      reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason,
+      nofn,
+      basis,
+      unknownDirection,
+    };
   }
 
   // The same, as one line of text, for tooltips and labels.
@@ -231,6 +243,13 @@
       sr.textContent = `: ${d.reason}`;
       flag.appendChild(sr);
       wrap.appendChild(flag);
+      } else if (d.unknownDirection) {
+        // In a sentence the partial flag is left to the trust line beside
+        // it, but an unknown direction is still said where the figure is.
+        const note = doc.createElement("span");
+        note.className = "num-flag";
+        note.textContent = UNKNOWN_DIRECTION;
+        wrap.appendChild(note);
       }
     } else if (d.state === "unavailable") {
       wrap.title = `No data: ${d.reason}`;

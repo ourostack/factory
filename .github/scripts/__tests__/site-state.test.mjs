@@ -248,6 +248,24 @@ test("a totals leaf that is malformed or contradicts itself is no data, never a 
   assert.deepEqual(empty.reasons, ["no_sessions"])
 })
 
+test("a rollup with no measured member never repeats a member's lower-bound reason; partly recorded members get a rollup-only reason", () => {
+  const median = rollup(
+    [partial(10, ["host_records_partly"]), partial(20, ["host_records_partly"]), unavailable(["status_unavailable"])],
+    { of: "finished jobs", measure: "median", reduce: (v) => v[0] },
+  )
+  assert.equal(median.state, "unavailable")
+  assert.ok(!("value" in median))
+  assert.ok(!median.reasons.includes("host_records_partly"))
+  assert.ok(median.reasons.includes("only_partly_recorded"))
+  assert.ok(median.reasons.includes("status_unavailable"))
+  assert.deepEqual(median.excluded, { partial: 2, unavailable: 1 })
+  // A partial rollup (some members measured) keeps its members' reasons: it
+  // shows a figure, and the figure is partial for those reasons.
+  const some = rollup([measured(5), partial(10, ["host_records_partly"])], { of: "finished jobs", measure: "median", reduce: (v) => v[0] })
+  assert.equal(some.state, "partial")
+  assert.ok(some.reasons.includes("host_records_partly"))
+})
+
 test("the default coverage every trust state reads is the capture share the build sets", () => {
   useCaptureCoverage({ state: "partial", value: 0.3, reasons: ["unverified_host"] })
   try {
