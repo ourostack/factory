@@ -7,7 +7,7 @@ import { test } from "node:test"
 
 import { Readable } from "node:stream"
 
-import { RETIRED_PAGE, historicalJobs, main, readBatch, writeRetiredPages } from "../retired-job-pages.mjs"
+import { RETIRED_PAGE, historicalJobs, main, readBatch, spawnGit, writeRetiredPages } from "../retired-job-pages.mjs"
 
 const JOB_KEPT = "a".repeat(32)
 const JOB_RETIRED = "b0174d12da0f501e34dd35b5fd0b2448"
@@ -197,4 +197,40 @@ test("historicalJobs reads many files through the real Git", async () => {
   for (let n = 0; n < 200; n += 1) files[`facts/claude-code-${String(n).padStart(8, "0")}-1111-4111-8111-111111111111.json`] = facts(n.toString(16).padStart(32, "0"))
   commit(dir, files, "many")
   assert.equal((await historicalJobs(dir)).length, 200)
+})
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+test("a Git child that fails after its caller stopped reading is not an unhandled rejection", async () => {
+  const seen = []
+  const listener = (reason) => seen.push(reason)
+  process.on("unhandledRejection", listener)
+  try {
+    const dir = store()
+    // The caller never awaits `done`, as when `readBatch` threw first.
+    spawnGit(dir, ["rev-parse", "--verify", "no-such-ref"])
+    await pause(500)
+    assert.deepEqual(seen, [])
+    rmSync(dir, { recursive: true, force: true })
+  } finally {
+    process.off("unhandledRejection", listener)
+  }
+})
+
+test("a Git child that dies before it reads its input fails loudly through `done`, never as an uncaught write error", async () => {
+  const uncaught = []
+  const listener = (error) => uncaught.push(error)
+  process.on("uncaughtException", listener)
+  try {
+    const dir = store()
+    const git = spawnGit(dir, ["rev-parse", "--verify", "no-such-ref"])
+    await pause(300) // the child has exited and closed its end of the pipe
+    git.stdin.write(Buffer.alloc(1 << 20))
+    await assert.rejects(git.done, /retired-job-pages: git rev-parse failed/)
+    await pause(100)
+    assert.deepEqual(uncaught, [])
+    rmSync(dir, { recursive: true, force: true })
+  } finally {
+    process.off("uncaughtException", listener)
+  }
 })

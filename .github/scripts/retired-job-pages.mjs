@@ -53,14 +53,30 @@ A task card that links here names a job an earlier derivation credited. The link
 
 // One Git child process with its output as a stream: `{ stdout, stdin, done }`, where `done` resolves when it exits 0 and rejects
 // otherwise. Nothing is buffered whole, so memory stays bounded by the largest single facts file, however long the history grows.
-function spawnGit(store, args) {
+//
+// Two failures are handled where they start. A caller that stops reading after an error never awaits `done`, so `done` carries a
+// no-op handler: its rejection is still seen by anyone who awaits it, but it can never surface as an unhandled rejection after the
+// step is already failing. `stdin` has an error listener too: a Git child that dies before it reads its input gives an EPIPE on the
+// write, which must not be an uncaught exception. The write error is kept and fails `done` (with Git's own message when Git exited
+// non-zero), so the step still stops loudly and never reads a partial answer as a whole one.
+export function spawnGit(store, args) {
   const child = spawn("git", ["-C", store, ...args], { stdio: ["pipe", "pipe", "pipe"] })
   const errors = []
+  let inputError = null
   child.stderr.on("data", (chunk) => errors.push(chunk))
+  child.stdin.on("error", (error) => {
+    inputError = error
+  })
   const done = new Promise((resolve, reject) => {
     child.on("error", reject)
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`retired-job-pages: git ${args[0]} failed: ${Buffer.concat(errors).toString("utf8").trim()}`))))
+    child.on("close", (code) => {
+      const said = Buffer.concat(errors).toString("utf8").trim()
+      if (code !== 0) reject(new Error(`retired-job-pages: git ${args[0]} failed: ${said}`))
+      else if (inputError !== null) reject(new Error(`retired-job-pages: git ${args[0]} did not take its input: ${inputError.code ?? "write error"}`))
+      else resolve()
+    })
   })
+  done.catch(() => {})
   return { stdout: child.stdout, stdin: child.stdin, done }
 }
 
