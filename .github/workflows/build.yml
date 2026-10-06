@@ -47,15 +47,19 @@
 # after a failed corrections step runs on the data: the kaizen check and the
 # build skip, and andon runs only when its own corrections step succeeded.
 #
-# A job a task card links to never loses its page. After the build,
-# `.github/scripts/retired-job-pages.mjs` writes a short fixed page at
-# `jobs/<job>.md` for every job some facts file on main's history credited
-# and the build made no report for (its sessions were re-derived, corrected
-# or withdrawn), so a card's `factory_report` link leads to "no session is
-# credited to this job now" instead of a 404. It reads Git objects only,
-# which is why this job checks out main's full history, and it stops the
-# build on a shallow checkout rather than quietly writing fewer pages. It
-# writes no `.json`, so the rollups and the site never count a retired job.
+# A job that some facts file on main ever credited keeps a page. After the
+# build, `.github/scripts/retired-job-pages.mjs` writes a short fixed page
+# at `jobs/<job>.md` for every such job the build made no report for (its
+# sessions were re-derived, corrected or withdrawn), so a card linking that
+# job ID leads to "no session is credited to this job now" instead of a
+# 404. A card whose job ID never appeared in main's facts (no session was
+# ever credited to it, or its desk publishes keyed IDs while the card links
+# the plain one) still links a missing page: the store cannot know that job.
+# The step streams Git objects one file at a time, which is why this job
+# checks out main's full history, and it stops the build on a shallow
+# checkout, a missing object or a failed Git call rather than quietly
+# writing fewer pages. It writes no `.json`, so the rollups and the site
+# never count a retired job.
 #
 # A red run must not wait for someone to look. When `factory-build` or
 # `issue-checks` fails on a run that is not an issue event, the `report` job

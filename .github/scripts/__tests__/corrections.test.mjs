@@ -233,6 +233,7 @@ test("a republish with polluted bindings keeps the corrected ones while other fi
   const result = applyCorrectionsToStore({ storeDir, ...store })
 
   assert.deepEqual(result.applied, [FILE_NAME])
+  assert.deepEqual(result.withheld, { [FILE_NAME]: 20 }, "the build summary counts the credit the ceiling withheld")
   const written = JSON.parse(store.store.get(factsPath))
   assert.deepEqual(written.jobs, correctedJobs)
   assert.equal(written.session.duration_ms, 31887607, "the republish's own updated duration still lands")
@@ -250,9 +251,23 @@ test("a re-derivation that credits no job leaves the stale correction nothing to
 
   const result = applyCorrectionsToStore({ storeDir, ...store })
 
-  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [FILE_NAME], moot: [] })
+  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [FILE_NAME], moot: [], withheld: {} })
   assert.equal(store.store.get(factsPath), rederived)
   assert.deepEqual(store.writes, [])
+})
+
+test("a correction that changes no jobs withholds nothing, even when it rewrites another field", () => {
+  const storeDir = "/store"
+  const factsPath = `${storeDir}/facts/${FILE_NAME}`
+  const store = memoryStore({
+    [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord({ fields: { plugins: [] } })),
+    [factsPath]: JSON.stringify({ schema: "desk.factory.published/1", plugins: [{ name: "desk", version: "3.2.0" }] }),
+  })
+
+  const result = applyCorrectionsToStore({ storeDir, ...store })
+
+  assert.deepEqual(result.applied, [FILE_NAME])
+  assert.deepEqual(result.withheld, {})
 })
 
 test("a facts file with no correction record is left alone", () => {
@@ -279,7 +294,7 @@ test("a correction whose target facts file is gone is moot: reported, not an err
 
   const result = applyCorrectionsToStore({ storeDir, ...store })
 
-  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [], moot: [FILE_NAME] })
+  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [], moot: [FILE_NAME], withheld: {} })
   assert.deepEqual(store.writes, [])
 })
 
