@@ -26,6 +26,7 @@
 
   // The page's own limit for a stale site. The health file cannot change it.
   const STALE_AFTER_HOURS = 36;
+  const UNKNOWN_DIRECTION = "could be higher or lower";
   const CLOCK_SKEW_HOURS = 0.1;
 
   const REASON_TEXT = {
@@ -63,6 +64,7 @@
     partial: "only partly measured",
     unmeasured_members: "some members were not measured and are left out",
     no_measured_members: "no member was measured",
+    only_partly_recorded: "every figure that exists here is only partly recorded, so no median or total is shown",
     no_members: "there is nothing to count yet",
     outside_capture_scope: "the job is unfinished or its start predates capture",
     counter_not_recorded: "the host does not record this counter",
@@ -99,6 +101,15 @@
     facts_missing: "a session's facts are missing",
     no_facts: "no facts were published for this",
     facts_ambiguous: "a session's facts disagree with each other",
+    // Capture coverage (the machines' content-free capture records).
+    no_records: "no machine has published a capture record yet",
+    record_stale: "some machines' capture records are older than 45 days and are left out",
+    record_invalid: "some machines' capture records could not be read and are left out",
+    records_over_limit: "more capture records than the site reads; the rest are left out",
+    unverified_host: "the host's session count is not yet verified (for Codex, until one of its sessions has been derived)",
+    no_sessions_on_disk: "no session of this host is on disk",
+    nothing_capturable: "every session on disk is held on purpose or outside a desk",
+    host_does_not_say_desk: "this host's folders do not say which desk a session belongs to",
   };
 
   // Every reason that can reach the page has words. The site build stops on
@@ -187,7 +198,18 @@
       direction = "";
     }
     const unknownDirection = number.bound === "unknown";
-    return { state: "partial", text: direction + body, marker: "partial", reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason, nofn, basis };
+    // An unknown direction is said in the visible marker too, so a reader
+    // does not have to hover to learn the figure could be off either way.
+    return {
+      state: "partial",
+      text: direction + body,
+      // An unverified host is said as such, visibly, not only in the reason.
+      marker: `${Array.isArray(number.reasons) && number.reasons.includes("unverified_host") ? "unverified" : "partial"}${unknownDirection ? `, ${UNKNOWN_DIRECTION}` : ""}`,
+      reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason,
+      nofn,
+      basis,
+      unknownDirection,
+    };
   }
 
   // The same, as one line of text, for tooltips and labels.
@@ -216,12 +238,22 @@
       if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
       flag.className = "num-flag";
-      flag.textContent = d.marker;
+      // In a narrow table cell the marker is one word ("unverified" or
+      // "partial"); the direction stays in the tooltip, the screen-reader
+      // text and the sentences around the table.
+      flag.textContent = opts && opts.shortMarker ? d.marker.split(",")[0] : d.marker;
       const sr = doc.createElement("span");
       sr.className = "sr-only";
       sr.textContent = `: ${d.reason}`;
       flag.appendChild(sr);
       wrap.appendChild(flag);
+      } else if (d.unknownDirection) {
+        // In a sentence the partial flag is left to the trust line beside
+        // it, but an unknown direction is still said where the figure is.
+        const note = doc.createElement("span");
+        note.className = "num-flag";
+        note.textContent = UNKNOWN_DIRECTION;
+        wrap.appendChild(note);
       }
     } else if (d.state === "unavailable") {
       wrap.title = `No data: ${d.reason}`;
@@ -370,5 +402,25 @@
     return typeof id === "string" && ANCHOR.test(id) ? `#${id}` : null;
   }
 
-  return { describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  // How many machines' records a host's figures rest on, and how many of them
+  // could not verify the host's session count.
+  function recordsWords(total, unverified) {
+    const words = `${total} record${total === 1 ? "" : "s"}`;
+    if (!unverified) return words;
+    if (unverified === total) return total === 1 ? `${words}, unverified` : `${words}, all unverified`;
+    return `${words}, ${unverified} unverified`;
+  }
+
+  // The coverage a trust line rests on, with its population named.
+  function coverageWords(cov) {
+    if (cov && (cov.state === "measured" || cov.state === "partial")) {
+      return `coverage: ${describe(cov, "pct").text} of sessions still on disk${cov.state === "partial" ? " (partial)" : ""}`;
+    }
+    if (cov && cov.state === "unavailable" && Array.isArray(cov.reasons) && !(cov.reasons.length === 1 && cov.reasons[0] === "not_recorded_yet")) {
+      return `coverage: no data (${describe(cov, "pct").reason})`;
+    }
+    return "coverage: not recorded yet";
+  }
+
+  return { recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

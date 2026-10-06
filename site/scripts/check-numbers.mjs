@@ -44,6 +44,8 @@ const ROLLUP_PATHS = [
   /^subagents\.buckets\.[^.]+$/,
   /^waste\.breakdown\[\d+\]\.(total_ms|share)$/,
   /^headlines\[\d+\]\.number$/,
+  /^capture_coverage\.share$/,
+  /^capture_coverage\.hosts\[\d+\]\.(on_disk|derived|held|frozen|pending|not_seen|not_in_a_desk|share|capturable_share)$/,
   /^takeaways\[\d+\]\.slots\.(median|rate|calls|failures|share|with|dispatches)$/,
 ];
 // Paths that must hold a stated number of some kind (not an empty object, a
@@ -55,6 +57,8 @@ const NUMBER_PATHS = [
   /^outcomes\.rework\.reason_check\.(compared|disagree|compared_verified)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
+  /^capture_coverage\.machines\.(counted|empty|stale|invalid|over_limit|files)$/,
+  /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
   ...ROLLUP_PATHS,
 ];

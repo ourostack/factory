@@ -202,3 +202,68 @@ test("a bound reads in words, a partial duration under a second shows millisecon
   assert.match(unknown.reason, /not known/)
   assert.equal(F.describe(m(0), "duration").text, "0s")
 })
+
+// A minimal document: enough of the DOM for render() to build its nodes.
+function fakeDoc() {
+  const node = (tag) => ({
+    tag,
+    className: "",
+    textContent: "",
+    title: "",
+    children: [],
+    appendChild(c) {
+      this.children.push(c)
+      return c
+    },
+  })
+  return { createElement: node }
+}
+// What a sighted reader sees: every text that is not screen-reader only.
+function visible(n) {
+  if (n.className === "sr-only") return ""
+  return [n.textContent, ...n.children.map(visible)].join("")
+}
+
+test("a partial number whose direction is unknown says so in visible text, not only on hover", () => {
+  const n = p(0.4, ["worker_split", "worker_shared"], "unknown")
+  assert.match(visible(F.render(fakeDoc(), n, "pct")), /could be higher or lower/)
+  assert.match(visible(F.render(fakeDoc(), n, "pct", { flag: false })), /could be higher or lower/)
+  assert.equal(F.describe(n, "pct").marker, "partial, could be higher or lower")
+  // A known direction keeps its words in the figure and the plain marker.
+  const lower = p(21, ["worker_split"], "lower")
+  assert.doesNotMatch(visible(F.render(fakeDoc(), lower, "count")), /could be higher or lower/)
+  assert.equal(F.describe(lower, "count").marker, "partial")
+})
+
+test("an unverified host says unverified in the visible marker, and the records cell says how many are unverified", () => {
+  const share = { state: "partial", value: 0.25, reasons: ["unverified_host"], bound: "unknown", kind: "rollup", n: 0, N: 1, of: "machines' records with the host verified", out_of_scope: 0 }
+  assert.equal(F.describe(share, "pct").marker, "unverified, could be higher or lower")
+  assert.equal(F.recordsWords(1, 1), "1 record, unverified")
+  assert.equal(F.recordsWords(2, 1), "2 records, 1 unverified")
+  assert.equal(F.recordsWords(2, 0), "2 records")
+  assert.equal(F.recordsWords(3, 3), "3 records, all unverified")
+})
+
+test("the trust line names the population of the coverage share", () => {
+  assert.equal(F.coverageWords({ state: "measured", value: 0.81, reasons: [] }), "coverage: 81% of sessions still on disk")
+  assert.equal(F.coverageWords({ state: "unavailable", reasons: ["not_recorded_yet"] }), "coverage: not recorded yet")
+})
+
+test("a table cell can carry a short marker, with the direction kept in the tooltip", () => {
+  const doc = fakeDoc()
+  const share = { state: "partial", value: 0.25, reasons: ["unverified_host"], bound: "unknown" }
+  const node = F.render(doc, share, "pct", { shortMarker: true })
+  assert.equal(node.children.find((c) => c.className === "num-flag").textContent, "unverified")
+  assert.match(node.title, /which way the true figure lies is not known/)
+  const plain = F.render(doc, { state: "partial", value: 3, reasons: ["record_stale"], bound: "unknown" }, "count", { shortMarker: true })
+  assert.equal(plain.children.find((c) => c.className === "num-flag").textContent, "partial")
+})
+
+test("the capture table uses one-word markers and shows a scroll cue whenever it is wider than its card", async () => {
+  const { readFileSync } = await import("node:fs")
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const table = app.slice(app.indexOf("function renderCaptureCoverage"))
+  assert.match(table, /shortMarker: true/)
+  assert.match(table, /scroll-cue/)
+  assert.match(table, /wrap\.scrollWidth > wrap\.clientWidth/)
+})

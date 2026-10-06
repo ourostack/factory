@@ -212,3 +212,22 @@ test("a rollup path may say not recorded yet with no n of N, and nothing else ma
   assert.ok(codes({ outcomes: { first_pass_yield: { state: "unavailable", reasons: ["no_delivered_jobs"] } } }).includes("rollup_expected"))
   assert.ok(codes({ outcomes: { first_pass_yield: { state: "partial", value: 0.5, reasons: ["not_recorded_yet"] } } }).includes("rollup_expected"))
 })
+
+test("capture coverage cannot ship a share or a count without its state and n of N", () => {
+  const share = { state: "measured", value: 0.9, reasons: [], kind: "rollup", n: 1, N: 1, of: "machines' records", out_of_scope: 0 }
+  const ok = { capture_coverage: { share, machines: { counted: measured(1) }, hosts: [{ host: "claude-code", on_disk: share, share }] } }
+  assert.deepEqual(checkNumbers(ok), [])
+  const bare = { capture_coverage: { share: 0.9, machines: { counted: 1 }, hosts: [{ host: "claude-code", on_disk: 280 }] } }
+  const c = codes(bare)
+  assert.ok(c.includes("rollup_expected"))
+  assert.ok(c.includes("number_expected"))
+  assert.ok(c.includes("bare_number"))
+  const noNofN = { capture_coverage: { share: measured(0.9), hosts: [] } }
+  assert.ok(codes(noNofN).includes("rollup_expected"))
+})
+
+test("a value with n of zero passes only under a reason that names why every member is flagged", () => {
+  const base = { kind: "rollup", n: 0, N: 2, of: "machines' records", out_of_scope: 0, state: "partial", value: 0.4, bound: "unknown" }
+  assert.deepEqual(checkNumbers({ capture_coverage: { share: { ...base, reasons: ["unverified_host"] } } }), [])
+  assert.ok(codes({ capture_coverage: { share: { ...base, reasons: ["record_stale"] } } }).includes("rollup_state_mismatch"))
+})

@@ -111,7 +111,7 @@ test("rollups over jobs take only measured members and show n of N", () => {
   assert.equal(active.trust.status, "thin_sample")
 })
 
-test("every headline carries a trust state and coverage that says not recorded yet", () => {
+test("every headline carries a trust state, and with no capture record its coverage is no data, never a share", () => {
   const fx = fixture()
   build(fx)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
@@ -119,8 +119,65 @@ test("every headline carries a trust state and coverage that says not recorded y
   for (const h of data.headlines) {
     assert.ok(["ok", "thin_sample", "partial", "low_coverage"].includes(h.trust.status), h.id)
     assert.ok(h.trust.reason.length > 0, h.id)
-    assert.deepEqual(h.trust.coverage.reasons, ["not_recorded_yet"], h.id)
+    assert.equal(h.trust.coverage.state, "unavailable", h.id)
+    assert.deepEqual(h.trust.coverage.reasons, ["no_records"], h.id)
   }
+  assert.equal(data.capture_coverage.share.state, "unavailable")
+  const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
+  assert.deepEqual(health.slots.capture_coverage.reasons, ["no_records"])
+})
+
+const captureHost = (over = {}) => ({ on_disk: 20, derived: 18, held: 0, frozen: 0, pending: 0, not_seen: 2, not_in_a_desk: 0, unverified: false, ...over })
+const captureRecord = (hosts) => ({ schema: "desk.factory.capture/1", basis: "still_on_disk", hosts })
+
+function commitCapture(main, name, rec, date) {
+  write(join(main, "capture", name), rec)
+  execFileSync("git", ["-C", main, "add", "."])
+  execFileSync("git", ["-C", main, "-c", "user.name=x", "-c", "user.email=x@example.com", "commit", "-q", "-m", "capture"], {
+    env: { ...process.env, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date },
+  })
+}
+
+test("capture records on main fill capture coverage, the health slot and every trust line", () => {
+  const fx = fixture()
+  const now = new Date().toISOString()
+  commitCapture(fx.main, "0123456789abcdef.json", captureRecord({ "claude-code": captureHost() }), now)
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.deepEqual(checkNumbers(data), [])
+  assert.equal(data.capture_coverage.share.state, "measured")
+  assert.equal(data.capture_coverage.share.value, 0.9)
+  assert.equal(data.coverage.capture.value, 0.9)
+  for (const h of data.headlines) assert.equal(h.trust.coverage.value, 0.9, h.id)
+  const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
+  assert.deepEqual(checkNumbers(health), [])
+  assert.equal(health.slots.capture_coverage.value, 0.9)
+  assert.equal(health.details.capture_coverage.find((d) => d.host === "claude-code").share.value, 0.9)
+  assert.doesNotMatch(JSON.stringify(data.capture_coverage), /0123456789abcdef/)
+})
+
+test("a capture record committed over 45 days ago is left out, and a fall against its previous commit raises an alarm", () => {
+  const fx = fixture()
+  const old = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString()
+  commitCapture(fx.main, "aaaaaaaaaaaaaaaa.json", captureRecord({ "claude-code": captureHost() }), old)
+  commitCapture(fx.main, "bbbbbbbbbbbbbbbb.json", captureRecord({ "claude-code": captureHost() }), new Date().toISOString())
+  commitCapture(fx.main, "bbbbbbbbbbbbbbbb.json", captureRecord({ "claude-code": captureHost({ derived: 10, not_seen: 10 }) }), new Date().toISOString())
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const cov = JSON.parse(readFileSync(fx.out, "utf8")).capture_coverage
+  assert.equal(cov.machines.stale.value, 1)
+  assert.equal(cov.share.state, "partial")
+  assert.deepEqual(cov.alarms.map((a) => a.code).sort(), ["coverage_dropped", "coverage_low"])
+  for (const h of JSON.parse(readFileSync(fx.out, "utf8")).headlines) assert.ok(h.trust.reason.length > 0)
+})
+
+test("a store whose capture share is low marks its headlines low coverage", () => {
+  const fx = fixture()
+  commitCapture(fx.main, "cccccccccccccccc.json", captureRecord({ "claude-code": captureHost({ derived: 5, not_seen: 15 }) }), new Date().toISOString())
+  build(fx)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  for (const h of data.headlines) assert.equal(h.trust.status, "low_coverage", h.id)
 })
 
 test("a count the reports cannot supply is unavailable, not zero", () => {
@@ -354,4 +411,19 @@ test("an outcomes rollup fills sign-off, yield and the unsigned deliveries slot,
   assert.deepEqual(checkNumbers(health), [])
   assert.equal(health.slots.unsigned_deliveries.value, 1)
   assert.equal(health.details.unsigned_deliveries[0].number.value, "waiting at least 7 days")
+})
+
+test("the attention headline's trust rests on the same capture share as every other trust line", () => {
+  const fx = fixture()
+  commitCapture(fx.main, "eeeeeeeeeeeeeeee.json", captureRecord({ "claude-code": captureHost() }), new Date().toISOString())
+  write(join(fx.reports, "rollups/outcomes.json"), {
+    schema: "desk.factory.rollups/1",
+    signoff: { recorded: true, jobs: 1, accepted: 1, accepted_unverified: 0, delivered_unsigned: 0, refused: 0, refused_unverified: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 0, jobs_without_work_record: 0, refusal_reasons: {}, waits: { signed: { lt_1h: 1, lt_1d: 0, lt_7d: 0, ge_7d: 0 }, unsigned: { lt_1h: 0, lt_1d: 0, lt_7d: 0, ge_7d: 0 } } },
+    attention: { headline: { state: "measured", value: 60000, reasons: [], n: 1, N: 1 } },
+  })
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.capture_coverage.share.state, "measured")
+  assert.deepEqual(data.outcomes.attention.trust.coverage, data.capture_coverage.share)
 })

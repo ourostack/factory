@@ -10,10 +10,13 @@
 # must also pass the store's own rule on correction records
 # (`.github/scripts/check-corrections.mjs`, read from the base): every
 # `corrections/*.json` file it adds or modifies parses as JSON and passes
-# `validateCorrectionRecord`. This file never checks out, installs or
+# `validateCorrectionRecord`, and the store's own rule on capture records
+# (`.github/scripts/check-capture.sh`, read from the base): every
+# `capture/` file it adds or modifies has a valid path, size and key set.
+# This file never checks out, installs or
 # executes the candidate's files. Failures report stable reason codes only.
 #
-# Both checks are skipped (not failed) when the base checkout does not yet
+# These checks are skipped (not failed) when the base checkout does not yet
 # have the script: the pull request that first adds a repo-owned check can
 # only be judged once it lands. The unit tests under
 # `.github/scripts/__tests__/` run the same way, for the same reason.
@@ -127,6 +130,17 @@ jobs:
             # file it adds or modifies must pass validateCorrectionRecord.
             if [ -f .github/scripts/check-corrections.mjs ]; then
               if ! codes=$(node .github/scripts/check-corrections.mjs "$BASE_SHA" "$HEAD_SHA"); then
+                printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+                printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            fi
+            # The store's own rule on capture records, from the base, for
+            # every pull request: a capture/ file it adds or modifies must be
+            # capture/<16 hex>.json, at most 2 KiB, with exactly the known
+            # keys, and one per pull request.
+            if [ -f .github/scripts/check-capture.sh ]; then
+              if ! codes=$(bash .github/scripts/check-capture.sh "$BASE_SHA" "$HEAD_SHA"); then
                 printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
                 printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
                 exit 1

@@ -15,9 +15,9 @@ import { direct } from "./bounds.mjs";
 // constant, so changing the threshold changes it everywhere.
 export const THIN_SAMPLE_MIN = 5;
 
-// Extension point for capture coverage. Per-host capture coverage will arrive
-// as its own published record (a `measured` share between 0 and 1). Until it
-// does, no coverage is claimed: the headline says "not recorded yet", never
+// Capture coverage: the share of sessions still on disk that were captured,
+// summed from the machines' capture records (capture-coverage.mjs). With no
+// record, no coverage is claimed: the headline says "not recorded yet", never
 // 100% and never 0%.
 export const LOW_COVERAGE_BELOW = 0.5;
 export const COVERAGE_NOT_RECORDED = Object.freeze({
@@ -129,18 +129,26 @@ export function rollup(members, { of, reduce, measure }) {
   const usable = list.filter((m) => m && m.state === "measured");
   const excluded = {};
   const reasons = new Set();
+  const lostReasons = new Set();
   for (const m of list) {
     if (m && m.state !== "measured") {
       const key = m?.state ?? "unavailable";
       excluded[key] = (excluded[key] || 0) + 1;
-      for (const r of m?.reasons ?? []) reasons.add(r);
+      for (const r of m?.reasons ?? []) {
+        reasons.add(r);
+        if (key !== "partial") lostReasons.add(r);
+      }
     }
   }
   const base = { kind: "rollup", n: usable.length, N: list.length, of, out_of_scope: outOfScope };
   direct(measured(0), measure);
   if (list.length === 0) return { ...unavailable(["no_applicable_members"]), ...base };
   if (usable.length === 0) {
-    return { ...unavailable(["no_measured_members", ...reasons]), ...base, excluded };
+    // No figure is shown, so a partial member's own reasons ("the figure is
+    // a lower bound") would contradict "no data". They are replaced by one
+    // rollup-only reason that says why nothing was combined.
+    const partly = excluded.partial ? ["only_partly_recorded"] : [];
+    return { ...unavailable(["no_measured_members", ...lostReasons, ...partly]), ...base, excluded };
   }
   // The measure is known up front: a rollup with no direction cannot be built.
   direct(measured(0), measure);
@@ -157,11 +165,13 @@ export function rollup(members, { of, reduce, measure }) {
 // Trust state for a headline: `ok`, `thin_sample`, `partial`, or (once a
 // coverage record exists) `low_coverage`. `reasons` lists every cause that
 // applies; `status` is the first that does, in that order of severity.
+// `coverage` is the capture share the trust state rests on; the site build
+// passes it to every call. Without one it reads "not recorded yet".
 export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   const n = Number.isInteger(headline?.n) ? headline.n : headline?.state === "measured" ? 1 : 0;
   const N = Number.isInteger(headline?.N) ? headline.N : n;
   const causes = [];
-  if (coverage?.state === "measured" && typeof coverage.value === "number" && coverage.value < LOW_COVERAGE_BELOW) {
+  if ((coverage?.state === "measured" || coverage?.state === "partial") && typeof coverage.value === "number" && coverage.value < LOW_COVERAGE_BELOW) {
     causes.push("low_coverage");
   }
   if (n < THIN_SAMPLE_MIN) causes.push("thin_sample");
