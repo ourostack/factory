@@ -146,19 +146,47 @@ test("validateCorrectionRecord rejects a jobs entry whose basis repeats an entry
 
 // --- applyCorrection / correctionChanges ------------------------------------
 
-test("applyCorrection overlays only the named fields", () => {
-  const current = { schema: "desk.factory.published/1", session: { duration_ms: 100 }, jobs: [1, 2, 3], plugins: ["a"] }
-  const record = { fields: { jobs: [4, 5] } }
+const jobEntry = (job, extra = {}) => ({ job, basis: ["desk_commit"], session_offset_ms: null, transitions: [], observed: null, ...extra })
+const JOB_A = "2927a4630f97b7869a71f387a4a757f1"
+const JOB_B = "4d2ddeafaa4aa2fbaca01d6f4996b5d2"
+const JOB_C = "5819103ed254066a2ae78270584041f0"
+
+test("applyCorrection overlays the named fields and leaves the rest", () => {
+  const current = { schema: "desk.factory.published/1", session: { duration_ms: 100 }, jobs: [], plugins: ["a"] }
+  const record = { fields: { plugins: ["b"] } }
   const corrected = applyCorrection(current, record)
-  assert.deepEqual(corrected.jobs, [4, 5])
+  assert.deepEqual(corrected.plugins, ["b"])
   assert.deepEqual(corrected.session, { duration_ms: 100 })
-  assert.deepEqual(corrected.plugins, ["a"])
+  assert.deepEqual(corrected.jobs, [])
 })
 
-test("correctionChanges is false once the fields already match", () => {
-  const current = { jobs: [1, 2] }
-  assert.equal(correctionChanges(current, { fields: { jobs: [1, 2] } }), false)
-  assert.equal(correctionChanges(current, { fields: { jobs: [1, 3] } }), true)
+test("a jobs correction is a ceiling: it cuts an over-bound republish back to the jobs it lists", () => {
+  const current = { jobs: [jobEntry(JOB_A), jobEntry(JOB_B), jobEntry(JOB_C)] }
+  const corrected = applyCorrection(current, { fields: { jobs: [jobEntry(JOB_A), jobEntry(JOB_B)] } })
+  assert.deepEqual(corrected.jobs.map((entry) => entry.job), [JOB_A, JOB_B])
+})
+
+test("a jobs correction never adds credit a later derivation no longer finds", () => {
+  // Session 1cd05863: the record pins 11 jobs; the re-derivation under binding version 5 holds none.
+  assert.deepEqual(applyCorrection({ jobs: [] }, { fields: { jobs: [jobEntry(JOB_A), jobEntry(JOB_B)] } }).jobs, [])
+  // A re-derivation that keeps fewer jobs shows exactly those, as it derived them (newer keys included).
+  const derived = jobEntry(JOB_B, { session_offset_ms: 5, agents: [0], segments: [{ start_ms: 0, end_ms: 10 }] })
+  assert.deepEqual(applyCorrection({ jobs: [derived] }, { fields: { jobs: [jobEntry(JOB_A), jobEntry(JOB_B)] } }).jobs, [derived])
+})
+
+test("a jobs correction keeps nothing from facts whose jobs are missing or malformed", () => {
+  const record = { fields: { jobs: [jobEntry(JOB_A)] } }
+  assert.deepEqual(applyCorrection({}, record).jobs, [])
+  assert.deepEqual(applyCorrection({ jobs: [1, null, { job: 7 }] }, record).jobs, [])
+})
+
+test("correctionChanges is false once the facts are within the correction", () => {
+  assert.equal(correctionChanges({ plugins: ["a"] }, { fields: { plugins: ["a"] } }), false)
+  assert.equal(correctionChanges({ plugins: ["a"] }, { fields: { plugins: ["b"] } }), true)
+  const record = { fields: { jobs: [jobEntry(JOB_A), jobEntry(JOB_B)] } }
+  assert.equal(correctionChanges({ jobs: [jobEntry(JOB_A)] }, record), false, "a derivation already within the ceiling is left alone")
+  assert.equal(correctionChanges({ jobs: [] }, record), false)
+  assert.equal(correctionChanges({ jobs: [jobEntry(JOB_A), jobEntry(JOB_C)] }, record), true)
 })
 
 // --- applyCorrectionsToStore -------------------------------------------------
@@ -186,16 +214,17 @@ test("a republish with polluted bindings keeps the corrected ones while other fi
   const storeDir = "/store"
   const correctionPath = `${storeDir}/corrections/${FILE_NAME}`
   const factsPath = `${storeDir}/facts/${FILE_NAME}`
+  const correctedJobs = [
+    jobEntry(JOB_A),
+    jobEntry(JOB_B, { observed: { status: "done", offset_ms: null } }),
+  ]
+  const polluted = Array.from({ length: 20 }, (_, i) => jobEntry(`${String(i).padStart(2, "0")}${"e".repeat(30)}`))
   const republished = {
     schema: "desk.factory.published/1",
     session: { host: "claude-code", id: SESSION, duration_ms: 31887607 },
-    jobs: Array.from({ length: 22 }, (_, i) => ({ job: `polluted-${i}`, basis: ["desk_commit"], session_offset_ms: null, transitions: [], observed: null })),
+    jobs: [...correctedJobs, ...polluted],
     plugins: [{ name: "desk", version: "3.2.0-alpha.130" }],
   }
-  const correctedJobs = [
-    { job: "2927a4630f97b7869a71f387a4a757f1", basis: ["desk_commit"], session_offset_ms: null, transitions: [], observed: null },
-    { job: "4d2ddeafaa4aa2fbaca01d6f4996b5d2", basis: ["desk_commit"], session_offset_ms: null, transitions: [], observed: { status: "done", offset_ms: null } },
-  ]
   const store = memoryStore({
     [correctionPath]: JSON.stringify(validRecord({ fields: { jobs: correctedJobs } })),
     [factsPath]: JSON.stringify(republished),
@@ -204,10 +233,41 @@ test("a republish with polluted bindings keeps the corrected ones while other fi
   const result = applyCorrectionsToStore({ storeDir, ...store })
 
   assert.deepEqual(result.applied, [FILE_NAME])
+  assert.deepEqual(result.withheld, { [FILE_NAME]: 20 }, "the build summary counts the credit the ceiling withheld")
   const written = JSON.parse(store.store.get(factsPath))
   assert.deepEqual(written.jobs, correctedJobs)
   assert.equal(written.session.duration_ms, 31887607, "the republish's own updated duration still lands")
   assert.deepEqual(written.plugins, republished.plugins, "an untouched field still comes from the republish")
+})
+
+test("a re-derivation that credits no job leaves the stale correction nothing to do", () => {
+  const storeDir = "/store"
+  const factsPath = `${storeDir}/facts/${FILE_NAME}`
+  const rederived = JSON.stringify({ schema: "desk.factory.published/1", session: { host: "claude-code", id: SESSION, duration_ms: 70446 }, jobs: [] })
+  const store = memoryStore({
+    [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord({ fields: { jobs: [jobEntry(JOB_A), jobEntry(JOB_B), jobEntry(JOB_C)] } })),
+    [factsPath]: rederived,
+  })
+
+  const result = applyCorrectionsToStore({ storeDir, ...store })
+
+  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [FILE_NAME], moot: [], withheld: {} })
+  assert.equal(store.store.get(factsPath), rederived)
+  assert.deepEqual(store.writes, [])
+})
+
+test("a correction that changes no jobs withholds nothing, even when it rewrites another field", () => {
+  const storeDir = "/store"
+  const factsPath = `${storeDir}/facts/${FILE_NAME}`
+  const store = memoryStore({
+    [`${storeDir}/corrections/${FILE_NAME}`]: JSON.stringify(validRecord({ fields: { plugins: [] } })),
+    [factsPath]: JSON.stringify({ schema: "desk.factory.published/1", plugins: [{ name: "desk", version: "3.2.0" }] }),
+  })
+
+  const result = applyCorrectionsToStore({ storeDir, ...store })
+
+  assert.deepEqual(result.applied, [FILE_NAME])
+  assert.deepEqual(result.withheld, {})
 })
 
 test("a facts file with no correction record is left alone", () => {
@@ -234,7 +294,7 @@ test("a correction whose target facts file is gone is moot: reported, not an err
 
   const result = applyCorrectionsToStore({ storeDir, ...store })
 
-  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [], moot: [FILE_NAME] })
+  assert.deepEqual(result, { checked: 1, applied: [], unchanged: [], moot: [FILE_NAME], withheld: {} })
   assert.deepEqual(store.writes, [])
 })
 

@@ -61,7 +61,10 @@ export class CorrectionsInvalidError extends Error {
 }
 
 /**
- * `applyCorrectionsToStore({ storeDir, ... }) -> { checked, applied, unchanged, moot }`.
+ * `applyCorrectionsToStore({ storeDir, ... }) -> { checked, applied, unchanged, moot, withheld }`.
+ * `withheld` maps a facts file name to how many jobs its record's ceiling
+ * removed (only files where it removed any), so the build summary shows the
+ * credit the reports no longer carry.
  * `applied`/`unchanged`/`moot` list facts file names (not paths); `moot` is
  * sorted and names records whose facts file is not present under
  * `<storeDir>/facts/`. Throws `CorrectionsInvalidError` (never returns
@@ -101,6 +104,7 @@ export function applyCorrectionsToStore({
   const applied = []
   const unchanged = []
   const moot = []
+  const withheld = {}
   for (const record of records) {
     const factsPath = path.join(factsDir, record.file)
     if (!exists(factsPath)) {
@@ -115,9 +119,12 @@ export function applyCorrectionsToStore({
     const corrected = applyCorrection(current, record)
     writeText(factsPath, `${JSON.stringify(corrected)}\n`)
     applied.push(record.file)
+    // What the jobs ceiling took away, so the build summary shows credit the reports no longer carry.
+    const cut = Object.hasOwn(record.fields, "jobs") && Array.isArray(current.jobs) ? current.jobs.length - corrected.jobs.length : 0
+    if (cut > 0) withheld[record.file] = cut
   }
 
-  return { checked: records.length, applied, unchanged, moot: moot.sort() }
+  return { checked: records.length, applied, unchanged, moot: moot.sort(), withheld }
 }
 
 export async function main({ argv = process.argv.slice(2), write = (text) => process.stdout.write(text), logError = (text) => process.stderr.write(text) } = {}) {

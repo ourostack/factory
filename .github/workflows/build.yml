@@ -4,7 +4,7 @@
 # Runs on pushes to main (maintainer merges), after factory-merge completes
 # (merges made with the workflow token do not start push workflows), daily,
 # and on demand. The build is deterministic and the commit has fixed metadata,
-# so the same facts always produce the same commit and an unchanged build
+# so the same facts (and facts history) always produce the same commit and an unchanged build
 # pushes nothing. The commit has no parent and holds only the build output.
 #
 # It also runs when an issue is opened, edited, reopened or labeled, so a new
@@ -46,6 +46,20 @@
 # retraction) is moot, not an error: the step reports it and goes on. No step
 # after a failed corrections step runs on the data: the kaizen check and the
 # build skip, and andon runs only when its own corrections step succeeded.
+#
+# A job that some facts file on main ever credited keeps a page. After the
+# build, `.github/scripts/retired-job-pages.mjs` writes a short fixed page
+# at `jobs/<job>.md` for every such job the build made no report for (its
+# sessions were re-derived, corrected or withdrawn), so a card linking that
+# job ID leads to "no session is credited to this job now" instead of a
+# 404. A card whose job ID never appeared in main's facts (no session was
+# ever credited to it, or its desk publishes keyed IDs while the card links
+# the plain one) still links a missing page: the store cannot know that job.
+# The step streams Git objects one file at a time, which is why this job
+# checks out main's full history, and it stops the build on a shallow
+# checkout, a missing object or a failed Git call rather than quietly
+# writing fewer pages. It writes no `.json`, so the rollups and the site
+# never count a retired job.
 #
 # A red run must not wait for someone to look. When `factory-build` or
 # `issue-checks` fails on a run that is not an issue event, the `report` job
@@ -95,6 +109,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
+          # Full history: the retired job pages step reads every facts file main ever held.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Clone Desk main
@@ -115,6 +131,11 @@ jobs:
           set -euo pipefail
           echo "Store main: $(git rev-parse HEAD)"
           node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" build --store . --out _out
+
+      - name: Keep a page for every retired job
+        run: |
+          set -euo pipefail
+          node .github/scripts/retired-job-pages.mjs --store . --out _out | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the reports branch
         env:
