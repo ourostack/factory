@@ -184,12 +184,14 @@ export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   if (n < N || headline?.state === "partial") causes.push("partial");
   const status = causes[0] ?? "ok";
   const text = {
-    coverage_unknown: `capture coverage not measured${Array.isArray(coverage?.reasons) && coverage.reasons.length ? ` (${coverage.reasons.join(", ")})` : ""}`,
     low_coverage: "capture coverage is low",
     thin_sample: `only ${n} measured (fewer than ${THIN_SAMPLE_MIN})`,
     partial: `${n} of ${N} measured`,
   };
-  const reason = status === "ok" ? `${n} of ${N} measured` : causes.map((r) => text[r]).join("; ");
+  // The coverage fact is stated once, by the coverage words beside the reason,
+  // so the reason leaves it out and speaks of the figure itself.
+  const shown = causes.filter((r) => r !== "coverage_unknown");
+  const reason = shown.length === 0 ? `${n} of ${N} measured` : shown.map((r) => text[r]).join("; ");
   return { status, reason, causes, coverage };
 }
 

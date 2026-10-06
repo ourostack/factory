@@ -1,5 +1,8 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { test } from "node:test"
 import { measured, rollup, trust } from "../../../site/scripts/state.mjs"
 import { createRequire } from "node:module"
@@ -16,7 +19,9 @@ test("trust is not ok when capture coverage could not be computed", () => {
     assert.notEqual(t.status, "ok", JSON.stringify(reasons))
     assert.equal(t.status, "coverage_unknown")
     assert.ok(t.causes.includes("coverage_unknown"))
-    assert.match(t.reason, /coverage/)
+    // The reason speaks of the figure and holds no raw code; the coverage words carry the coverage fact.
+    assert.equal(t.reason, "6 of 6 measured")
+    assert.doesNotMatch(t.reason, /not_recorded|no_capture_records|^x$/)
   }
 })
 
@@ -33,7 +38,7 @@ test("coverage that is only not recorded yet, or measured, is unchanged", () => 
 
 test("the site words the unknown status as not measured, with the reason", () => {
   const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
-  assert.match(app, /coverage_unknown: "[^"]*not measured/)
+  assert.match(app, /coverage_unknown: "capture coverage not measured"/)
   const css = readFileSync(new URL("../../../site/src/styles.css", import.meta.url), "utf8")
   assert.match(css, /\.trust-coverage_unknown/)
   assert.match(coverageWords(unavailable("no_capture_records")), /no data/)
@@ -46,14 +51,43 @@ test("the store's own check scripts are never skipped when absent", () => {
     const text = workflow(name)
     assert.doesNotMatch(text, /\[ -[fex] [^\]]*check-(corrections|capture)/, `${name} guards a check on the script existing`)
   }
+  assert.doesNotMatch(workflow("validate.yml"), /; skipped"/)
   assert.match(workflow("validate.yml"), /node \.github\/scripts\/check-corrections\.mjs "\$BASE_SHA" "\$HEAD_SHA"/)
   assert.match(workflow("validate.yml"), /bash \.github\/scripts\/check-capture\.sh "\$BASE_SHA" "\$HEAD_SHA"/)
 })
 
-test("a check that produces no code still rejects with a stable code", () => {
+test("a store check that cannot run leaves the pull request open and fails the job, never rejects it", () => {
   const merge = workflow("merge.yml")
-  assert.match(merge, /capture_check_unavailable/)
+  // It is reported like validator_unavailable (no action, job fails), not as a rejection code.
+  assert.match(merge, /jq -n -c --arg code "\$unavailable_check" '\{unavailable: \$code\}'/)
+  assert.doesNotMatch(merge, /codes\+="capture_check_unavailable"/)
+  assert.match(merge, /_check_unavailable\$/)
+  assert.match(merge, /; no action"/)
   const validate = workflow("validate.yml")
-  assert.match(validate, /corrections_check_unavailable/)
-  assert.match(validate, /capture_check_unavailable/)
+  for (const code of ["corrections_check_unavailable", "capture_check_unavailable", "intake_check_unavailable", "tests_unavailable"]) {
+    assert.match(validate, new RegExp(code), code)
+  }
+})
+
+// The merge step's own check block, run for real: a missing capture script marks the result unavailable, it does not reject.
+test("merge.yml: a missing check script yields an unavailable result, not a rejection", () => {
+  const text = workflow("merge.yml")
+  const a = text.indexOf('              codes=""\n              unavailable_check')
+  const b = text.indexOf("            # The maintenance allowlist")
+  assert.ok(a > 0 && b > a)
+  const snippet = text.slice(a, b).split("\n").map((l) => l.slice(14)).join("\n")
+  const run = (scripts) => {
+    const dir = mkdtempSync(join(tmpdir(), "merge-"))
+    mkdirSync(join(dir, ".github/scripts"), { recursive: true })
+    for (const [name, body] of Object.entries(scripts)) writeFileSync(join(dir, ".github/scripts", name), body)
+    writeFileSync(join(dir, "r.json"), '{"ok":true}')
+    const r = spawnSync("bash", ["-c", `set -uo pipefail\nresult=r.json base_sha=a HEAD_SHA=b\n${snippet}`], { cwd: dir, encoding: "utf8" })
+    return JSON.parse(readFileSync(join(dir, "r.json"), "utf8"))
+  }
+  assert.deepEqual(run({ "check-intake-plugins.sh": "exit 0\n" }), { unavailable: "capture_check_unavailable" })
+  assert.deepEqual(run({ "check-capture.sh": "exit 0\n" }), { unavailable: "intake_check_unavailable" })
+  assert.deepEqual(run({ "check-intake-plugins.sh": "exit 0\n", "check-capture.sh": "echo capture_check_unavailable; exit 1\n" }), { unavailable: "capture_check_unavailable" })
+  const bad = run({ "check-intake-plugins.sh": "exit 0\n", "check-capture.sh": "echo capture_path; exit 1\n" })
+  assert.deepEqual(bad, { ok: false, errors: [{ code: "capture_path" }] })
+  assert.deepEqual(run({ "check-intake-plugins.sh": "exit 0\n", "check-capture.sh": "exit 0\n" }), { ok: true })
 })

@@ -16,11 +16,11 @@
 # This file never checks out, installs or
 # executes the candidate's files. Failures report stable reason codes only.
 #
-# These checks are skipped (not failed) when the base checkout does not yet
-# have the script: the pull request that first adds a repo-owned check can
-# only be judged once it lands. The unit tests under
-# `.github/scripts/__tests__/` run from the base the same way, for the same
-# reason, and they test the code that judges this pull request.
+# A check that cannot run fails the job: a missing or crashing script is
+# `corrections_check_unavailable`, `capture_check_unavailable` or
+# `intake_check_unavailable`, never a skip. The unit tests under
+# `.github/scripts/__tests__/` run from the base the same way, and a missing
+# test folder fails too. They test the code that judges this pull request.
 #
 # The pull request's own tests run in a separate job, `head-tests`, which
 # `factory-validate` waits for and fails on. It executes the candidate's code,
@@ -235,11 +235,11 @@ jobs:
       - name: Run the store's own script tests
         run: |
           set -euo pipefail
-          if [ -d .github/scripts/__tests__ ]; then
-            node --test '.github/scripts/__tests__/*.test.mjs'
-          else
-            echo "factory-validate: no .github/scripts/__tests__ on the base yet; skipped"
+          if [ ! -d .github/scripts/__tests__ ]; then
+            printf 'factory-validate: tests_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          node --test '.github/scripts/__tests__/*.test.mjs'
 
       - name: Clone Desk main
         run: |
@@ -316,7 +316,8 @@ jobs:
             # plugins.
             if ! codes=$(bash .github/scripts/check-intake-plugins.sh "$BASE_SHA" "$HEAD_SHA"); then
               printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
-              printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+              stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
+              printf '%s\n' "${stable:-intake_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
               exit 1
             fi
             printf 'factory-validate: passed\n' | tee -a "$GITHUB_STEP_SUMMARY"

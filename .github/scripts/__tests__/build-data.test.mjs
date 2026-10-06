@@ -120,7 +120,8 @@ test("every headline carries a trust state, and with no capture record its cover
   assert.ok(data.headlines.length >= 5)
   for (const h of data.headlines) {
     assert.equal(h.trust.status, "coverage_unknown", h.id)
-    assert.match(h.trust.reason, /not measured \(no_records\)/, h.id)
+    assert.doesNotMatch(h.trust.reason, /no_records/, h.id)
+    assert.ok(h.trust.reason.length > 0, h.id)
     assert.equal(h.trust.coverage.state, "unavailable", h.id)
     assert.deepEqual(h.trust.coverage.reasons, ["no_records"], h.id)
   }

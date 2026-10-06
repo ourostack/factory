@@ -349,7 +349,7 @@
 
   // ----------------------------------------------------- trust and slots
 
-  const TRUST_LABEL = { ok: "ok", thin_sample: "thin sample", partial: "partial", low_coverage: "low coverage", coverage_unknown: "not measured (coverage unknown)" };
+  const TRUST_LABEL = { ok: "ok", thin_sample: "thin sample", partial: "partial", low_coverage: "low coverage", coverage_unknown: "capture coverage not measured" };
 
   // The trust state of a headline, as text beside the figure: its status in
   // words, why, and what is known about capture coverage. Coverage is never
