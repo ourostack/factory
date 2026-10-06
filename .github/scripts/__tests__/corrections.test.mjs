@@ -514,3 +514,43 @@ test("a correction may restore a null token or request counter: null is not reco
   assert.deepEqual(errors, [])
   assert.equal(ok, true)
 })
+
+// --- the mirror against Desk's vocabulary (H51) -------------------------------
+
+import { existsSync } from "node:fs"
+import { pathToFileURL } from "node:url"
+import { MIRRORED_VOCABULARY } from "../lib/corrections.mjs"
+
+test("a correction for a Codex job is accepted, not refused by the file name or the host", () => {
+  const file = `codex-cli-${SESSION}.json`
+  const record = validRecord({
+    file,
+    fields: { session: { host: "codex-cli", id: SESSION, duration_ms: 1000, started_offset_ms: 0 } },
+  })
+  const codes = validateCorrectionRecord(record, file).errors.map((e) => e.code)
+  assert.ok(!codes.includes("correction_file_invalid"), codes.join())
+  assert.ok(!codes.includes("correction_file_mismatch"), codes.join())
+  const hostErrors = validateCorrectionRecord(record, file).errors.filter((e) => e.path === "fields.session.host")
+  assert.deepEqual(hostErrors, [])
+})
+
+test("a job whose basis is spawn_brief or inherited is accepted; an unknown basis is still refused", () => {
+  const job = (basis) => ({ job: "2927a4630f97b7869a71f387a4a757f1", basis, session_offset_ms: null, transitions: [], observed: null })
+  for (const basis of [["spawn_brief"], ["inherited"], ["desk_tool", "inherited"]]) {
+    assert.deepEqual(validateCorrectionRecord(validRecord({ fields: { jobs: [job(basis)] } }), FILE_NAME).errors, [], basis.join())
+  }
+  assert.ok(validateCorrectionRecord(validRecord({ fields: { jobs: [job(["made_up"])] } }), FILE_NAME).errors.some((e) => e.code === "correction_field_enum"))
+})
+
+// Desk's schema module imports nothing, so it can be loaded straight from a Desk checkout. In CI (FACTORY_REQUIRE_DESK=1) an
+// unreachable Desk fails the test instead of skipping it: a skipped comparison is a drift nobody sees.
+const deskSchema = process.env.DESK_DIR ? path.join(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/schema.js") : null
+const deskSchemaReachable = Boolean(deskSchema && existsSync(deskSchema))
+
+test("the mirror's vocabulary equals Desk's, list for list", { skip: deskSchemaReachable || process.env.FACTORY_REQUIRE_DESK === "1" ? false : "Desk is not reachable: set DESK_DIR to a Desk checkout" }, async () => {
+  assert.ok(deskSchemaReachable, "FACTORY_REQUIRE_DESK is set but DESK_DIR does not hold Desk's schema.js")
+  const { ENUMS } = await import(pathToFileURL(deskSchema).href)
+  for (const [name, mirrored] of Object.entries(MIRRORED_VOCABULARY)) {
+    assert.deepEqual([...mirrored].sort(), [...ENUMS[name]].sort(), `the mirror's ${name} list differs from Desk's`)
+  }
+})

@@ -36,8 +36,12 @@ export const HOST_FLAGS = Object.freeze({
     ["tool_outcomes", "host_records_partly"],
     ["requests", "host_records_partly"],
     ["tokens", "host_records_partly"],
+    ["human_turns", "host_does_not_record"],
   ],
-  "copilot-cli": [["prs", "host_records_partly"]],
+  "copilot-cli": [
+    ["prs", "host_records_partly"],
+    ["human_turns", "host_records_partly"],
+  ],
 });
 
 // A session's flags: its own `unavailable` list plus its host's constants,

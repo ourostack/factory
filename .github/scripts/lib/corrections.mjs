@@ -43,7 +43,7 @@ const CORRECTABLE_FIELDS = Object.freeze([
 ]);
 
 const RECORD_KEYS = Object.freeze(["schema", "file", "fields", "reason", "date", "pr"]);
-const FACTS_FILE_NAME = /^(claude-code|copilot-cli)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u;
+const FACTS_FILE_NAME = /^(claude-code|codex-cli|copilot-cli)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u;
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/u;
 const MAX_REASON_LENGTH = 500;
 
@@ -96,8 +96,8 @@ const MAX_OFFSET_MS = 3650 * 24 * 60 * 60 * 1000; // PUBLISHED_LIMITS.maxOffsetM
 const JOB_STATUSES = Object.freeze([
   "drafting", "processing", "validating", "collaborating", "paused", "blocked", "done", "cancelled",
 ]);
-const JOB_BASIS_VALUES = Object.freeze(["desk_tool", "file_write", "desk_commit"]);
-const HOSTS = Object.freeze(["claude-code", "copilot-cli"]);
+const JOB_BASIS_VALUES = Object.freeze(["desk_tool", "file_write", "desk_commit", "spawn_brief", "inherited"]);
+const HOSTS = Object.freeze(["claude-code", "copilot-cli", "codex-cli"]);
 const ENTRYPOINTS = Object.freeze(["cli", "desktop", "sdk", "launcher", "unknown"]);
 const END_REASONS = Object.freeze([
   "clear", "resume", "logout", "prompt_input_exit", "complete", "user_exit", "error", "other",
@@ -109,9 +109,13 @@ const INTERVAL_KINDS = Object.freeze([
   "turn", "tool", "subagent", "human_wait", "permission_wait", "api_retry", "compaction",
 ]);
 const OUTCOMES = Object.freeze(["ok", "error", "denied", "interrupted", "timeout"]);
-// Published facts /2 (`desk.factory.published/2`; `/1` files keep their
-// smaller vocabulary, a subset of this one). A field listed here was not
-// recorded: its value in the file is not a measured zero.
+// Published facts (`desk.factory.published/2`). Desk's validator checks `/1`
+// and `/2` files against this one vocabulary (the only `/2`-only part is the
+// `human_turns` list, which is not a correctable field), so there is no
+// smaller `/1` vocabulary to keep apart here. A field listed here was not
+// recorded: its value in the file is not a measured zero. The lists are
+// compared with Desk's own by a test that runs wherever Desk is reachable
+// (always in CI), so a drift is a failing test, not a refused correction.
 const PUBLISHED_UNAVAILABLE_FIELDS = Object.freeze([
   "tokens", "requests", "models", "turns", "tool_durations", "permission_waits",
   "human_waits", "api_retries", "commits", "ci_runs", "plugins", "ended_at",
@@ -557,4 +561,18 @@ export function correctionChanges(current, record) {
   return Object.keys(record.fields).some((key) => JSON.stringify(current[key]) !== JSON.stringify(corrected[key]));
 }
 
-export { CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };
+// The mirrored vocabulary, exported only so a test can compare it with Desk's.
+const MIRRORED_VOCABULARY = Object.freeze({
+  host: HOSTS,
+  entrypoint: ENTRYPOINTS,
+  endReason: END_REASONS,
+  toolKind: TOOL_KINDS,
+  intervalKind: INTERVAL_KINDS,
+  outcome: OUTCOMES,
+  jobStatus: JOB_STATUSES,
+  jobBasis: JOB_BASIS_VALUES,
+  publishedUnavailableField: PUBLISHED_UNAVAILABLE_FIELDS,
+  unavailableReason: UNAVAILABLE_REASONS,
+});
+
+export { MIRRORED_VOCABULARY, CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };
