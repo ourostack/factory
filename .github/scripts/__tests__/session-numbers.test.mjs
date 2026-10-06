@@ -214,16 +214,20 @@ import { join as joinPath } from "node:path"
 import { pathToFileURL } from "node:url"
 import { HOST_FLAGS } from "../../../site/scripts/session-numbers.mjs"
 
-// Desk main does not carry `src/factory/host-flags.js` until the published
-// facts /2 work lands there. Until then there is nothing to compare with in
-// CI; set DESK_DIR to a Desk checkout that has it to run the comparison.
+// Desk main carries `src/factory/host-flags.js`, and CI clones Desk before it
+// runs the store's tests and sets DESK_DIR, so the comparison runs there. In CI
+// (FACTORY_REQUIRE_DESK=1) a Desk that cannot be reached fails the test: a
+// skipped comparison would let the two tables drift unseen. Locally, set
+// DESK_DIR to a Desk checkout to run it; without one it is skipped with its
+// reason.
 const deskHostFlags = process.env.DESK_DIR ? joinPath(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/host-flags.js") : null
 const deskReachable = Boolean(deskHostFlags && existsSync(deskHostFlags))
 
 test(
   "the site's host table matches Desk's own, field for field",
-  { skip: deskReachable ? false : "Desk's host table is not reachable: Desk main does not carry src/factory/host-flags.js yet; set DESK_DIR to a Desk checkout that has it" },
+  { skip: deskReachable || process.env.FACTORY_REQUIRE_DESK === "1" ? false : "Desk's host table is not reachable: set DESK_DIR to a Desk checkout" },
   async () => {
+    assert.ok(deskReachable, "FACTORY_REQUIRE_DESK is set but DESK_DIR does not hold src/factory/host-flags.js")
     const desk = (await import(pathToFileURL(deskHostFlags).href)).HOST_FLAGS
     const norm = (table) => Object.fromEntries(Object.entries(table).map(([host, flags]) => [host, flags.map((f) => (Array.isArray(f) ? `${f[0]}|${f[1]}` : `${f.field}|${f.reason}`)).sort()]))
     assert.deepEqual(norm(HOST_FLAGS), norm(desk))

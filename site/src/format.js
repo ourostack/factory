@@ -107,6 +107,7 @@
     record_invalid: "some machines' capture records could not be read and are left out",
     records_over_limit: "more capture records than the site reads; the rest are left out",
     unverified_host: "the host's session count is not yet verified (for Codex, until one of its sessions has been derived)",
+    host_not_counted: "a machine could not count this host's sessions, so it is left out of these figures",
     no_sessions_on_disk: "no session of this host is on disk",
     nothing_capturable: "every session on disk is held on purpose or outside a desk",
     host_does_not_say_desk: "this host's folders do not say which desk a session belongs to",
@@ -242,10 +243,9 @@
       if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
       flag.className = "num-flag";
-      // In a narrow table cell the marker is one word ("unverified" or
-      // "partial"); the direction stays in the tooltip, the screen-reader
-      // text and the sentences around the table.
-      flag.textContent = opts && opts.shortMarker ? d.marker.split(",")[0] : d.marker;
+      // The whole marker, direction included, is visible text: a reader on a
+      // touch screen or a keyboard has no hover, so the tooltip only repeats it.
+      flag.textContent = d.marker;
       const sr = doc.createElement("span");
       sr.className = "sr-only";
       sr.textContent = `: ${d.reason}`;
@@ -408,10 +408,13 @@
 
   // How many machines' records a host's figures rest on, and how many of them
   // could not verify the host's session count.
-  function recordsWords(total, unverified) {
-    const words = `${total} record${total === 1 ? "" : "s"}`;
+  function recordsWords(total, unverified, notCounted) {
+    let words = `${total} record${total === 1 ? "" : "s"}`;
+    if (notCounted) words += notCounted === total ? (total === 1 ? ", not counted" : ", none counted") : `, ${notCounted} not counted`;
+    const counted = total - (notCounted || 0);
     if (!unverified) return words;
-    if (unverified === total) return total === 1 ? `${words}, unverified` : `${words}, all unverified`;
+    // "all" counts only the machines that could count; say so when others could not.
+    if (unverified === counted) return notCounted ? `${words}, the other ${counted} unverified` : `${words}, ${counted === 1 ? "unverified" : "all unverified"}`;
     return `${words}, ${unverified} unverified`;
   }
 

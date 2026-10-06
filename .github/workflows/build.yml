@@ -200,7 +200,20 @@ jobs:
           set -euo pipefail
           node .github/scripts/apply-corrections.mjs --store . | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The store keeps copies of two of Desk's tables (the host flags the site
+      # reads, the vocabulary the correction check mirrors). A drift is a
+      # failing test here, which opens the build-failing issue; it does not stop
+      # the reports, which are already published by the job before this one.
+      - name: Compare the store's copies of Desk's tables with Desk's own
+        env:
+          DESK_DIR: ${{ runner.temp }}/desk
+          FACTORY_REQUIRE_DESK: "1"
+        run: |
+          set -uo pipefail
+          node --test .github/scripts/__tests__/session-numbers.test.mjs .github/scripts/__tests__/corrections.test.mjs
+
       - name: Check the kaizen cards
+        if: ${{ !cancelled() && steps.corrections.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -248,7 +261,7 @@ jobs:
           set -euo pipefail
           trap 'echo "::warning::The build alarm step failed; the build result is unchanged."' ERR
           steps="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '[.jobs[] | select(.conclusion == "failure") | .name as $job | .steps[] | select(.conclusion == "failure") | "\($job): \(.name)"] | join(", ")')"
-          body="The factory build failed in $RUN_URL at: ${steps:-unknown step}. If the failed step is in factory-build, the public reports and site stay at their last good build until a run succeeds; if only issue-checks failed, the reports were still published and the failure is in the kaizen or andon checks. Open the failed step in the run to see why; the next successful run closes this issue."
+          body="The factory build failed in $RUN_URL at: ${steps:-unknown step}. If the failed step is in factory-build, the public reports and site stay at their last good build until a run succeeds; if only issue-checks failed, the reports were still published and the failure is in the comparison of the store copies of the Desk tables with the Desk originals (a Desk change not mirrored yet), the kaizen check or the andon check. Open the failed step in the run to see why; the next successful run closes this issue."
           gh label create "$ISSUE_LABEL" --repo "$GITHUB_REPOSITORY" --color B60205 --description "The factory build is failing" --force
           number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$ISSUE_LABEL" --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty')"
           if [ -n "$number" ]; then

@@ -117,14 +117,14 @@ test("the README names both caveats, the store's rule and the accept flag file",
 
 const put = (rec) => check({ [`capture/${ID}.json`]: rec }).codes
 
-test("a count that holds a path, a date or an email fails as capture_values, in a host entry and in the loop slot", () => {
+test("a count that holds a path, a date or an email fails as capture_values in a host entry and as capture_loop in the loop slot", () => {
   for (const bad of ["/Users/someone/desk", "2026-10-01T10:00:00Z", "someone@example.com"]) {
     assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, derived: bad } } }), ["capture_values"], bad)
-    assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: bad } }), ["capture_values"], bad)
-    assert.deepEqual(put({ ...valid, loop: { v: 1, headless: bad } }), ["capture_values"], bad)
+    assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: bad } }), ["capture_loop"], bad)
+    assert.deepEqual(put({ ...valid, loop: { v: 1, headless: bad } }), ["capture_loop"], bad)
   }
-  assert.deepEqual(put({ ...valid, loop: { v: 1, note: "ran" } }), ["capture_values"])
-  assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: { nested: 1 } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, loop: { v: 1, note: "ran" } }), ["capture_loop"])
+  assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: { nested: 1 } } }), ["capture_loop"])
 })
 
 test("every count is a whole number from 0 to 1,000,000, the buckets add up and the flags are what they say", () => {
@@ -142,8 +142,29 @@ test("every count is a whole number from 0 to 1,000,000, the buckets add up and 
 test("the loop slot holds only the loop_slot_v1 counts and the headless code", () => {
   const full = { v: 1, improvement_open: 2, improvement_claimed: 0, improvement_shipped: 0, improvement_verifying: 1, oldest_open_age_days: null, closed_confirmed_month: 3, closed_unverified_month: 0, loop_alarms_open: 0, steps_stale: 0, headless: "ran" }
   assert.deepEqual(put({ ...valid, loop: full }), [])
-  assert.deepEqual(put({ ...valid, loop: { ...full, v: 2 } }), ["capture_values"])
-  assert.deepEqual(put({ ...valid, loop: { improvement_open: 2 } }), ["capture_values"])
-  assert.deepEqual(put({ ...valid, loop: { ...full, headless: "Has Spaces" } }), ["capture_values"])
-  assert.deepEqual(put({ ...valid, loop: { ...full, steps_stale: true } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, loop: { ...full, v: 2 } }), ["capture_loop"])
+  assert.deepEqual(put({ ...valid, loop: { improvement_open: 2 } }), ["capture_loop"])
+  assert.deepEqual(put({ ...valid, loop: { ...full, headless: "Has Spaces" } }), ["capture_loop"])
+  assert.deepEqual(put({ ...valid, loop: { ...full, steps_stale: true } }), ["capture_loop"])
+})
+
+test("a loop slot that breaks loop_slot_v1 is capture_loop, never the counts' code, so a client can tell which part was refused", () => {
+  assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: "x" } }), ["capture_loop"])
+  assert.deepEqual(put({ ...valid, loop: { improvement_open: 1 } }), ["capture_loop"])
+  // A bad count AND a bad loop slot reports the counts first: one code per record, the first part that fails.
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, derived: "x" } }, loop: { v: 2 } }), ["capture_values"])
+  // A loop that is not an object is a keys problem, as before.
+  assert.deepEqual(put({ ...valid, loop: 5 }), ["capture_keys"])
+})
+
+test("a host the machine could not count is exactly { not_counted: true }, with no counts to read as zero", () => {
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": host, "codex-cli": { not_counted: true } } }), [])
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { not_counted: true } } }), [])
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { not_counted: false } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { not_counted: "yes" } } }), ["capture_values"])
+  // Not a flag next to counts, and not a flag with anything else.
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { ...host, not_counted: true } } }), ["capture_keys"])
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { not_counted: true, on_disk: 0 } } }), ["capture_keys"])
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": {} } }), ["capture_keys"])
+  assert.deepEqual(put({ ...valid, hosts: { "made-up-cli": { not_counted: true } } }), ["capture_keys"])
 })

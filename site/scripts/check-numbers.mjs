@@ -26,7 +26,7 @@ const ROLLUP_KEYS = ["n", "N", "of", "out_of_scope", "excluded"];
 // host that records partly, a capture share from unverified hosts). Each
 // package adds its own reasons below, so the list grows in one place per
 // package.
-const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["host_records_partly", "unverified_host"]);
+const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["host_records_partly", "unverified_host", "host_not_counted"]);
 
 // Paths in data.json that must be rollups (they sum, take a median or a
 // share over a population). A rollup that lost its marker and its counts is
@@ -59,7 +59,7 @@ const NUMBER_PATHS = [
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
   /^capture_coverage\.machines\.(counted|empty|stale|invalid|over_limit|files)$/,
-  /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines)$/,
+  /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines|not_counted_machines)$/,
   /^loop_health\.machines\.(reporting|without_loop|unreadable_loop|quiet|stale)$/,
   /^loop_health\.(headless|notices)\[\d+\]\.machines$/,
   /^loop_health\.verdict\.(quiet|stale)$/,
