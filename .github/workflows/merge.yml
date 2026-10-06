@@ -14,7 +14,10 @@
 # pull request it passes, the store's own plugin-name rule
 # (`.github/scripts/check-intake-plugins.sh`, from main: every added or
 # modified facts file carries `refs.private.plugins` and names only plugins
-# listed in `intake.json`); the third acts on the results. It merges only when
+# listed in `intake.json`) and its capture-record rule
+# (`.github/scripts/check-capture.sh`, from main: a capture/ file has a valid
+# path, size and key set, one per pull request); the third acts on the
+# results. It merges only when
 # both validations pass and the pull request still has that head, and the
 # merge call passes that head as `sha`, so GitHub refuses the merge if the
 # head moved. It rejects only when the trusted validation fails and the head
@@ -137,8 +140,16 @@ jobs:
             # The store's own plugin-name rule, from main, for a data pull
             # request Desk passed; a failure becomes a rejection with its codes.
             if jq -e '.ok == true and .maintenance != true' "$result" > /dev/null 2>&1; then
-              if ! codes=$(bash .github/scripts/check-intake-plugins.sh "$base_sha" "$HEAD_SHA"); then
-                printf '%s\n' "$codes" | jq -R -s -c '{ok: false, errors: [split("\n")[] | select(length > 0) | {code: .}]}' > "$result"
+              codes=""
+              if ! plugin_codes=$(bash .github/scripts/check-intake-plugins.sh "$base_sha" "$HEAD_SHA"); then
+                codes+="$plugin_codes"$'\n'
+              fi
+              # The store's own rule on capture records, from main.
+              if [ -f .github/scripts/check-capture.sh ] && ! capture_codes=$(bash .github/scripts/check-capture.sh "$base_sha" "$HEAD_SHA"); then
+                codes+="$capture_codes"$'\n'
+              fi
+              if [ -n "$codes" ]; then
+                printf '%s' "$codes" | jq -R -s -c '{ok: false, errors: [split("\n")[] | select(length > 0) | {code: .}]}' > "$result"
               fi
             fi
           done < "$RUNNER_TEMP/factory-prs.tsv"
