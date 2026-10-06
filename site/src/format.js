@@ -115,6 +115,8 @@
     job_unbound: "the session is not bound to the job",
     range: "a labeled stretch runs past the session",
     evidence_unmatched: "the labeled evidence no longer matches the facts",
+    share_unknown: "the facts do not record which part of the session was the job's",
+    outside_share: "the labels cover none of the job's own part of the session",
     // Capture coverage (the machines' content-free capture records).
     no_records: "no machine has published a capture record yet",
     record_stale: "some machines' capture records are older than 45 days and are left out",
@@ -131,6 +133,7 @@
     none_open: "no improvement item is open",
     // One job's labeled time (the page's per-task waste).
     some_sessions_not_labeled: "some of the job's sessions are not labeled yet, so this is at least this much",
+    job_share_unknown: "for some of the job's sessions there is no record of which part was this job's, so their labels are left out and this is at least this much",
   };
 
   // Every reason that can reach the page has words. The site build stops on

@@ -458,7 +458,11 @@ test("with no loop slot anywhere the open improvement items slot is no data, nev
 test("the build gives each task its waste from its label files and its sessions, and adds the trend and what to fix next", () => {
   const fx = fixture()
   write(join(fx.reports, "jobs/a.json"), { ...job("a", "done"), timeline: { intervals: [{ session_id: "s1", host: "claude-code" }] } })
-  write(join(fx.main, "labels/a/s1.json"), { schema: "desk.factory.labels/1", job: "a", session: "s1", stretches: [{ start_ms: 0, end_ms: 1000, class: "muda", waste: "waiting" }] })
+  write(join(fx.reports, "jobs/c.json"), { ...job("c", "done"), timeline: { intervals: [{ session_id: "s1", host: "claude-code" }] } })
+  // Session s1 holds jobs a (0..1000) and c (1000..1500); each job's evaluator labeled the whole session.
+  write(join(fx.main, "facts/claude-code-s1.json"), facts("s1", { jobs: [{ job: "a", segments: [{ start_ms: 0, end_ms: 1000 }] }, { job: "c", segments: [{ start_ms: 1000, end_ms: 1500 }] }] }))
+  write(join(fx.main, "labels/a/s1.json"), { schema: "desk.factory.labels/1", job: "a", session: "s1", stretches: [{ start_ms: 0, end_ms: 1500, class: "muda", waste: "waiting" }] })
+  write(join(fx.main, "labels/c/s1.json"), { schema: "desk.factory.labels/1", job: "c", session: "s1", stretches: [{ start_ms: 0, end_ms: 1500, class: "muda", waste: "waiting" }] })
   // A label file naming another job is not this job's.
   write(join(fx.main, "labels/a/s9.json"), { schema: "desk.factory.labels/1", job: "b", session: "s9", stretches: [{ start_ms: 0, end_ms: 5, class: "muda", waste: "motion" }] })
   const r = build(fx)
@@ -467,6 +471,8 @@ test("the build gives each task its waste from its label files and its sessions,
   assert.deepEqual(checkNumbers(data), [])
   const a = data.jobs.find((j) => j.id === "a")
   assert.deepEqual(a.waste.rows.map((x) => [x.key, x.total_ms.value, x.total_ms.state]), [["waiting", 1000, "measured"]])
+  assert.deepEqual(data.jobs.find((j) => j.id === "c").waste.rows.map((x) => [x.key, x.total_ms.value]), [["waiting", 500]])
+  assert.deepEqual(data.labeled_waste.rows.map((x) => [x.key, x.total_ms.value]), [["waiting", 1500]], "the shared session counts once in all")
   assert.deepEqual(data.jobs.find((j) => j.id === "b").waste.rows, [])
   assert.deepEqual(data.sessions.map((s) => s.session_id), ["s1"])
   assert.match(data.sessions[0].facts_url, /\/blob\/main\/facts\/claude-code-s1\.json$/)

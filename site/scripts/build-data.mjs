@@ -47,7 +47,7 @@ import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "
 import { checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
-import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, labeledWaste, qualifiersOf } from "./waste.mjs";
+import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, labeledWaste, ownShare, qualifiersOf } from "./waste.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 
@@ -201,15 +201,6 @@ const jobs = jobFiles.map((f) => jobSummary(readJSON(join(jobsDir, f), {}), f));
 // Until an outcome is accepted, the band answers per delivered task instead.
 outcomes.attention.per_delivered = attentionPerDelivered(jobs);
 
-// Each job's labeled time, from the evaluator's label files on main
-// (labels/<job>/<session>.json).
-const labelsDir = join(mainDir, "labels");
-for (const j of jobs) {
-  const dir = join(labelsDir, j.id);
-  const docs = /^[0-9A-Za-z_-]{1,64}$/.test(j.id) ? listJSON(dir).map((f) => readJSON(join(dir, f), null)).filter((d) => d && d.job === j.id) : [];
-  j.waste = jobWaste(docs, j.sessions.map((x) => x.session_id));
-}
-
 const jobStatusCounts = {};
 for (const j of jobs) {
   jobStatusCounts[j.status] = (jobStatusCounts[j.status] || 0) + 1;
@@ -290,9 +281,12 @@ const scopedFacts = []; // same substantial-session scope, for every fact-level 
 // The sessions on some job's timeline, for the task page's session list.
 const jobSessionIds = new Set(jobs.flatMap((j) => j.sessions.map((s) => s.session_id)));
 const sessions = [];
+// Each such session's job bindings, for each job's own share of it.
+const sessionBindings = new Map();
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
+  if (jobSessionIds.has(d.session?.id)) sessionBindings.set(d.session.id, d.jobs);
   if (jobSessionIds.has(d.session?.id) && /^[A-Za-z0-9._-]+\.json$/.test(f)) {
     const models = [...(d.models || [])].filter((m) => m && typeof m.id === "string").sort((a, b) => (b.requests ?? -1) - (a.requests ?? -1)).map((m) => m.id);
     sessions.push({
@@ -317,6 +311,17 @@ for (const f of factFiles) {
   scopedSessionCount += 1;
   scopedEntrypoints[entrypoint] = (scopedEntrypoints[entrypoint] || 0) + 1;
   if (bound) scopedBoundCount += 1;
+}
+
+// Each job's labeled time, from the evaluator's label files on main
+// (labels/<job>/<session>.json), clipped to the job's own share of each
+// session (its binding's segments in that session's facts).
+const labelsDir = join(mainDir, "labels");
+for (const j of jobs) {
+  const dir = join(labelsDir, j.id);
+  const docs = /^[0-9A-Za-z_-]{1,64}$/.test(j.id) ? listJSON(dir).map((f) => readJSON(join(dir, f), null)).filter((d) => d && d.job === j.id) : [];
+  const shares = new Map(j.sessions.map((x) => [x.session_id, ownShare(sessionBindings.get(x.session_id), j.id)]));
+  j.waste = jobWaste(docs, j.sessions.map((x) => x.session_id), shares);
 }
 
 // Fact-level totals. The pipeline's own totals (rollups/totals.json) apply
