@@ -128,6 +128,8 @@
     no_loop_records: "no machine has sent its improvement loop's health yet",
     machine_sent_no_loop_record: "some machines did not send this figure and are left out",
     none_open: "no improvement item is open",
+    // One job's labeled time (the page's per-task waste).
+    some_sessions_not_labeled: "some of the job's sessions are not labeled yet, so this is at least this much",
   };
 
   // Every reason that can reach the page has words. The site build stops on
@@ -275,7 +277,9 @@
     } else if (d.state === "unavailable") {
       wrap.title = `No data: ${d.reason}`;
       const why = doc.createElement("span");
-      why.className = "num-reason";
+      // In a dense table the caller states the reason once below the table
+      // (opts.reason === false); the cell keeps it for screen readers.
+      why.className = opts && opts.reason === false ? "sr-only" : "num-reason";
       why.textContent = `(${d.reason})`;
       wrap.appendChild(why);
     }
@@ -365,8 +369,9 @@
   }
 
   // The only shapes the page will turn into a link from data: a GitHub pull
-  // request, issue or workflow run. Anything else is shown as text.
-  const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(pull|issues|actions\/runs)\/\d+$/;
+  // request, issue or workflow run, a session's facts file on main, or a job's
+  // report on the reports branch. Anything else is shown as text.
+  const GITHUB_URL = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/((pull|issues|actions\/runs)\/\d+|blob\/main\/facts\/[A-Za-z0-9._-]+\.json|blob\/reports\/jobs\/[A-Za-z0-9_-]+\.md)$/;
   function safeGithubUrl(u) {
     return typeof u === "string" && GITHUB_URL.test(u) && !u.split("/").some((seg) => seg === "." || seg === "..") ? u : null;
   }

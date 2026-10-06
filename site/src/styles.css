@@ -1025,3 +1025,116 @@ footer a {
 table.capture-table th { white-space: normal; vertical-align: bottom; }
 table.capture-table td.capture-records { white-space: normal; min-width: 7em; }
 table.capture-table td .num-reason { display: block; white-space: normal; max-width: 9em; margin-left: auto; }
+
+/* ---------- Overview: glance, answer, fix next, tasks ---------- */
+
+.glance-tiles,
+.answer-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 0 0 18px;
+}
+.answer-tiles .answer-headline { grid-column: 1 / -1; }
+.answer-headline .stat-value { font-size: clamp(30px, 6vw, 44px); }
+.glance-tile .stat-value { font-size: 26px; }
+.verdict-inline-alive { color: var(--status-good); }
+.verdict-inline-stale { color: var(--status-serious); }
+.verdict-inline-broken { color: var(--status-critical); }
+.verdict-inline-unknown { color: var(--text-secondary); }
+.glance-stale { border: 2px dashed var(--status-warning); }
+.glance-broken { border: 4px double var(--status-critical); }
+.glance-unknown { border: 3px dotted var(--text-secondary); }
+
+h3.sub-title { font-size: 17px; margin: 30px 0 12px; }
+.muted { color: var(--text-secondary); }
+
+.more-details { margin: 12px 0 0; }
+.more-details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--series-1);
+  padding: 8px 0;
+}
+.more-details section { padding: 24px 0 8px; border-top: 1px solid var(--border); }
+.more-details .wrap { padding: 0; }
+
+.fix-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.fix-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--series-1);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.fix-alarm { border-left-color: var(--status-critical); }
+.fix-act { border-left-color: var(--status-warning); }
+.fix-improve { border-left-color: var(--series-1); }
+.fix-signal { border-left-color: var(--baseline); border-left-style: dashed; }
+.fix-head { margin: 0 0 6px; }
+.fix-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 6px;
+  margin-right: 8px;
+  color: var(--text-secondary);
+}
+.fix-tag-alarm { color: var(--status-critical); }
+.fix-count { color: var(--text-secondary); }
+.fix-action { margin: 0 0 6px; }
+.fix-do { font-weight: 700; }
+.fix-examples { margin: 4px 0 0; padding-left: 18px; font-size: 14px; }
+.fix-examples li { margin: 2px 0; }
+
+.task-table { width: 100%; min-width: 0 !important; }
+.task-table td { vertical-align: top; }
+.task-name { font-weight: 600; overflow-wrap: anywhere; }
+.task-key { color: var(--text-secondary); font-size: 13px; margin: -6px 0 18px; overflow-wrap: anywhere; }
+.task-asked p { margin: 6px 0; }
+.task-tiles { margin-top: 0; }
+#view-job .chart-card, #view-session .chart-card { margin-bottom: 16px; }
+.back-link { margin: 0 0 12px; font-size: 14px; }
+.pr-list { margin: 0; padding-left: 18px; columns: 2 220px; }
+.guide-list { margin: 0; padding-left: 20px; max-width: 78ch; }
+.guide-list li { margin: 0 0 8px; }
+.outcome { white-space: normal; }
+
+/* At phone width a table row becomes a card: each cell says what it is. */
+@media (max-width: 720px) {
+  .task-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .task-table, .task-table tbody, .task-table tr, .task-table td { display: block; width: 100%; }
+  .task-table tr { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); padding: 10px 12px; margin: 0 0 10px; }
+  .task-table td { border: 0; padding: 3px 0; text-align: right; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .task-table td.num { text-align: right; }
+  .task-table td::before { content: attr(data-label); color: var(--text-secondary); font-size: 13px; text-align: left; flex: none; }
+  .task-table td.task-cell { display: block; text-align: left; font-size: 16px; padding-bottom: 6px; }
+  .task-table td.task-cell::before { content: none; }
+  .task-table tbody tr:hover { background: var(--surface-2); }
+}
+.table-notes { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13px; color: var(--text-secondary); }
+.table-notes li { margin: 2px 0; }
+.table-notes-head { font-weight: 600; }
+.stat-value .num-flag { font-size: 11px; vertical-align: middle; }
+.stat-value .num-reason { font-size: 14px; }
+.task-tiles { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+/* On a task or session page the header shrinks to its title and links. */
+body[data-view="job"] .hero-sub, body[data-view="job"] .limit-text,
+body[data-view="session"] .hero-sub, body[data-view="session"] .limit-text { display: none; }
+body[data-view="job"] h1.hero-title, body[data-view="session"] h1.hero-title { font-size: clamp(20px, 3vw, 26px); }
+body[data-view="job"] header.site-header, body[data-view="session"] header.site-header { padding: 22px 0 16px; }
+.chart-grid > *, .answer-tiles > *, .glance-tiles > * { min-width: 0; }
+.waste-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+@media (max-width: 560px) {
+  .glance-tiles, .answer-tiles { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .answer-tiles .answer-headline, .glance-tiles .glance-tile:first-child { grid-column: 1 / -1; }
+  .stat-tile .stat-value { font-size: 22px; }
+  .stat-value .num-reason { font-size: 12px; }
+  .glance-tiles .stat-tile, .answer-tiles .stat-tile { padding: 12px; }
+}
+.stat-value .num-nofn { display: block; font-size: 12px; margin-top: 4px; }
+#chart-intake { max-width: 640px; }

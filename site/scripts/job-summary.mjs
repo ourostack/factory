@@ -56,7 +56,7 @@ const DETAILS = [
   ["tokens_cache_write", "Cache write tokens", "compact", (F) => bounded(F.tokens_total?.cache_write, "tokens_cache_write")],
   ["signoff", "Sign-off", "text", signoffOf],
   ["signoff_wait", "Wait for sign-off", "text", signoffWaitOf],
-  ["first_pass", "First pass", "pass", (F) => bounded(F.first_pass_yield, "first_pass_job")],
+  ["first_pass", "First pass", "pass", (F) => firstPassOf(F)],
   ["returns", "Times sent back", "count", returnsOf],
 ];
 
@@ -68,15 +68,66 @@ const SIGNOFF_WORDS = {
   reopened: "reopened",
   not_delivered: "not delivered yet",
 };
+// Acceptance is the agent's record of the operator's word: an old record's
+// `verified` field is read past, so an accepted job reads accepted with or
+// without it.
 function signoffOf(F) {
   const n = fromFormula(F.signoff);
   if (n.state === "unavailable") return n;
   const v = n.value;
-  const witnessed = F.signoff?.verified === true;
   let words = SIGNOFF_WORDS[v];
-  if (v === "accepted") words = witnessed ? "accepted" : "accepted, not witnessed";
-  if (v === "refused") words = witnessed ? "sent back" : "sent back, not witnessed";
+  if (v === "accepted") words = "accepted";
+  if (v === "refused") words = "sent back";
   return words ? measured(words) : unavailable(["not_recorded"]);
+}
+
+// Where the job stands for the operator, in one word the page can group by:
+// accepted, sent back, delivered and waiting for an answer, delivered before
+// sign-off was recorded, or not delivered yet.
+export function outcomeOf(status, F) {
+  const s = F?.signoff;
+  const v = s && s.state !== "unavailable" && s.class !== "unavailable" ? s.value : null;
+  if (v === "accepted") return "accepted";
+  if (v === "refused") return "sent_back";
+  if (v === "delivered_unsigned") return "awaiting_signoff";
+  if (status === "done") return "delivered";
+  if (status === "cancelled") return "cancelled";
+  if (status === "unavailable") return "unknown";
+  return "in_progress";
+}
+
+// The human attention the job took (Desk's per-job attention estimate) and
+// the human turns it rests on, each with the estimate's own state.
+function attentionOf(F) {
+  return bounded(F.attention, "attention_ms");
+}
+function humanTurnsOf(F) {
+  const a = F.attention;
+  const n = fromFormula(a);
+  if (n.state === "unavailable") return n;
+  if (!Number.isSafeInteger(a.turns) || a.turns < 0) return unavailable(["not_recorded"]);
+  return bounded({ ...a, value: a.turns }, "human_turns");
+}
+
+// The job's public pull requests, as links with their number only (never
+// the repository owner on the page text).
+function pullRequestsOf(F) {
+  const list = F.references?.value?.public_pull_requests;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => p && typeof p.repo === "string" && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(p.repo) && Number.isSafeInteger(p.number) && p.number > 0)
+    .map((p) => ({ ref: `#${p.number}`, url: `https://github.com/${p.repo}/pull/${p.number}` }));
+}
+
+// The sessions on the job's timeline, in order of first appearance.
+export function sessionsOf(d) {
+  const seen = new Map();
+  for (const i of Array.isArray(d?.timeline?.intervals) ? d.timeline.intervals : []) {
+    if (i && typeof i.session_id === "string" && /^[0-9A-Za-z_-]{1,64}$/.test(i.session_id) && !seen.has(i.session_id)) {
+      seen.set(i.session_id, typeof i.host === "string" ? i.host : "unknown");
+    }
+  }
+  return [...seen].map(([session_id, host]) => ({ session_id, host }));
 }
 function signoffWaitOf(F) {
   const n = fromFormula(F.signoff);
@@ -84,6 +135,20 @@ function signoffWaitOf(F) {
   const words = waitWords(F.signoff?.wait);
   return words ? measured(words) : unavailable(["not_delivered"]);
 }
+// A first pass whose only doubt is an unwitnessed sign-off is final: the
+// agent recorded the answer on the operator's word.
+function firstPassOf(F) {
+  const f = F.first_pass_yield;
+  if (f && typeof f === "object" && Array.isArray(f.reasons) && f.reasons.includes("signoff_unverified")) {
+    const reasons = f.reasons.filter((r) => r !== "signoff_unverified");
+    const partialReasons = Array.isArray(f.partial_reasons) ? f.partial_reasons.filter((r) => r !== "signoff_unverified") : f.partial_reasons;
+    const rest = { ...f, reasons, partial_reasons: partialReasons, partial: reasons.length > 0 };
+    if (!reasons.length && f.state === "partial") rest.state = "measured";
+    return bounded(rest, "first_pass_job");
+  }
+  return bounded(f, "first_pass_job");
+}
+
 // All returns of the job, whichever catch point caught them.
 function returnsOf(F) {
   const r = F.rework;
@@ -122,8 +187,13 @@ export function jobSummary(d, f) {
     public_prs: bounded(prs, "public_prs"),
     signoff: signoffOf(F),
     signoff_wait: signoffWaitOf(F),
-    first_pass: bounded(F.first_pass_yield, "first_pass_job"),
+    first_pass: firstPassOf(F),
     returns: returnsOf(F),
+    outcome: outcomeOf(statusValue, F),
+    attention_ms: attentionOf(F),
+    human_turns: humanTurnsOf(F),
+    pull_requests: pullRequestsOf(F),
+    sessions: sessionsOf(d),
     details: jobDetails(F),
   };
 }

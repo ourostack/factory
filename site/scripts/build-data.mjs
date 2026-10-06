@@ -45,8 +45,9 @@ import { direct } from "./bounds.mjs";
 import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
-import { outcomesSummary } from "./outcomes.mjs";
-import { confidenceFigures, confidenceOf, evaluatorVersionsFigure, qualifiersOf } from "./waste.mjs";
+import { outcomesSummary, releaseTrend } from "./outcomes.mjs";
+import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
+import { compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, qualifiersOf } from "./waste.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 
@@ -178,7 +179,10 @@ const totalsFile = readJSON(join(reportsDir, "rollups/totals.json"), null);
 const toolKindsFile = readJSON(join(reportsDir, "rollups/tool-kinds.json"), null);
 // Sign-off, first-pass yield and rework, from a Desk whose pipeline builds
 // rollups/outcomes.json. Absent, every outcome figure reads "not recorded yet".
-const outcomes = outcomesSummary(readJSON(join(reportsDir, "rollups/outcomes.json"), null), { coverage: captureCoverage.share });
+const outcomesFile = readJSON(join(reportsDir, "rollups/outcomes.json"), null);
+const outcomes = outcomesSummary(outcomesFile, { coverage: captureCoverage.share });
+// The same figures per Desk release, oldest first: the trend over time.
+const trend = releaseTrend(outcomesFile, measuresFile, compareVersions);
 // If the reports branch is missing its rollups, the site says so (health
 // verdict `broken`) and every number the rollups would supply is unavailable.
 const reportsReadable = coverageFile !== null && measuresFile !== null && mudaFile !== null;
@@ -194,6 +198,15 @@ const jobsDir = join(reportsDir, "jobs");
 const jobFiles = listJSON(jobsDir);
 
 const jobs = jobFiles.map((f) => jobSummary(readJSON(join(jobsDir, f), {}), f));
+
+// Each job's labeled time, from the evaluator's label files on main
+// (labels/<job>/<session>.json).
+const labelsDir = join(mainDir, "labels");
+for (const j of jobs) {
+  const dir = join(labelsDir, j.id);
+  const docs = /^[0-9A-Za-z_-]{1,64}$/.test(j.id) ? listJSON(dir).map((f) => readJSON(join(dir, f), null)).filter((d) => d && d.job === j.id) : [];
+  j.waste = jobWaste(docs, j.sessions_bound);
+}
 
 const jobStatusCounts = {};
 for (const j of jobs) {
@@ -272,8 +285,24 @@ let scopedSessionCount = 0;
 let scopedBoundCount = 0;
 const scopedFacts = []; // same substantial-session scope, for every fact-level number
 
+// The sessions on some job's timeline, for the task page's session list.
+const jobSessionIds = new Set(jobs.flatMap((j) => j.sessions.map((s) => s.session_id)));
+const sessions = [];
+
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
+  if (jobSessionIds.has(d.session?.id) && /^[A-Za-z0-9._-]+\.json$/.test(f)) {
+    const models = [...(d.models || [])].filter((m) => m && typeof m.id === "string").sort((a, b) => (b.requests ?? -1) - (a.requests ?? -1)).map((m) => m.id);
+    sessions.push({
+      session_id: d.session.id,
+      host: typeof d.session.host === "string" ? d.session.host : "unknown",
+      entrypoint: entrypointOf(d),
+      facts_url: `https://github.com/${process.env.GITHUB_REPOSITORY || "ourostack/factory"}/blob/main/facts/${f}`,
+      ...featuredNumbers(d),
+      models: models.slice(0, 3),
+      jobs: (Array.isArray(d.jobs) ? d.jobs : []).filter((x) => x && typeof x.job === "string").map((x) => ({ id: x.job })),
+    });
+  }
   const entrypoint = entrypointOf(d);
   allEntrypoints[entrypoint] = (allEntrypoints[entrypoint] || 0) + 1;
   const host = typeof d.session?.host === "string" && d.session.host ? d.session.host : "unknown";
@@ -536,6 +565,7 @@ async function fetchIssues(label) {
         title: typeof i.title === "string" && AUTOFILED_TITLE_RE.test(i.title) ? i.title : null,
         state: i.state,
         url: i.html_url,
+        created_at: i.created_at,
         body: i.body || "",
       })),
   };
@@ -548,8 +578,11 @@ async function fetchLastComment(number) {
 }
 
 async function enrichIssue(issue) {
-  const { body, number, title, state, url } = issue;
-  const base = { ref: `#${number}`, ...(title ? { title } : {}), issue_state: state, url };
+  const { body, number, title, state, url, created_at } = issue;
+  // How long the issue has been open, in whole days (public GitHub data).
+  const opened = Date.parse(created_at);
+  const age_days = Number.isFinite(opened) ? measured(Math.max(0, Math.floor((Date.now() - opened) / 86400000))) : unavailable(["not_recorded"]);
+  const base = { ref: `#${number}`, ...(title ? { title } : {}), issue_state: state, url, age_days };
   if (state !== "closed") return { ...base, resolution: { kind: "open" } };
   let link = extractCountermeasure(body);
   if (!link) link = firstPrLink(await fetchLastComment(number));
@@ -803,6 +836,10 @@ const data = {
   featured,
   takeaways,
   outcomes,
+  trend,
+  sessions,
+  waste_actions: WASTE_ACTIONS,
+  fix_next: fixNext({ jobs, outcomes, kaizenIssues, andonIssues, capture: captureCoverage, loop: loopHealth }),
 };
 
 // The site's own health, built beside the data.

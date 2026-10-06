@@ -109,9 +109,9 @@ test("a file that cannot be trusted never shows alive", () => {
 })
 
 test("safeGithubUrl allows only a github pull request, issue or run link", () => {
-  const ok = ["https://github.com/o/r/pull/12", "https://github.com/o-1/r.x/issues/3", "https://github.com/o/r/actions/runs/99"]
+  const ok = ["https://github.com/o/r/pull/12", "https://github.com/o-1/r.x/issues/3", "https://github.com/o/r/actions/runs/99", "https://github.com/o/r/blob/main/facts/claude-code-ab-1.json", "https://github.com/o/r/blob/reports/jobs/0f12ab.md"]
   for (const u of ok) assert.equal(F.safeGithubUrl(u), u)
-  for (const u of ["javascript:alert(1)", "http://github.com/o/r/pull/1", "https://evil.com/o/r/pull/1", "https://github.com/o/r/pull/x", "https://github.com/o/r/blob/main/x", "https://github.com.evil.com/o/r/pull/1", "https://github.com/o/r/pull/1?x=1", "https://github.com/a/../pull/1", "https://github.com/../b/pull/1", "https://github.com/./b/pull/1", "", null, 5, undefined]) {
+  for (const u of ["javascript:alert(1)", "http://github.com/o/r/pull/1", "https://evil.com/o/r/pull/1", "https://github.com/o/r/pull/x", "https://github.com/o/r/blob/main/x", "https://github.com/o/r/blob/main/facts/../x.json", "https://github.com/o/r/blob/main/README.md", "https://github.com.evil.com/o/r/pull/1", "https://github.com/o/r/pull/1?x=1", "https://github.com/a/../pull/1", "https://github.com/../b/pull/1", "https://github.com/./b/pull/1", "", null, 5, undefined]) {
     assert.equal(F.safeGithubUrl(u), null, String(u))
   }
 })

@@ -26,7 +26,8 @@
 //     the waste and unknown time together (value and support time are not
 //     in it), but not of `muda_time_ms`: it is not known to be waste. The site adds nothing to a waste total.
 
-import { measured, unavailable } from "./state.mjs";
+import { measured, partial, unavailable } from "./state.mjs";
+import { direct } from "./bounds.mjs";
 
 export const UNKNOWN_WASTE = "unknown";
 export const CONFIDENCE_LEVELS = Object.freeze(["high", "medium", "low"]);
@@ -94,4 +95,46 @@ export function evaluatorVersions(raw) {
 export function evaluatorVersionsFigure(raw) {
   const versions = evaluatorVersions(raw);
   return versions ? measured(versions.join(", ")) : unavailable(["not_recorded"]);
+}
+
+// One job's labeled time, from the evaluator's label files for its sessions
+// (`labels/<job>/<session>.json`). Time is summed per class (value, support)
+// and per waste (the eight, and `unknown` as its own row), largest first.
+// Each row carries the time resting on each confidence level; a row with any
+// stretch whose confidence was not recorded (a `/1` label) has no recorded
+// confidence. With fewer label files than bound sessions, every row is at
+// least its figure (`some_sessions_not_labeled`). No label file is no data.
+const ROW_KINDS = { value: "value", support: "support" };
+const LEVELS = new Set(CONFIDENCE_LEVELS);
+
+export function jobWaste(docs, sessionsBound) {
+  const usable = (Array.isArray(docs) ? docs : []).filter((d) => d && Array.isArray(d.stretches));
+  if (!usable.length) return { sessions_labeled: measured(0), rows: [] };
+  const rows = new Map();
+  for (const d of usable) {
+    for (const s of d.stretches) {
+      if (!s || !Number.isFinite(s.start_ms) || !Number.isFinite(s.end_ms) || s.end_ms < s.start_ms) continue;
+      const key = s.class === "muda" && typeof s.waste === "string" ? s.waste : s.class === "unknown" ? UNKNOWN_WASTE : ROW_KINDS[s.class];
+      if (!key) continue;
+      const row = rows.get(key) || { total: 0, levels: { high: 0, medium: 0, low: 0 }, recorded: true };
+      const ms = Math.round(s.end_ms - s.start_ms);
+      row.total += ms;
+      if (LEVELS.has(s.confidence)) row.levels[s.confidence] += ms;
+      else row.recorded = false;
+      rows.set(key, row);
+    }
+  }
+  const bound = sessionsBound && sessionsBound.state === "measured" ? sessionsBound.value : null;
+  const whole = bound !== null && usable.length >= bound;
+  const figure = (ms) => (whole ? measured(ms) : direct(partial(ms, ["some_sessions_not_labeled"]), "job_waste_ms"));
+  const out = [...rows]
+    .map(([key, r]) => ({
+      key,
+      kind: ROW_KINDS[key] || (key === UNKNOWN_WASTE ? "unknown" : "waste"),
+      total_ms: figure(r.total),
+      confidence: confidenceFigures(r.recorded ? { recorded: true, parts: r.levels } : { recorded: false }),
+      qualifiers: ROW_KINDS[key] ? [] : qualifiersOf(key, r.recorded ? { recorded: true, parts: r.levels } : { recorded: false }),
+    }))
+    .sort((a, b) => b.total_ms.value - a.total_ms.value);
+  return { sessions_labeled: measured(usable.length), rows: out };
 }

@@ -86,9 +86,9 @@ test("a store where no session published an outcomes key says sign-off is not pu
   assert.deepEqual(checkNumbers({ outcomes: s }), [])
 })
 
-test("sign-off counts are measured, and an unverified acceptance is apart from accepted", () => {
+test("sign-off counts are measured, and an acceptance with no witnessed prompt counts as accepted (recorded on the operator's word)", () => {
   const s = outcomesSummary(file())
-  assert.equal(s.signoff.accepted.value, 2)
+  assert.equal(s.signoff.accepted.value, 3)
   assert.equal(s.signoff.accepted_unverified.value, 1)
   assert.equal(s.signoff.refused.value, 1)
   assert.equal(s.signoff.no_record.value, 4)
@@ -117,8 +117,10 @@ test("an awaiting-sign-off yield is an upper bound, with jobs that predate sign-
   assert.equal(y.state, "partial")
   assert.equal(y.value, 0.75)
   assert.equal(y.bound, "upper")
-  assert.equal(y.n, 2)
+  // Only the delivery still awaiting an answer is not final; an unwitnessed verdict is.
+  assert.equal(y.n, 3)
   assert.equal(y.N, 4)
+  assert.ok(!y.reasons.includes("signoff_unverified"))
   assert.equal(y.out_of_scope, 5)
   // The shown percentage can be rebuilt from counts shown beside it.
   const c = outcomesSummary(file()).first_pass_counts
@@ -165,16 +167,25 @@ test("rework with no recorded history is no data", () => {
   assert.equal(r.changed_ask.state, "unavailable")
 })
 
-test("a disagreement counted over unverified refusals is a lower bound", () => {
+test("a disagreement counted over refusals with no witnessed prompt is whole: each is the operator's word as the agent recorded it", () => {
   const r = outcomesSummary(file({ rework: rework({ reason_check: { state: "measured", compared: 3, disagree: 1, compared_verified: 1, reasons: [] } }) })).rework
-  assert.equal(r.reason_check.disagree.state, "partial")
-  assert.equal(r.reason_check.disagree.bound, "lower")
-  assert.deepEqual(r.reason_check.disagree.reasons, ["refusal_unverified"])
+  assert.equal(r.reason_check.disagree.state, "measured")
+  assert.equal(r.reason_check.disagree.value, 1)
+})
+
+test("a job's first pass whose only doubt is an unwitnessed sign-off is final", () => {
+  const j = jobSummary({ job: "f", formulas: { first_pass_yield: { class: "declared", state: "partial", value: 1, reasons: ["signoff_unverified"], partial: true, partial_reasons: ["signoff_unverified"] } } }, "f.json")
+  assert.equal(j.first_pass.state, "measured")
+  assert.equal(j.first_pass.value, 1)
+  const awaiting = jobSummary({ job: "g", formulas: { first_pass_yield: { class: "declared", state: "partial", value: 1, reasons: ["awaiting_signoff", "signoff_unverified"], partial: true, partial_reasons: ["awaiting_signoff", "signoff_unverified"] } } }, "g.json")
+  assert.equal(awaiting.first_pass.state, "partial")
+  assert.deepEqual(awaiting.first_pass.reasons, ["awaiting_signoff"])
+  assert.equal(awaiting.first_pass.bound, "upper")
 })
 
 test("with sign-off published but no attention estimate, the headline says not recorded yet and shows no n of N", () => {
   const s = outcomesSummary(file())
-  assert.equal(s.signoff.accepted.value, 2)
+  assert.equal(s.signoff.accepted.value, 3)
   for (const f of [s.attention.headline, s.attention.turns_per_accepted]) {
     assert.deepEqual(f, { state: "unavailable", reasons: ["not_recorded_yet"] })
   }
@@ -223,9 +234,24 @@ test("a job with no signoff formula reads not recorded in the jobs table, and it
     { job: "m", formulas: { signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], verified: false, reason: null, wait: { class: "lt_1h", censored: false } } } },
     "m.json",
   )
-  assert.equal(acceptedUnverified.signoff.value, "accepted, not witnessed")
+  assert.equal(acceptedUnverified.signoff.value, "accepted")
+  assert.equal(acceptedUnverified.outcome, "accepted")
   assert.equal(acceptedUnverified.signoff_wait.value, "signed within an hour")
-  assert.deepEqual(checkNumbers({ jobs: [unsigned, legacy, acceptedUnverified] }), [])
+  // A current record carries no `verified` field at all; it reads the same.
+  const acceptedNew = jobSummary(
+    { job: "n", formulas: { signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], reason: null, wait: { class: "lt_1h", censored: false } } } },
+    "n.json",
+  )
+  assert.equal(acceptedNew.signoff.value, "accepted")
+  assert.equal(acceptedNew.outcome, "accepted")
+  const refused = jobSummary(
+    { job: "r", formulas: { status: { class: "declared", value: "processing" }, signoff: { class: "declared", state: "measured", value: "refused", reasons: [], verified: false, reason: "defect", wait: { class: "lt_1h", censored: false } } } },
+    "r.json",
+  )
+  assert.equal(refused.signoff.value, "sent back")
+  assert.equal(refused.outcome, "sent_back")
+  assert.equal(unsigned.outcome, "awaiting_signoff")
+  assert.deepEqual(checkNumbers({ jobs: [unsigned, legacy, acceptedUnverified, acceptedNew, refused] }), [])
 })
 
 test("a censored wait reads waiting at least its lower edge; a signed one reads its class", () => {
