@@ -1,5 +1,8 @@
 // A store correction overrides specific top-level fields of one published
-// facts file, permanently, against every future republish of that session.
+// facts file against every future republish of that session. Its `jobs`
+// field is the exception: it is a ceiling, not a value (see
+// `applyCorrection`), so it can only take credit away and never outlives a
+// later derivation that credits less.
 //
 // Why this exists: a facts file can be re-sent in full by its contributor's
 // client at any time (a "republish"), and the store always accepts a
@@ -11,9 +14,10 @@
 // again.
 //
 // A correction record under `corrections/<facts file name>.json` names the
-// fields whose corrected value should always win over whatever a republish
-// sends, while every other field still updates normally from the incoming
-// data. `applyCorrection` performs that overlay; `validateCorrectionRecord`
+// fields whose corrected value should win over whatever a republish sends
+// (for `jobs`, the most credit it may keep), while every other field still
+// updates normally from the incoming data. `applyCorrection` performs that
+// overlay; `validateCorrectionRecord`
 // is the schema gate a correction record must pass, called from
 // `check-corrections.mjs` (a pull request that edits `corrections/`) and
 // from `apply-corrections.mjs` (every read that applies corrections). A
@@ -519,19 +523,38 @@ export function validateCorrectionRecord(record, expectedFileName) {
 
 /**
  * The facts object a correction produces from `current` (already-parsed
- * JSON): every field the correction record names is replaced by the
+ * JSON). Every field the record names except `jobs` is replaced by the
  * record's value; every other field is left exactly as `current` has it, so
  * a republish's legitimate updates (duration, counts, and so on) still land.
+ *
+ * `jobs` is a ceiling on credit, not a value to restore: the session keeps
+ * only those of its current jobs whose ID the record lists, each exactly as
+ * the current facts carry it, and never gains a job the current facts do not
+ * hold. Every jobs correction so far was written to undo over-binding (a
+ * stale client republishing housekeeping or card-touch credit), and a
+ * republish of that kind is a superset of the record, so it is cut back to
+ * the record. A later derivation under newer binding rules that credits
+ * fewer jobs (or none) is already within the ceiling and shows as it is: a
+ * pinned value used to put the record's jobs back on top of it, crediting
+ * work the latest derivation no longer finds (session 1cd05863: 11 jobs
+ * pinned over a re-derivation holding none). The cost of the ceiling is that
+ * a correction can no longer add a job; credit comes from a derivation.
  * Does not validate `record`; callers validate first and never call this
  * with a record that failed validation.
  */
 export function applyCorrection(current, record) {
-  return { ...current, ...record.fields };
+  const corrected = { ...current, ...record.fields };
+  if (Object.hasOwn(record.fields, "jobs")) {
+    const allowed = new Set(record.fields.jobs.map((entry) => entry.job));
+    corrected.jobs = (Array.isArray(current.jobs) ? current.jobs : []).filter((entry) => typeof entry?.job === "string" && allowed.has(entry.job));
+  }
+  return corrected;
 }
 
 /** True when `applyCorrection` would change `current` at all. */
 export function correctionChanges(current, record) {
-  return Object.entries(record.fields).some(([key, value]) => JSON.stringify(current[key]) !== JSON.stringify(value));
+  const corrected = applyCorrection(current, record);
+  return Object.keys(record.fields).some((key) => JSON.stringify(current[key]) !== JSON.stringify(corrected[key]));
 }
 
 export { CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };

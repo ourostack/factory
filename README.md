@@ -92,6 +92,9 @@ CI rebuilds the reports from `main` after every merge and once a day, and publis
 - `index.md` lists every job with its lead time, active time and flow efficiency, then a coverage section: sessions bound to a job versus unattributed sessions, sessions per host, how often each field was unavailable and why, and the plugin versions seen.
 - `jobs/<job>.md` answers four questions for one job: what happened, what mattered, what was waste, and what we could not see.
 - `jobs/<job>.json` holds that job's normalized timeline and the formulas behind the report.
+- A retired job keeps a page. When no session is credited to a job any more (its sessions were re-derived under newer binding rules, corrected or withdrawn), the build writes a short `jobs/<job>.md` that says so, for every job any facts file on `main` ever credited, so a task card's link never leads to a missing file. A retired job has no `.json` and is not counted anywhere.
+
+A correction record under `corrections/` can only take job credit away: its `jobs` list is the most a session may be credited with, so a stale client's over-bound republish is cut back to it, and a later derivation that credits fewer jobs shows as it is.
 
 A job is identified by a one-way hash. A contributor's Desk can compute the same hash, so a task card can link to its job's report, but the hash names no desk, task or person.
 
