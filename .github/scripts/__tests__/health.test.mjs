@@ -107,3 +107,12 @@ test("alive needs every required piece of evidence; each missing piece gives unk
   }
   for (const piece of REQUIRED_EVIDENCE) assert.ok(piece.name && typeof piece.present === "function")
 })
+
+test("a package fills its slot with a stated number; an unknown slot name is dropped; the rest stay not recorded yet", () => {
+  const share = { state: "measured", value: 0.9, reasons: [], kind: "rollup", n: 1, N: 1, of: "machines' records", out_of_scope: 0 }
+  const h = buildHealth({ ...base(), slots: { capture_coverage: share, made_up: share }, details: { capture_coverage: [{ host: "claude-code", share }] } })
+  assert.equal(h.slots.capture_coverage.value, 0.9)
+  assert.ok(!("made_up" in h.slots))
+  assert.deepEqual(h.slots.open_improvement_items.reasons, ["not_recorded_yet"])
+  assert.equal(h.details.capture_coverage[0].host, "claude-code")
+})

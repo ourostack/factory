@@ -345,7 +345,12 @@
     wrap.appendChild(el("span", "trust-label", `trust: ${TRUST_LABEL[t.status] || t.status}`));
     wrap.appendChild(el("span", "trust-reason", ` — ${t.reason}`));
     const cov = t.coverage;
-    const covText = cov && cov.state === "measured" ? `coverage: ${F.toText(cov, "pct")}` : "coverage: not recorded yet";
+    const covText =
+      cov && (cov.state === "measured" || cov.state === "partial")
+        ? `coverage: ${F.describe(cov, "pct").text}${cov.state === "partial" ? " (partial)" : ""}`
+        : cov && cov.state === "unavailable" && !(cov.reasons || []).includes("not_recorded_yet")
+          ? `coverage: no data (${F.describe(cov, "pct").reason})`
+          : "coverage: not recorded yet";
     wrap.appendChild(el("span", "trust-coverage", ` · ${covText}`));
     return wrap;
   }
@@ -909,8 +914,10 @@
     "3_to_7_days": "three to seven days ago",
     over_7_days: "over seven days ago",
   };
+  // How each slot's number reads; a slot with no row is a count.
+  const SLOT_KIND = { capture_coverage: "pct" };
   const SLOT_LABEL = {
-    capture_coverage: "Capture coverage per host",
+    capture_coverage: "Capture coverage (share of sessions still on disk)",
     open_improvement_items: "Open improvement items (count and oldest age)",
     unsigned_deliveries: "Unsigned deliveries",
   };
@@ -986,7 +993,7 @@
     row(dl, "Facts files by host", hostsNode);
     for (const [key, number] of Object.entries(health.slots || {})) {
       const node = el("span");
-      node.appendChild(num(number, "count"));
+      node.appendChild(num(number, SLOT_KIND[key] || "count"));
       const detail = health.details && Array.isArray(health.details[key]) ? health.details[key] : [];
       if (key !== "capture_coverage" && detail.length && number.state !== "unavailable") {
         const per = el("span", "slot-detail");
@@ -997,9 +1004,99 @@
         }
         node.appendChild(per);
       }
+      if (key === "capture_coverage" && detail.length && number.state !== "unavailable") {
+        const per = el("span", "slot-detail");
+        detail.forEach((d, i) => {
+          per.appendChild(document.createTextNode(`${i ? ", " : " \u00b7 "}${d.host} `));
+          per.appendChild(num(d.share, "pct", { nofn: false }));
+        });
+        node.appendChild(per);
+      }
       row(dl, SLOT_LABEL[key] || key, node);
     }
     container.appendChild(dl);
+  }
+
+  // ------------------------------------------------------ capture coverage
+  // Per host, what became of every root session still on disk, from the
+  // machines' own capture records. Every count says how many machines'
+  // records it rests on; the caveats always sit beside the shares.
+
+  const CAPTURE_COLUMNS = [
+    ["on_disk", "On disk", "count"],
+    ["derived", "Captured", "count"],
+    ["held", "Held", "count"],
+    ["frozen", "Frozen", "count"],
+    ["pending", "Pending", "count"],
+    ["not_seen", "Never seen", "count"],
+    ["not_in_a_desk", "Not in a desk", "count"],
+    ["share", "Share captured", "pct"],
+    ["capturable_share", "Of what could be captured", "pct"],
+  ];
+  const CAPTURE_ALARM = {
+    coverage_low: "less than 80% of the sessions that could be captured were captured",
+    coverage_dropped: "a machine's capture share fell by 15 points or more since its previous record",
+  };
+
+  function renderCaptureCoverage(container, cov) {
+    container.innerHTML = "";
+    if (!cov || !cov.share) {
+      emptyState(container, "Capture coverage is not part of this build's data.");
+      return;
+    }
+    const top = el("p", "capture-total");
+    top.appendChild(document.createTextNode("Across every host: "));
+    top.appendChild(num(cov.share, "pct"));
+    top.appendChild(document.createTextNode(" of sessions still on disk were captured."));
+    container.appendChild(top);
+    if (cov.share.state === "unavailable") return;
+    const wrap = el("div", "table-wrap");
+    const table = document.createElement("table");
+    table.className = "data-table capture-table";
+    const head = document.createElement("tr");
+    for (const c of ["Host", ...CAPTURE_COLUMNS.map((x) => x[1])]) {
+      const th = document.createElement("th");
+      th.textContent = c;
+      if (c !== "Host") th.className = "num";
+      head.appendChild(th);
+    }
+    const thead = document.createElement("thead");
+    thead.appendChild(head);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const h of cov.hosts || []) {
+      const tr = document.createElement("tr");
+      tr.appendChild(el("td", null, h.host));
+      for (const [key, , kind] of CAPTURE_COLUMNS) {
+        const td = el("td", "num");
+        td.appendChild(num(h[key], kind, { nofn: key === "share" }));
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+    const notes = el("ul", "capture-notes");
+    for (const c of cov.caveats || []) notes.appendChild(el("li", null, c.text));
+    const m = cov.machines || {};
+    const parts = [["counted", "counted"], ["empty", "withdrawn"], ["stale", "older than 45 days"], ["invalid", "unreadable"], ["over_limit", "over the limit"]];
+    const li = el("li");
+    li.appendChild(document.createTextNode("Machines' records: "));
+    parts.forEach(([key, word], i) => {
+      if (!m[key]) return;
+      if (i) li.appendChild(document.createTextNode(", "));
+      li.appendChild(num(m[key], "count"));
+      li.appendChild(document.createTextNode(` ${word}`));
+    });
+    notes.appendChild(li);
+    container.appendChild(notes);
+    const alarms = Array.isArray(cov.alarms) ? cov.alarms : [];
+    const al = el("p", alarms.length ? "capture-alarms capture-alarms-on" : "capture-alarms");
+    al.textContent = alarms.length
+      ? `Alarm: ${alarms.map((a) => `${a.host}: ${CAPTURE_ALARM[a.code] || a.code}`).join("; ")}.`
+      : "No capture alarm: every host with enough sessions captured at least 80% of what it could.";
+    container.appendChild(al);
   }
 
   // ---------------------------------------------------------------- main
@@ -1097,6 +1194,7 @@
       );
     }
 
+    renderCaptureCoverage(document.getElementById("capture-coverage"), data.capture_coverage);
     renderTakeaways(document.getElementById("takeaways"), data.takeaways);
 
     const timeBreakdownNoteEl = document.getElementById("time-breakdown-note");

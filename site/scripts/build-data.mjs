@@ -31,7 +31,6 @@ import { compareJobs, jobSummary, scopeMember } from "./job-summary.mjs";
 import { harnessSummary } from "./harness-summary.mjs";
 import { SUBSTANTIAL_ACTIVE_MS, inScope, isBound } from "./active-time.mjs";
 import {
-  COVERAGE_NOT_RECORDED,
   LOW_COVERAGE_BELOW,
   THIN_SAMPLE_MIN,
   declareRollup,
@@ -41,12 +40,14 @@ import {
   rollup,
   trust,
   unavailable,
+  useCaptureCoverage,
 } from "./state.mjs";
 import { direct } from "./bounds.mjs";
 import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
 import { outcomesSummary } from "./outcomes.mjs";
+import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -104,6 +105,59 @@ function countTrust(number) {
   const n = number.state === "unavailable" ? 0 : number.value;
   return trust({ state: number.state, n, N: n });
 }
+
+// ---------------------------------------------------------------------------
+// Capture coverage: every capture/<intake id>.json on main, with the time of
+// its last commit (to leave out a record older than 45 days) and its bytes at
+// the commit before (to see a machine's coverage drop). Only the summary is
+// published: no date, no intake id, no per-machine figure. It is read first,
+// because every headline's trust state reads it.
+// ---------------------------------------------------------------------------
+
+function readCaptureFiles(dir) {
+  const captureDir = join(dir, "capture");
+  if (!existsSync(captureDir)) return [];
+  const names = readdirSync(captureDir).filter((n) => n.endsWith(".json")).sort();
+  return names.map((name) => {
+    if (!CAPTURE_FILE.test(name)) return { text: null, committedAtMs: null, previousText: null };
+    let text = null;
+    try {
+      text = readFileSync(join(captureDir, name), "utf8");
+    } catch {
+      text = null;
+    }
+    let committedAtMs = null;
+    let previousText = null;
+    try {
+      const log = execFileSync("git", ["-C", dir, "log", "--format=%H %ct", "-2", "--", `capture/${name}`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+      const seconds = Number((log[0] || "").split(" ")[1]);
+      committedAtMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+      const previous = (log[1] || "").split(" ")[0];
+      if (/^[0-9a-f]{40}$/.test(previous)) {
+        try {
+          previousText = execFileSync("git", ["-C", dir, "show", `${previous}:capture/${name}`], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          });
+        } catch {
+          previousText = null;
+        }
+      }
+    } catch {
+      committedAtMs = null;
+    }
+    return { text, committedAtMs, previousText };
+  });
+}
+
+const captureCoverage = summarizeCapture({ files: readCaptureFiles(mainDir), nowMs: Date.now() });
+useCaptureCoverage(captureCoverage.share);
 
 // ---------------------------------------------------------------------------
 // Rollups (already computed by factory-build; we read them, never re-derive)
@@ -685,8 +739,9 @@ const data = {
     sessions_with_facts: counted(coverageRaw.sessions_with_facts ?? factFiles.length),
     jobs: jobsTracked,
     jobs_open: jobsOpen,
-    capture: COVERAGE_NOT_RECORDED,
+    capture: captureCoverage.share,
   },
+  capture_coverage: captureCoverage,
   scope: {
     sessions_total: totalSessions,
     sessions_scoped: scoped,
@@ -746,8 +801,11 @@ const health = buildHealth({
   newestIntake: intakeClass(newestIntakeMs, Date.parse(builtAt)),
   lastBuild,
   reportsReadable,
-  slots: { unsigned_deliveries: outcomes.unsigned },
-  details: { unsigned_deliveries: [{ label: "longest", kind: "text", number: outcomes.oldest_unsigned_wait }] },
+  slots: { capture_coverage: captureCoverage.share, unsigned_deliveries: outcomes.unsigned },
+  details: {
+    capture_coverage: captureCoverage.hosts.map((h) => ({ host: h.host, share: h.share })),
+    unsigned_deliveries: [{ label: "longest", kind: "text", number: outcomes.oldest_unsigned_wait }],
+  },
 });
 
 // The numbers regression check. It runs before anything is written, so a

@@ -15,15 +15,24 @@ import { direct } from "./bounds.mjs";
 // constant, so changing the threshold changes it everywhere.
 export const THIN_SAMPLE_MIN = 5;
 
-// Extension point for capture coverage. Per-host capture coverage will arrive
-// as its own published record (a `measured` share between 0 and 1). Until it
-// does, no coverage is claimed: the headline says "not recorded yet", never
+// Capture coverage: the share of sessions still on disk that were captured,
+// summed from the machines' capture records (capture-coverage.mjs). With no
+// record, no coverage is claimed: the headline says "not recorded yet", never
 // 100% and never 0%.
 export const LOW_COVERAGE_BELOW = 0.5;
 export const COVERAGE_NOT_RECORDED = Object.freeze({
   state: "unavailable",
   reasons: ["not_recorded_yet"],
 });
+
+// The capture coverage every trust state reads by default. The site build
+// sets it once, from the machines' capture records, before it builds any
+// headline (`useCaptureCoverage`); until then, and with no record, it is
+// "not recorded yet".
+let defaultCoverage = COVERAGE_NOT_RECORDED;
+export function useCaptureCoverage(coverage) {
+  defaultCoverage = coverage && typeof coverage === "object" ? coverage : COVERAGE_NOT_RECORDED;
+}
 
 // Reasons that mean "this measure does not apply here, by design", not "the
 // data was lost". A member unavailable only for these reasons is not in a
@@ -157,11 +166,11 @@ export function rollup(members, { of, reduce, measure }) {
 // Trust state for a headline: `ok`, `thin_sample`, `partial`, or (once a
 // coverage record exists) `low_coverage`. `reasons` lists every cause that
 // applies; `status` is the first that does, in that order of severity.
-export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
+export function trust(headline, { coverage = defaultCoverage } = {}) {
   const n = Number.isInteger(headline?.n) ? headline.n : headline?.state === "measured" ? 1 : 0;
   const N = Number.isInteger(headline?.N) ? headline.N : n;
   const causes = [];
-  if (coverage?.state === "measured" && typeof coverage.value === "number" && coverage.value < LOW_COVERAGE_BELOW) {
+  if ((coverage?.state === "measured" || coverage?.state === "partial") && typeof coverage.value === "number" && coverage.value < LOW_COVERAGE_BELOW) {
     causes.push("low_coverage");
   }
   if (n < THIN_SAMPLE_MIN) causes.push("thin_sample");

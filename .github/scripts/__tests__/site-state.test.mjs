@@ -11,6 +11,7 @@ import {
   rollup,
   trust,
   unavailable,
+  useCaptureCoverage,
 } from "../../../site/scripts/state.mjs"
 
 test("a number always carries state, value and reasons", () => {
@@ -245,4 +246,15 @@ test("a totals leaf that is malformed or contradicts itself is no data, never a 
   }
   const empty = fromTotalsLeaf({ N: 0, n: 0, reasons: ["no_sessions"], state: "unavailable" }, "published sessions")
   assert.deepEqual(empty.reasons, ["no_sessions"])
+})
+
+test("the default coverage every trust state reads is the capture share the build sets", () => {
+  useCaptureCoverage({ state: "partial", value: 0.3, reasons: ["unverified_host"] })
+  try {
+    const t = trust({ state: "measured", n: 10, N: 10 })
+    assert.equal(t.status, "low_coverage")
+  } finally {
+    useCaptureCoverage(null)
+  }
+  assert.deepEqual(trust({ state: "measured", n: 10, N: 10 }).coverage.reasons, ["not_recorded_yet"])
 })

@@ -996,3 +996,9 @@ footer a {
 .outcome-block h4 { margin: 0 0 8px; font-size: 1em; }
 .outcome-block .stat-value { margin: 0 0 6px; }
 .outcome-block .stat-tile .health-facts, .stat-tile.outcome-block .health-facts { grid-template-columns: minmax(0, 1fr) auto; margin-top: 10px; }
+/* Capture coverage */
+.capture-total { margin: 4px 0 12px; }
+.capture-notes { margin: 12px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 0.9em; }
+.capture-alarms { margin: 10px 0 0; color: var(--text-secondary); }
+.capture-alarms-on { color: var(--text-primary); font-weight: 600; }
+.slot-detail { color: var(--text-secondary); }

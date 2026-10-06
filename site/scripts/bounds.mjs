@@ -84,6 +84,10 @@ export const DIRECTIONS = Object.freeze({
   session_counter: "lower",
   prs_merged: "lower",
   issues_first_page: "lower",
+  // Capture coverage: a share whose host is unverified (Codex root sessions
+  // not yet proven, or a listing that fell back), or that leaves out old or
+  // invalid machine records, can be off either way.
+  capture_share: "unknown",
 });
 
 function fromReasons(reasons) {

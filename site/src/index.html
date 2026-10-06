@@ -54,6 +54,12 @@
       <h2 class="section-title" id="health-title">Is this site healthy?</h2>
       <p class="section-sub">This panel is read in your browser. If the site stops rebuilding, it says so by itself.</p>
       <div id="health-panel" class="health-panel"><p class="chart-empty">Loading&hellip;</p></div>
+
+      <div class="chart-card" style="margin-top:20px;">
+        <h3>How much of the work the store sees</h3>
+        <p class="chart-caption">For each host, the root sessions still on disk on the machines that contribute, and what became of each: captured into facts, held on purpose (no consent, no store), frozen (facts that cannot be sent now), pending, never seen (no marker and no facts, in a desk's folder), or outside any desk. Counts are summed over the machines' own records and say how many records they rest on; no machine is shown on its own.</p>
+        <div id="capture-coverage"></div>
+      </div>
     </div>
   </section>
 

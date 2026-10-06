@@ -99,6 +99,15 @@
     facts_missing: "a session's facts are missing",
     no_facts: "no facts were published for this",
     facts_ambiguous: "a session's facts disagree with each other",
+    // Capture coverage (the machines' content-free capture records).
+    no_records: "no machine has published a capture record yet",
+    record_stale: "some machines' capture records are older than 45 days and are left out",
+    record_invalid: "some machines' capture records could not be read and are left out",
+    records_over_limit: "more capture records than the site reads; the rest are left out",
+    unverified_host: "the host's session count is not yet verified (for Codex, until one of its sessions has been derived)",
+    no_sessions_on_disk: "no session of this host is on disk",
+    nothing_capturable: "every session on disk is held on purpose or outside a desk",
+    host_does_not_say_desk: "this host's folders do not say which desk a session belongs to",
   };
 
   // Every reason that can reach the page has words. The site build stops on
