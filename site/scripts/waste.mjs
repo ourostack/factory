@@ -217,35 +217,37 @@ export function jobWaste(docs, sessionIds, shares) {
 }
 
 // The page's one waste overview, from the same per-job labels: each waste's
-// labeled time, largest first, with the jobs whose own rows have it. A
+// labeled time, largest first, with the jobs that add time to it. A
 // session's time counts once even where several jobs hold it (a `shared`
-// segment): the first job by ID that counted a stretch of time keeps it. It
-// is at least that much unless every finished job is fully labeled.
+// segment): the first job by ID that labeled a stretch of that time keeps
+// it, whatever the stretch's class (value included), and a later job adds
+// only time no earlier job labeled. A job counts for a waste only when it
+// adds time to it. It is at least that much unless every finished job is
+// fully labeled.
 export function labeledWaste(jobs) {
   const finished = jobs.filter((j) => j.status === "done");
   const whole = finished.length > 0 && finished.every((j) => j.waste && j.waste.rows.length && j.waste.rows.every((r) => r.total_ms.state === "measured"));
   const sums = new Map();
   const add = (key, ms, job) => {
+    if (!(ms > 0)) return;
     const e = sums.get(key) || { ms: 0, jobs: new Set() };
     e.ms += ms;
-    if (job !== null) e.jobs.add(job);
+    e.jobs.add(job);
     sums.set(key, e);
   };
   const counted = (k) => k !== "value" && k !== "support";
-  const covered = new Map(); // session -> [[start, end]] already counted
+  const covered = new Map(); // session -> [[start, end]] some earlier job labeled
   for (const j of [...jobs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (!j.waste) continue;
-    for (const r of j.waste.rows) if (r.kind === "waste" || r.kind === "unknown") add(r.key, 0, j.id ?? j);
     const pieces = Array.isArray(j.waste.pieces) ? j.waste.pieces : null;
     if (pieces === null) {
       // Rows built without pieces (an older caller) are summed as they are.
-      for (const r of j.waste.rows) if (r.kind === "waste" || r.kind === "unknown") add(r.key, r.total_ms.value, null);
+      for (const r of j.waste.rows) if (r.kind === "waste" || r.kind === "unknown") add(r.key, r.total_ms.value, j.id);
       continue;
     }
     for (const p of pieces) {
-      if (!counted(p.key)) continue;
       const taken = covered.get(p.session) || [];
-      add(p.key, p.end - p.start - inside(p.start, p.end, taken), null);
+      if (counted(p.key)) add(p.key, p.end - p.start - inside(p.start, p.end, taken), j.id);
       covered.set(p.session, merge([...taken, [p.start, p.end]]));
     }
   }

@@ -90,7 +90,7 @@ test("a session shared by several jobs counts for each only inside its own segme
   assert.deepEqual(b.rows.map((r) => [r.key, r.total_ms.value]), [["waiting", 300]])
   assert.equal(a.rows[1].confidence.high_ms.value, 200, "confidence follows the clipped time")
   // The overview sums the shares, so the session's waiting time (600) is counted at most once: 200 + 300.
-  const lw = labeledWaste([{ status: "done", waste: a }, { status: "done", waste: b }])
+  const lw = labeledWaste([{ id: "a", status: "done", waste: a }, { id: "b", status: "done", waste: b }])
   assert.deepEqual(lw.rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["waiting", 500, 2]])
   assert.deepEqual(checkNumbers({ jobs: [{ waste: a }, { waste: b }], labeled_waste: lw }), [])
 })
@@ -105,11 +105,22 @@ test("a shared segment counts for each job that holds it, and once in the overvi
   assert.ok(!Object.keys(a).includes("pieces"), "the counted stretches are not published")
   // The first job by ID keeps the shared time: the session's 300 ms count once, all as a's waiting.
   const lw = labeledWaste([{ id: "b", status: "done", waste: b }, { id: "a", status: "done", waste: a }])
-  assert.deepEqual(lw.rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["waiting", 300, 2], ["defects", 0, 1]])
+  assert.deepEqual(lw.rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["waiting", 300, 1]], "b's labels fall wholly on time a labeled first, so b adds nothing and is not counted")
   assert.equal(JSON.parse(JSON.stringify(a)).pieces, undefined)
   // Rows built without counted stretches are summed as they are.
-  const bare = { status: "done", waste: { rows: [{ key: "motion", kind: "waste", total_ms: measured(7) }, { key: "value", kind: "value", total_ms: measured(9) }] } }
+  const bare = { id: "c", status: "done", waste: { rows: [{ key: "motion", kind: "waste", total_ms: measured(7) }, { key: "value", kind: "value", total_ms: measured(9) }] } }
   assert.deepEqual(labeledWaste([bare]).rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["motion", 7, 1]])
+})
+
+test("in the overview the first job by ID keeps shared time whatever it labeled it, value included", () => {
+  // Jobs 1 and 8 share 0..2000: job 1 labeled it value, job 8 waiting. Each job's own figures count it; the overview adds no waiting.
+  const bindings = [{ job: "1", segments: [{ start_ms: 0, end_ms: 2000, shared: true }] }, { job: "8", segments: [{ start_ms: 0, end_ms: 2000, shared: true }] }]
+  const one = jobWaste([label("s1", [stretch(0, 2000, "value", null, "high")], "1")], ["s1"], new Map([["s1", ownShare(bindings, "1")]]))
+  const eight = jobWaste([label("s1", [stretch(0, 2000, "muda", "waiting", "high")], "8")], ["s1"], new Map([["s1", ownShare(bindings, "8")]]))
+  assert.deepEqual(eight.rows.map((r) => [r.key, r.total_ms.value]), [["waiting", 2000]])
+  const lw = labeledWaste([{ id: "8", status: "done", waste: eight }, { id: "1", status: "done", waste: one }])
+  assert.deepEqual(lw.rows, [], "no waiting is added, and no job is counted for a row it adds nothing to")
+  assert.deepEqual(checkNumbers({ labeled_waste: lw }), [])
 })
 
 test("a label file with no stretch inside the job's share is not labeled for the job, never a zero", () => {
