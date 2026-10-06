@@ -47,6 +47,7 @@ import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "
 import { checkNumbers } from "./check-numbers.mjs";
 import { outcomesSummary } from "./outcomes.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
+import { summarizeLoop } from "./loop-health.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -155,7 +156,10 @@ function readCaptureFiles(dir) {
   });
 }
 
-const captureCoverage = summarizeCapture({ files: readCaptureFiles(mainDir), nowMs: Date.now() });
+const captureFiles = readCaptureFiles(mainDir);
+const captureCoverage = summarizeCapture({ files: captureFiles, nowMs: Date.now() });
+// The improvement loop's health rides in the same records (their `loop` slot).
+const loopHealth = summarizeLoop({ files: captureFiles, nowMs: Date.now() });
 // Every trust state rests on the capture share, passed in, never a global.
 const trustOf = (headline) => trust(headline, { coverage: captureCoverage.share });
 
@@ -742,6 +746,7 @@ const data = {
     capture: captureCoverage.share,
   },
   capture_coverage: captureCoverage,
+  loop_health: loopHealth,
   scope: {
     sessions_total: totalSessions,
     sessions_scoped: scoped,
@@ -801,10 +806,11 @@ const health = buildHealth({
   newestIntake: intakeClass(newestIntakeMs, Date.parse(builtAt)),
   lastBuild,
   reportsReadable,
-  slots: { capture_coverage: captureCoverage.share, unsigned_deliveries: outcomes.unsigned },
+  slots: { capture_coverage: captureCoverage.share, unsigned_deliveries: outcomes.unsigned, open_improvement_items: loopHealth.not_closed },
   details: {
     capture_coverage: captureCoverage.hosts.map((h) => ({ host: h.host, share: h.share })),
     unsigned_deliveries: [{ label: "longest", kind: "text", number: outcomes.oldest_unsigned_wait }],
+    open_improvement_items: [{ label: "oldest open, in days", number: loopHealth.oldest_open_age_days }],
   },
 });
 

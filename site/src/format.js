@@ -110,6 +110,10 @@
     no_sessions_on_disk: "no session of this host is on disk",
     nothing_capturable: "every session on disk is held on purpose or outside a desk",
     host_does_not_say_desk: "this host's folders do not say which desk a session belongs to",
+    // The improvement loop (the loop slot in each machine's capture record).
+    no_loop_records: "no machine has sent its improvement loop's health yet",
+    machine_sent_no_loop_record: "some machines did not send this figure and are left out",
+    none_open: "no improvement item is open",
   };
 
   // Every reason that can reach the page has words. The site build stops on

@@ -427,3 +427,26 @@ test("the attention headline's trust rests on the same capture share as every ot
   assert.equal(data.capture_coverage.share.state, "measured")
   assert.deepEqual(data.outcomes.attention.trust.coverage, data.capture_coverage.share)
 })
+
+test("a capture record's loop slot fills the open improvement items slot and the loop figures", () => {
+  const fx = fixture()
+  const loop = { v: 1, improvement_open: 2, improvement_claimed: 1, improvement_shipped: 0, improvement_verifying: 0, oldest_open_age_days: 9, closed_confirmed_month: 1, closed_unverified_month: 0, loop_alarms_open: 0, steps_stale: 0, headless: "no_credentials" }
+  commitCapture(fx.main, "dddddddddddddddd.json", { ...captureRecord({ "claude-code": captureHost() }), loop }, new Date().toISOString())
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.loop_health.open.value, 2)
+  assert.deepEqual(data.loop_health.alarms.map((a) => a.code), ["improvement_age"])
+  const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
+  assert.deepEqual(checkNumbers(health), [])
+  assert.equal(health.slots.open_improvement_items.value, 3)
+  assert.equal(health.details.open_improvement_items[0].number.value, 9)
+})
+
+test("with no loop slot anywhere the open improvement items slot is no data, never zero", () => {
+  const fx = fixture()
+  build(fx)
+  const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
+  assert.equal(health.slots.open_improvement_items.state, "unavailable")
+  assert.ok(!("value" in health.slots.open_improvement_items))
+})

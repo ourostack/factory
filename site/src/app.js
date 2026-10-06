@@ -1115,6 +1115,76 @@
     container.appendChild(al);
   }
 
+  // ------------------------------------------------------ improvement loop
+  // Whether found problems get fixed by themselves: open and in-progress
+  // improvement items, the oldest one's age, what closed this month, and the
+  // loop's own alarms. Each figure is the largest any one machine reports
+  // (machines can share a desk, so counts are never added), with n of N.
+
+  const LOOP_ROWS = [
+    ["open", "Open, not yet taken"],
+    ["in_progress", "Taken, fixed or being checked"],
+    ["oldest_open_age_days", "Oldest open item, in days"],
+    ["closed_confirmed_month", "Closed in the last 30 days, fix confirmed by data"],
+    ["closed_unverified_month", "Closed in the last 30 days without a confirming measure"],
+    ["loop_alarms_open", "The loop's own alarms open"],
+    ["steps_stale", "Loop steps that stopped succeeding"],
+  ];
+  const LOOP_ALARM = {
+    improvement_age: "an improvement item has been open for a week or more",
+    loop_alarms_open: "the loop has raised an alarm about itself",
+    steps_stale: "a loop step has stopped succeeding",
+  };
+  const HEADLESS_WORD = {
+    idle: "idle",
+    ran: "ran today",
+    no_agent_cli: "no agent command found",
+    no_credentials: "not signed in",
+    disabled_would_bill: "off: it would bill an account",
+    sign_in_unknown: "sign-in could not be told",
+    budget_exhausted: "today's budget spent",
+    disabled: "switched off",
+    unsupported_host: "host not supported",
+    unavailable: "not known today",
+  };
+
+  function renderLoop(container, loop) {
+    container.innerHTML = "";
+    if (!loop || !loop.open) {
+      emptyState(container, "The improvement loop is not part of this build's data.");
+      return;
+    }
+    const dl = el("dl", "health-facts");
+    for (const [key, label] of LOOP_ROWS) row(dl, label, num(loop[key], "count"));
+    const evalNode = el("span");
+    if (!loop.headless.length) evalNode.appendChild(document.createTextNode("no data (no machine said)"));
+    loop.headless.forEach((h, i) => {
+      if (i) evalNode.appendChild(document.createTextNode(", "));
+      evalNode.appendChild(document.createTextNode(`${HEADLESS_WORD[h.code] || h.code.replace(/_/g, " ")} on `));
+      evalNode.appendChild(num(h.machines, "count"));
+      evalNode.appendChild(document.createTextNode(" machine(s)"));
+    });
+    row(dl, "Waste evaluator, run by itself", evalNode);
+    const m = loop.machines;
+    const machinesNode = el("span");
+    machinesNode.appendChild(num(m.reporting, "count"));
+    machinesNode.appendChild(document.createTextNode(" reporting, "));
+    machinesNode.appendChild(num(m.without_loop, "count"));
+    machinesNode.appendChild(document.createTextNode(" on a Desk that does not send it yet, "));
+    machinesNode.appendChild(num(m.quiet, "count"));
+    machinesNode.appendChild(document.createTextNode(" quiet for over three days"));
+    row(dl, "Machines", machinesNode);
+    container.appendChild(dl);
+    const alarms = Array.isArray(loop.alarms) ? loop.alarms : [];
+    const al = el("p", alarms.length ? "capture-alarms capture-alarms-on" : "capture-alarms");
+    al.textContent = alarms.length
+      ? `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`
+      : loop.open.state === "unavailable"
+        ? "No alarm can be told until a machine sends its loop's health."
+        : "No loop alarm: nothing has been open for a week, and every loop step is succeeding.";
+    container.appendChild(al);
+  }
+
   // ---------------------------------------------------------------- main
 
   async function loadJSON(url) {
@@ -1211,6 +1281,7 @@
     }
 
     renderCaptureCoverage(document.getElementById("capture-coverage"), data.capture_coverage);
+    renderLoop(document.getElementById("loop-health"), data.loop_health);
     renderTakeaways(document.getElementById("takeaways"), data.takeaways);
 
     const timeBreakdownNoteEl = document.getElementById("time-breakdown-note");
