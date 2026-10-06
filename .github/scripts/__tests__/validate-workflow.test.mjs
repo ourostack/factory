@@ -53,10 +53,19 @@ test("only data files skip the head's tests, and the data paths are the ones an 
   assert.match(headJob, /\^\(facts\|labels\|capture\)\/\[\^\/\]\+\\\.json\$/)
 })
 
-test("the store's tests run with Desk reachable and a missing Desk fails them instead of skipping", () => {
-  const base = section("      - name: Run the store's own script tests", "      - name: Decide whether the author maintains")
-  assert.match(base, /DESK_DIR: \$\{\{ runner\.temp \}\}\/desk/)
-  assert.match(base, /FACTORY_REQUIRE_DESK: "1"/)
-  assert.ok(validateJob.indexOf("Clone Desk main") < validateJob.indexOf("Run the store's own script tests"))
+test("the head's tests require Desk (a missing Desk fails them) and the base's run does not look at Desk", () => {
   assert.match(headJob, /FACTORY_REQUIRE_DESK=1 DESK_DIR=/)
+  const base = section("      - name: Run the store's own script tests", "      - name: Decide whether the author maintains")
+  assert.doesNotMatch(base, /DESK_DIR|FACTORY_REQUIRE_DESK/)
+})
+
+test("a drift from Desk's tables is raised by the build's issue-checks job, which opens the build-failing issue", () => {
+  const build = readFileSync(new URL("../../workflows/build.yml", import.meta.url), "utf8")
+  const issueChecks = build.slice(build.indexOf("\n  issue-checks:\n"), build.indexOf("\n  report:\n"))
+  const step = issueChecks.slice(issueChecks.indexOf("Compare the store's copies of Desk's tables"), issueChecks.indexOf("Check the kaizen cards"))
+  assert.match(step, /FACTORY_REQUIRE_DESK: "1"/)
+  assert.match(step, /DESK_DIR: \$\{\{ runner\.temp \}\}\/desk/)
+  assert.match(step, /session-numbers\.test\.mjs/)
+  assert.match(step, /corrections\.test\.mjs/)
+  assert.ok(issueChecks.indexOf("Clone Desk main") < issueChecks.indexOf("Compare the store's copies"))
 })

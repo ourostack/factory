@@ -200,6 +200,18 @@ jobs:
           set -euo pipefail
           node .github/scripts/apply-corrections.mjs --store . | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The store keeps copies of two of Desk's tables (the host flags the site
+      # reads, the vocabulary the correction check mirrors). A drift is a
+      # failing test here, which opens the build-failing issue; it does not stop
+      # the reports, which are already published by the job before this one.
+      - name: Compare the store's copies of Desk's tables with Desk's own
+        env:
+          DESK_DIR: ${{ runner.temp }}/desk
+          FACTORY_REQUIRE_DESK: "1"
+        run: |
+          set -uo pipefail
+          node --test .github/scripts/__tests__/session-numbers.test.mjs .github/scripts/__tests__/corrections.test.mjs
+
       - name: Check the kaizen cards
         env:
           GH_TOKEN: ${{ github.token }}

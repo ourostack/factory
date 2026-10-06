@@ -40,7 +40,11 @@
 #     base, which is what would land) with a scrubbed environment, and no step
 #     that holds a token reads or runs anything from the candidate.
 # So a green `factory-validate` now also means the pull request's own tests
-# passed on what merging it would land.
+# passed on what merging it would land. Those tests include the comparisons
+# with Desk's tables, which `head-tests` requires (a Desk that cannot be read
+# fails them). The base's run above does not look at Desk: a change in Desk
+# must not block every intake pull request. A drift is instead raised by the
+# `factory-build` run's `issue-checks` job, which opens the build-failing issue.
 #
 # GitHub runs the workflow files of the pull request's own merge commit on
 # `pull_request`, so a pull request that edits this file, or adds a workflow
@@ -203,16 +207,7 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
 
-      - name: Clone Desk main
-        run: |
-          set -euo pipefail
-          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
-          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
-
       - name: Run the store's own script tests
-        env:
-          DESK_DIR: ${{ runner.temp }}/desk
-          FACTORY_REQUIRE_DESK: "1"
         run: |
           set -euo pipefail
           if [ -d .github/scripts/__tests__ ]; then
@@ -220,6 +215,12 @@ jobs:
           else
             echo "factory-validate: no .github/scripts/__tests__ on the base yet; skipped"
           fi
+
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
 
       - name: Decide whether the author maintains this repository
         id: maintainer
