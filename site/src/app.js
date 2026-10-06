@@ -344,14 +344,7 @@
     const wrap = el("span", `trust trust-${t.status}`);
     wrap.appendChild(el("span", "trust-label", `trust: ${TRUST_LABEL[t.status] || t.status}`));
     wrap.appendChild(el("span", "trust-reason", ` — ${t.reason}`));
-    const cov = t.coverage;
-    const covText =
-      cov && (cov.state === "measured" || cov.state === "partial")
-        ? `coverage: ${F.describe(cov, "pct").text}${cov.state === "partial" ? " (partial)" : ""}`
-        : cov && cov.state === "unavailable" && !(cov.reasons || []).includes("not_recorded_yet")
-          ? `coverage: no data (${F.describe(cov, "pct").reason})`
-          : "coverage: not recorded yet";
-    wrap.appendChild(el("span", "trust-coverage", ` · ${covText}`));
+    wrap.appendChild(el("span", "trust-coverage", ` · ${F.coverageWords(t.coverage)}`));
     return wrap;
   }
 
@@ -1059,10 +1052,10 @@
     const table = document.createElement("table");
     table.className = "data-table capture-table";
     const head = document.createElement("tr");
-    for (const c of ["Host", ...CAPTURE_COLUMNS.map((x) => x[1])]) {
+    for (const c of ["Host", "Records", ...CAPTURE_COLUMNS.map((x) => x[1])]) {
       const th = document.createElement("th");
       th.textContent = c;
-      if (c !== "Host") th.className = "num";
+      if (c !== "Host" && c !== "Records") th.className = "num";
       head.appendChild(th);
     }
     const thead = document.createElement("thead");
@@ -1072,9 +1065,15 @@
     for (const h of cov.hosts || []) {
       const tr = document.createElement("tr");
       tr.appendChild(el("td", null, h.host));
+      // How many machines' records the row rests on, with the unverified
+      // ones named in words, so a share's partial mark is explained on the
+      // page and not only on hover.
+      const records = h.records && h.records.state === "measured" ? h.records.value : 0;
+      const unverified = h.unverified_machines && h.unverified_machines.state === "measured" ? h.unverified_machines.value : 0;
+      tr.appendChild(el("td", unverified ? "capture-records capture-unverified" : "capture-records", records ? F.recordsWords(records, unverified) : "none"));
       for (const [key, , kind] of CAPTURE_COLUMNS) {
         const td = el("td", "num");
-        td.appendChild(num(h[key], kind, { nofn: key === "share" }));
+        td.appendChild(num(h[key], kind, { nofn: false }));
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -1095,6 +1094,7 @@
       li.appendChild(document.createTextNode(` ${word}`));
     });
     notes.appendChild(li);
+    notes.appendChild(el("li", null, "A machine sends its record again only when its counts change, so a record not refreshed for 45 days is treated as stale and left out, even if the machine is still working."));
     container.appendChild(notes);
     const alarms = Array.isArray(cov.alarms) ? cov.alarms : [];
     const al = el("p", alarms.length ? "capture-alarms capture-alarms-on" : "capture-alarms");

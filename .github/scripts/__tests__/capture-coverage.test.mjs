@@ -151,7 +151,16 @@ test("coverage_low fires under the threshold only with enough sessions", () => {
   const small = { on_disk: 5, derived: 1, held: 0, frozen: 0, pending: 0, not_seen: 4, not_in_a_desk: null, unverified: false }
   const cov = summarizeCapture({ files: [file(record({ "claude-code": low, "copilot-cli": small }))], nowMs: NOW })
   assert.deepEqual(cov.alarms.map((a) => [a.host, a.code]), [["claude-code", "coverage_low"]])
-  assert.ok(LOW_SHARE > 0.5 && MIN_SESSIONS === 10)
+})
+
+test("coverage_low fires just under the threshold, not at it, and not below the minimum of sessions", () => {
+  const h = (onDisk, derived) => ({ on_disk: onDisk, derived, held: 0, frozen: 0, pending: 0, not_seen: onDisk - derived, not_in_a_desk: 0, unverified: false })
+  const at = Math.round(LOW_SHARE * 100)
+  const fires = (onDisk, derived) => summarizeCapture({ files: [file(record({ "claude-code": h(onDisk, derived) }))], nowMs: NOW }).alarms.some((a) => a.code === "coverage_low")
+  assert.equal(fires(100, at), false)
+  assert.equal(fires(100, at - 1), true)
+  assert.equal(fires(MIN_SESSIONS, 0), true)
+  assert.equal(fires(MIN_SESSIONS - 1, 0), false)
 })
 
 test("coverage_dropped fires on a fall against the machine's previous record and not on a rise", () => {
@@ -164,7 +173,15 @@ test("coverage_dropped fires on a fall against the machine's previous record and
   })
   assert.ok(cov.alarms.some((a) => a.host === "claude-code" && a.code === "coverage_dropped"))
   assert.ok(!cov.alarms.some((a) => a.host === "copilot-cli" && a.code === "coverage_dropped"))
-  assert.ok(DROP_POINTS === 0.15)
+})
+
+test("coverage_dropped fires on a fall of the threshold or more, and not on a smaller fall", () => {
+  const h = (derived) => ({ on_disk: 100, derived, held: 0, frozen: 0, pending: 0, not_seen: 100 - derived, not_in_a_desk: 0, unverified: false })
+  const before = record({ "claude-code": h(100) })
+  const fires = (derived) => summarizeCapture({ files: [file(record({ "claude-code": h(derived) }), { previous: before })], nowMs: NOW }).alarms.some((a) => a.code === "coverage_dropped")
+  const drop = Math.round(DROP_POINTS * 100)
+  assert.equal(fires(100 - drop), true)
+  assert.equal(fires(100 - drop + 1), false)
 })
 
 test("the caveats are always present when there is data and fixed", () => {
@@ -208,4 +225,16 @@ test("more than the record limit is bounded", () => {
   assert.equal(cov.machines.over_limit.value, 5)
   assert.equal(cov.share.state, "partial")
   assert.ok(cov.share.reasons.includes("records_over_limit"))
+})
+
+test("a host share counts machines' records with the host verified, and says how many records are unverified", () => {
+  const cov = summarizeCapture({ files: [file(record({ "codex-cli": codex() }))], nowMs: NOW })
+  const c = host(cov, "codex-cli")
+  assert.equal(c.share.of, "machines' records with the host verified")
+  assert.equal(c.share.n, 0)
+  assert.equal(c.share.N, 1)
+  assert.equal(c.records.value, 1)
+  assert.equal(c.unverified_machines.value, 1)
+  assert.equal(cov.share.of, "machines' records, current and verified")
+  assert.deepEqual(checkNumbers({ capture_coverage: cov }), [])
 })

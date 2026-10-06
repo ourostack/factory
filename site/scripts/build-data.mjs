@@ -40,7 +40,6 @@ import {
   rollup,
   trust,
   unavailable,
-  useCaptureCoverage,
 } from "./state.mjs";
 import { direct } from "./bounds.mjs";
 import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
@@ -103,7 +102,7 @@ function counted(v) {
 // the count itself.
 function countTrust(number) {
   const n = number.state === "unavailable" ? 0 : number.value;
-  return trust({ state: number.state, n, N: n });
+  return trustOf({ state: number.state, n, N: n });
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +156,8 @@ function readCaptureFiles(dir) {
 }
 
 const captureCoverage = summarizeCapture({ files: readCaptureFiles(mainDir), nowMs: Date.now() });
-useCaptureCoverage(captureCoverage.share);
+// Every trust state rests on the capture share, passed in, never a global.
+const trustOf = (headline) => trust(headline, { coverage: captureCoverage.share });
 
 // ---------------------------------------------------------------------------
 // Rollups (already computed by factory-build; we read them, never re-derive)
@@ -234,13 +234,13 @@ const scopedTimeBreakdown = [
   { key: "api_retry_wait", label: "Waiting on API retries", field: "api_retry_ms" },
 ].map(({ key, label, field }) => {
   const r = timeRollups(field);
-  return { key, label, ...r, trust: trust(r.median) };
+  return { key, label, ...r, trust: trustOf(r.median) };
 });
 
 const flowRollups = timeRollups("flow_efficiency");
 const scopedFlowEfficiency = {
   ...flowRollups,
-  trust: trust(flowRollups.median),
+  trust: trustOf(flowRollups.median),
 };
 
 // ---------------------------------------------------------------------------
@@ -591,9 +591,9 @@ const totalSessions = measured(factFiles.length);
 const headlines = [
   { id: "substantial_sessions", label: "Substantial sessions", number: scoped, note: { template: "of {total} published", slots: { total: totalSessions } }, trust: countTrust(scoped) },
   { id: "jobs_tracked", label: "Jobs tracked", number: jobsTracked, note: { template: "{open} open", slots: { open: jobsOpen } }, trust: countTrust(jobsTracked) },
-  { id: "subagent_dispatches", label: "Subagent dispatches", number: headlineTotals.dispatches, note: { template: headlineTotals.note, slots: {} }, trust: trust(headlineTotals.dispatches) },
-  { id: "tool_calls", label: "Tool calls recorded", number: headlineTotals.tool_calls, note: { template: headlineTotals.note, slots: {} }, trust: trust(headlineTotals.tool_calls) },
-  { id: "model_requests", label: "Model requests", number: headlineTotals.model_requests, note: { template: headlineTotals.note, slots: {} }, trust: trust(headlineTotals.model_requests) },
+  { id: "subagent_dispatches", label: "Subagent dispatches", number: headlineTotals.dispatches, note: { template: headlineTotals.note, slots: {} }, trust: trustOf(headlineTotals.dispatches) },
+  { id: "tool_calls", label: "Tool calls recorded", number: headlineTotals.tool_calls, note: { template: headlineTotals.note, slots: {} }, trust: trustOf(headlineTotals.tool_calls) },
+  { id: "model_requests", label: "Model requests", number: headlineTotals.model_requests, note: { template: headlineTotals.note, slots: {} }, trust: trustOf(headlineTotals.model_requests) },
   { id: "kaizen", label: "Kaizen issues", number: kaizenRaised, note: { template: "{resolved} resolved", slots: { resolved: kaizenResolved } }, trust: countTrust(kaizenRaised) },
 ];
 
@@ -624,7 +624,7 @@ takeaways.push({
       id: "tool_failures",
       template: `${toolKindsScope === "published" ? "Across every published session" : "Among the {scoped} substantial sessions"}, "{tool}" calls fail most often of the tool kinds used at least {min_calls} times: {rate} of {calls} calls ({failures} failures).`,
       slots: { ...(toolKindsScope === "published" ? {} : { scoped }), tool: worst.tool, min_calls: measured(20), rate: worst.failure_rate, calls: worst.calls, failures: worst.failures },
-      trust: trust(worst.calls),
+      trust: trustOf(worst.calls),
     });
   }
 }
@@ -650,7 +650,7 @@ if (modelRolls.models.length > 0 && modelRolls.total_requests.state !== "unavail
     id: "model_concentration",
     template: "Among the {scoped} substantial sessions, {model} accounts for {share} of the {total} model requests they recorded.",
     slots: { scoped, model: top.id, share, total: modelRolls.total_requests },
-    trust: trust(share),
+    trust: trustOf(share),
   });
 }
 
@@ -660,7 +660,7 @@ if (subagentRolls.sessions_with_subagents.state !== "unavailable") {
     id: "subagents",
     template: "{with} of the {scoped} substantial sessions dispatch at least one subagent, {dispatches} dispatches in total across them; sessions whose subagent logs could not be read are left out.",
     slots: { with: w, scoped, dispatches: subagentRolls.dispatches },
-    trust: trust(w),
+    trust: trustOf(w),
   });
 }
 
@@ -670,7 +670,7 @@ if (mudaOverall && mudaOverall.jobs_labeled === 0) {
     id: "waste_not_labeled",
     template: "Labeling has just started: {labeled} of {jobs} jobs are fully labeled for waste yet, though session-level labels already exist. A job's waste breakdown appears here once every one of its sessions is evaluated.",
     slots: { labeled: jobsLabeled, jobs: counted(mudaOverall.jobs) },
-    trust: trust({ state: "partial", n: 0, N: counted(mudaOverall.jobs).state === "measured" ? counted(mudaOverall.jobs).value : 0 }),
+    trust: trustOf({ state: "partial", n: 0, N: counted(mudaOverall.jobs).state === "measured" ? counted(mudaOverall.jobs).value : 0 }),
   });
 }
 

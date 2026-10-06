@@ -1002,3 +1002,4 @@ footer a {
 .capture-alarms { margin: 10px 0 0; color: var(--text-secondary); }
 .capture-alarms-on { color: var(--text-primary); font-weight: 600; }
 .slot-detail { color: var(--text-secondary); }
+.capture-unverified { font-weight: 600; }

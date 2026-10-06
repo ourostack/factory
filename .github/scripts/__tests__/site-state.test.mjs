@@ -11,7 +11,6 @@ import {
   rollup,
   trust,
   unavailable,
-  useCaptureCoverage,
 } from "../../../site/scripts/state.mjs"
 
 test("a number always carries state, value and reasons", () => {
@@ -266,13 +265,8 @@ test("a rollup with no measured member never repeats a member's lower-bound reas
   assert.ok(some.reasons.includes("host_records_partly"))
 })
 
-test("the default coverage every trust state reads is the capture share the build sets", () => {
-  useCaptureCoverage({ state: "partial", value: 0.3, reasons: ["unverified_host"] })
-  try {
-    const t = trust({ state: "measured", n: 10, N: 10 })
-    assert.equal(t.status, "low_coverage")
-  } finally {
-    useCaptureCoverage(null)
-  }
+test("trust reads the coverage it is given, and with none given says coverage is not recorded yet", () => {
+  const t = trust({ state: "measured", n: 10, N: 10 }, { coverage: { state: "partial", value: 0.3, reasons: ["unverified_host"] } })
+  assert.equal(t.status, "low_coverage")
   assert.deepEqual(trust({ state: "measured", n: 10, N: 10 }).coverage.reasons, ["not_recorded_yet"])
 })

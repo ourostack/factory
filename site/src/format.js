@@ -203,7 +203,8 @@
     return {
       state: "partial",
       text: direction + body,
-      marker: unknownDirection ? `partial, ${UNKNOWN_DIRECTION}` : "partial",
+      // An unverified host is said as such, visibly, not only in the reason.
+      marker: `${Array.isArray(number.reasons) && number.reasons.includes("unverified_host") ? "unverified" : "partial"}${unknownDirection ? `, ${UNKNOWN_DIRECTION}` : ""}`,
       reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason,
       nofn,
       basis,
@@ -398,5 +399,25 @@
     return typeof id === "string" && ANCHOR.test(id) ? `#${id}` : null;
   }
 
-  return { describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  // How many machines' records a host's figures rest on, and how many of them
+  // could not verify the host's session count.
+  function recordsWords(total, unverified) {
+    const words = `${total} record${total === 1 ? "" : "s"}`;
+    if (!unverified) return words;
+    if (unverified === total) return total === 1 ? `${words}, unverified` : `${words}, all unverified`;
+    return `${words}, ${unverified} unverified`;
+  }
+
+  // The coverage a trust line rests on, with its population named.
+  function coverageWords(cov) {
+    if (cov && (cov.state === "measured" || cov.state === "partial")) {
+      return `coverage: ${describe(cov, "pct").text} of sessions still on disk${cov.state === "partial" ? " (partial)" : ""}`;
+    }
+    if (cov && cov.state === "unavailable" && Array.isArray(cov.reasons) && !(cov.reasons.length === 1 && cov.reasons[0] === "not_recorded_yet")) {
+      return `coverage: no data (${describe(cov, "pct").reason})`;
+    }
+    return "coverage: not recorded yet";
+  }
+
+  return { recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

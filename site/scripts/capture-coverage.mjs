@@ -37,6 +37,13 @@ export const DROP_POINTS = 0.15
 
 const DAY = 24 * 3600 * 1000
 const MACHINES = "machines' records"
+// A share's n of N: the records whose host the machine could verify, over
+// every record that has the host. An unverified record is still counted in
+// every figure beside it; the records column says how many are unverified.
+const VERIFIED = "machines' records with the host verified"
+// The store-wide share's n of N: the current records whose every host is
+// verified, over every record that is not a retraction.
+const CURRENT_VERIFIED = "machines' records, current and verified"
 
 export const CAVEATS = Object.freeze([
   Object.freeze({
@@ -89,7 +96,7 @@ const capturable = (e) => e.derived + e.frozen + e.pending + e.not_seen
 // `unverified_host` (the numbers check allows a value with n of zero only for
 // such named reasons).
 function shareOf(num, den, n, N, reasonIfZero) {
-  const base = { kind: "rollup", n, N, of: MACHINES, out_of_scope: 0 }
+  const base = { kind: "rollup", n, N, of: VERIFIED, out_of_scope: 0 }
   if (N === 0) return { ...unavailable(["no_records"]), ...base, n: 0 }
   if (den === 0) return { ...unavailable([reasonIfZero]), ...base, n: 0 }
   const value = num / den
@@ -153,6 +160,7 @@ export function summarizeCapture({ files, nowMs }) {
     row.share = shareOf(total("derived"), total("on_disk"), verified, N, "no_sessions_on_disk")
     const den = entries.reduce((s, e) => s + capturable(e), 0)
     row.capturable_share = shareOf(total("derived"), den, verified, N, "nothing_capturable")
+    row.records = measured(N)
     row.unverified_machines = N === 0 ? unavailable(["no_records"]) : measured(N - verified)
     if (N > 0 && den >= MIN_SESSIONS && total("derived") / den < LOW_SHARE) alarms.push({ host, code: "coverage_low" })
     const dropped = fresh.some(({ record, previous }) => {
@@ -181,7 +189,7 @@ export function summarizeCapture({ files, nowMs }) {
   if (counts.invalid) reasons.push("record_invalid")
   if (counts.over_limit) reasons.push("records_over_limit")
   if (whole < counts.counted) reasons.push("unverified_host")
-  const base = { kind: "rollup", n: whole, N, of: MACHINES, out_of_scope: counts.empty }
+  const base = { kind: "rollup", n: whole, N, of: CURRENT_VERIFIED, out_of_scope: counts.empty }
   const sumAll = (key) => fresh.reduce((s, r) => s + Object.values(r.record.hosts).reduce((t, e) => t + e[key], 0), 0)
   const derived = sumAll("derived")
   const onDisk = sumAll("on_disk")

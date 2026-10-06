@@ -234,3 +234,17 @@ test("a partial number whose direction is unknown says so in visible text, not o
   assert.doesNotMatch(visible(F.render(fakeDoc(), lower, "count")), /could be higher or lower/)
   assert.equal(F.describe(lower, "count").marker, "partial")
 })
+
+test("an unverified host says unverified in the visible marker, and the records cell says how many are unverified", () => {
+  const share = { state: "partial", value: 0.25, reasons: ["unverified_host"], bound: "unknown", kind: "rollup", n: 0, N: 1, of: "machines' records with the host verified", out_of_scope: 0 }
+  assert.equal(F.describe(share, "pct").marker, "unverified, could be higher or lower")
+  assert.equal(F.recordsWords(1, 1), "1 record, unverified")
+  assert.equal(F.recordsWords(2, 1), "2 records, 1 unverified")
+  assert.equal(F.recordsWords(2, 0), "2 records")
+  assert.equal(F.recordsWords(3, 3), "3 records, all unverified")
+})
+
+test("the trust line names the population of the coverage share", () => {
+  assert.equal(F.coverageWords({ state: "measured", value: 0.81, reasons: [] }), "coverage: 81% of sessions still on disk")
+  assert.equal(F.coverageWords({ state: "unavailable", reasons: ["not_recorded_yet"] }), "coverage: not recorded yet")
+})

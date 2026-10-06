@@ -25,15 +25,6 @@ export const COVERAGE_NOT_RECORDED = Object.freeze({
   reasons: ["not_recorded_yet"],
 });
 
-// The capture coverage every trust state reads by default. The site build
-// sets it once, from the machines' capture records, before it builds any
-// headline (`useCaptureCoverage`); until then, and with no record, it is
-// "not recorded yet".
-let defaultCoverage = COVERAGE_NOT_RECORDED;
-export function useCaptureCoverage(coverage) {
-  defaultCoverage = coverage && typeof coverage === "object" ? coverage : COVERAGE_NOT_RECORDED;
-}
-
 // Reasons that mean "this measure does not apply here, by design", not "the
 // data was lost". A member unavailable only for these reasons is not in a
 // rollup's N; it is counted beside it as `out_of_scope`. Missing data inside
@@ -174,7 +165,9 @@ export function rollup(members, { of, reduce, measure }) {
 // Trust state for a headline: `ok`, `thin_sample`, `partial`, or (once a
 // coverage record exists) `low_coverage`. `reasons` lists every cause that
 // applies; `status` is the first that does, in that order of severity.
-export function trust(headline, { coverage = defaultCoverage } = {}) {
+// `coverage` is the capture share the trust state rests on; the site build
+// passes it to every call. Without one it reads "not recorded yet".
+export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   const n = Number.isInteger(headline?.n) ? headline.n : headline?.state === "measured" ? 1 : 0;
   const N = Number.isInteger(headline?.N) ? headline.N : n;
   const causes = [];

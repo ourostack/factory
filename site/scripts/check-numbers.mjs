@@ -58,7 +58,7 @@ const NUMBER_PATHS = [
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
   /^capture_coverage\.machines\.(counted|empty|stale|invalid|over_limit|files)$/,
-  /^capture_coverage\.hosts\[\d+\]\.unverified_machines$/,
+  /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
   ...ROLLUP_PATHS,
 ];
