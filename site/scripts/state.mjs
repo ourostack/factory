@@ -57,12 +57,42 @@ export function unavailable(reasons = ["not_recorded"]) {
   return { state: "unavailable", reasons: reasons.length ? [...reasons] : ["not_recorded"] };
 }
 
-// The pipeline's own envelope for one formula: `class` (measured, inferred,
-// declared, unavailable), `partial` with `partial_reasons`, `censored`, and
-// `reason` when unavailable. Absent, empty or null is not a zero: it is
-// unavailable with the reason `not_recorded`.
+const STATES = new Set(["measured", "partial", "unavailable"]);
+
+function isValue(v) {
+  return (typeof v === "number" && Number.isFinite(v)) || typeof v === "string";
+}
+
+function reasonList(reasons) {
+  return [...new Set((Array.isArray(reasons) ? reasons : []).filter((r) => typeof r === "string" && r))].sort();
+}
+
+// A result from a report that carries its own `state` and `reasons` (Desk's
+// per-job report since published facts /2). The state is read first; the
+// value only when the state allows one. A result that contradicts itself
+// (unavailable class, a measured state without a value, a measured state
+// with reasons) never becomes a plain measured figure.
+function fromStated(f) {
+  const reasons = reasonList(f.reasons);
+  if (f.state === "unavailable" || f.class === "unavailable") {
+    return unavailable(reasons.length ? reasons : ["not_recorded"]);
+  }
+  if (!isValue(f.value)) return unavailable(["not_recorded"]);
+  if (f.state === "partial" || reasons.length > 0) return partial(f.value, reasons.length ? reasons : ["partial"]);
+  if (f.class === "declared") return { ...measured(f.value), basis: "declared" };
+  return measured(f.value);
+}
+
+// The pipeline's own envelope for one formula. A current report carries
+// `state` and `reasons` and is read by them (`mixed` appears only as
+// `reason`; the real causes are in `reasons`). An older report has only
+// `class` (measured, inferred, declared, unavailable), `partial` with
+// `partial_reasons`, `censored`, and `reason` when unavailable. Absent,
+// empty or null is not a zero: it is unavailable with the reason
+// `not_recorded`.
 export function fromFormula(f) {
   if (!f || typeof f !== "object") return unavailable(["not_recorded"]);
+  if (STATES.has(f.state) && Array.isArray(f.reasons)) return fromStated(f);
   if (f.class === "unavailable") {
     return unavailable([typeof f.reason === "string" && f.reason ? f.reason : "not_recorded"]);
   }
@@ -160,4 +190,35 @@ export function declareRollup({ value, n, N, of, reasons = [], outOfScope = 0 })
   if (n === 0 || !ok) return { ...unavailable(["no_measured_members", ...reasons]), ...base };
   if (n < N) return { state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base };
   return { state: "measured", value, reasons: [], ...base };
+}
+
+// A leaf of the pipeline's `rollups/totals.json`, or a tool-kind row's
+// counts: `{ state, value?, n, N, reasons }` over sessions. Its rule, from
+// Desk: measured when n === N, partial when a value exists and n < N,
+// unavailable when no session supplied a count. A partial value sums the
+// counted sessions plus, as a lower bound, sessions the host records only
+// partly, so a partial total can have n of zero only for that reason. A leaf
+// that breaks the rule, or is malformed, is no data: never a zero.
+export function fromTotalsLeaf(leaf, of) {
+  const base = { kind: "rollup", of, out_of_scope: 0 };
+  const okCounts =
+    leaf && typeof leaf === "object" && Number.isInteger(leaf.n) && Number.isInteger(leaf.N) && leaf.n >= 0 && leaf.n <= leaf.N;
+  const N = okCounts ? leaf.N : Number.isInteger(leaf?.N) && leaf.N >= 0 ? leaf.N : 0;
+  const broken = { ...unavailable(["not_recorded"]), ...base, n: 0, N };
+  if (!okCounts || !STATES.has(leaf.state) || !Array.isArray(leaf.reasons)) return broken;
+  const reasons = reasonList(leaf.reasons);
+  const has = "value" in leaf && leaf.value !== undefined;
+  if (has && !(typeof leaf.value === "number" && Number.isFinite(leaf.value))) return broken;
+  const want = leaf.N > 0 && leaf.n === leaf.N ? "measured" : has ? "partial" : "unavailable";
+  if (leaf.state !== want) return broken;
+  if (want === "measured") {
+    if (reasons.length || !has) return broken;
+    return { ...measured(leaf.value), ...base, n: leaf.n, N: leaf.N };
+  }
+  if (!reasons.length) return broken;
+  if (want === "partial") {
+    if (leaf.n === 0 && !reasons.includes("host_records_partly")) return broken;
+    return { ...partial(leaf.value, reasons), bound: "lower", ...base, n: leaf.n, N: leaf.N };
+  }
+  return { ...unavailable(reasons), ...base, n: leaf.n, N: leaf.N };
 }

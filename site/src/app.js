@@ -646,10 +646,14 @@
       const tr = document.createElement("tr");
 
       const idTd = document.createElement("td");
+      const link = document.createElement("a");
+      const safe = F.safeAnchor(`job-${j.id}`);
+      if (safe) link.href = safe;
+      link.title = `Open the job page for ${j.id}`;
       const code = document.createElement("code");
       code.textContent = j.id.slice(0, 10);
-      code.title = j.id;
-      idTd.appendChild(code);
+      link.appendChild(code);
+      idTd.appendChild(link);
       tr.appendChild(idTd);
 
       const statusTd = document.createElement("td");
@@ -681,6 +685,82 @@
     table.appendChild(tbody);
     wrap.appendChild(table);
     container.appendChild(wrap);
+  }
+
+  // ------------------------------------------------------------ job page
+  // One job's every measure, each with its state in words and its reason in
+  // text beside it, not only on hover. Opened from the jobs table; its
+  // address is #job-<id>, so a job page can be linked.
+
+  const STATE_WORD = { measured: "measured", partial: "partial", unavailable: "no data" };
+  const JOB_ID = /^[0-9A-Za-z_-]{1,64}$/;
+
+  function jobIdFromHash() {
+    const m = /^#job-(.+)$/.exec(window.location.hash || "");
+    return m && JOB_ID.test(m[1]) ? m[1] : null;
+  }
+
+  function renderJobDetail(container, jobs, id) {
+    container.innerHTML = "";
+    const j = id ? jobs.find((x) => x.id === id) : null;
+    const card = container.closest(".chart-card") || container;
+    if (!j) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    container.appendChild(el("h3", null, `Job ${j.id.slice(0, 10)}`));
+    container.appendChild(
+      el(
+        "p",
+        "chart-caption",
+        `Status: ${j.status}. Every measure the store's report holds for this job. "Measured" is the whole figure, and a zero here is a measured zero. "Partial" covers only part of the job (a bound sign shows which way the true figure lies). "No data" means the store could not measure it. The reason is beside each.`,
+      ),
+    );
+    const wrap = el("div", "table-wrap");
+    const table = document.createElement("table");
+    table.className = "data-table job-detail-table";
+    const head = document.createElement("tr");
+    for (const c of ["Measure", "Figure", "State", "Why"]) {
+      const th = document.createElement("th");
+      th.textContent = c;
+      if (c === "Figure") th.className = "num";
+      head.appendChild(th);
+    }
+    const thead = document.createElement("thead");
+    thead.appendChild(head);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const d of j.details || []) {
+      const tr = document.createElement("tr");
+      tr.className = `state-row state-row-${d.number.state}`;
+      tr.appendChild(el("td", null, d.label));
+      const figure = F.describe(d.number, d.kind);
+      const fig = el("td", `num num-${figure.state}`);
+      fig.appendChild(el("span", "num-value", figure.text));
+      tr.appendChild(fig);
+      const st = el("td");
+      st.appendChild(el("span", `state-word state-${d.number.state}`, STATE_WORD[d.number.state]));
+      tr.appendChild(st);
+      tr.appendChild(el("td", "state-why", figure.state === "measured" ? "" : figure.reason));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+    const back = document.createElement("a");
+    const safe = F.safeAnchor("jobs-table");
+    back.href = safe;
+    back.textContent = "Back to every job";
+    container.appendChild(back);
+  }
+
+  function showJobFromHash(jobs) {
+    const container = document.getElementById("job-detail");
+    if (!container) return;
+    const id = jobIdFromHash();
+    renderJobDetail(container, jobs, id);
+    if (id && !container.closest(".chart-card").hidden) container.closest(".chart-card").scrollIntoView({ block: "start" });
   }
 
   // -------------------------------------------------------------- health
@@ -925,6 +1005,13 @@
       emptyText: "No jobs tracked yet.",
     });
 
+    const toolCallsCaption = document.getElementById("tool-calls-caption");
+    if (toolCallsCaption) {
+      toolCallsCaption.textContent =
+        data.tool_kinds_scope === "published"
+          ? "Calls recorded per tool kind, across every published session that used it. A session whose tool record is cut short, unreadable, capped or still open is left out, and each figure says how many sessions it rests on (n of N)."
+          : "Total calls recorded across the substantial sessions whose tool counts are whole; each figure says how many sessions it rests on (n of N).";
+    }
     const toolCallRows = data.tool_kinds.slice(0, 10).map((t) => ({
       label: t.tool,
       number: t.calls,
@@ -990,6 +1077,8 @@
     });
 
     renderJobsTable(document.getElementById("jobs-table"), data.jobs);
+    showJobFromHash(data.jobs);
+    window.addEventListener("hashchange", () => showJobFromHash(data.jobs));
   }
 
   main();

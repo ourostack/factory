@@ -11,7 +11,12 @@
 // Usage: node check-numbers.mjs <data.json>   (exit 1 and name each violation)
 
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+
+// The page's own words for each reason. A reason with no words would reach
+// a reader as a code, so it fails the build here.
+const { hasReasonText } = createRequire(import.meta.url)("../src/format.js");
 
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
@@ -36,6 +41,7 @@ const ROLLUP_PATHS = [
 // string or anything else that would make the formatter throw).
 const NUMBER_PATHS = [
   /^jobs\[\d+\]\.(lead_time_ms|active_time_ms|flow_efficiency|queue_before_start_ms|human_wait_ms|api_retry_ms|tool_failures|tool_retries|sessions_bound|public_prs)$/,
+  /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
   ...ROLLUP_PATHS,
@@ -72,6 +78,7 @@ export function checkNumbers(data) {
       if (node.state === "measured" && node.reasons.length > 0) bad(path, "measured_with_reasons");
       if ((node.state === "partial" || node.state === "unavailable") && node.reasons.length === 0) bad(path, "missing_reasons");
       if (node.reasons.some((r) => typeof r !== "string" || !r)) bad(path, "bad_reason");
+      else if (node.reasons.some((r) => !hasReasonText(r))) bad(path, "reason_without_text");
     }
     if (node.state === "unavailable") {
       if ("value" in node) bad(path, "value_on_unavailable");
@@ -102,7 +109,12 @@ export function checkNumbers(data) {
       } else if (n > N) {
         bad(path, "rollup_n_exceeds_N");
       } else {
-        const want = n === 0 ? "unavailable" : n < N ? "partial" : "measured";
+        // n of zero is no data, except a total counted only from sessions the
+        // host records partly: that is a partial lower bound with a value
+        // (Desk's rollups/totals.json).
+        const lowerBoundOnly =
+          n === 0 && N > 0 && "value" in node && Array.isArray(node.reasons) && node.reasons.includes("host_records_partly");
+        const want = N > 0 && n === N ? "measured" : n === 0 && !lowerBoundOnly ? "unavailable" : "partial";
         if (node.state !== want) bad(path, "rollup_state_mismatch");
       }
       if ("excluded" in node) {

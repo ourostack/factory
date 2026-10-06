@@ -11,7 +11,7 @@ import { measured, rollup, unavailable } from "../../../site/scripts/state.mjs"
 const good = () => ({
   schema: "factory-site/3",
   config: { thin_sample_min: 5 },
-  jobs: [{ id: "a", status: "done", lead_time_ms: measured(5), active_time_ms: unavailable(["x"]) }],
+  jobs: [{ id: "a", status: "done", lead_time_ms: measured(5), active_time_ms: unavailable(["log_missing"]) }],
   time_breakdown: [{ key: "k", median: rollup([measured(1), measured(2)], { of: "jobs", reduce: (v) => v[0] }) }],
   headline: rollup([measured(1), measured(2)], { of: "jobs", reduce: (v) => v[0] }),
   takeaways: [{ id: "t", template: "Of {a} sessions", numbers: { a: measured(3) } }],
@@ -54,8 +54,8 @@ test("a number without a valid state, or without reasons, is refused", () => {
 
 test("unavailable must not carry a value; measured and partial must", () => {
   const d = good()
-  d.jobs[0].active_time_ms = { state: "unavailable", value: 0, reasons: ["x"] }
-  d.jobs[0].lead_time_ms = { state: "partial", reasons: ["y"] }
+  d.jobs[0].active_time_ms = { state: "unavailable", value: 0, reasons: ["log_missing"] }
+  d.jobs[0].lead_time_ms = { state: "partial", reasons: ["capped"] }
   const c = codes(d)
   assert.ok(c.includes("value_on_unavailable"))
   assert.ok(c.includes("missing_value"))
@@ -139,7 +139,7 @@ test("measured with any reason, partial without one, and unavailable with a hidd
   e.jobs[0].lead_time_ms = { state: "partial", value: 5, reasons: [] }
   assert.ok(codes(e).includes("missing_reasons"))
   const f = good()
-  f.jobs[0].active_time_ms = { state: "unavailable", reasons: ["x"], zero: 0 }
+  f.jobs[0].active_time_ms = { state: "unavailable", reasons: ["log_missing"], zero: 0 }
   assert.ok(codes(f).includes("unknown_key"))
 })
 
@@ -150,4 +150,34 @@ test("an empty object where a number belongs is refused", () => {
   const e = good()
   e.time_breakdown[0].median = {}
   assert.ok(codes(e).includes("rollup_expected"))
+})
+
+// --- every reason has words; lower-bound totals; the job page ---
+
+test("a reason that has no plain text fails the build", () => {
+  const d = good()
+  d.jobs[0].active_time_ms = unavailable(["a_reason_with_no_words"])
+  assert.ok(codes(d).includes("reason_without_text"))
+  d.jobs[0].active_time_ms = unavailable(["host_records_partly"])
+  assert.deepEqual(codes(d), [])
+})
+
+test("a total counted only from partly recorded sessions may be partial with n of zero; otherwise n of zero is no data", () => {
+  const d = good()
+  d.headline = { kind: "rollup", state: "partial", value: 40, reasons: ["host_records_partly"], bound: "lower", n: 0, N: 3, of: "published sessions", out_of_scope: 0 }
+  assert.deepEqual(codes(d), [])
+  d.headline = { kind: "rollup", state: "partial", value: 40, reasons: ["field_absent"], n: 0, N: 3, of: "published sessions", out_of_scope: 0 }
+  assert.ok(codes(d).includes("rollup_state_mismatch"))
+  d.headline = { kind: "rollup", state: "partial", reasons: ["field_absent"], n: 1, N: 3, of: "published sessions", out_of_scope: 0 }
+  assert.ok(codes(d).includes("missing_value"))
+})
+
+test("a measure on the job page must be a stated number", () => {
+  const d = good()
+  d.jobs[0].details = [{ key: "tokens_total", label: "Tokens", kind: "compact", number: 12 }]
+  assert.ok(codes(d).includes("number_expected") || codes(d).includes("bare_number"))
+  d.jobs[0].details = [{ key: "tokens_total", label: "Tokens", kind: "compact", number: {} }]
+  assert.ok(codes(d).includes("number_expected"))
+  d.jobs[0].details = [{ key: "tokens_total", label: "Tokens", kind: "compact", number: measured(12) }]
+  assert.deepEqual(codes(d), [])
 })

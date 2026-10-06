@@ -117,3 +117,90 @@ test("scope: only a job genuinely outside capture is out of scope; lost data kee
     ["job_offsets_unavailable"],
   )
 })
+
+// --- the per-job report with state and reasons (Desk contract section 2) ---
+
+const v2 = {
+  job: "j2",
+  formulas: {
+    status: { class: "declared", reasons: [], state: "measured", value: "done" },
+    active_time_ms: { class: "measured", partial: true, partial_reasons: ["worker_shared", "log_truncated"], reasons: ["log_truncated", "worker_shared"], state: "partial", value: 88 },
+    waits: {
+      human_wait_ms: { class: "measured", reasons: [], state: "measured", value: 0 },
+      permission_wait_ms: { class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null },
+      api_retry_ms: { class: "measured", partial: true, partial_reasons: ["host_records_partly"], reasons: ["host_records_partly"], state: "partial", value: 30 },
+      compaction_ms: { class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null },
+    },
+    references: {
+      class: "measured",
+      partial: true,
+      partial_reasons: ["host_does_not_record", "host_records_partly"],
+      reasons: ["host_does_not_record", "host_records_partly"],
+      state: "partial",
+      value: { public_prs: 2, public_commits: null, private_prs: 0, private_commits: null },
+      parts: {
+        public_prs: { class: "measured", partial: true, partial_reasons: ["host_records_partly"], reasons: ["host_records_partly"], state: "partial", value: 2 },
+        public_commits: { class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null },
+        private_prs: { class: "measured", partial: true, partial_reasons: ["host_records_partly"], reasons: ["host_records_partly"], state: "partial", value: 0 },
+        private_commits: { class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null },
+      },
+    },
+    tokens_total: {
+      total: { class: "measured", reasons: [], state: "measured", value: 300 },
+      input: { class: "measured", reasons: [], state: "measured", value: 100 },
+      output: { class: "measured", reasons: [], state: "measured", value: 200 },
+      cache_read: { class: "measured", partial: true, partial_reasons: ["worker_split"], reasons: ["worker_split"], state: "partial", value: 5 },
+      cache_write: { class: "measured", reasons: [], state: "measured", value: 0 },
+      reasoning: { class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null },
+    },
+    rework_signals: {
+      api_retries: { class: "inferred", partial: true, partial_reasons: ["host_records_partly"], reasons: ["host_records_partly"], state: "partial", value: 0 },
+      session_retouches: { basis: "captured_sessions", class: "inferred", reasons: [], state: "measured", value: 1 },
+    },
+  },
+}
+
+test("public pull requests come from the references part, with its own state", () => {
+  const s = jobSummary(v2, "j2.json")
+  assert.deepEqual(s.public_prs, { state: "partial", value: 2, reasons: ["host_records_partly"], bound: "lower" })
+})
+
+test("a time partial for missing data and for a shared worker has no bound: the two pull opposite ways", () => {
+  const s = jobSummary(v2, "j2.json")
+  assert.equal(s.active_time_ms.state, "partial")
+  assert.deepEqual(s.active_time_ms.reasons, ["log_truncated", "worker_shared"])
+  assert.equal("bound" in s.active_time_ms, false)
+})
+
+test("the job page lists every measure with its state: measured, partial and no data", () => {
+  const s = jobSummary(v2, "j2.json")
+  const by = Object.fromEntries(s.details.map((d) => [d.key, d]))
+  assert.deepEqual(by.human_wait_ms.number, { state: "measured", value: 0, reasons: [] })
+  assert.equal(by.api_retry_ms.number.state, "partial")
+  assert.deepEqual(by.permission_wait_ms.number, { state: "unavailable", reasons: ["host_does_not_record"] })
+  assert.deepEqual(by.compaction_ms.number, { state: "unavailable", reasons: ["host_does_not_record"] })
+  assert.deepEqual(by.public_commits.number, { state: "unavailable", reasons: ["host_does_not_record"] })
+  assert.equal(by.private_prs.number.value, 0)
+  assert.equal(by.private_prs.number.state, "partial")
+  assert.deepEqual(by.tokens_total.number, { state: "measured", value: 300, reasons: [] })
+  assert.deepEqual(by.tokens_reasoning.number, { state: "unavailable", reasons: ["host_does_not_record"] })
+  assert.equal(by.tokens_cache_read.number.state, "partial")
+  assert.equal(by.api_retries.number.state, "partial")
+  assert.equal(by.session_retouches.number.value, 1)
+  for (const d of s.details) {
+    assert.equal(typeof d.label, "string", d.key)
+    assert.ok(["duration", "count", "compact", "pct"].includes(d.kind), d.key)
+  }
+})
+
+test("an older report without parts or tokens never shows a commit or token zero", () => {
+  const s = jobSummary(
+    { formulas: { references: { class: "measured", value: { public_prs: 1, public_commits: 0, private_prs: 0, private_commits: 0 } } } },
+    "old.json",
+  )
+  const by = Object.fromEntries(s.details.map((d) => [d.key, d]))
+  assert.equal(s.public_prs.value, 1)
+  for (const k of ["public_commits", "private_commits", "private_prs", "tokens_total", "tokens_reasoning", "permission_wait_ms", "compaction_ms"]) {
+    assert.deepEqual(by[k].number, { state: "unavailable", reasons: ["not_recorded"] }, k)
+  }
+})

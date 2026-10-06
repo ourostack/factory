@@ -5,6 +5,7 @@ import {
   THIN_SAMPLE_MIN,
   declareRollup,
   fromFormula,
+  fromTotalsLeaf,
   measured,
   partial,
   rollup,
@@ -165,4 +166,83 @@ test("all members out of scope: unavailable with N of zero", () => {
   assert.equal(r.state, "unavailable")
   assert.equal(r.N, 0)
   assert.equal(r.out_of_scope, 1)
+})
+
+// --- per-job report results carrying `state` and `reasons` (Desk contract section 2) ---
+
+test("a result that carries state and reasons is read by its state, one per state", () => {
+  assert.deepEqual(fromFormula({ class: "measured", reasons: [], state: "measured", value: 8000 }), measured(8000))
+  assert.deepEqual(
+    fromFormula({ class: "measured", partial: true, partial_reasons: ["host_records_partly"], reasons: ["host_records_partly"], state: "partial", uncovered_sessions: 1, value: 0 }),
+    partial(0, ["host_records_partly"]),
+  )
+  assert.deepEqual(
+    fromFormula({ class: "unavailable", reason: "host_does_not_record", reasons: ["host_does_not_record"], state: "unavailable", value: null }),
+    unavailable(["host_does_not_record"]),
+  )
+})
+
+test("a censored result reads partial with censored among its reasons", () => {
+  const n = fromFormula({ basis: "latest_session_end", censored: true, class: "measured", reasons: ["censored"], state: "partial", value: 12 })
+  assert.equal(n.state, "partial")
+  assert.deepEqual(n.reasons, ["censored"])
+})
+
+test("mixed is never shown: the real causes come from reasons", () => {
+  const n = fromFormula({ class: "unavailable", reason: "mixed", reasons: ["field_absent", "worker_split"], state: "unavailable", value: null })
+  assert.deepEqual(n.reasons, ["field_absent", "worker_split"])
+})
+
+test("a stated result that contradicts itself never becomes a measured figure", () => {
+  assert.equal(fromFormula({ class: "unavailable", reasons: [], state: "measured", value: 3 }).state, "unavailable")
+  assert.deepEqual(fromFormula({ class: "measured", reasons: [], state: "measured", value: null }), unavailable(["not_recorded"]))
+  assert.deepEqual(fromFormula({ class: "measured", reasons: ["capped"], state: "measured", value: 4 }), partial(4, ["capped"]))
+  assert.deepEqual(fromFormula({ class: "measured", reasons: [], state: "partial", value: 4 }), partial(4, ["partial"]))
+})
+
+test("a declared result keeps its basis when read by state", () => {
+  assert.deepEqual(fromFormula({ class: "declared", reasons: [], state: "measured", value: 7 }), { ...measured(7), basis: "declared" })
+})
+
+// --- rollups/totals.json leaves and tool-kind rows (Desk contract section 3) ---
+
+test("a totals leaf becomes a rollup with its n of N, one per state", () => {
+  assert.deepEqual(fromTotalsLeaf({ N: 10, n: 10, reasons: [], state: "measured", value: 10 }, "published sessions"), {
+    state: "measured", value: 10, reasons: [], kind: "rollup", n: 10, N: 10, of: "published sessions", out_of_scope: 0,
+  })
+  assert.deepEqual(fromTotalsLeaf({ N: 249, n: 174, reasons: ["field_absent"], state: "partial", value: 78283 }, "published sessions"), {
+    state: "partial", value: 78283, reasons: ["field_absent"], bound: "lower", kind: "rollup", n: 174, N: 249, of: "published sessions", out_of_scope: 0,
+  })
+  const none = fromTotalsLeaf({ N: 10, n: 0, reasons: ["field_absent"], state: "unavailable" }, "published sessions")
+  assert.equal(none.state, "unavailable")
+  assert.equal("value" in none, false)
+  assert.deepEqual(none.reasons, ["field_absent"])
+})
+
+test("a totals leaf counted only from sessions the host records partly is a lower bound with n of zero", () => {
+  const n = fromTotalsLeaf({ N: 3, n: 0, reasons: ["host_records_partly"], state: "partial", value: 40 }, "published sessions")
+  assert.equal(n.state, "partial")
+  assert.equal(n.value, 40)
+  assert.equal(n.n, 0)
+  assert.equal(n.bound, "lower")
+})
+
+test("a totals leaf that is malformed or contradicts itself is no data, never a zero", () => {
+  for (const bad of [
+    null,
+    { N: 3, n: 4, reasons: [], state: "measured", value: 1 },
+    { N: 3, n: 3, reasons: [], state: "measured" },
+    { N: 3, n: 1, reasons: [], state: "measured", value: 1 },
+    { N: 3, n: 0, reasons: ["field_absent"], state: "partial", value: 1 },
+    { N: 3, n: 3, reasons: ["x"], state: "measured", value: 1 },
+    { N: 3, n: 1, reasons: ["x"], state: "partial", value: NaN },
+    { n: 1, reasons: [], state: "measured", value: 1 },
+  ]) {
+    const n = fromTotalsLeaf(bad, "published sessions")
+    assert.equal(n.state, "unavailable", JSON.stringify(bad))
+    assert.equal("value" in n, false)
+    assert.equal(n.kind, "rollup")
+  }
+  const empty = fromTotalsLeaf({ N: 0, n: 0, reasons: ["no_sessions"], state: "unavailable" }, "published sessions")
+  assert.deepEqual(empty.reasons, ["no_sessions"])
 })

@@ -139,3 +139,70 @@ test("a session with no agents list and no flag is unmeasured for subagents, not
   const r = subagentRollups([d])
   assert.equal(r.dispatches.state, "unavailable")
 })
+
+// --- published facts /2 flags and the host constants applied to /1 files (Desk contract section 1) ---
+
+import { entrypointOf, sessionFlags } from "../../../site/scripts/session-numbers.mjs"
+
+test("a /1 file gets its host's constant flags on read; the file's own flags are kept", () => {
+  const f = sessionFlags(session({ unavailable: [{ field: "turns", reason: "log_truncated" }] }))
+  const has = (field, reason) => f.some((u) => u.field === field && u.reason === reason)
+  assert.ok(has("turns", "log_truncated"))
+  assert.ok(has("reasoning_tokens", "host_does_not_record"))
+  assert.ok(has("commits", "host_does_not_record"))
+  assert.ok(has("api_retries", "host_records_partly"))
+  assert.ok(has("prs", "host_records_partly"))
+  const codex = sessionFlags(session({ session: { host: "codex-cli", id: "s" } }))
+  assert.ok(codex.some((u) => u.field === "tokens" && u.reason === "host_records_partly"))
+  assert.ok(codex.some((u) => u.field === "requests" && u.reason === "host_records_partly"))
+  const twice = sessionFlags(session({ unavailable: [{ field: "commits", reason: "host_does_not_record" }] }))
+  assert.equal(twice.filter((u) => u.field === "commits").length, 1)
+})
+
+test("a Copilot cli entrypoint is a default, not a recorded fact", () => {
+  assert.equal(entrypointOf(session({ session: { host: "copilot-cli", id: "s", entrypoint: "cli" } })), "unknown")
+  assert.equal(entrypointOf(session({ session: { host: "claude-code", id: "s", entrypoint: "cli" } })), "cli")
+  assert.equal(entrypointOf(session({ session: { host: "claude-code", id: "s" } })), "unknown")
+})
+
+test("a token or request counter flagged field_absent is no data with that reason, not zero", () => {
+  const s = session({ models: [model("m", null, { input: null, output: null, cache_read: null, cache_write: null })], unavailable: [{ field: "tokens", reason: "field_absent" }, { field: "requests", reason: "field_absent" }] })
+  const r = modelRollups([s])
+  assert.equal(r.total_requests.state, "unavailable")
+  assert.ok(r.total_requests.reasons.includes("field_absent"))
+  assert.equal(r.models[0].input.state, "unavailable")
+  assert.ok(r.models[0].input.reasons.includes("field_absent"))
+})
+
+test("a flag on requests alone leaves the token counts measured", () => {
+  const s = session({ models: [model("m", null)], unavailable: [{ field: "requests", reason: "field_absent" }] })
+  const r = modelRollups([s])
+  assert.equal(r.total_requests.state, "unavailable")
+  assert.equal(r.models[0].output.state, "measured")
+  assert.equal(r.models[0].output.value, 2)
+})
+
+test("counts the host records only partly are a partial lower bound, kept out of n", () => {
+  const s = session({ session: { host: "codex-cli", id: "s" }, models: [model("m", 5)] })
+  const r = modelRollups([s, session({ models: [model("m", 3)] })])
+  assert.equal(r.total_requests.state, "partial")
+  assert.equal(r.total_requests.n, 1)
+  assert.equal(r.total_requests.N, 2)
+  assert.equal(r.total_requests.value, 3)
+  assert.ok(r.total_requests.reasons.includes("host_records_partly"))
+})
+
+test("tool failures the host does not record are no data; tool calls stay measured", () => {
+  const s = session({ counts: { tool_calls: { shell: 4 }, tool_failures: { shell: 0 } }, unavailable: [{ field: "tool_outcomes", reason: "host_does_not_record" }] })
+  const f = featuredNumbers(s)
+  assert.deepEqual(f.tool_calls_total, { state: "measured", value: 4, reasons: [] })
+  assert.deepEqual(f.tool_failures_total, { state: "unavailable", reasons: ["host_does_not_record"] })
+  const partly = featuredNumbers({ ...s, unavailable: [{ field: "tool_outcomes", reason: "host_records_partly" }] })
+  assert.deepEqual(partly.tool_failures_total, { state: "partial", value: 0, reasons: ["host_records_partly"], bound: "lower" })
+})
+
+test("a capped tool record is not whole", () => {
+  const s = session({ counts: { tool_calls: { shell: 4 }, tool_failures: { shell: 0 } }, unavailable: [{ field: "tool_durations", reason: "capped" }] })
+  assert.equal(featuredNumbers(s).tool_calls_total.state, "partial")
+  assert.deepEqual(featuredNumbers(s).tool_calls_total.reasons, ["capped"])
+})

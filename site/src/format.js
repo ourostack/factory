@@ -55,10 +55,41 @@
     no_intake_found: "no intake was found",
     not_checked: "not checked",
     no_applicable_members: "the measure applies to no job yet",
+    queue_start_not_whole: "the job's first session start is itself only partly measured",
+    // Published facts reasons (Desk's `unavailableReason`), the ones not above.
+    log_missing: "a session's log was missing",
+    capped: "the record hit a size limit and was cut",
+    desk_public: "withheld because the desk's own repository may be public",
+    field_absent: "the host's log did not include this",
+    host_records_partly: "the host records only part of this, so the figure is a lower bound",
+    withheld_public: "withheld from the public store",
+    // Report-only reasons (Desk's per-job report and rollups), the ones not above.
+    mixed: "more than one cause",
+    no_sessions: "no session was recorded",
+    open_job: "the job is still open",
+    not_labeled: "not labeled for waste yet",
+    cancelled: "the job was cancelled",
+    status_unavailable: "the job's status could not be read",
+    wait_fields_unavailable: "the waits could not be measured",
+    zero_lead_time: "the lead time was zero, so no share can be taken",
+    no_wait_intervals: "no wait was recorded",
+    no_active_intervals: "no active time was recorded",
+    not_reported_to_store: "not reported to the store",
+    not_in_published_facts: "not part of the published facts",
+    facts_missing: "a session's facts are missing",
+    no_facts: "no facts were published for this",
+    facts_ambiguous: "a session's facts disagree with each other",
   };
 
+  // Every reason that can reach the page has words. The site build stops on
+  // one that does not (check-numbers.mjs); the page itself still shows an
+  // unknown code readably rather than failing.
+  function hasReasonText(code) {
+    return Object.prototype.hasOwnProperty.call(REASON_TEXT, code);
+  }
+
   function reasonText(code) {
-    return Object.prototype.hasOwnProperty.call(REASON_TEXT, code) ? REASON_TEXT[code] : String(code).replace(/_/g, " ");
+    return hasReasonText(code) ? REASON_TEXT[code] : String(code).replace(/_/g, " ");
   }
 
   const KINDS = {
@@ -259,5 +290,12 @@
     return typeof u === "string" && GITHUB_URL.test(u) && !u.split("/").some((seg) => seg === "." || seg === "..") ? u : null;
   }
 
-  return { describe, toText, render, reasonText, pageVerdict, safeGithubUrl, STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  // An in-page link built from data: only "#" and a plain id (letters,
+  // digits, "-" and "_"), so data can never become a script or remote link.
+  const ANCHOR = /^[A-Za-z0-9_-]{1,80}$/;
+  function safeAnchor(id) {
+    return typeof id === "string" && ANCHOR.test(id) ? `#${id}` : null;
+  }
+
+  return { describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

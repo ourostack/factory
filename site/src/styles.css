@@ -968,3 +968,19 @@ footer a {
   font-style: italic;
   color: var(--text-secondary);
 }
+
+/* ---- Job page: the state in words, beside every figure. Not color alone:
+   a word, a border style and the reason in text. ---- */
+.job-detail-table td.state-why { color: var(--text-secondary); font-size: 13px; }
+.state-word {
+  display: inline-block;
+  padding: 0 0.45em;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+.state-measured { border-style: solid; }
+.state-partial { border-style: dashed; }
+.state-unavailable { border-style: dotted; font-style: italic; }
+.job-detail-table td.num-unavailable .num-value { font-style: italic; color: var(--text-secondary); }
