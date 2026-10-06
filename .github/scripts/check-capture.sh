@@ -2,10 +2,10 @@
 # check-capture.sh <base-sha> <head-sha>
 #
 # The store's own rule on capture records, run after Desk's validator passes
-# a pull request. Desk's validator is the authority on a record's full shape
-# (`desk.factory.capture/1`: counts per host only); this is the store's belt,
-# so a record that Desk main does not yet check, or checks less strictly,
-# still cannot add a key the site would publish. A capture record holds
+# a pull request. It checks keys and values both, so the store never relies
+# on Desk main's validator alone: a record that Desk checks less strictly
+# still cannot carry a path, a date, a name or any other free text into this
+# public repository. A capture record holds
 # per-host session counts from one machine: no date, no path, no name.
 #
 # Every capture/ file the pull request adds or modifies is read as a Git
@@ -20,6 +20,14 @@
 #                             (schema, basis, hosts and an optional loop), an
 #                             unknown host, or a host entry whose keys are not
 #                             exactly the eight counts and flags
+#   capture_values            a value is not what its key allows: schema and
+#                             basis are their constants; every count is a
+#                             whole number from 0 to 1,000,000 (not_in_a_desk
+#                             may be null); unverified is true or false; the
+#                             buckets add up to on_disk; the loop slot is
+#                             loop_slot_v1 (v is 1, only its known keys, each
+#                             count a whole number or null, headless a plain
+#                             code or null, at most 512 bytes)
 #   capture_many              more than one capture file in one pull request
 #   capture_check_unavailable the two commits or a blob could not be read
 set -uo pipefail
@@ -67,6 +75,29 @@ while IFS= read -r path; do
     and ((has("loop") | not) or (.loop | type == "object"))
   ' <<< "$blob" > /dev/null 2>&1; then
     codes+=$'capture_keys\n'
+    continue
+  fi
+  if ! jq -e '
+    def count: type == "number" and . == floor and . >= 0 and . <= 1000000;
+    def code: type == "string" and test("^[a-z_]{1,32}$");
+    .schema == "desk.factory.capture/1"
+    and .basis == "still_on_disk"
+    and ([.hosts[] |
+      (.on_disk, .derived, .held, .frozen, .pending, .not_seen | count)
+      and (.not_in_a_desk == null or (.not_in_a_desk | count))
+      and (.unverified | type == "boolean")
+      and (.derived + .held + .frozen + .pending + .not_seen + (.not_in_a_desk // 0) == .on_disk)
+    ] | all)
+    and ((has("loop") | not) or (.loop |
+      .v == 1
+      and (keys - ["v", "improvement_open", "improvement_claimed", "improvement_shipped", "improvement_verifying", "oldest_open_age_days", "closed_confirmed_month", "closed_unverified_month", "loop_alarms_open", "steps_stale", "headless"] | length == 0)
+      and ([to_entries[] | select(.key != "v") |
+        if .key == "headless" then (.value == null or (.value | code)) else (.value == null or (.value | count)) end
+      ] | all)
+      and (tojson | utf8bytelength <= 512)
+    ))
+  ' <<< "$blob" > /dev/null 2>&1; then
+    codes+=$'capture_values\n'
   fi
 done <<< "$changed"
 

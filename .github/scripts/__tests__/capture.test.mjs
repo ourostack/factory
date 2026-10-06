@@ -114,3 +114,36 @@ test("the README names both caveats, the store's rule and the accept flag file",
   assert.match(readme, /check-capture\.sh/)
   assert.match(readme, /`capture\.json`/)
 })
+
+const put = (rec) => check({ [`capture/${ID}.json`]: rec }).codes
+
+test("a count that holds a path, a date or an email fails as capture_values, in a host entry and in the loop slot", () => {
+  for (const bad of ["/Users/someone/desk", "2026-10-01T10:00:00Z", "someone@example.com"]) {
+    assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, derived: bad } } }), ["capture_values"], bad)
+    assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: bad } }), ["capture_values"], bad)
+    assert.deepEqual(put({ ...valid, loop: { v: 1, headless: bad } }), ["capture_values"], bad)
+  }
+  assert.deepEqual(put({ ...valid, loop: { v: 1, note: "ran" } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, loop: { v: 1, improvement_open: { nested: 1 } } }), ["capture_values"])
+})
+
+test("every count is a whole number from 0 to 1,000,000, the buckets add up and the flags are what they say", () => {
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, on_disk: -1 } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, on_disk: 1.5 } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, on_disk: 1000001, not_seen: 1000000 } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, on_disk: 4 } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, unverified: "no" } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "claude-code": { ...host, derived: null } } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { ...host, not_in_a_desk: null, not_seen: 2, unverified: true } } }), [])
+  assert.deepEqual(put({ ...valid, schema: "desk.factory.capture/2" }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, basis: "all_time" }), ["capture_values"])
+})
+
+test("the loop slot holds only the loop_slot_v1 counts and the headless code", () => {
+  const full = { v: 1, improvement_open: 2, improvement_claimed: 0, improvement_shipped: 0, improvement_verifying: 1, oldest_open_age_days: null, closed_confirmed_month: 3, closed_unverified_month: 0, loop_alarms_open: 0, steps_stale: 0, headless: "ran" }
+  assert.deepEqual(put({ ...valid, loop: full }), [])
+  assert.deepEqual(put({ ...valid, loop: { ...full, v: 2 } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, loop: { improvement_open: 2 } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, loop: { ...full, headless: "Has Spaces" } }), ["capture_values"])
+  assert.deepEqual(put({ ...valid, loop: { ...full, steps_stale: true } }), ["capture_values"])
+})
