@@ -22,9 +22,9 @@
 //   - A row's `evaluator_versions` lists the distinct evaluator plugin
 //     versions of the labels that contributed to that row. Absent is "not
 //     recorded", not none.
-//   - `unknown` time counts in the total labeled time, which is the
-//     denominator of every row's share, but not in `muda_time_ms`: it is not
-//     known to be waste. The site adds nothing to a waste total.
+//   - `unknown` time is part of every row's share denominator, which is
+//     the waste and unknown time together (value and support time are not
+//     in it), but not of `muda_time_ms`: it is not known to be waste. The site adds nothing to a waste total.
 
 import { measured, unavailable } from "./state.mjs";
 
