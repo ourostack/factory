@@ -101,6 +101,18 @@
     facts_missing: "a session's facts are missing",
     no_facts: "no facts were published for this",
     facts_ambiguous: "a session's facts disagree with each other",
+    // Human attention (Desk's rollups/outcomes.json `attention`).
+    no_turn_records: "no session in the store records the human's turns",
+    turns_not_recorded: "some sessions did not record all of the human's turns, so this is a lower bound",
+    turns_capped: "a session's list of human turns was cut to a size limit, so this is a lower bound",
+    turn_not_estimable: "some turns could not be estimated, so this is a lower bound",
+    decision_not_estimable: "some permission decisions could not be estimated, so this is a lower bound",
+    // Labels files (Desk's label reasons: what a label could not use, and why one is left unused).
+    session_log_missing: "the session log was missing",
+    session_mismatch: "the labels name a different session",
+    job_unbound: "the session is not bound to the job",
+    range: "a labeled stretch runs past the session",
+    evidence_unmatched: "the labeled evidence no longer matches the facts",
     // Capture coverage (the machines' content-free capture records).
     no_records: "no machine has published a capture record yet",
     record_stale: "some machines' capture records are older than 45 days and are left out",
