@@ -19,7 +19,28 @@
 # These checks are skipped (not failed) when the base checkout does not yet
 # have the script: the pull request that first adds a repo-owned check can
 # only be judged once it lands. The unit tests under
-# `.github/scripts/__tests__/` run the same way, for the same reason.
+# `.github/scripts/__tests__/` run from the base the same way, for the same
+# reason, and they test the code that judges this pull request.
+#
+# The pull request's own tests run in a separate job, `head-tests`, which
+# `factory-validate` waits for and fails on. It executes the candidate's code,
+# so it is the one place that does, and it runs only when it is safe:
+#   - A pull request that changes only data (`facts/`, `labels/` and
+#     `capture/` JSON files, which is everything an intake pull request from a
+#     contributor's machine holds) has no code to run; the job says so and
+#     passes. Nothing of the candidate is checked out or executed.
+#   - A pull request that changes anything else runs its tests only when its
+#     author is a maintainer (the same collaborator-permission read as below).
+#     For anyone else the job fails with `head_tests_author_not_maintainer`,
+#     which is also what the validator would say about a change outside the
+#     data paths; the candidate's code is never executed.
+#   - The job has a read-only token and no secrets, as every `pull_request`
+#     job here does. The checkout does not persist its credentials, the
+#     candidate's code runs in a merged working tree (the head merged into the
+#     base, which is what would land) with a scrubbed environment, and no step
+#     that holds a token reads or runs anything from the candidate.
+# So a green `factory-validate` now also means the pull request's own tests
+# passed on what merging it would land.
 #
 # GitHub runs the workflow files of the pull request's own merge commit on
 # `pull_request`, so a pull request that edits this file, or adds a workflow
@@ -48,10 +69,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  factory-validate:
-    name: factory-validate
+  head-tests:
+    name: factory-head-tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -73,7 +94,125 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
 
+      - name: Decide whether the candidate has code to run
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          if ! changed=$(git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" 2> /dev/null | tr '\0' '\n'); then
+            printf 'factory-validate: head_tests_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # Data paths: one JSON file directly under facts/, labels/ or capture/.
+          code=$(printf '%s\n' "$changed" | grep -Ev '^$|^(facts|labels|capture)/[^/]+\.json$' | head -n 1 || true)
+          if [ -z "$code" ]; then
+            echo "run=no" >> "$GITHUB_OUTPUT"
+            echo "factory-head-tests: the pull request changes only data; there is no candidate code to run"
+            exit 0
+          fi
+          maintainer=no
+          if printf '%s' "$AUTHOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+            if permission=$(gh api "repos/$REPOSITORY/collaborators/$AUTHOR/permission" --jq '.permission' 2> /dev/null); then
+              case "$permission" in
+                admin|write) maintainer=yes ;;
+              esac
+            else
+              printf 'factory-validate: maintainer_check_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          fi
+          if [ "$maintainer" != yes ]; then
+            printf 'factory-validate: failed\nfactory-rejected: head_tests_author_not_maintainer\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "run=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Clone Desk main
+        if: steps.scope.outputs.run == 'yes'
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+
+      - name: Run the pull request's own tests on what merging it would land
+        if: steps.scope.outputs.run == 'yes'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          tree="$RUNNER_TEMP/merged"
+          git worktree add --quiet --detach "$tree" "$BASE_SHA"
+          if ! git -C "$tree" -c user.name=factory-ci -c user.email=factory-ci@users.noreply.github.com merge --quiet --no-ff --no-edit "$HEAD_SHA" > /dev/null 2>&1; then
+            printf 'factory-validate: failed\nfactory-rejected: head_tests_merge_conflict\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ ! -d "$tree/.github/scripts/__tests__" ]; then
+            printf 'factory-validate: failed\nfactory-rejected: head_tests_missing\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cd "$tree"
+          # A scrubbed environment: no token, no runner secrets, nothing but
+          # what the tests need. Tests that need Desk read it from DESK_DIR.
+          if ! env -i PATH="$PATH" HOME="$RUNNER_TEMP" CI=true FACTORY_REQUIRE_DESK=1 DESK_DIR="$RUNNER_TEMP/desk" \
+            node --test '.github/scripts/__tests__/*.test.mjs'; then
+            printf 'factory-validate: failed\nfactory-rejected: head_tests_failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  factory-validate:
+    name: factory-validate
+    needs: head-tests
+    # Runs even when head-tests failed, so the check reports a result of its
+    # own instead of being skipped; the first step then fails it.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require the pull request's own tests
+        env:
+          HEAD_TESTS: ${{ needs.head-tests.result }}
+        run: |
+          set -uo pipefail
+          if [ "$HEAD_TESTS" != success ]; then
+            printf 'factory-validate: failed\nfactory-rejected: head_tests_%s\n' "$HEAD_TESTS" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out the base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the candidate as data
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags origin "$HEAD_SHA"
+          test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
+
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
+          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
+
       - name: Run the store's own script tests
+        env:
+          DESK_DIR: ${{ runner.temp }}/desk
+          FACTORY_REQUIRE_DESK: "1"
         run: |
           set -euo pipefail
           if [ -d .github/scripts/__tests__ ]; then
@@ -81,12 +220,6 @@ jobs:
           else
             echo "factory-validate: no .github/scripts/__tests__ on the base yet; skipped"
           fi
-
-      - name: Clone Desk main
-        run: |
-          set -euo pipefail
-          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk "$RUNNER_TEMP/desk"
-          echo "Desk main: $(git -C "$RUNNER_TEMP/desk" rev-parse HEAD)"
 
       - name: Decide whether the author maintains this repository
         id: maintainer
