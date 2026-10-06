@@ -245,9 +245,9 @@ test("the page has the overview's parts and a guide on how to read it", () => {
   assert.match(html, /"Declared" means taken from the task card/)
 })
 
-test("a partial figure in a list keeps its reason in the title, not in the text", () => {
+test("a partial figure in a list keeps its reason in the title and for screen readers, not in the visible text", () => {
   const doc = { createElement: () => ({ className: "", textContent: "", title: "", children: [], appendChild(c) { this.children.push(c); return c } }) }
-  const text = (n) => [n.textContent, ...n.children.map(text)].join("")
+  const text = (n) => (n.className === "sr-only" ? "" : [n.textContent, ...n.children.map(text)].join(""))
   const n = F.render(doc, { state: "partial", value: 431, reasons: ["session_open"], bound: "lower" }, "count", { flag: "short", nofn: false })
   assert.doesNotMatch(text(n), /session had not ended/)
   assert.match(n.children.find((c) => c.className === "num-flag").title, /session had not ended/)

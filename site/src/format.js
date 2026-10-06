@@ -263,6 +263,10 @@
         flag.className = "num-flag";
         flag.textContent = d.marker.startsWith("unverified") ? "unverified" : "partial";
         flag.title = d.reason;
+        const sr = doc.createElement("span");
+        sr.className = "sr-only";
+        sr.textContent = `: ${d.reason}`;
+        flag.appendChild(sr);
         wrap.appendChild(flag);
       } else if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
