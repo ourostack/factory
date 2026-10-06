@@ -1202,7 +1202,7 @@
       al.textContent = `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`;
     } else if (verdict.status === "healthy") {
       al.textContent = "No loop alarm: nothing has been open for a week, the loop has no alarm of its own, and every loop step is succeeding.";
-    } else if (loop.open.state === "unavailable" && !verdict.missing.length) {
+    } else if (verdict.missing.length && verdict.missing.every((x) => x.codes.length === 1 && x.codes[0] === "no_records")) {
       al.textContent = "No alarm can be told until a machine sends its loop's health.";
     } else {
       const parts = verdict.missing.map((x) => `${LOOP_FIGURE[x.figure] || x.figure} (${x.codes.map((c) => F.reasonText(c)).join("; ")})`);
