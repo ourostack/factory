@@ -1,3 +1,4 @@
+import { createRequire } from "node:module"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
@@ -231,5 +232,27 @@ test(
     const desk = (await import(pathToFileURL(deskHostFlags).href)).HOST_FLAGS
     const norm = (table) => Object.fromEntries(Object.entries(table).map(([host, flags]) => [host, flags.map((f) => (Array.isArray(f) ? `${f[0]}|${f[1]}` : `${f.field}|${f.reason}`)).sort()]))
     assert.deepEqual(norm(HOST_FLAGS), norm(desk))
+  },
+)
+
+// Every reason Desk's reports and rollups can carry reaches the site, and the
+// site's numbers check stops the build on a reason with no display text. A
+// reason Desk adds without words here would therefore fail the live build
+// (as `no_turn_records` did). This comparison fails the pull request instead.
+// Desk's `report.js` imports only `node:` built-ins, so it loads straight from
+// a Desk checkout.
+const deskReport = process.env.DESK_DIR ? joinPath(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/pipeline/report.js") : null
+const deskReportReachable = Boolean(deskReport && existsSync(deskReport))
+
+test(
+  "every reason Desk can emit has display text on the site",
+  { skip: deskReportReachable || process.env.FACTORY_REQUIRE_DESK === "1" ? false : "Desk's reason table is not reachable: set DESK_DIR to a Desk checkout" },
+  async () => {
+    assert.ok(deskReportReachable, "FACTORY_REQUIRE_DESK is set but DESK_DIR does not hold pipeline/report.js")
+    const { REASON_TEXT } = await import(pathToFileURL(deskReport).href)
+    const F = createRequire(import.meta.url)("../../../site/src/format.js")
+    const codes = Object.keys(REASON_TEXT)
+    assert.ok(codes.length > 20, "Desk's reason table looks empty")
+    assert.deepEqual(codes.filter((code) => !F.hasReasonText(code)), [], "Desk can emit a reason the site has no display text for")
   },
 )
