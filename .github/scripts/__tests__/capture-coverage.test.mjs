@@ -306,4 +306,16 @@ test("the page has words for the reason, and the records cell names the machines
   assert.equal(fmt.recordsWords(1, 0, 1), "1 record, not counted")
   assert.equal(fmt.recordsWords(2, 0, 1), "2 records, 1 not counted")
   assert.equal(fmt.recordsWords(3, 1, 1), "3 records, 1 not counted, 1 unverified")
+  // "all" means only the machines that could count, so it is not said when some could not.
+  assert.equal(fmt.recordsWords(3, 2, 1), "3 records, 1 not counted, the other 2 unverified")
+  assert.equal(fmt.recordsWords(3, 3, 0), "3 records, all unverified")
+})
+
+test("the store-wide share keeps every reason: no sessions on disk among the counted hosts and a host not counted", () => {
+  const empty = claude({ on_disk: 0, derived: 0, held: 0, frozen: 0, pending: 0, not_seen: 0, not_in_a_desk: 0 })
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": empty, "codex-cli": NOT_COUNTED }))], nowMs: NOW })
+  assert.equal(cov.share.state, "unavailable")
+  assert.deepEqual(cov.share.reasons, ["no_sessions_on_disk", "host_not_counted"])
+  const row = host(summarizeCapture({ files: [file(record({ "claude-code": empty })), file(record({ "claude-code": NOT_COUNTED }))], nowMs: NOW }), "claude-code")
+  assert.deepEqual(row.share.reasons, ["no_sessions_on_disk", "host_not_counted"])
 })

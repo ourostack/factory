@@ -113,7 +113,7 @@ function shareOf(num, den, n, N, reasonIfZero, { counted, notCounted = 0 } = {})
   const base = { kind: "rollup", n, N, of: VERIFIED, out_of_scope: 0 }
   if (N === 0) return { ...unavailable(["no_records"]), ...base, n: 0 }
   if (counted === 0) return { ...unavailable(["host_not_counted"]), ...base, n: 0 }
-  if (den === 0) return { ...unavailable([reasonIfZero]), ...base, n: 0 }
+  if (den === 0) return { ...unavailable([reasonIfZero, ...(notCounted > 0 ? ["host_not_counted"] : [])]), ...base, n: 0 }
   const value = num / den
   if (n === N) return { ...measured(value), ...base }
   const reasons = []
@@ -220,7 +220,10 @@ export function summarizeCapture({ files, nowMs }) {
   const onDisk = sumAll("on_disk")
   let share
   if (counts.counted === 0) share = { ...unavailable(["no_records", ...reasons]), ...base, n: 0 }
-  else if (onDisk === 0) share = { ...unavailable([anyNotCounted ? "host_not_counted" : "no_sessions_on_disk"]), ...base, n: 0 }
+  else if (onDisk === 0) {
+    const anyCounted = fresh.some((r) => Object.values(r.record.hosts).some((e) => !isNotCounted(e)))
+    share = { ...unavailable([...(anyCounted ? ["no_sessions_on_disk"] : []), ...(anyNotCounted ? ["host_not_counted"] : [])]), ...base, n: 0 }
+  }
   else if (reasons.length === 0) share = { ...measured(derived / onDisk), ...base }
   else share = direct({ state: "partial", value: derived / onDisk, reasons: reasons.sort(), ...base }, "capture_share")
 

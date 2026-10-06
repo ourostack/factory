@@ -413,7 +413,8 @@
     if (notCounted) words += notCounted === total ? (total === 1 ? ", not counted" : ", none counted") : `, ${notCounted} not counted`;
     const counted = total - (notCounted || 0);
     if (!unverified) return words;
-    if (unverified === counted) return `${words}, ${counted === 1 ? "unverified" : "all unverified"}`;
+    // "all" counts only the machines that could count; say so when others could not.
+    if (unverified === counted) return notCounted ? `${words}, the other ${counted} unverified` : `${words}, ${counted === 1 ? "unverified" : "all unverified"}`;
     return `${words}, ${unverified} unverified`;
   }
 
