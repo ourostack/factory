@@ -7,6 +7,7 @@ import { test } from "node:test"
 
 const SCRIPT = new URL("../check-capture.sh", import.meta.url).pathname
 const WORKFLOWS = new URL("../../workflows/", import.meta.url).pathname
+const ROOT = new URL("../../../", import.meta.url).pathname
 
 const ID = "0123456789abcdef"
 const host = { on_disk: 3, derived: 1, held: 0, frozen: 0, pending: 0, not_seen: 2, not_in_a_desk: 0, unverified: false }
@@ -167,4 +168,12 @@ test("a host the machine could not count is exactly { not_counted: true }, with 
   assert.deepEqual(put({ ...valid, hosts: { "codex-cli": { not_counted: true, on_disk: 0 } } }), ["capture_keys"])
   assert.deepEqual(put({ ...valid, hosts: { "codex-cli": {} } }), ["capture_keys"])
   assert.deepEqual(put({ ...valid, hosts: { "made-up-cli": { not_counted: true } } }), ["capture_keys"])
+})
+
+test("the store says it accepts capture records with a capture.json that is exactly {\"capture\":1}", () => {
+  const text = readFileSync(join(ROOT, "capture.json"), "utf8")
+  const parsed = JSON.parse(text)
+  assert.deepEqual(Object.keys(parsed), ["capture"])
+  assert.equal(parsed.capture, 1)
+  assert.match(readFileSync(join(ROOT, "README.md"), "utf8"), /this store holds `capture\.json`/)
 })
