@@ -6,18 +6,27 @@ import { dirname, join } from "node:path"
 import { test } from "node:test"
 
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
-import { confidenceFigures, confidenceOf, evaluatorVersions, qualifiersOf } from "../../../site/scripts/waste.mjs"
+import { compareVersions, confidenceFigures, confidenceOf, evaluatorVersions, qualifiersOf } from "../../../site/scripts/waste.mjs"
 
 const SCRIPT = new URL("../../../site/scripts/build-data.mjs", import.meta.url).pathname
 
 // --- the rules, one by one ----------------------------------------------------
 
-test("confidence is recorded only when all three levels are whole numbers within the row's total", () => {
+test("confidence is recorded only when all three levels are whole numbers that add up to the row's total", () => {
   assert.deepEqual(confidenceOf({ total_ms: 100, confidence_ms: { high: 60, medium: 30, low: 10 } }), { recorded: true, parts: { high: 60, medium: 30, low: 10 } })
-  assert.deepEqual(confidenceOf({ total_ms: 100, confidence_ms: { high: 0, medium: 0, low: 0 } }).recorded, true, "a recorded zero is a zero")
+  assert.equal(confidenceOf({ total_ms: 0, confidence_ms: { high: 0, medium: 0, low: 0 } }).recorded, true, "a row of no time is covered by no time")
   for (const bad of [undefined, null, {}, { high: 1, medium: 2 }, { high: 1, medium: 2, low: null }, { high: 1, medium: 2, low: -1 }, { high: 1, medium: 2, low: "3" }, { high: 1.5, medium: 2, low: 3 }, { high: 101, medium: 0, low: 0 }, [1, 2, 3]]) {
     assert.equal(confidenceOf({ total_ms: 100, confidence_ms: bad }).recorded, false, JSON.stringify(bad))
   }
+})
+
+test("a confidence that covers none or only part of the row's time is not recorded, so the row is not sound", () => {
+  for (const parts of [{ high: 0, medium: 0, low: 0 }, { high: 60, medium: 0, low: 0 }, { high: 60, medium: 30, low: 20 }]) {
+    const c = confidenceOf({ total_ms: 100, confidence_ms: parts })
+    assert.equal(c.recorded, false, JSON.stringify(parts))
+    assert.deepEqual(qualifiersOf("waiting", c), ["confidence_not_recorded"])
+  }
+  assert.equal(confidenceOf({ total_ms: null, confidence_ms: { high: 0, medium: 0, low: 0 } }).recorded, false, "no total, nothing to cover")
 })
 
 test("a row is sound only when its confidence is recorded, none is low, and it is not unknown", () => {
@@ -40,7 +49,9 @@ test("an unrecorded confidence figure is unavailable, never a measured zero", ()
 })
 
 test("evaluator versions keep only real versions, once each; none recorded is null, not an empty list", () => {
-  assert.deepEqual(evaluatorVersions(["3.2.0-alpha.98", "3.2.0", "3.2.0", "not a version", 5, "2026-10-06"]), ["3.2.0", "3.2.0-alpha.98"])
+  assert.deepEqual(evaluatorVersions(["3.2.0-alpha.98", "3.2.0", "3.2.0", "not a version", 5, "2026-10-06"]), ["3.2.0-alpha.98", "3.2.0"])
+  assert.deepEqual(evaluatorVersions(["3.2.0-alpha.198", "3.10.0", "3.2.0-alpha.98", "3.2.0-beta.1", "3.2.0-rc.2", "3.9.1"]), ["3.2.0-alpha.98", "3.2.0-alpha.198", "3.2.0-beta.1", "3.2.0-rc.2", "3.9.1", "3.10.0"], "by version, not text")
+  assert.ok(compareVersions("3.2.0", "3.2.0-rc.9") > 0)
   for (const bad of [undefined, null, [], ["x"], "3.2.0", {}]) assert.equal(evaluatorVersions(bad), null)
 })
 
@@ -89,10 +100,10 @@ const muda = (rows, extra = {}) => ({ wastes: ALL, groupings: { overall: { all: 
 
 test("an unknown label keeps its own row, is never folded into another, and is not sound", () => {
   const rows = [
-    { waste: "waiting", total_ms: 600000, jobs: 2, share: 0.6, confidence_ms: { high: 600000, medium: 0, low: 0 } },
-    { waste: "unknown", total_ms: 400000, jobs: 1, share: 0.4, confidence_ms: { high: 400000, medium: 0, low: 0 } },
+    { waste: "waiting", total_ms: 600000, jobs: 2, share: 0.6, confidence_ms: { high: 600000, medium: 0, low: 0 }, evaluator_versions: ["3.2.0-alpha.98"] },
+    { waste: "unknown", total_ms: 400000, jobs: 1, share: 0.4, confidence_ms: { high: 400000, medium: 0, low: 0 }, evaluator_versions: ["3.2.0-alpha.98", "3.2.0-alpha.198"] },
   ]
-  const data = build(fixture(muda(rows, { evaluator_versions: ["3.2.0-alpha.98"] }), { "claude-code-s1.json": facts("s1") }))
+  const data = build(fixture(muda(rows), { "claude-code-s1.json": facts("s1") }))
   assert.deepEqual(checkNumbers(data), [])
   assert.deepEqual(data.waste.breakdown.map((r) => r.waste), ["waiting", "unknown"])
   const [waiting, unknown] = data.waste.breakdown
@@ -101,22 +112,26 @@ test("an unknown label keeps its own row, is never folded into another, and is n
   assert.deepEqual(waiting.qualifiers, [])
   assert.deepEqual(unknown.qualifiers, ["unknown_label"])
   assert.ok(data.waste.wastes.includes("unknown"))
-  assert.equal(data.waste.evaluator_versions.value, "3.2.0-alpha.98")
+  assert.equal(waiting.evaluator_versions.value, "3.2.0-alpha.98")
+  assert.equal(unknown.evaluator_versions.value, "3.2.0-alpha.98, 3.2.0-alpha.198", "per row, in version order")
 })
 
 test("time on low-confidence labels is flagged, and a row with no recorded confidence is not sound", () => {
   const rows = [
     { waste: "defects", total_ms: 1000, jobs: 1, share: 0.5, confidence_ms: { high: 400, medium: 100, low: 500 } },
     { waste: "motion", total_ms: 1000, jobs: 1, share: 0.5 },
+    { waste: "inventory", total_ms: 1000, jobs: 1, share: 0.5, confidence_ms: { high: 0, medium: 0, low: 0 } },
   ]
   const data = build(fixture(muda(rows), { "claude-code-s1.json": facts("s1") }))
   assert.deepEqual(checkNumbers(data), [])
-  const [defects, motion] = data.waste.breakdown
+  const [defects, motion, inventory] = data.waste.breakdown
   assert.deepEqual(defects.qualifiers, ["low_confidence"])
   assert.equal(defects.confidence.low_ms.value, 500)
   assert.deepEqual(motion.qualifiers, ["confidence_not_recorded"])
   assert.equal(motion.confidence.low_ms.state, "unavailable", "not recorded is not a zero")
-  assert.equal(data.waste.evaluator_versions.state, "unavailable", "no version listed is not recorded, not none")
+  assert.deepEqual(inventory.qualifiers, ["confidence_not_recorded"], "a confidence covering none of the row's time is not recorded")
+  assert.equal(inventory.confidence.low_ms.state, "unavailable")
+  assert.equal(motion.evaluator_versions.state, "unavailable", "no version listed is not recorded, not none")
 })
 
 test("a published /3 facts file whose commit carries a time builds, and counts like any other", () => {

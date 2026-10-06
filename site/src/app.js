@@ -334,7 +334,7 @@
   };
 
   const WASTE_QUALIFIER_TEXT = {
-    unknown_label: "the evaluator looked at this time and could not tell what kind of waste it was. It is shown as its own row and is not counted as any other waste.",
+    unknown_label: "the evaluator looked at this time and could not tell what kind of waste it was. It is shown as its own row, is not counted as any other waste, and is not counted in the waste total because it is not known to be waste. It is part of the labeled time the shares are taken of.",
     low_confidence: "some of this time rests on labels the evaluator marked low confidence, so do not rely on it.",
     confidence_not_recorded: "the evaluator's confidence was not recorded, so this is not shown as sound.",
   };
@@ -551,7 +551,8 @@
           tooltipRows: [
             { label: "Time lost", value: F.toText(w.total_ms, "duration") },
             { label: "Jobs affected", value: F.toText(w.jobs, "count") },
-            { label: "Share of labeled waste", value: F.toText(w.share, "pct1") },
+            { label: "Share of labeled time (unknown included)", value: F.toText(w.share, "pct1") },
+            { label: "Evaluator versions", value: w.evaluator_versions && w.evaluator_versions.state !== "unavailable" ? String(w.evaluator_versions.value) : "not recorded" },
             confRow("Resting on high-confidence labels", "high_ms"),
             confRow("Resting on medium-confidence labels", "medium_ms"),
             confRow("Resting on low-confidence labels", "low_ms"),
@@ -567,8 +568,13 @@
       }
       if (notes.children.length) panelEl.appendChild(notes);
       else panelEl.appendChild(el("p", "chart-caption", "Every row above rests on labels whose confidence was recorded and none of it low."));
-      const versions = waste.evaluator_versions && waste.evaluator_versions.state !== "unavailable" ? String(waste.evaluator_versions.value) : null;
-      panelEl.appendChild(el("p", "chart-caption", versions ? `Labels assigned by evaluator version ${versions}.` : "The evaluator version behind these labels was not recorded."));
+      const known = waste.breakdown.filter((w) => w.evaluator_versions && w.evaluator_versions.state !== "unavailable");
+      const unrecorded = waste.breakdown.filter((w) => !(w.evaluator_versions && w.evaluator_versions.state !== "unavailable")).map(nameOf);
+      const versions = [...new Set(known.flatMap((w) => String(w.evaluator_versions.value).split(", ")))];
+      const said = [];
+      if (versions.length) said.push(`Labels assigned by evaluator version ${versions.join(", ")}.`);
+      if (unrecorded.length) said.push(`The evaluator version was not recorded for: ${unrecorded.join(", ")}.`);
+      panelEl.appendChild(el("p", "chart-caption", said.join(" ")));
       return;
     }
 

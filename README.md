@@ -48,11 +48,16 @@ Still no who and no when: no name, login or account says who signed, and no time
 
 ## How the waste table treats a doubtful label
 
-The waste table reads Desk's rollup of the evaluator's labels, and it never shows a doubt as a sound figure. `unknown` is a real label, the evaluator's "looked and could not tell": it keeps its own row and its own time, is never added to another waste, and is shown as not sound. A row whose rollup records how much time rests on `high`, `medium` and `low` confidence labels says so in its hover text, and a row with time on low-confidence labels is marked not sound. A row with no recorded confidence is marked not sound too, and its confidence figures read "not recorded", never zero. Under the table the page says which evaluator versions assigned the labels, or that the version was not recorded.
+The waste table reads Desk's rollup of the evaluator's labels, and it never shows a doubt as a sound figure. This is accepted once Desk ships the label changes: Desk does not yet publish `confidence_ms` or per-row `evaluator_versions`, so today every row reads "not sound, confidence not recorded" and says the evaluator version was not recorded.
+
+- `unknown` is a real label, the evaluator's "looked and could not tell". It keeps its own row and its own time, is never added to another waste, and is always shown as not sound. Its time counts in the total labeled time that every share is taken of, but not in the waste total, because it is not known to be waste.
+- A row may record `confidence_ms` (`high`, `medium`, `low`, in milliseconds). It is recorded only when the three parts add up to the row's own time; anything else reads "not recorded", never zero.
+- A row with time on low-confidence labels, or with no recorded confidence, is marked not sound, in words under the table as well as on hover.
+- A row's `evaluator_versions` lists the distinct evaluator versions of the labels that contributed to it; the page names them, or says they were not recorded.
 
 ## What the store guarantees
 
-Every file under `facts/` passes the published schema, `desk.factory.published/1`, `/2` or `/3`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored `/1` or `/2` file stays valid and is never rewritten. `/3` (the store accepts it ahead of Desk publishing it) lets a commit carry the time it was made (`at_ms`, milliseconds from the session start, as a pull request already can), so a commit can be placed in a job's segment; a commit with no time stays valid. In every version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most every field with every reason once, 22 fields by 11 reasons today, so 242 entries) says which fields were not recorded and why (a session with more than 256 outcomes cut says `outcomes` / `capped`, rather than losing the rest without a word):
+Every file under `facts/` passes the published schema, `desk.factory.published/1` or `/2`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored `/1` or `/2` file stays valid and is never rewritten. In every version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most every field with every reason once, 21 fields by 11 reasons today, so 231 entries) says which fields were not recorded and why:
 
 - the shape is exact, and any unknown key is rejected;
 - every string matches an enum or a strict pattern, and a string holding a date or a time of day is rejected;
@@ -60,6 +65,8 @@ Every file under `facts/` passes the published schema, `desk.factory.published/1
 - a file's name matches the host and session it describes;
 - an existing file can only grow: the host and session stay the same, and the duration never decreases;
 - validation errors report stable reason codes only and never echo the rejected value.
+
+Accepted once Desk ships them, not in force yet: a `/3` file (a commit that carries the time it was made, `at_ms`) and the `outcomes` / `capped` flag (a session with more than 256 outcomes cut). Desk main's validator refuses both today, so intake does too, and the field list is still 21 by 11. When Desk adds them it becomes 22 by 11, so 242 entries. The store is ready: its correction check and its build already accept them, and a correction may write them only into a `/3` file.
 
 The measurement contract, including what is collected locally, what is published and what never leaves the machine, is section 4 of the public [Agentic Engineering V2 RFC](https://github.com/ourostack/desk/blob/main/plugins/desk/docs/agentic-engineering-v2-rfc.md#4-the-factory-measuring-and-designing-the-work).
 

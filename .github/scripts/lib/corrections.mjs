@@ -109,10 +109,12 @@ const INTERVAL_KINDS = Object.freeze([
   "turn", "tool", "subagent", "human_wait", "permission_wait", "api_retry", "compaction",
 ]);
 const OUTCOMES = Object.freeze(["ok", "error", "denied", "interrupted", "timeout"]);
-// Published facts (`desk.factory.published/2`). Desk's validator checks `/1`
-// and `/2` files against this one vocabulary (the only `/2`-only part is the
-// `human_turns` list, which is not a correctable field), so there is no
-// smaller `/1` vocabulary to keep apart here. A field listed here was not
+// Published facts (`desk.factory.published/1`, `/2`, and `/3` once Desk
+// publishes it). Desk's validator checks every version against this one
+// vocabulary (the version-only parts are the `human_turns` list, a `/2`
+// field that is not correctable, and the `/3` commit time and `outcomes`
+// flag, which `checkCorrectionAgainstFacts` keeps off older files), so there
+// is no smaller `/1` vocabulary to keep apart here. A field listed here was not
 // recorded: its value in the file is not a measured zero. The lists are
 // compared with Desk's own by a test that runs wherever Desk is reachable
 // (always in CI), so a drift is a failing test, not a refused correction.
@@ -562,6 +564,39 @@ export function validateCorrectionRecord(record, expectedFileName) {
  * Does not validate `record`; callers validate first and never call this
  * with a record that failed validation.
  */
+function schemaVersion(facts) {
+  const m = typeof facts?.schema === "string" ? /^desk\.factory\.published\/([0-9]+)$/u.exec(facts.schema) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * `checkCorrectionAgainstFacts(current, record) -> errors`: a correction that
+ * already passed `validateCorrectionRecord`, checked against the facts file it
+ * would change. It may not write what that file's own schema version does not
+ * allow: a commit time (`refs.commits[].at_ms`) or an `outcomes` flag needs
+ * `/3`; a pull request time (`refs.prs[].at_ms`) needs `/2`. (Desk's rules
+ * call each of these `inconsistent` on an older file.) Empty when it is fine.
+ */
+export function checkCorrectionAgainstFacts(current, record) {
+  const errors = [];
+  const version = schemaVersion(current);
+  const needs = (minimum, path) => {
+    if (version === null || version < minimum) fail(errors, "correction_version_mismatch", path);
+  };
+  const fields = isPlainObject(record?.fields) ? record.fields : {};
+  const refs = isPlainObject(fields.refs) ? fields.refs : {};
+  (Array.isArray(refs.commits) ? refs.commits : []).forEach((commit, i) => {
+    if (isPlainObject(commit) && Object.hasOwn(commit, "at_ms")) needs(3, `fields.refs.commits.${i}.at_ms`);
+  });
+  (Array.isArray(refs.prs) ? refs.prs : []).forEach((pr, i) => {
+    if (isPlainObject(pr) && Object.hasOwn(pr, "at_ms")) needs(2, `fields.refs.prs.${i}.at_ms`);
+  });
+  (Array.isArray(fields.unavailable) ? fields.unavailable : []).forEach((entry, i) => {
+    if (isPlainObject(entry) && entry.field === "outcomes") needs(3, `fields.unavailable.${i}.field`);
+  });
+  return errors;
+}
+
 export function applyCorrection(current, record) {
   const corrected = { ...current, ...record.fields };
   if (Object.hasOwn(record.fields, "jobs")) {

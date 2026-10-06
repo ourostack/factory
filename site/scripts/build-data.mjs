@@ -700,6 +700,7 @@ const wasteBreakdown = (mudaOverall?.wastes ?? [])
       // with time on low-confidence labels and a row with no recorded
       // confidence are never shown as sound.
       confidence: confidenceFigures(confidence),
+      evaluator_versions: evaluatorVersionsFigure(w.evaluator_versions),
       qualifiers: qualifiersOf(w.waste, confidence),
     };
   });
@@ -794,7 +795,6 @@ const data = {
     jobs_labeled: wasteJobsLabeled,
     label_files: counted(coverageRaw.labels?.files),
     breakdown: wasteBreakdown,
-    evaluator_versions: evaluatorVersionsFigure(mudaOverall?.evaluator_versions),
   },
   kaizen: { raised: kaizenRaised, resolved: kaizenResolved, verification: kaizenFetch.verification },
   kaizen_issues: kaizenIssues,
