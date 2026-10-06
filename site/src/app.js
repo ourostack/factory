@@ -1045,9 +1045,14 @@
       return;
     }
     const top = el("p", "capture-total");
-    top.appendChild(document.createTextNode("Across every host: "));
-    top.appendChild(num(cov.share, "pct"));
-    top.appendChild(document.createTextNode(" of sessions still on disk were captured."));
+    if (cov.share.state === "unavailable") {
+      top.appendChild(document.createTextNode("Share of sessions still on disk that were captured: "));
+      top.appendChild(num(cov.share, "pct"));
+    } else {
+      top.appendChild(document.createTextNode("Across every host: "));
+      top.appendChild(num(cov.share, "pct"));
+      top.appendChild(document.createTextNode(" of sessions still on disk were captured."));
+    }
     container.appendChild(top);
     if (cov.share.state === "unavailable") return;
     const wrap = el("div", "table-wrap");
