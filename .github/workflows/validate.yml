@@ -132,8 +132,8 @@ jobs:
             case "$path" in
               *[[:cntrl:]]*) code=yes; break ;;
             esac
-            [[ "$path" =~ $data_path ]]
-            if [ "$?" -ne 0 ]; then code=yes; break; fi
+            # No match (status 1) and a matching error (status 2) are both code.
+            if [[ "$path" =~ $data_path ]]; then :; else code=yes; break; fi
           done < "$paths"
           if [ "$code" = no ]; then
             echo "run=no" >> "$GITHUB_OUTPUT"

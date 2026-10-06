@@ -76,7 +76,7 @@ function runScope(files) {
   const out = join(dir, "out")
   const summary = join(dir, "summary")
   writeFileSync(out, "")
-  const result = spawnSync("bash", ["-c", run], {
+  const result = spawnSync("bash", ["-e", "-c", run], {
     cwd: dir,
     encoding: "utf8",
     env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: dir, GH_TOKEN: "none", REPOSITORY: "o/r", AUTHOR: "-", HEAD_REPOSITORY: "o/r", BASE_SHA: base, HEAD_SHA: head },
