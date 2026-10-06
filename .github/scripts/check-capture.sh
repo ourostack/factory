@@ -19,15 +19,20 @@
 #   capture_keys              not a JSON object with exactly the known keys
 #                             (schema, basis, hosts and an optional loop), an
 #                             unknown host, or a host entry whose keys are not
-#                             exactly the eight counts and flags
+#                             exactly the eight counts and flags (or exactly
+#                             `{"not_counted": true}`, a host the machine could
+#                             not count)
 #   capture_values            a value is not what its key allows: schema and
 #                             basis are their constants; every count is a
 #                             whole number from 0 to 1,000,000 (not_in_a_desk
 #                             may be null); unverified is true or false; the
-#                             buckets add up to on_disk; the loop slot is
-#                             loop_slot_v1 (v is 1, only its known keys, each
-#                             count a whole number or null, headless a plain
-#                             code or null, at most 512 bytes)
+#                             buckets add up to on_disk; not_counted is true
+#   capture_loop              the loop slot is not loop_slot_v1: v is not 1, a
+#                             key it does not know, a count that is not a
+#                             whole number or null, headless not a plain code
+#                             or null, or more than 512 bytes. Its own code, so
+#                             a client can tell the loop slot from the counts
+#                             and need not guess why a record was refused.
 #   capture_many              more than one capture file in one pull request
 #   capture_check_unavailable the two commits or a blob could not be read
 set -uo pipefail
@@ -71,7 +76,7 @@ while IFS= read -r path; do
     and has("schema") and has("basis") and has("hosts")
     and (.hosts | type == "object")
     and (.hosts | keys - ["claude-code", "codex-cli", "copilot-cli"] | length == 0)
-    and ([.hosts[] | type == "object" and (keys == ["derived", "frozen", "held", "not_in_a_desk", "not_seen", "on_disk", "pending", "unverified"])] | all)
+    and ([.hosts[] | type == "object" and (keys == ["derived", "frozen", "held", "not_in_a_desk", "not_seen", "on_disk", "pending", "unverified"] or keys == ["not_counted"])] | all)
     and ((has("loop") | not) or (.loop | type == "object"))
   ' <<< "$blob" > /dev/null 2>&1; then
     codes+=$'capture_keys\n'
@@ -83,12 +88,22 @@ while IFS= read -r path; do
     .schema == "desk.factory.capture/1"
     and .basis == "still_on_disk"
     and ([.hosts[] |
-      (.on_disk, .derived, .held, .frozen, .pending, .not_seen | count)
-      and (.not_in_a_desk == null or (.not_in_a_desk | count))
-      and (.unverified | type == "boolean")
-      and (.derived + .held + .frozen + .pending + .not_seen + (.not_in_a_desk // 0) == .on_disk)
+      if has("not_counted") then .not_counted == true
+      else
+        (.on_disk, .derived, .held, .frozen, .pending, .not_seen | count)
+        and (.not_in_a_desk == null or (.not_in_a_desk | count))
+        and (.unverified | type == "boolean")
+        and (.derived + .held + .frozen + .pending + .not_seen + (.not_in_a_desk // 0) == .on_disk)
+      end
     ] | all)
-    and ((has("loop") | not) or (.loop |
+  ' <<< "$blob" > /dev/null 2>&1; then
+    codes+=$'capture_values\n'
+    continue
+  fi
+  if ! jq -e '
+    def count: type == "number" and . == floor and . >= 0 and . <= 1000000;
+    def code: type == "string" and test("^[a-z_]{1,32}$");
+    ((has("loop") | not) or (.loop |
       .v == 1
       and (keys - ["v", "improvement_open", "improvement_claimed", "improvement_shipped", "improvement_verifying", "oldest_open_age_days", "closed_confirmed_month", "closed_unverified_month", "loop_alarms_open", "steps_stale", "headless"] | length == 0)
       and ([to_entries[] | select(.key != "v") |
@@ -97,7 +112,7 @@ while IFS= read -r path; do
       and (tojson | utf8bytelength <= 512)
     ))
   ' <<< "$blob" > /dev/null 2>&1; then
-    codes+=$'capture_values\n'
+    codes+=$'capture_loop\n'
   fi
 done <<< "$changed"
 
