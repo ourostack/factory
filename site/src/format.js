@@ -116,6 +116,7 @@
     range: "a labeled stretch runs past the session",
     evidence_unmatched: "the labeled evidence no longer matches the facts",
     share_unknown: "the facts do not record which part of the session was the job's",
+    outside_share: "the labels cover none of the job's own part of the session",
     // Capture coverage (the machines' content-free capture records).
     no_records: "no machine has published a capture record yet",
     record_stale: "some machines' capture records are older than 45 days and are left out",
