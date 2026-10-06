@@ -991,7 +991,7 @@
     parts.forEach(([label, n], i) => {
       if (i) p.appendChild(document.createTextNode(" · "));
       p.appendChild(el("span", "counts-label", `${label} `));
-      p.appendChild(shared ? el("span", "num num-unavailable", "no data") : cellNum(n, "count"));
+      p.appendChild(shared || reasons[i] ? el("span", "num num-unavailable", "no data") : cellNum(n, "count"));
       if (!shared && reasons[i]) p.appendChild(el("span", "muted", ` (${reasons[i]})`));
     });
     if (shared) p.appendChild(el("span", "muted", ` — ${shared}.`));

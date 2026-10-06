@@ -175,6 +175,8 @@ test("what to fix next lists alarms first, then sign-off, then waste with its ta
   const blocked = items.find((i) => i.id === "headline_blocked")
   assert.match(blocked.action, /task_signoff/)
   assert.match(blocked.action, /operator's turns/)
+  // It says why the band above can read no data while these tasks exist.
+  assert.match(blocked.action, /count only deliveries that have a sign-off record/)
   assert.deepEqual(blocked.examples, [{ job: "b" }, { job: "w" }])
   // An example carries a figure only when it supports the action.
   assert.deepEqual(items.find((i) => i.id === "unlabeled").examples.map((e) => Object.keys(e)), [["job"], ["job"]])
@@ -241,4 +243,18 @@ test("the page has the overview's parts and a guide on how to read it", () => {
   assert.ok(at("answer") < at("fix") && at("fix") < at("tasks") && at("tasks") < at("rest") && at("rest") < at("guide"))
   // "Declared" is explained in the guide.
   assert.match(html, /"Declared" means taken from the task card/)
+})
+
+test("a partial figure in a list keeps its reason in the title, not in the text", () => {
+  const doc = { createElement: () => ({ className: "", textContent: "", title: "", children: [], appendChild(c) { this.children.push(c); return c } }) }
+  const text = (n) => [n.textContent, ...n.children.map(text)].join("")
+  const n = F.render(doc, { state: "partial", value: 431, reasons: ["session_open"], bound: "lower" }, "count", { flag: "short", nofn: false })
+  assert.doesNotMatch(text(n), /session had not ended/)
+  assert.match(n.children.find((c) => c.className === "num-flag").title, /session had not ended/)
+})
+
+test("a no-data count line says the reason once, in words, and the page code does not print it twice", () => {
+  assert.equal(F.reasonText("no_signoff_records"), "no delivered job has a sign-off record yet")
+  const app = read("site/src/app.js")
+  assert.match(app, /shared \|\| reasons\[i\] \? el\("span", "num num-unavailable", "no data"\)/)
 })

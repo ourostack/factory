@@ -74,7 +74,7 @@ export function fixNext({ jobs = [], outcomes = null, kaizenIssues = [], andonIs
       id: "headline_blocked",
       severity: "act",
       title: "The headline cannot be computed yet",
-      action: `${steps.map((x, i) => (i ? x : x[0].toUpperCase() + x.slice(1))).join(", and ")}. Tasks delivered before sign-off existed stay out of scope.`,
+      action: `${steps.map((x, i) => (i ? x : x[0].toUpperCase() + x.slice(1))).join(", and ")}. Tasks delivered before sign-off existed stay out of scope.${noAccepted ? " The numbers above count only deliveries that have a sign-off record, so they can say no data while these tasks exist." : ""}`,
       ...(noAccepted && delivered.length ? { count: measured(delivered.length), noun: ["delivered task with no sign-off", "delivered tasks with no sign-off"] } : {}),
       examples: noAccepted ? delivered.slice(0, TOP).map((j) => task(j)) : [],
     });

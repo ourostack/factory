@@ -64,6 +64,7 @@
     session_open: "the session had not ended",
     partial: "only partly measured",
     unmeasured_members: "some members were not measured and are left out",
+    no_signoff_records: "no delivered job has a sign-off record yet",
     no_measured_members: "no member was measured",
     only_partly_recorded: "every figure that exists here is only partly recorded, so no median or total is shown",
     no_members: "there is nothing to count yet",
@@ -261,10 +262,7 @@
         const flag = doc.createElement("span");
         flag.className = "num-flag";
         flag.textContent = d.marker.startsWith("unverified") ? "unverified" : "partial";
-        const sr = doc.createElement("span");
-        sr.className = "sr-only";
-        sr.textContent = `: ${d.reason}`;
-        flag.appendChild(sr);
+        flag.title = d.reason;
         wrap.appendChild(flag);
       } else if (!(opts && opts.flag === false)) {
       const flag = doc.createElement("span");
