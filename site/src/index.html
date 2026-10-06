@@ -15,18 +15,13 @@
   <div class="wrap">
     <p class="eyebrow">Desk factory &middot; public measurement store</p>
     <h1 class="hero-title">How much operator attention does an accepted outcome cost, and where does the rest go?</h1>
-    <p class="hero-sub">
-      This store is for anyone deciding how to get more accepted outcomes for less human attention: an operator, a team lead, or an agent improving its own system.
-      The value it cares about is an outcome a human accepted. Everything measured here serves one question: how much human attention does an accepted outcome cost, and where does the rest go?
-      Agent time, tokens and tool calls are inputs; they matter only because they help explain that ratio.
-    </p>
+    <p class="hero-sub">Every number is read live from the public store; "no data" is never zero.</p>
     <p class="limit-text"><strong>Designed for many desks; proven on one so far.</strong></p>
     <nav class="header-links" aria-label="On this page">
-      <a href="#glance">At a glance</a>
       <a href="#answer">The answer</a>
       <a href="#fix">What to fix next</a>
-      <a href="#rest">Where the rest goes</a>
       <a href="#tasks">Every task</a>
+      <a href="#rest">Where the rest goes</a>
       <a href="#guide">How to read this</a>
       <a href="#more">More from the store</a>
     </nav>
@@ -36,12 +31,12 @@
 <main id="main">
 <div id="view-overview">
 
-  <!-- ============ AT A GLANCE ============ -->
-  <section id="glance" aria-labelledby="glance-title">
+  <!-- ============ THE ANSWER, AND THE FACTORY'S HEALTH ============ -->
+  <section id="answer" aria-labelledby="answer-title">
     <div class="wrap">
-      <h2 class="section-title" id="glance-title">At a glance</h2>
-      <p class="section-sub">Is the factory alive, how much of the real work it saw, and whether the improvement loop is turning. Read in your browser: if the site stops rebuilding, it says so by itself.</p>
-      <div id="glance-tiles" class="glance-tiles"><p class="chart-empty">Loading&hellip;</p></div>
+      <h2 class="section-title" id="answer-title">What an accepted outcome costs</h2>
+      <div id="status-line"><p class="chart-empty">Loading&hellip;</p></div>
+      <div id="answer-tiles" class="answer-band"></div>
       <details class="more-details">
         <summary>Health details</summary>
         <div id="health-panel" class="health-panel"></div>
@@ -59,22 +54,21 @@
     </div>
   </section>
 
-  <!-- ============ THE ANSWER ============ -->
-  <section id="answer" aria-labelledby="answer-title">
-    <div class="wrap">
-      <h2 class="section-title" id="answer-title">What an accepted outcome costs</h2>
-      <p class="section-sub">An outcome counts as accepted when the operator accepts the delivery. The agent records that answer on the operator's word. Attention spent on work that was sent back or is still waiting stays in the cost.</p>
-      <div id="answer-tiles" class="answer-tiles"></div>
-
-    </div>
-  </section>
-
   <!-- ============ WHAT TO FIX NEXT ============ -->
   <section id="fix" aria-labelledby="fix-title">
     <div class="wrap">
       <h2 class="section-title" id="fix-title">What to fix next</h2>
-      <p class="section-sub">Built from the figures on this page: alarms first, then what keeps the headline from being measured, then waste with the tasks it was seen on, then open improvement cards. Items marked "signal" are inferred from session records, not yet classified by the waste evaluator.</p>
-      <ol id="fix-list" class="fix-list"></ol>
+      <p class="section-sub">Alarms first, then what keeps the headline from being measured, then waste, then open improvement cards. "Signal" items are inferred from session records, not classified by the waste evaluator.</p>
+      <div id="fix-list"></div>
+    </div>
+  </section>
+
+  <!-- ============ EVERY TASK ============ -->
+  <section id="tasks" aria-labelledby="tasks-title">
+    <div class="wrap">
+      <h2 class="section-title" id="tasks-title">Every task</h2>
+      <p class="section-sub" id="tasks-sub">One row per task the store tracks, longest first. Open a task for its sign-off, waste, pull requests and sessions.</p>
+      <div id="jobs-table"></div>
     </div>
   </section>
 
@@ -82,11 +76,10 @@
   <section id="rest" aria-labelledby="rest-title">
     <div class="wrap">
       <h2 class="section-title" id="rest-title">Where the rest goes, and the trend</h2>
-      <p class="section-sub">Where agent and operator time went across finished tasks, which kinds of waste the evaluator found, and how the figures move from one Desk release to the next.</p>
       <div class="chart-grid cols-2">
         <div class="chart-card">
           <h3>Where time goes</h3>
-          <p class="chart-caption">Median and 75th-percentile duration per job, computed only over finished jobs whose whole life sits inside capture &mdash; no gap between the job's recorded start and its first captured session &mdash; and whose own figure is fully measured. Every other job is left out and counted in the "n of N" beside each figure. Bar length is log-scaled so seconds and days both stay visible; the label always shows the real duration.</p>
+          <p class="chart-caption">Median and 75th-percentile duration per job, over finished jobs whose whole life sits inside capture and whose own figure is fully measured; the "n of N" beside each figure counts the rest. Bars are log-scaled; the label shows the real duration.</p>
           <p class="chart-caption" id="time-breakdown-note"></p>
           <div class="legend">
             <span class="legend-item"><span class="legend-swatch" style="background:var(--series-1);"></span>Median</span>
@@ -96,33 +89,14 @@
         </div>
         <div class="chart-card">
           <h3>Waste, by Lean type</h3>
-          <p class="chart-caption" id="waste-caption"></p>
-          <div id="waste-panel"></div>
+          <div id="labeled-waste"></div>
         </div>
       </div>
-
-      <h3 class="sub-title">Over time</h3>
-      <div class="chart-grid">
-        <div class="chart-card">
-          <h3>By Desk release, oldest first</h3>
-          <p class="chart-caption">The same figures for the jobs worked under each Desk release. Published facts carry no clock time, so the release is the clock. A job worked under several releases is counted under "several releases".</p>
-          <div id="trend"></div>
-        </div>
-        <div class="chart-card">
-          <h3>Sessions published, cumulative</h3>
-          <p class="chart-caption">How much work the store has captured so far: the day each facts file first landed on <code>main</code>, never finer than a day, as a running total. The first day was a one-time flush of sessions already on contributing machines, not a burst of work.</p>
-          <div id="chart-intake"></div>
-        </div>
+      <div class="chart-card" style="margin-top:20px;">
+        <h3>By Desk release, oldest first</h3>
+        <p class="chart-caption">The release is the clock: published facts carry no clock time. A job worked under several releases counts under "several releases".</p>
+        <div id="trend"></div>
       </div>
-    </div>
-  </section>
-
-  <!-- ============ EVERY TASK ============ -->
-  <section id="tasks" aria-labelledby="tasks-title">
-    <div class="wrap">
-      <h2 class="section-title" id="tasks-title">Every task</h2>
-      <p class="section-sub" id="tasks-sub">One row per task (job) the store tracks, longest first. Open a task for its sign-off, waste, pull requests and sessions. A figure marked "partial" covers only part of the task; "no data" means the store could not measure it, with the reason beside it.</p>
-      <div id="jobs-table"></div>
     </div>
   </section>
 
@@ -130,11 +104,14 @@
   <section id="guide" aria-labelledby="guide-title">
     <div class="wrap">
       <h2 class="section-title" id="guide-title">How to read this</h2>
+      <p class="section-sub">This store is for anyone deciding how to get more accepted outcomes for less human attention: an operator, a team lead, or an agent improving its own system. The value it cares about is an outcome a human accepted, and everything here serves one question: how much human attention does an accepted outcome cost, and where does the rest go? Agent time, tokens and tool calls are inputs; they matter only because they help explain that ratio.</p>
       <ul class="guide-list">
-        <li><strong>Start at the top.</strong> "At a glance" says whether you can trust the page today. "What an accepted outcome costs" is the answer the factory exists to give. "What to fix next" is what to do about it.</li>
-        <li><strong>A plain figure was measured.</strong> A figure marked <span class="num num-partial"><span class="num-value">at least 12</span><span class="num-flag">partial</span></span> was only partly measured; "at least" or "at most" says which way the true figure lies, and the reason is on hover and in text for screen readers.</li>
-        <li><strong>"No data" is never zero.</strong> A figure shown as <span class="num num-unavailable"><span class="num-value">no data</span><span class="num-reason">(with its reason)</span></span> was not measured. A zero appears only when zero was measured.</li>
-        <li><strong>Every total says what it rests on</strong>, for example "12 of 31 jobs". A trust note beside a headline says, in words, whether its sample is thin or partial.</li>
+        <li><strong>Start at the top.</strong> The status line says whether you can trust the page today, the headline is the answer the factory exists to give, and "What to fix next" is what to do about it.</li>
+        <li><strong>A plain figure was measured.</strong> A figure marked <span class="num num-partial"><span class="num-value">at least 12</span><span class="num-flag">partial</span></span> was only partly measured; "at least" or "at most" says which way the true figure lies. The reason is on hover, in text for screen readers, and in the note under each table.</li>
+        <li><strong>"No data" is never zero.</strong> A figure shown as <span class="num num-unavailable"><span class="num-value">no data</span></span> was not measured, and its reason is given beside it or once under its table. A zero appears only when zero was measured.</li>
+        <li><strong>Every total says what it rests on</strong>, for example "12 of 31 jobs", and a sentence beside a headline says whether its sample is thin or partial.</li>
+        <li><strong>"Declared" means taken from the task card,</strong> such as a task's start date written on its card, rather than measured from a session record. A task's "Every measure" table says which figures are declared.</li>
+        <li><strong>Two kinds of waiting.</strong> "Deliveries waiting for an answer" counts finished work the operator has not yet accepted or sent back. "Gaps between the operator's prompts" is idle time inside sessions. The evaluator's "Waiting (any kind)" is all labeled waiting, on CI, tools or the operator.</li>
         <li><strong>Tasks are anonymous.</strong> The store publishes a one-way key per task, never its name. On the operator's own machine, a private <code>local-names.json</code> next to the page shows the real names instead.</li>
         <li><strong>Accepted means the operator's word,</strong> recorded by the agent through Desk's sign-off tool.</li>
       </ul>
@@ -148,6 +125,14 @@
       <p class="section-sub">Everything else the store measures: the longest sessions, the headline counts, the sign-off and rework detail, the kaizen loop, the tool and model charts, and how the data gets here.</p>
       <details class="more-details" id="more-details">
         <summary>Open every chart</summary>
+  <section id="intake" aria-labelledby="intake-title">
+    <div class="wrap">
+      <h2 class="section-title" id="intake-title">Sessions published, cumulative</h2>
+      <p class="section-sub">How much work the store has captured so far: the day each facts file first landed on <code>main</code>, never finer than a day, as a running total. The first day was a one-time flush of sessions already on contributing machines, not a burst of work.</p>
+      <div class="chart-card"><div id="chart-intake"></div></div>
+    </div>
+  </section>
+
   <!-- ============ 1. THE PROOF ============ -->
   <section id="proof" aria-labelledby="proof-title">
     <div class="wrap">

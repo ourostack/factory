@@ -1028,23 +1028,29 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 
 /* ---------- Overview: glance, answer, fix next, tasks ---------- */
 
-.glance-tiles,
 .answer-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
   margin: 0 0 18px;
 }
-.answer-tiles .answer-headline { grid-column: 1 / -1; }
-.answer-headline .stat-value { font-size: clamp(30px, 6vw, 44px); }
-.glance-tile .stat-value { font-size: 26px; }
+.answer-band { margin: 0 0 8px; }
+.headline-row { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 0 0 10px; }
+.answer-headline .stat-value { font-size: clamp(26px, 4vw, 36px); margin: 4px 0; }
+.answer-headline .stat-label, .answer-headline .stat-note { margin-top: 4px; margin-bottom: 0; }
+.counts-line { margin: 0; font-size: 15px; }
+.counts-label { color: var(--text-secondary); }
+.status-line { margin: 0 0 4px; font-size: 15px; }
+.status-reason { margin: 0 0 12px; font-size: 14px; color: var(--text-secondary); }
+.status-line + .status-reason { margin-top: 0; }
+#status-line { margin: 0 0 14px; }
 .verdict-inline-alive { color: var(--status-good); }
 .verdict-inline-stale { color: var(--status-serious); }
 .verdict-inline-broken { color: var(--status-critical); }
 .verdict-inline-unknown { color: var(--text-secondary); }
-.glance-stale { border: 2px dashed var(--status-warning); }
-.glance-broken { border: 4px double var(--status-critical); }
-.glance-unknown { border: 3px dotted var(--text-secondary); }
+.status-stale .verdict-inline { border: 2px dashed var(--status-warning); padding: 0 4px; }
+.status-broken .verdict-inline { border: 3px double var(--status-critical); padding: 0 4px; }
+.status-unknown .verdict-inline { border: 2px dotted var(--text-secondary); padding: 0 4px; }
 
 h3.sub-title { font-size: 17px; margin: 30px 0 12px; }
 .muted { color: var(--text-secondary); }
@@ -1095,7 +1101,7 @@ h3.sub-title { font-size: 17px; margin: 30px 0 12px; }
 .task-table td { vertical-align: top; }
 .task-name { font-weight: 600; overflow-wrap: anywhere; }
 .task-key { color: var(--text-secondary); font-size: 13px; margin: -6px 0 18px; overflow-wrap: anywhere; }
-.task-asked p { margin: 6px 0; }
+.task-status { margin: 0 0 16px; }
 .task-tiles { margin-top: 0; }
 #view-job .chart-card, #view-session .chart-card { margin-bottom: 16px; }
 .back-link { margin: 0 0 12px; font-size: 14px; }
@@ -1116,9 +1122,10 @@ h3.sub-title { font-size: 17px; margin: 30px 0 12px; }
   .task-table td.task-cell::before { content: none; }
   .task-table tbody tr:hover { background: var(--surface-2); }
 }
-.table-notes { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13px; color: var(--text-secondary); }
+.table-notes { margin: 10px 0 0; font-size: 13px; color: var(--text-secondary); }
+.table-notes ul { list-style: none; margin: 6px 0 0; padding: 0; }
 .table-notes li { margin: 2px 0; }
-.table-notes-head { font-weight: 600; }
+.table-notes-head { font-weight: 600; cursor: pointer; }
 .stat-value .num-flag { font-size: 11px; vertical-align: middle; }
 .stat-value .num-reason { font-size: 14px; }
 .task-tiles { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
@@ -1127,14 +1134,19 @@ body[data-view="job"] .hero-sub, body[data-view="job"] .limit-text,
 body[data-view="session"] .hero-sub, body[data-view="session"] .limit-text { display: none; }
 body[data-view="job"] h1.hero-title, body[data-view="session"] h1.hero-title { font-size: clamp(20px, 3vw, 26px); }
 body[data-view="job"] header.site-header, body[data-view="session"] header.site-header { padding: 22px 0 16px; }
-.chart-grid > *, .answer-tiles > *, .glance-tiles > * { min-width: 0; }
-.waste-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.chart-grid > *, .answer-tiles > * { min-width: 0; }
 @media (max-width: 560px) {
-  .glance-tiles, .answer-tiles { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .answer-tiles .answer-headline, .glance-tiles .glance-tile:first-child { grid-column: 1 / -1; }
+  .answer-tiles { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .answer-tiles.headline-row { grid-template-columns: 1fr; }
   .stat-tile .stat-value { font-size: 22px; }
   .stat-value .num-reason { font-size: 12px; }
-  .glance-tiles .stat-tile, .answer-tiles .stat-tile { padding: 12px; }
+  .answer-tiles .stat-tile, .answer-band .stat-tile { padding: 12px; }
 }
 .stat-value .num-nofn { display: block; font-size: 12px; margin-top: 4px; }
 #chart-intake { max-width: 640px; }
+@media (min-width: 721px) { .task-table .outcome, .task-table td.num, .task-table td.num .num { white-space: nowrap; } table.data-table.task-table th, table.data-table.task-table td { padding-left: 6px; padding-right: 6px; } table.data-table.task-table th { white-space: normal; } .task-table .num-flag { margin-left: 0.25em; } }
+/* Examples sit on one line under their action. */
+.fix-examples { display: flex; flex-wrap: wrap; gap: 2px 18px; list-style: none; padding-left: 0; }
+.fix-item { padding: 12px 16px; }
+#view-overview > section { padding: 32px 0; }
+.task-tiles .stat-value { margin: 6px 0; }

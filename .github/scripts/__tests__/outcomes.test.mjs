@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { outcomesSummary, waitWords } from "../../../site/scripts/outcomes.mjs"
+import { attentionPerDelivered, outcomesSummary, waitWords } from "../../../site/scripts/outcomes.mjs"
 import { jobSummary } from "../../../site/scripts/job-summary.mjs"
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 
@@ -86,9 +86,9 @@ test("a store where no session published an outcomes key says sign-off is not pu
   assert.deepEqual(checkNumbers({ outcomes: s }), [])
 })
 
-test("sign-off counts are measured, and an acceptance with no witnessed prompt counts as accepted (recorded on the operator's word)", () => {
+test("sign-off counts are measured, and an unverified acceptance is apart from accepted", () => {
   const s = outcomesSummary(file())
-  assert.equal(s.signoff.accepted.value, 3)
+  assert.equal(s.signoff.accepted.value, 2)
   assert.equal(s.signoff.accepted_unverified.value, 1)
   assert.equal(s.signoff.refused.value, 1)
   assert.equal(s.signoff.no_record.value, 4)
@@ -117,10 +117,8 @@ test("an awaiting-sign-off yield is an upper bound, with jobs that predate sign-
   assert.equal(y.state, "partial")
   assert.equal(y.value, 0.75)
   assert.equal(y.bound, "upper")
-  // Only the delivery still awaiting an answer is not final; an unwitnessed verdict is.
-  assert.equal(y.n, 3)
+  assert.equal(y.n, 2)
   assert.equal(y.N, 4)
-  assert.ok(!y.reasons.includes("signoff_unverified"))
   assert.equal(y.out_of_scope, 5)
   // The shown percentage can be rebuilt from counts shown beside it.
   const c = outcomesSummary(file()).first_pass_counts
@@ -167,25 +165,33 @@ test("rework with no recorded history is no data", () => {
   assert.equal(r.changed_ask.state, "unavailable")
 })
 
-test("a disagreement counted over refusals with no witnessed prompt is whole: each is the operator's word as the agent recorded it", () => {
+test("a disagreement counted over unverified refusals is a lower bound", () => {
   const r = outcomesSummary(file({ rework: rework({ reason_check: { state: "measured", compared: 3, disagree: 1, compared_verified: 1, reasons: [] } }) })).rework
-  assert.equal(r.reason_check.disagree.state, "measured")
-  assert.equal(r.reason_check.disagree.value, 1)
+  assert.equal(r.reason_check.disagree.state, "partial")
+  assert.equal(r.reason_check.disagree.bound, "lower")
+  assert.deepEqual(r.reason_check.disagree.reasons, ["refusal_unverified"])
 })
 
-test("a job's first pass whose only doubt is an unwitnessed sign-off is final", () => {
-  const j = jobSummary({ job: "f", formulas: { first_pass_yield: { class: "declared", state: "partial", value: 1, reasons: ["signoff_unverified"], partial: true, partial_reasons: ["signoff_unverified"] } } }, "f.json")
-  assert.equal(j.first_pass.state, "measured")
-  assert.equal(j.first_pass.value, 1)
-  const awaiting = jobSummary({ job: "g", formulas: { first_pass_yield: { class: "declared", state: "partial", value: 1, reasons: ["awaiting_signoff", "signoff_unverified"], partial: true, partial_reasons: ["awaiting_signoff", "signoff_unverified"] } } }, "g.json")
-  assert.equal(awaiting.first_pass.state, "partial")
-  assert.deepEqual(awaiting.first_pass.reasons, ["awaiting_signoff"])
-  assert.equal(awaiting.first_pass.bound, "upper")
+test("one source for acceptance: the accepted count and the headline are Desk's own, never a sum the site makes", () => {
+  // Desk counts 2 accepted and 1 accepted-unverified, and divides the headline by its 2.
+  const s = outcomesSummary(file({ attention: { headline: { state: "measured", value: 3600000, reasons: [], n: 2, N: 2 } } }))
+  assert.equal(s.signoff.accepted.value, 2)
+  assert.equal(s.signoff.accepted_unverified.value, 1)
+  assert.equal(s.attention.headline.value, 3600000)
+  assert.equal(s.attention.headline.n, s.signoff.accepted.value)
+  // When Desk counts every acceptance as accepted, the site follows without a change.
+  const all = outcomesSummary(file({ signoff: signoff({ accepted: 3, accepted_unverified: 0 }), attention: { headline: { state: "measured", value: 1200000, reasons: [], n: 3, N: 3 } } }))
+  assert.equal(all.signoff.accepted.value, 3)
+  assert.equal(all.attention.headline.value, 1200000)
+  // With Desk counting no acceptance, the headline is no data with Desk's reason, never zero.
+  const none = outcomesSummary(file({ signoff: signoff({ accepted: 0, accepted_unverified: 3 }), attention: { headline: { state: "unavailable", reasons: ["no_accepted_outcomes"], n: 0, N: 0 } } }))
+  assert.equal(none.signoff.accepted.value, 0)
+  assert.equal(none.attention.headline.state, "unavailable")
 })
 
 test("with sign-off published but no attention estimate, the headline says not recorded yet and shows no n of N", () => {
   const s = outcomesSummary(file())
-  assert.equal(s.signoff.accepted.value, 3)
+  assert.equal(s.signoff.accepted.value, 2)
   for (const f of [s.attention.headline, s.attention.turns_per_accepted]) {
     assert.deepEqual(f, { state: "unavailable", reasons: ["not_recorded_yet"] })
   }
@@ -288,4 +294,25 @@ test("a private desk's job carries nothing past the closed sign-off fields: no w
   const s = outcomesSummary(file({ signoff: signoff({ by_person: { someone: 3 }, private_desks: ["x"] }) }))
   const all = JSON.stringify(s)
   for (const leak of ["someone", "by_person", "private_desks"]) assert.ok(!all.includes(leak), leak)
+})
+
+test("until an outcome is accepted, attention per delivered task averages the whole estimates and counts the rest", () => {
+  const m = (value) => ({ state: "measured", value, reasons: [] })
+  const jobs = [
+    { outcome: "delivered", attention_ms: m(1000) },
+    { outcome: "awaiting_signoff", attention_ms: m(3000) },
+    { outcome: "delivered", attention_ms: { state: "partial", value: 9000, reasons: ["host_records_partly"], bound: "lower" } },
+    { outcome: "delivered", attention_ms: { state: "unavailable", reasons: ["not_recorded"] } },
+    { outcome: "in_progress", attention_ms: m(99999) },
+  ]
+  const d = attentionPerDelivered(jobs)
+  assert.equal(d.value, 2000)
+  assert.equal(d.state, "partial")
+  assert.equal(d.n, 2)
+  assert.equal(d.N, 4)
+  assert.equal(d.bound, "unknown")
+  assert.equal(attentionPerDelivered(jobs.slice(0, 2)).state, "measured")
+  // No delivered task: no data, never zero.
+  assert.equal(attentionPerDelivered([jobs[4]]).state, "unavailable")
+  assert.deepEqual(checkNumbers({ outcomes: { attention: { per_delivered: d } } }), [])
 })

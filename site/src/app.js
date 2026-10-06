@@ -184,7 +184,7 @@
       fillEl.style.background = row.color || color;
       trackEl.appendChild(fillEl);
       const valueEl = el("span", "bar-value");
-      valueEl.appendChild(num(row.number, opts.kind, { nofn: opts.nofn }));
+      valueEl.appendChild(num(row.number, opts.kind, { nofn: opts.nofn, flag: opts.flag, basis: opts.basis }));
       if (opts.suffix) valueEl.appendChild(document.createTextNode(opts.suffix));
       rowEl.append(labelEl, trackEl, valueEl);
 
@@ -320,24 +320,9 @@
     unavailable: "var(--text-muted)",
   };
 
-  const WASTE_NAMES = {
-    defects: "Defects",
-    overproduction: "Overproduction",
-    waiting: "Waiting",
-    non_utilized_talent: "Non-utilized talent",
-    transportation: "Transportation",
-    inventory: "Inventory",
-    motion: "Motion",
-    extra_processing: "Extra processing",
-    // A real label: the evaluator looked and could not tell. Never folded into another.
-    unknown: "Unknown (the evaluator could not tell)",
-  };
-
-  const WASTE_QUALIFIER_TEXT = {
-    unknown_label: "the evaluator looked at this time and could not tell what kind of waste it was. It is shown as its own row, is not counted as any other waste, and is not counted in the waste total because it is not known to be waste. It is part of the waste and unknown time the shares are taken of.",
-    low_confidence: "some of this time rests on labels the evaluator marked low confidence, so do not rely on it.",
-    confidence_not_recorded: "the evaluator's confidence was not recorded, so this is not shown as sound.",
-  };
+  // Plain names for every waste key, from the build (waste.mjs).
+  let wasteNames = {};
+  const wasteName = (key) => wasteNames[key] || "Unnamed waste";
 
   function statusColor(status) {
     return STATUS_COLOR[status] || "var(--text-muted)";
@@ -354,11 +339,20 @@
   // The trust state of a headline, as text beside the figure: its status in
   // words, why, and what is known about capture coverage. Coverage is never
   // shown as a percentage until a coverage record exists.
+  // One plain sentence on how far a figure can be trusted. The status words
+  // are on hover (TRUST_LABEL), never a code on the page.
+  const TRUST_LEAD = {
+    ok: "Sound",
+    thin_sample: "Thin sample",
+    partial: "Partly measured",
+    low_coverage: "Low capture coverage, so much of the work may be missing",
+    coverage_unknown: "Can't yet tell how much work was missed",
+  };
   function trustNode(t) {
     const wrap = el("span", `trust trust-${t.status}`);
-    wrap.appendChild(el("span", "trust-label", `trust: ${TRUST_LABEL[t.status] || t.status}`));
-    wrap.appendChild(el("span", "trust-reason", ` — ${t.reason}`));
-    wrap.appendChild(el("span", "trust-coverage", ` · ${F.coverageWords(t.coverage)}`));
+    const reason = String(t.reason || "");
+    wrap.textContent = `${TRUST_LEAD[t.status] || "Not sound"}: ${reason}.`;
+    wrap.title = `${TRUST_LABEL[t.status] || t.status}; ${F.coverageWords(t.coverage)}`;
     return wrap;
   }
 
@@ -513,79 +507,24 @@
 
   // -------------------------------------------------------------- waste
 
-  function renderWaste(captionEl, panelEl, waste) {
-    const total = waste.jobs_total;
-    const labeled = waste.jobs_labeled;
-    const labelFiles = waste.label_files;
-    const isPositive = (n) => n.state !== "unavailable" && n.value > 0;
-    captionEl.innerHTML = "";
-    if (isPositive(labeled)) {
-      captionEl.appendChild(num(labeled, "count", { nofn: false }));
-      captionEl.appendChild(document.createTextNode(" of "));
-      captionEl.appendChild(num(total, "count", { nofn: false }));
-      captionEl.appendChild(document.createTextNode(" jobs are fully labeled for waste. Bars show total time lost to each type, across labeled jobs."));
-    } else if (isPositive(labelFiles)) {
-      captionEl.appendChild(document.createTextNode("Labeling has just started: "));
-      captionEl.appendChild(num(labelFiles, "count", { nofn: false }));
-      captionEl.appendChild(document.createTextNode(" session labels exist, but no job is fully labeled yet — a job needs every one of its sessions evaluated before it counts here. The taxonomy below is what labeling classifies against; bars appear as finished jobs are evaluated."));
-    } else if (labelFiles.state === "unavailable") {
-      captionEl.appendChild(document.createTextNode("Labeling coverage is not recorded in this build ("));
-      captionEl.appendChild(document.createTextNode(F.describe(labelFiles, "count").reason));
-      captionEl.appendChild(document.createTextNode("). The taxonomy below is what labeling classifies against."));
-    } else {
-      captionEl.textContent = "Labeling has just started: no session has been evaluated yet. The taxonomy below is what labeling will classify against; bars appear here as finished jobs are evaluated.";
-    }
-
-    panelEl.innerHTML = "";
-    if (isPositive(labeled) && waste.breakdown && waste.breakdown.length) {
-      const nameOf = (w) => WASTE_NAMES[w.waste] || w.waste;
-      const rows = waste.breakdown.map((w) => {
-        const q = Array.isArray(w.qualifiers) ? w.qualifiers : ["confidence_not_recorded"];
-        const conf = w.confidence || {};
-        const confRow = (label, key) => ({ label, value: conf[key] ? F.toText(conf[key], "duration") : "not recorded" });
-        return {
-          label: nameOf(w),
-          flag: q.length ? "not sound" : "",
-          color: w.waste === "unknown" ? "var(--text-muted)" : undefined,
-          number: w.total_ms,
-          tooltipRows: [
-            { label: "Time lost", value: F.toText(w.total_ms, "duration") },
-            { label: "Jobs affected", value: F.toText(w.jobs, "count") },
-            { label: "Share of waste and unknown time", value: F.toText(w.share, "pct1") },
-            { label: "Evaluator versions", value: w.evaluator_versions && w.evaluator_versions.state !== "unavailable" ? String(w.evaluator_versions.value) : "not recorded" },
-            confRow("Resting on high-confidence labels", "high_ms"),
-            confRow("Resting on medium-confidence labels", "medium_ms"),
-            confRow("Resting on low-confidence labels", "low_ms"),
-          ],
-        };
-      });
-      renderBarList(panelEl, rows, { color: "var(--series-8)", kind: "duration" });
-      // The same facts in plain, always-visible words: a hover is not the only place a doubt is stated.
-      const notes = el("ul", "waste-notes");
-      for (const w of waste.breakdown) {
-        const q = Array.isArray(w.qualifiers) ? w.qualifiers : ["confidence_not_recorded"];
-        for (const code of q) notes.appendChild(el("li", "", `${nameOf(w)}: ${WASTE_QUALIFIER_TEXT[code] || code.replace(/_/g, " ")}`));
-      }
-      if (notes.children.length) panelEl.appendChild(notes);
-      else panelEl.appendChild(el("p", "chart-caption", "Every row above rests on labels whose confidence was recorded and none of it low."));
-      const known = waste.breakdown.filter((w) => w.evaluator_versions && w.evaluator_versions.state !== "unavailable");
-      const unrecorded = waste.breakdown.filter((w) => !(w.evaluator_versions && w.evaluator_versions.state !== "unavailable")).map(nameOf);
-      const versions = [...new Set(known.flatMap((w) => String(w.evaluator_versions.value).split(", ")))];
-      const said = [];
-      if (versions.length) said.push(`Labels assigned by evaluator version ${versions.join(", ")}.`);
-      if (unrecorded.length) said.push(`The evaluator version was not recorded for: ${unrecorded.join(", ")}.`);
-      panelEl.appendChild(el("p", "chart-caption", said.join(" ")));
+  // The waste overview: each kind's labeled time summed over the tasks, from
+  // the same per-task labels the task pages show (data.labeled_waste).
+  function renderLabeledWaste(container, lw) {
+    container.innerHTML = "";
+    if (!lw || !lw.rows.length) {
+      container.appendChild(el("p", "chart-empty", "No task's own sessions are labeled for waste yet, so waste is no data, not zero. Each task's page shows its labels as they arrive."));
       return;
     }
-
-    const grid = el("div", "waste-grid");
-    for (const code of waste.wastes) {
-      const item = el("div", "waste-item");
-      item.appendChild(el("p", "waste-name", WASTE_NAMES[code] || code));
-      item.appendChild(el("p", "waste-code", code));
-      grid.appendChild(item);
-    }
-    panelEl.appendChild(grid);
+    const cap = el("p", "chart-caption");
+    cap.appendChild(document.createTextNode("Labeled time per kind of waste, summed over the "));
+    cap.appendChild(num(lw.jobs_with_labels, "count"));
+    cap.appendChild(document.createTextNode(" tasks with labels, out of "));
+    cap.appendChild(num(lw.jobs_finished, "count"));
+    cap.appendChild(document.createTextNode(" finished tasks. It is the same data the task pages show."));
+    container.appendChild(cap);
+    const bars = el("div");
+    renderBarList(bars, lw.rows.map((r) => ({ label: wasteName(r.key), number: r.total_ms, color: r.key === "unknown" ? "var(--text-muted)" : "var(--series-8)" })), { kind: "duration", flag: "short" });
+    container.appendChild(bars);
   }
 
   // ------------------------------------------------------------- kaizen
@@ -785,34 +724,29 @@
 
   // --------------------------------------------------------- task names
   // Private desks publish only anonymous job keys. On the operator's own
-  // machine a `local-names.json` beside the page may name them:
-  // { version: 1, jobs: { "<job key>": { title, track, task } } }. A missing
-  // or malformed file is the public view, silently. Names go in as text only.
+  // machine a `local-names.json` beside the page may name them (format.js
+  // parseLocalNames). A missing, slow or malformed file is the public view,
+  // silently: the fetch gives up after a second.
 
   let localNames = {};
   // What to do about each kind of waste, from the build (fix-next.mjs).
   let wasteActions = {};
 
   async function loadLocalNames() {
+    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 1000) : null;
     try {
-      const res = await fetch("./local-names.json", { cache: "no-store" });
-      if (!res.ok) return;
-      const file = await res.json();
-      if (file && file.version === 1 && file.jobs && typeof file.jobs === "object" && !Array.isArray(file.jobs)) localNames = file.jobs;
+      const res = await fetch("./local-names.json", { cache: "no-store", ...(ctrl ? { signal: ctrl.signal } : {}) });
+      if (res.ok) localNames = F.parseLocalNames(await res.json());
     } catch (err) {
       localNames = {};
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
-  function localName(id) {
-    const n = Object.prototype.hasOwnProperty.call(localNames, id) ? localNames[id] : null;
-    return n && typeof n.title === "string" && n.title.trim() ? n : null;
-  }
-
-  function jobLabel(j) {
-    const n = localName(j.id);
-    return n ? n.title : `Task ${j.id.slice(0, 10)}`;
-  }
+  const localName = (id) => (Object.prototype.hasOwnProperty.call(localNames, id) ? localNames[id] : null);
+  const jobLabel = (j) => F.jobLabel(localNames, j.id);
 
   function jobLink(id, text) {
     const a = document.createElement("a");
@@ -822,13 +756,19 @@
     return a;
   }
 
+  // A figure in a dense table or a list: "partial" beside it, its reason in
+  // the title and in the table's one note; no "declared" chip.
+  function cellNum(number, kind) {
+    return num(number, kind, { reason: false, nofn: false, flag: "short", basis: false });
+  }
+
   // --------------------------------------------------------------- tasks
 
   const OUTCOME_WORD = {
     accepted: "Accepted",
     sent_back: "Sent back",
-    awaiting_signoff: "Delivered, waiting for an answer",
-    delivered: "Delivered, no sign-off record",
+    awaiting_signoff: "Waiting for an answer",
+    delivered: "Delivered, no sign-off",
     in_progress: "In progress",
     cancelled: "Cancelled",
     unknown: "Status not recorded",
@@ -848,7 +788,7 @@
     const dot = el("span", "status-dot");
     dot.style.background = OUTCOME_COLOR[j.outcome] || "var(--text-muted)";
     span.appendChild(dot);
-    let word = OUTCOME_WORD[j.outcome] || j.status;
+    let word = OUTCOME_WORD[j.outcome] || "Status not recorded";
     if (j.outcome === "in_progress" && j.status !== "unavailable") word += ` (${j.status})`;
     span.appendChild(document.createTextNode(word));
     return span;
@@ -858,21 +798,19 @@
   function topWasteNode(j) {
     const rows = (j.waste && j.waste.rows) || [];
     const top = rows.find((r) => r.kind === "waste" || r.kind === "unknown");
-    if (!top) {
-      return el("span", "muted", rows.length ? "none labeled" : "not labeled yet");
-    }
+    if (!top) return el("span", "muted", rows.length ? "none labeled" : "not labeled yet");
     const span = el("span");
-    span.appendChild(document.createTextNode(`${WASTE_NAMES[top.key] || top.key} `));
-    span.appendChild(num(top.total_ms, "duration"));
+    span.appendChild(document.createTextNode(`${wasteName(top.key)} `));
+    span.appendChild(cellNum(top.total_ms, "duration"));
     return span;
   }
 
-  // A dense table says "no data" in each cell and gives the reasons once,
-  // under the table, per column: "Operator turns, 43 tasks: <reason>".
+  // A dense table says "no data" or "partial" in each cell and gives the
+  // reasons once, under the table, per column.
   function tableCell(tr, notes, label, number, kind, cls) {
     const td = el("td", cls);
     td.dataset.label = label;
-    td.appendChild(num(number, kind, { reason: false, nofn: false }));
+    td.appendChild(cellNum(number, kind));
     if (number.state !== "measured") {
       const why = F.describe(number, kind).reason;
       const what = number.state === "partial" ? `${label} (partial)` : label;
@@ -884,10 +822,31 @@
 
   function tableNotes(container, notes, noun) {
     if (!notes.size) return;
-    const ul = el("ul", "table-notes");
-    ul.appendChild(el("li", "table-notes-head", "Why some cells say no data or partial:"));
+    const box = el("details", "table-notes");
+    box.appendChild(el("summary", "table-notes-head", "Why some cells say no data or partial"));
+    const ul = el("ul");
     for (const n of notes.values()) ul.appendChild(el("li", null, `${n.label}, ${n.count === 1 ? `one ${noun}` : `${n.count} ${noun}s`}: ${n.why}.`));
-    container.appendChild(ul);
+    box.appendChild(ul);
+    container.appendChild(box);
+  }
+
+  function plainCell(tr, label, node, cls) {
+    const td = el("td", cls);
+    td.dataset.label = label;
+    td.appendChild(node);
+    tr.appendChild(td);
+  }
+
+  function tableHead(table, cols) {
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (const [c, cls] of cols) {
+      const th = el("th", cls, c);
+      th.scope = "col";
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    table.appendChild(thead);
   }
 
   function renderJobsTable(container, jobs) {
@@ -896,47 +855,21 @@
       emptyState(container, "No jobs tracked yet.");
       return;
     }
-    const table = document.createElement("table");
-    table.className = "data-table task-table";
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    const cols = [
-      ["Task", ""],
-      ["Status", ""],
-      ["Elapsed", "num"],
-      ["Agent time", "num"],
-      ["Operator turns", "num"],
-      ["Sent back", "num"],
-      ["Largest waste", ""],
-      ["Public PRs", "num"],
-    ];
-    for (const [c, cls] of cols) {
-      const th = el("th", cls, c);
-      th.scope = "col";
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-
+    const table = el("table", "data-table task-table");
+    tableHead(table, [["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Agent time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
     const tbody = document.createElement("tbody");
     const notes = new Map();
     for (const j of jobs) {
       const tr = document.createElement("tr");
-      const cell = (label, node, cls) => {
-        const td = el("td", cls);
-        td.dataset.label = label;
-        td.appendChild(node);
-        tr.appendChild(td);
-      };
       const name = el("span", "task-name");
       name.appendChild(jobLink(j.id, jobLabel(j)));
-      cell("Task", name, "task-cell");
-      cell("Status", outcomeNode(j));
+      plainCell(tr, "Task", name, "task-cell");
+      plainCell(tr, "Status", outcomeNode(j));
       tableCell(tr, notes, "Elapsed", j.lead_time_ms, "duration", "num");
       tableCell(tr, notes, "Agent time", j.active_time_ms, "duration", "num");
       tableCell(tr, notes, "Operator turns", j.human_turns, "count", "num");
       tableCell(tr, notes, "Sent back", j.returns, "count", "num");
-      cell("Largest waste", topWasteNode(j));
+      plainCell(tr, "Largest waste", topWasteNode(j));
       tableCell(tr, notes, "Public PRs", j.public_prs, "count", "num");
       tbody.appendChild(tr);
     }
@@ -948,63 +881,242 @@
   // ----------------------------------------------------------- fix next
 
   const SEVERITY_WORD = { alarm: "Alarm", act: "Act", improve: "Improve", signal: "Signal" };
+  const FIX_SHOWN = 5;
+
+  function fixItem(item, byId) {
+    const li = el("li", `fix-item fix-${item.severity}`);
+    const head = el("p", "fix-head");
+    head.appendChild(el("span", `fix-tag fix-tag-${item.severity}`, SEVERITY_WORD[item.severity] || "Note"));
+    head.appendChild(el("strong", "fix-title", item.title));
+    if (item.count && Array.isArray(item.noun)) {
+      const c = el("span", "fix-count");
+      c.appendChild(document.createTextNode(" · "));
+      c.appendChild(cellNum(item.count, "count"));
+      c.appendChild(document.createTextNode(` ${item.count.value === 1 ? item.noun[0] : item.noun[1]}`));
+      head.appendChild(c);
+    }
+    li.appendChild(head);
+    const act = el("p", "fix-action");
+    act.appendChild(el("span", "fix-do", "Do: "));
+    act.appendChild(document.createTextNode(item.action));
+    li.appendChild(act);
+    const list = el("ul", "fix-examples");
+    for (const e of item.examples) {
+      const j = byId.get(e.job);
+      const ex = document.createElement("li");
+      ex.appendChild(jobLink(e.job, j ? jobLabel(j) : F.jobLabel(localNames, e.job)));
+      if (e.figure) {
+        ex.appendChild(document.createTextNode(" — "));
+        ex.appendChild(cellNum(e.figure, e.kind));
+      }
+      list.appendChild(ex);
+    }
+    for (const l of item.links) {
+      const ex = document.createElement("li");
+      ex.appendChild(safeLink(l.title || `Issue ${l.ref}`, l.url));
+      ex.appendChild(document.createTextNode(" — open "));
+      ex.appendChild(cellNum(l.age_days, "count"));
+      ex.appendChild(document.createTextNode(" days"));
+      list.appendChild(ex);
+    }
+    if (list.children.length) li.appendChild(list);
+    return li;
+  }
 
   function renderFixNext(container, items, jobs) {
     container.innerHTML = "";
+    const ol = el("ol", "fix-list");
+    container.appendChild(ol);
     if (!items || !items.length) {
-      container.appendChild(el("li", "chart-empty", "Nothing to fix: no alarm, nothing waiting, no labeled waste and no open card."));
+      ol.appendChild(el("li", "chart-empty", "Nothing to fix: no alarm, nothing waiting, no labeled waste and no open card."));
       return;
     }
     const byId = new Map(jobs.map((j) => [j.id, j]));
-    for (const item of items) {
-      const li = el("li", `fix-item fix-${item.severity}`);
-      const head = el("p", "fix-head");
-      head.appendChild(el("span", `fix-tag fix-tag-${item.severity}`, SEVERITY_WORD[item.severity] || item.severity));
-      head.appendChild(el("strong", "fix-title", item.title));
-      if (item.count) {
-        const c = el("span", "fix-count");
-        c.appendChild(document.createTextNode(" · "));
-        c.appendChild(num(item.count, "count"));
-        c.appendChild(document.createTextNode(item.links.length ? " open" : item.examples.length ? (item.count.value === 1 ? " task" : " tasks") : ""));
-        head.appendChild(c);
-      }
-      li.appendChild(head);
-      const act = el("p", "fix-action");
-      act.appendChild(el("span", "fix-do", "Do: "));
-      act.appendChild(document.createTextNode(item.action));
-      li.appendChild(act);
-      if (item.examples.length) {
-        const ul = el("ul", "fix-examples");
-        for (const e of item.examples) {
-          const j = byId.get(e.job);
-          const ex = document.createElement("li");
-          ex.appendChild(jobLink(e.job, j ? jobLabel(j) : `Task ${e.job.slice(0, 10)}`));
-          ex.appendChild(document.createTextNode(" — "));
-          ex.appendChild(num(e.figure, e.kind));
-          ul.appendChild(ex);
-        }
-        li.appendChild(ul);
-      }
-      if (item.links.length) {
-        const ul = el("ul", "fix-examples");
-        for (const l of item.links) {
-          const ex = document.createElement("li");
-          ex.appendChild(safeLink(l.title || `Issue ${l.ref}`, l.url));
-          ex.appendChild(document.createTextNode(" — open "));
-          ex.appendChild(num(l.age_days, "count"));
-          ex.appendChild(document.createTextNode(" days"));
-          ul.appendChild(ex);
-        }
-        li.appendChild(ul);
-      }
-      container.appendChild(li);
+    items.slice(0, FIX_SHOWN).forEach((item) => ol.appendChild(fixItem(item, byId)));
+    if (items.length > FIX_SHOWN) {
+      const more = el("details", "more-details");
+      more.appendChild(el("summary", null, `More to fix (${items.length - FIX_SHOWN})`));
+      const ol2 = el("ol", "fix-list");
+      items.slice(FIX_SHOWN).forEach((item) => ol2.appendChild(fixItem(item, byId)));
+      more.appendChild(ol2);
+      container.appendChild(more);
     }
   }
 
-  // ------------------------------------------------------------ glance
+  // ------------------------------------------------------------ the band
+  // The answer and the factory's health in one band: one status line, the
+  // headline, and one line of counts.
 
-  function tile(container, label, valueNode, notes, cls) {
-    const t = el("div", `stat-tile glance-tile${cls ? ` ${cls}` : ""}`);
+  function words(...parts) {
+    const span = el("span");
+    for (const p of parts) span.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
+    return span;
+  }
+
+  function renderStatusLine(container, data, health) {
+    container.innerHTML = "";
+    let v;
+    try {
+      v = F.pageVerdict(health, Date.now());
+    } catch (err) {
+      v = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
+    }
+    const line = el("p", `status-line status-${v.status}`);
+    const verdict = el("strong", `verdict-inline verdict-inline-${v.status}`, `${VERDICT_MARK[v.status]} ${VERDICT_WORD[v.status]}`);
+    verdict.title = v.reason;
+    line.appendChild(verdict);
+    line.appendChild(document.createTextNode(" · real work captured: "));
+    const cov = data.capture_coverage && data.capture_coverage.share;
+    line.appendChild(cov && cov.state !== "unavailable" ? cellNum(cov, "pct") : el("span", "muted", "not measured yet"));
+    line.appendChild(document.createTextNode(" · improvement loop: "));
+    const k = data.kaizen;
+    if (k.resolved.state === "unavailable" || k.raised.state === "unavailable") {
+      line.appendChild(el("span", "muted", "not known for this build"));
+      line.title = `Improvement cards: ${F.describe(k.raised.state === "unavailable" ? k.raised : k.resolved, "count").reason}`;
+    } else {
+      line.appendChild(cellNum(k.resolved, "count"));
+      line.appendChild(document.createTextNode(" of "));
+      line.appendChild(cellNum(k.raised, "count"));
+      line.appendChild(document.createTextNode(" cards closed"));
+    }
+    container.appendChild(line);
+    if (v.status !== "alive") container.appendChild(el("p", "status-reason", `Why: ${v.reason}.`));
+  }
+
+  // Several figures that are all no data for one reason say it once.
+  function countsLine(parts) {
+    const p = el("p", "counts-line");
+    const reasons = parts.map(([, n]) => (n.state === "unavailable" ? F.describe(n, "count").reason : null));
+    const shared = reasons.every((r) => r !== null && r === reasons[0]) ? reasons[0] : null;
+    parts.forEach(([label, n], i) => {
+      if (i) p.appendChild(document.createTextNode(" · "));
+      p.appendChild(el("span", "counts-label", `${label} `));
+      p.appendChild(shared ? el("span", "num num-unavailable", "no data") : cellNum(n, "count"));
+      if (!shared && reasons[i]) p.appendChild(el("span", "muted", ` (${reasons[i]})`));
+    });
+    if (shared) p.appendChild(el("span", "muted", ` — ${shared}.`));
+    return p;
+  }
+
+  function headlineTile(container, label, valueNode, notes) {
+    const t = el("div", "stat-tile answer-headline");
+    t.appendChild(el("p", "stat-label", label));
+    const v = el("p", "stat-value");
+    v.appendChild(valueNode);
+    t.appendChild(v);
+    for (const n of notes) t.appendChild(n);
+    container.appendChild(t);
+  }
+
+  function note(cls, ...parts) {
+    const p = el("p", cls);
+    for (const x of parts) p.appendChild(typeof x === "string" ? document.createTextNode(x) : x);
+    return p;
+  }
+
+  function renderAnswer(container, o) {
+    container.innerHTML = "";
+    const h = o.attention.headline;
+    const noneAccepted = o.signoff.accepted.state === "measured" && o.signoff.accepted.value === 0;
+    const row = el("div", "answer-tiles headline-row");
+    if (h.state !== "unavailable") {
+      headlineTile(row, "Operator attention per accepted outcome", num(h, "duration", { nofn: false }), [
+        note("stat-note", "An estimate of the operator's reading and answering time, over the outcomes accepted. Attention spent on work sent back or still waiting stays in the cost."),
+        note("stat-trust", trustNode(o.attention.trust)),
+      ]);
+    } else if (noneAccepted) {
+      // No acceptance yet: say so, and answer per delivered task meanwhile.
+      headlineTile(row, "Operator attention per accepted outcome", el("span", "num num-unavailable", "none accepted yet"), [
+        note("stat-note", "The first acceptance is recorded when the operator answers a delivery."),
+      ]);
+      const d = o.attention.per_delivered;
+      if (d) {
+        headlineTile(row, "Operator attention per delivered task", num(d, "duration", { nofn: false, flag: "short" }), [
+          note("stat-note", "The interim measure until acceptances exist: the same attention estimate, averaged over delivered tasks instead of accepted ones."),
+          ...(d.state === "unavailable" ? [] : [note("stat-note", `Rests on ${d.n} of ${d.N} delivered tasks; the others have no whole attention estimate yet, so the true average could be higher or lower.`)]),
+        ]);
+      }
+    } else {
+      const fix = document.createElement("a");
+      const safe = F.safeAnchor("fix");
+      if (safe) fix.href = safe;
+      fix.textContent = "What unblocks it";
+      headlineTile(row, "Operator attention per accepted outcome", el("span", "num num-unavailable", "no data"), [
+        note("stat-note", `Not computed yet: ${F.describe(h, "duration").reason}. `, fix),
+      ]);
+    }
+    container.appendChild(row);
+    container.appendChild(
+      countsLine([
+        ["Accepted", o.signoff.accepted],
+        ["Deliveries waiting for an answer", o.unsigned],
+        ["Sent back", o.signoff.refused],
+      ]),
+    );
+  }
+
+  // ------------------------------------------------------------- trend
+  // Only the columns where at least one release has data.
+
+  function renderTrend(container, trend) {
+    container.innerHTML = "";
+    const cols = [
+      ["Accepted", "accepted", "count"],
+      ["Sent back", "sent_back", "count"],
+      ["First-pass yield", "first_pass_yield", "pct"],
+      ["Attention per accepted", "attention", "duration"],
+      ["Flow efficiency (median)", "flow_efficiency", "pct"],
+    // A column every release leaves empty, or zero throughout, says nothing per release.
+    ].filter(([, key]) => (trend || []).some((r) => r[key].state !== "unavailable" && r[key].value !== 0));
+    // Only the releases with a figure in a shown column.
+    const rowsWithData = (trend || []).filter((r) => cols.some(([, key]) => r[key].state !== "unavailable"));
+    if (!rowsWithData.length || !cols.length) {
+      container.appendChild(el("p", "chart-empty", "The trend fills in once sign-offs are recorded."));
+      return;
+    }
+    const table = el("table", "data-table task-table trend-table");
+    tableHead(table, [["Desk release", ""], ["Tasks", "num"], ...cols.map(([c]) => [c, "num"])]);
+    const tbody = document.createElement("tbody");
+    const notes = new Map();
+    for (const r of rowsWithData) {
+      const tr = document.createElement("tr");
+      plainCell(tr, "Desk release", el("span", "task-name", r.version === "mixed" ? "several releases" : r.version), "task-cell");
+      tableCell(tr, notes, "Tasks", r.jobs, "count", "num");
+      for (const [label, key, kind] of cols) tableCell(tr, notes, label, r[key], kind, "num");
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    container.appendChild(table);
+    tableNotes(container, notes, "release");
+    const left = trend.length - rowsWithData.length;
+    if (cols.length < 5 || left) container.appendChild(el("p", "chart-caption", `Only columns with a figure other than zero are shown${left ? `, and ${left} releases with no figure yet are left out` : ""}. Accepted, sent back, yield and attention appear once a release has an answered delivery.`));
+  }
+
+  // ------------------------------------------------------------ task page
+  // One task: what it is, where it stands, what it cost, its waste with
+  // confidence, its pull requests and its sessions. Its address is
+  // #job-<key>, so a task page can be linked.
+
+  // Which entry of data.scopes each captioned section reads.
+  const SCOPE_OF = { headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" };
+
+  const STATE_WORD = { measured: "measured", partial: "partial", unavailable: "no data" };
+  const JOB_ID = /^[0-9A-Za-z_-]{1,64}$/;
+
+  function idFromHash(prefix) {
+    const m = new RegExp(`^#${prefix}-(.+)$`).exec(window.location.hash || "");
+    return m && JOB_ID.test(m[1]) ? m[1] : null;
+  }
+
+  function confidenceWords(r) {
+    const c = r.confidence || {};
+    if (!c.high_ms || c.high_ms.state === "unavailable") return "confidence not recorded";
+    const parts = ["high", "medium", "low"].filter((k) => c[`${k}_ms`].value > 0);
+    return parts.length ? `confidence: ${parts.join(", ")}` : "confidence: none recorded";
+  }
+
+  function tile(container, label, valueNode, notes) {
+    const t = el("div", "stat-tile");
     t.appendChild(el("p", "stat-label", label));
     const v = el("p", "stat-value");
     v.appendChild(valueNode);
@@ -1018,129 +1130,9 @@
     return t;
   }
 
-  function words(...parts) {
-    const span = el("span");
-    for (const p of parts) span.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
-    return span;
-  }
-
-  function renderGlance(container, data, health) {
-    container.innerHTML = "";
-    let v;
-    try {
-      v = F.pageVerdict(health, Date.now());
-    } catch (err) {
-      v = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
-    }
-    tile(container, "The factory is", el("span", `verdict-inline verdict-inline-${v.status}`, `${VERDICT_MARK[v.status]} ${VERDICT_WORD[v.status]}`), [v.reason], `glance-${v.status}`);
-    const cov = data.capture_coverage && data.capture_coverage.share;
-    tile(container, "Real work captured", num(cov || { state: "unavailable", reasons: ["not_recorded_yet"] }, "pct", { nofn: false }), [
-      "of sessions still on disk",
-      words(num(data.scope.sessions_total, "count"), " sessions published; ", num(data.coverage.jobs, "count", { nofn: false }), " tasks tracked"),
-    ]);
-    const loop = data.loop_health || {};
-    tile(container, "Improvement loop", words(num(data.kaizen.resolved, "count", { nofn: false }), " of ", num(data.kaizen.raised, "count", { nofn: false })), [
-      "kaizen cards closed",
-      words("Open items now: ", num(loop.open || { state: "unavailable", reasons: ["not_recorded_yet"] }, "count", { nofn: false })),
-      words("Closed this month with the fix confirmed: ", num(loop.closed_confirmed_month || { state: "unavailable", reasons: ["not_recorded_yet"] }, "count", { nofn: false })),
-    ]);
-    const waitNotes = ["deliveries waiting for the operator's answer"];
-    if (data.outcomes.oldest_unsigned_wait.state !== "unavailable") waitNotes.push(words("Longest: ", num(data.outcomes.oldest_unsigned_wait, "text")));
-    tile(container, "Waiting on the operator", num(data.outcomes.unsigned, "count", { nofn: false }), waitNotes);
-  }
-
-  // ------------------------------------------------------------ answer
-
-  function renderAnswer(container, o) {
-    container.innerHTML = "";
-    const head = tile(container, "Operator attention per accepted outcome", num(o.attention.headline, "duration", { nofn: false }), [
-      "An estimate of the time the operator spent reading and answering, over the outcomes accepted.",
-      words("Operator turns per accepted outcome: ", num(o.attention.turns_per_accepted, "count", { nofn: false })),
-    ], "answer-headline");
-    if (o.attention.headline.state !== "unavailable") {
-      const t = el("p", "stat-trust");
-      t.appendChild(trustNode(o.attention.trust));
-      head.appendChild(t);
-    }
-    tile(container, "Accepted", num(o.signoff.accepted, "count", { nofn: false }), ["recorded by the agent on the operator's word"]);
-    tile(container, "Waiting for an answer", num(o.unsigned, "count", { nofn: false }), ["delivered, not answered yet"]);
-    tile(container, "Sent back", num(o.signoff.refused, "count", { nofn: false }), [words("Delivered before sign-off was recorded: ", num(o.signoff.not_recorded, "count", { nofn: false }))]);
-    tile(container, "First-pass yield", num(o.first_pass_yield, "pct"), ["deliveries accepted with nothing sent back"]);
-  }
-
-  // ------------------------------------------------------------- trend
-
-  function renderTrend(container, trend) {
-    container.innerHTML = "";
-    if (!Array.isArray(trend) || !trend.length) {
-      emptyState(container, "No release grouping is in this build's data yet.");
-      return;
-    }
-    const table = el("table", "data-table task-table trend-table");
-    const thead = document.createElement("thead");
-    const hr = document.createElement("tr");
-    for (const [c, cls] of [["Desk release", ""], ["Tasks", "num"], ["Accepted", "num"], ["Sent back", "num"], ["First-pass yield", "num"], ["Attention per accepted", "num"], ["Flow efficiency (median)", "num"]]) hr.appendChild(el("th", cls, c));
-    thead.appendChild(hr);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    const notes = new Map();
-    for (const r of trend) {
-      const tr = document.createElement("tr");
-      const cell = (label, node, cls) => {
-        const td = el("td", cls);
-        td.dataset.label = label;
-        td.appendChild(node);
-        tr.appendChild(td);
-      };
-      cell("Desk release", el("span", "task-name", r.version === "mixed" ? "several releases" : r.version), "task-cell");
-      tableCell(tr, notes, "Tasks", r.jobs, "count", "num");
-      tableCell(tr, notes, "Accepted", r.accepted, "count", "num");
-      tableCell(tr, notes, "Sent back", r.sent_back, "count", "num");
-      tableCell(tr, notes, "First-pass yield", r.first_pass_yield, "pct", "num");
-      tableCell(tr, notes, "Attention per accepted", r.attention, "duration", "num");
-      tableCell(tr, notes, "Flow efficiency (median)", r.flow_efficiency, "pct", "num");
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    container.appendChild(table);
-    tableNotes(container, notes, "release");
-  }
-
-  // ------------------------------------------------------------ task page
-  // One task: what was asked, where it stands, what it cost, its waste with
-  // confidence, its pull requests and its sessions. Its address is
-  // #job-<key>, so a task page can be linked.
-
-  // Which entry of data.scopes each captioned section reads.
-  const SCOPE_OF = { headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" };
-
-  const STATE_WORD = { measured: "measured", partial: "partial", unavailable: "no data" };
-  const JOB_ID = /^[0-9A-Za-z_-]{1,64}$/;
-  const ROW_NAME = { value: "Value-adding work", support: "Necessary support" };
-
-  function idFromHash(prefix) {
-    const m = new RegExp(`^#${prefix}-(.+)$`).exec(window.location.hash || "");
-    return m && JOB_ID.test(m[1]) ? m[1] : null;
-  }
-
-  function jobIdFromHash() {
-    return idFromHash("job");
-  }
-
-  function confidenceWords(r) {
-    const c = r.confidence || {};
-    if (!c.high_ms || c.high_ms.state === "unavailable") return "confidence not recorded";
-    const parts = ["high", "medium", "low"].filter((k) => c[`${k}_ms`].value > 0);
-    return parts.length ? `confidence: ${parts.join(", ")}` : "confidence: none recorded";
-  }
-
   function detailsTable(j) {
     const table = el("table", "data-table job-detail-table");
-    const head = document.createElement("tr");
-    for (const c of ["Measure", "Figure", "State", "Why"]) head.appendChild(el("th", c === "Figure" ? "num" : "", c));
-    const thead = document.createElement("thead");
-    thead.appendChild(head);
-    table.appendChild(thead);
+    tableHead(table, [["Measure", ""], ["Figure", "num"], ["State", ""], ["Why", ""]]);
     const tbody = document.createElement("tbody");
     for (const d of j.details || []) {
       const tr = document.createElement("tr");
@@ -1153,7 +1145,8 @@
       const st = el("td");
       st.appendChild(el("span", `state-word state-${d.number.state}`, STATE_WORD[d.number.state]));
       tr.appendChild(st);
-      tr.appendChild(el("td", "state-why", figure.state === "measured" ? "" : figure.reason));
+      const why = figure.state === "measured" ? (figure.basis === "declared" ? "taken from the task card, not measured from a session" : figure.basis === "inferred" ? "computed from other measures" : "") : figure.reason;
+      tr.appendChild(el("td", "state-why", why));
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
@@ -1172,35 +1165,34 @@
     }
     const name = localName(j.id);
     container.appendChild(el("h2", "section-title", jobLabel(j)));
-    container.appendChild(el("p", "task-key", name ? `${name.track || ""}${name.track && name.task ? " / " : ""}${name.task || ""} · key ${j.id}` : `Anonymous task key ${j.id}`));
+    const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
+    container.appendChild(el("p", "task-key", name ? `${where ? `${where} · ` : ""}key ${j.id}` : `Anonymous task key ${j.id}. The task's name stays private on the operator's machine.`));
 
-    const asked = el("div", "chart-card task-asked");
-    asked.appendChild(el("h3", null, "What was asked"));
-    asked.appendChild(el("p", null, name ? name.title : "The task's name stays private on the operator's machine; the store publishes only this anonymous key."));
-    const where = el("p", null);
-    where.appendChild(outcomeNode(j));
-    if (j.signoff.state !== "unavailable") {
-      where.appendChild(document.createTextNode(" · sign-off: "));
-      where.appendChild(num(j.signoff, "text"));
-      if (j.outcome === "accepted" || j.outcome === "sent_back") where.appendChild(el("span", "muted", " (recorded by the agent on the operator's word)"));
-      if (j.signoff_wait.state !== "unavailable") {
-        where.appendChild(document.createTextNode(" · "));
-        where.appendChild(num(j.signoff_wait, "text"));
-      }
-    } else {
-      where.appendChild(document.createTextNode(" · sign-off: "));
-      where.appendChild(num(j.signoff, "text"));
+    const status = el("p", "task-status");
+    status.appendChild(outcomeNode(j));
+    status.appendChild(document.createTextNode(" · sign-off: "));
+    status.appendChild(cellNum(j.signoff, "text"));
+    if (j.signoff.state === "unavailable") status.appendChild(el("span", "muted", ` (${F.describe(j.signoff, "text").reason})`));
+    if (j.outcome === "accepted" || j.outcome === "sent_back") status.appendChild(el("span", "muted", " (recorded by the agent on the operator's word)"));
+    if (j.signoff_wait.state !== "unavailable") {
+      status.appendChild(document.createTextNode(" · "));
+      status.appendChild(cellNum(j.signoff_wait, "text"));
     }
-    asked.appendChild(where);
-    container.appendChild(asked);
+    container.appendChild(status);
 
     const tiles = el("div", "answer-tiles task-tiles");
-    tile(tiles, "Elapsed", num(j.lead_time_ms, "duration"), ["from the task card to its last session"]);
-    tile(tiles, "Agent time", num(j.active_time_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
-    tile(tiles, "Operator attention", num(j.attention_ms, "duration"), [words("over ", num(j.human_turns, "count"), " operator turns")]);
-    tile(tiles, "Sent back", num(j.returns, "count"), [words("first pass: ", num(j.first_pass, "pass"))]);
-    tile(tiles, "Waiting on the operator", num(j.human_wait_ms, "duration"), ["gaps between prompts inside sessions"]);
+    const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", basis: false, reason: false });
+    tile(tiles, "Elapsed", fig(j.lead_time_ms, "duration"), [j.lead_time_ms.basis === "declared" ? "from the task card's dates" : "from the task card to its last session"]);
+    tile(tiles, "Agent time", fig(j.active_time_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
+    tile(tiles, "Operator attention", fig(j.attention_ms, "duration"), [words("over ", fig(j.human_turns, "count"), " operator turns")]);
+    tile(tiles, "Sent back", fig(j.returns, "count"), [words("first pass: ", fig(j.first_pass, "pass"))]);
+    tile(tiles, "Gaps between the operator's prompts", fig(j.human_wait_ms, "duration"), ["inside sessions; not the evaluator's waiting"]);
     container.appendChild(tiles);
+    const tileNotes = [[j.lead_time_ms, "duration"], [j.active_time_ms, "duration"], [j.attention_ms, "duration"], [j.human_turns, "count"], [j.returns, "count"], [j.first_pass, "pass"], [j.human_wait_ms, "duration"]].filter(([n]) => n.state !== "measured");
+    if (tileNotes.length) {
+      const reasons = [...new Set(tileNotes.map(([n, kind]) => F.describe(n, kind).reason))];
+      container.appendChild(el("p", "chart-caption", `Why some figures say no data or partial: ${reasons.join("; ")}.`));
+    }
 
     // Waste, with confidence.
     const waste = el("div", "chart-card");
@@ -1208,28 +1200,31 @@
     const rows = (j.waste && j.waste.rows) || [];
     const cap = el("p", "chart-caption");
     cap.appendChild(document.createTextNode("Labeled by the independent waste evaluator: "));
-    cap.appendChild(num(j.waste ? j.waste.sessions_labeled : { state: "unavailable", reasons: ["not_labeled"] }, "count"));
-    cap.appendChild(document.createTextNode(" of "));
-    cap.appendChild(num(j.sessions_bound, "count"));
-    cap.appendChild(document.createTextNode(" sessions."));
+    cap.appendChild(cellNum(j.waste ? j.waste.sessions_labeled : { state: "unavailable", reasons: ["not_labeled"] }, "count"));
+    cap.appendChild(document.createTextNode(" of the "));
+    cap.appendChild(cellNum(j.waste ? j.waste.sessions_on_timeline : { state: "unavailable", reasons: ["not_labeled"] }, "count"));
+    cap.appendChild(document.createTextNode(" sessions on this task's timeline. Labeled time covers each session's whole clock, including waiting on CI, tools and the operator."));
     waste.appendChild(cap);
+    if (j.waste && j.waste.foreign_sessions && j.waste.foreign_sessions.value > 0) {
+      waste.appendChild(el("p", "fix-action", "Data defect: some labels filed under this task name sessions that are not on its timeline. They are not counted here."));
+    }
     if (!rows.length) {
       waste.appendChild(el("p", "chart-empty", "Not labeled yet, so this task's waste is no data, not zero. Do: run the waste evaluator on this task's sessions."));
     } else {
       const barRows = rows.map((r) => ({
-        label: ROW_NAME[r.key] || WASTE_NAMES[r.key] || r.key,
+        label: wasteName(r.key),
         flag: r.kind === "value" || r.kind === "support" ? "" : confidenceWords(r),
         color: r.kind === "value" ? "var(--status-good)" : r.kind === "support" ? "var(--series-1)" : r.kind === "unknown" ? "var(--text-muted)" : "var(--series-8)",
         number: r.total_ms,
       }));
       const bars = el("div");
-      renderBarList(bars, barRows, { kind: "duration" });
+      renderBarList(bars, barRows, { kind: "duration", flag: "short" });
       waste.appendChild(bars);
-      const advice = rows.filter((r) => r.kind === "waste" || r.kind === "unknown").slice(0, 1);
-      for (const r of advice) {
+      const top = rows.find((r) => r.kind === "waste" || r.kind === "unknown");
+      if (top) {
         const p = el("p", "fix-action");
         p.appendChild(el("span", "fix-do", "Do: "));
-        p.appendChild(document.createTextNode(wasteActions[r.key] || "Look at the labeled stretches and remove the cause."));
+        p.appendChild(document.createTextNode(wasteActions[top.key] || "Look at the labeled stretches and remove the cause."));
         waste.appendChild(p);
       }
     }
@@ -1240,7 +1235,7 @@
     prs.appendChild(el("h3", null, "Pull requests"));
     const prLine = el("p", "chart-caption");
     prLine.appendChild(document.createTextNode("Public pull requests the task's sessions referenced: "));
-    prLine.appendChild(num(j.public_prs, "count"));
+    prLine.appendChild(cellNum(j.public_prs, "count"));
     prs.appendChild(prLine);
     if (j.pull_requests.length) {
       const ul = el("ul", "pr-list");
@@ -1261,36 +1256,28 @@
       ses.appendChild(el("p", "chart-empty", "No session is on this task's timeline."));
     } else {
       const table = el("table", "data-table task-table");
-      const hr = document.createElement("tr");
-      for (const [c, cls] of [["Session", ""], ["Length", "num"], ["Agent time", "num"], ["Tool calls", "num"], ["Failed calls", "num"], ["Subagents", "num"]]) hr.appendChild(el("th", cls, c));
-      const thead = document.createElement("thead");
-      thead.appendChild(hr);
-      table.appendChild(thead);
+      tableHead(table, [["Session", ""], ["Length", "num"], ["Agent time", "num"], ["Tool calls", "num"], ["Failed calls", "num"], ["Subagents", "num"]]);
       const tbody = document.createElement("tbody");
+      const notes = new Map();
+      const none = { state: "unavailable", reasons: ["facts_missing"] };
       for (const s of j.sessions) {
         const f = byId.get(s.session_id);
         const tr = document.createElement("tr");
-        const cell = (label, node, cls) => {
-          const td = el("td", cls);
-          td.dataset.label = label;
-          td.appendChild(node);
-          tr.appendChild(td);
-        };
         const link = document.createElement("a");
         const safe = F.safeAnchor(`session-${s.session_id}`);
         if (safe) link.href = safe;
         link.textContent = `${s.host} · ${s.session_id.slice(0, 8)}`;
-        cell("Session", link, "task-cell");
-        const none = { state: "unavailable", reasons: ["facts_missing"] };
-        cell("Length", num(f ? f.duration_ms : none, "duration"), "num");
-        cell("Agent time", num(f ? f.active_ms : none, "duration"), "num");
-        cell("Tool calls", num(f ? f.tool_calls_total : none, "count"), "num");
-        cell("Failed calls", num(f ? f.tool_failures_total : none, "count"), "num");
-        cell("Subagents", num(f ? f.subagent_count : none, "count"), "num");
+        plainCell(tr, "Session", link, "task-cell");
+        tableCell(tr, notes, "Length", f ? f.duration_ms : none, "duration", "num");
+        tableCell(tr, notes, "Agent time", f ? f.active_ms : none, "duration", "num");
+        tableCell(tr, notes, "Tool calls", f ? f.tool_calls_total : none, "count", "num");
+        tableCell(tr, notes, "Failed calls", f ? f.tool_failures_total : none, "count", "num");
+        tableCell(tr, notes, "Subagents", f ? f.subagent_count : none, "count", "num");
         tbody.appendChild(tr);
       }
       table.appendChild(tbody);
       ses.appendChild(table);
+      tableNotes(ses, notes, "session");
     }
     container.appendChild(ses);
 
@@ -1323,20 +1310,22 @@
     container.appendChild(el("h2", "section-title", `Session ${s.session_id.slice(0, 8)}`));
     container.appendChild(el("p", "task-key", `${s.host} · ${s.entrypoint} · ${s.session_id}`));
     const tiles = el("div", "answer-tiles task-tiles");
-    tile(tiles, "Length", num(s.duration_ms, "duration"), ["from the session's first record to its last"]);
-    tile(tiles, "Agent time", num(s.active_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
-    tile(tiles, "Tool calls", num(s.tool_calls_total, "count"), [words("failed: ", num(s.tool_failures_total, "count"))]);
-    tile(tiles, "Subagents", num(s.subagent_count, "count"), [s.models.length ? `models: ${s.models.join(", ")}` : "models: none recorded"]);
+    const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", reason: false });
+    tile(tiles, "Length", fig(s.duration_ms, "duration"), ["from the session's first record to its last"]);
+    tile(tiles, "Agent time", fig(s.active_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
+    tile(tiles, "Tool calls", fig(s.tool_calls_total, "count"), [words("failed: ", fig(s.tool_failures_total, "count"))]);
+    tile(tiles, "Subagents", fig(s.subagent_count, "count"), [s.models.length ? `models: ${s.models.join(", ")}` : "models: none recorded"]);
     container.appendChild(tiles);
+    const partly = [s.duration_ms, s.active_ms, s.tool_calls_total, s.tool_failures_total, s.subagent_count].filter((n) => n.state !== "measured");
+    if (partly.length) container.appendChild(el("p", "chart-caption", `Why some figures say no data or partial: ${[...new Set(partly.map((n) => F.describe(n, "count").reason))].join("; ")}.`));
     const card = el("div", "chart-card");
     card.appendChild(el("h3", null, "Tasks this session worked on"));
     const ul = el("ul", "pr-list");
-    const known = new Set(jobs.map((j) => j.id));
     for (const ref of s.jobs) {
       const li = document.createElement("li");
       const j = jobs.find((x) => x.id === ref.id);
-      if (known.has(ref.id)) li.appendChild(jobLink(ref.id, jobLabel(j)));
-      else li.appendChild(document.createTextNode(`Task ${ref.id.slice(0, 10)} (no report in this build)`));
+      if (j) li.appendChild(jobLink(ref.id, jobLabel(j)));
+      else li.appendChild(document.createTextNode(`${F.jobLabel(localNames, ref.id)} (no report in this build)`));
       ul.appendChild(li);
     }
     card.appendChild(ul);
@@ -1367,9 +1356,6 @@
     }
   }
 
-  function showJobFromHash(data) {
-    route(data);
-  }
   // -------------------------------------------------------------- health
 
   const VERDICT_WORD = { alive: "Alive", stale: "Stale", broken: "Broken", unknown: "Unknown" };
@@ -1676,7 +1662,7 @@
       al.textContent = `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`;
     } else if (verdict.status === "healthy") {
       al.textContent = "No loop alarm: nothing has been open for a week, the loop has no alarm of its own, and every loop step is succeeding.";
-    } else if (verdict.missing.length && verdict.missing.every((x) => x.codes.length === 1 && x.codes[0] === "no_records")) {
+    } else if (verdict.missing.length && verdict.missing.every((x) => x.codes.length === 1 && x.codes[0] === "no_loop_records")) {
       al.textContent = "No alarm can be told until a machine sends its loop's health.";
     } else {
       const parts = verdict.missing.map((x) => `${LOOP_FIGURE[x.figure] || x.figure} (${x.codes.map((c) => F.reasonText(c)).join("; ")})`);
@@ -1717,7 +1703,7 @@
       renderHealth(document.getElementById("health-panel"), health, false, err.message);
       const msg = "This page could not load the store's data (" + err.message + "). Try reloading, or check the reports branch directly.";
       emptyState(document.getElementById("featured-grid"), msg);
-      emptyState(document.getElementById("glance-tiles"), msg);
+      emptyState(document.getElementById("answer-tiles"), msg);
       return;
     }
     renderHealth(document.getElementById("health-panel"), health, true, "");
@@ -1726,10 +1712,12 @@
     // The overview: at a glance, the answer, the trend, what to fix next.
     await loadLocalNames();
     wasteActions = data.waste_actions && typeof data.waste_actions === "object" ? data.waste_actions : {};
-    renderGlance(document.getElementById("glance-tiles"), data, health);
+    wasteNames = data.waste_names && typeof data.waste_names === "object" ? data.waste_names : {};
+    renderStatusLine(document.getElementById("status-line"), data, health);
     renderAnswer(document.getElementById("answer-tiles"), data.outcomes);
     renderTrend(document.getElementById("trend"), data.trend);
     renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs);
+    renderLabeledWaste(document.getElementById("labeled-waste"), data.labeled_waste);
 
     // Build metadata footer
     const built = new Date(data.built_at);
@@ -1838,7 +1826,6 @@
       rowEl.after(line);
     });
 
-    renderWaste(document.getElementById("waste-caption"), document.getElementById("waste-panel"), data.waste);
     renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes);
     renderKaizen(
       document.getElementById("kaizen-panel"),
@@ -1929,8 +1916,8 @@
     });
 
     renderJobsTable(document.getElementById("jobs-table"), data.jobs);
-    showJobFromHash(data);
-    window.addEventListener("hashchange", () => showJobFromHash(data));
+    route(data);
+    window.addEventListener("hashchange", () => route(data));
   }
 
   main();

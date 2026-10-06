@@ -12,7 +12,7 @@
 // out of scope of the sign-off figures, counted beside them.
 
 import { direct } from "./bounds.mjs"
-import { declareRollup, measured, partial, trust, unavailable } from "./state.mjs"
+import { declareRollup, measured, partial, rollup, trust, unavailable } from "./state.mjs"
 
 const NOT_YET = ["not_recorded_yet"]
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
@@ -47,12 +47,10 @@ const JOBS_SIGNED = "delivered jobs with a sign-off record"
 const DELIVERED = "verdicts on delivered jobs are final"
 const HISTORY = "jobs with a recorded history"
 
-// Acceptance is recorded by the agent on the operator's word. Desk still
-// counts an acceptance with no witnessed prompt apart (`accepted_unverified`);
-// the site counts both as accepted, so `accepted` here is their sum.
+// The accepted count is Desk's own (`accepted`), the same population Desk
+// divides the attention headline by, so the two can never disagree.
 function signoffPart(raw, published) {
   const signoff = Object.fromEntries(SIGNOFF_KEYS.map((k) => [k, published ? count(raw[k]) : unavailable(published === null ? NOT_YET : ["signoff_not_published"])]))
-  if (published && isCount(raw.accepted)) signoff.accepted = count(raw.accepted + (isCount(raw.accepted_unverified) ? raw.accepted_unverified : 0))
   const refusal = published && isObject(raw.refusal_reasons) ? raw.refusal_reasons : {}
   const refusalReasons = REFUSALS.filter((r) => isCount(refusal[r]) && refusal[r] > 0).map((reason) => ({ reason, jobs: measured(refusal[reason]) }))
   const waitsOf = (side) =>
@@ -97,12 +95,11 @@ function yieldOf(y) {
   const lostJobs = lost.reduce((s, e) => s + e.jobs, 0)
   if (!isCount(y.N) || !isCount(y.awaiting_signoff) || !isCount(y.signoff_unverified)) return none(["not_recorded"], DELIVERED)
   const N = y.N + lostJobs
-  // An unwitnessed verdict is final: the agent recorded it on the operator's word.
-  const reasons = [...new Set([...(Array.isArray(y.reasons) ? y.reasons : []), ...lost.map((e) => e.reason)])].filter((r) => r !== "signoff_unverified").sort()
+  const reasons = [...new Set([...(Array.isArray(y.reasons) ? y.reasons : []), ...lost.map((e) => e.reason)])].sort()
   if (y.state === "unavailable" || y.N === 0 || typeof y.value !== "number") {
     return none(reasons.length ? reasons : ["no_delivered_jobs"], DELIVERED, N, outOfScope)
   }
-  const n = Math.max(0, y.N - y.awaiting_signoff)
+  const n = Math.max(0, y.N - y.awaiting_signoff - y.signoff_unverified)
   const base = { kind: "rollup", n, N, of: DELIVERED, out_of_scope: outOfScope }
   if (n === N && reasons.length === 0) return { ...measured(y.value), ...base }
   return direct({ ...partial(y.value, reasons.length ? reasons : ["unmeasured_members"]), ...base }, "first_pass_yield")
@@ -131,9 +128,9 @@ function reworkOf(r) {
   if (!check || check.state === "unavailable" || !isCount(check.compared) || !isCount(check.disagree) || !isCount(check.compared_verified)) {
     reasonCheck = { compared: unavailable(checkReasons), disagree: unavailable(checkReasons), compared_verified: unavailable(checkReasons) }
   } else {
-    // Every refusal is the operator's word as the agent recorded it, so the
-    // disagreement over all of them is whole.
-    const disagree = measured(check.disagree)
+    // Unverified refusals are compared too; what the human said there is not
+    // witnessed, so the disagreement is at least this.
+    const disagree = check.compared_verified < check.compared ? direct(partial(check.disagree, ["refusal_unverified"]), "reason_disagree") : measured(check.disagree)
     reasonCheck = { compared: measured(check.compared), disagree, compared_verified: measured(check.compared_verified) }
   }
   const d = isObject(r?.defects) ? r.defects : null
@@ -189,8 +186,8 @@ export function outcomesSummary(file, { coverage = null } = {}) {
     first_pass_counts: {
       passed: count(f?.first_pass_yield?.passed, f ? ["not_recorded"] : NOT_YET),
       counted: count(f?.first_pass_yield?.N, f ? ["not_recorded"] : NOT_YET),
-      final: isObject(f?.first_pass_yield) && [f.first_pass_yield.N, f.first_pass_yield.awaiting_signoff].every(isCount)
-        ? measured(Math.max(0, f.first_pass_yield.N - f.first_pass_yield.awaiting_signoff))
+      final: isObject(f?.first_pass_yield) && [f.first_pass_yield.N, f.first_pass_yield.awaiting_signoff, f.first_pass_yield.signoff_unverified].every(isCount)
+        ? measured(Math.max(0, f.first_pass_yield.N - f.first_pass_yield.awaiting_signoff - f.first_pass_yield.signoff_unverified))
         : unavailable(f ? ["not_recorded"] : NOT_YET),
       returned: count(f?.first_pass_yield?.returned, f ? ["not_recorded"] : NOT_YET),
       changed_ask_only: count(f?.first_pass_yield?.changed_ask_only, f ? ["not_recorded"] : NOT_YET),
@@ -204,6 +201,16 @@ export function outcomesSummary(file, { coverage = null } = {}) {
 // Desk already builds (`groupings.plugin_version` in outcomes.json and
 // measures.json), oldest release first. A job that ran under several
 // releases is in its own row, "mixed", last. Each figure keeps its state.
+// The interim answer until an outcome is accepted: the operator's attention
+// per delivered task, from the same per-task attention estimate Desk's
+// headline sums. A mean over the delivered tasks whose estimate is whole;
+// the rest are counted in its n of N.
+const DELIVERED_OUTCOMES = new Set(["delivered", "awaiting_signoff", "accepted", "sent_back"])
+export function attentionPerDelivered(jobs) {
+  const members = (Array.isArray(jobs) ? jobs : []).filter((j) => DELIVERED_OUTCOMES.has(j.outcome)).map((j) => j.attention_ms)
+  return rollup(members, { of: "delivered tasks", reduce: (v) => Math.round(v.reduce((a, b) => a + b, 0) / v.length), measure: "attention_per_delivered" })
+}
+
 export function releaseTrend(outcomesFile, measuresFile, compareVersions) {
   const o = isObject(outcomesFile?.groupings?.plugin_version) ? outcomesFile.groupings.plugin_version : {}
   const m = isObject(measuresFile?.groupings?.plugin_version) ? measuresFile.groupings.plugin_version : {}
