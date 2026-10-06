@@ -112,7 +112,7 @@ const PUBLISHED_UNAVAILABLE_FIELDS = Object.freeze([
   "tokens", "requests", "models", "turns", "tool_durations", "permission_waits",
   "human_waits", "api_retries", "commits", "ci_runs", "plugins", "ended_at",
   "compaction_waits", "agents", "prs", "reasoning_tokens", "entrypoint", "tool_outcomes", "job_segments",
-  "job_offsets",
+  "job_offsets", "human_turns",
 ]);
 const UNAVAILABLE_REASONS = Object.freeze([
   "host_does_not_record", "log_missing", "log_truncated", "session_open",
@@ -135,6 +135,7 @@ const SHAPE_LIMITS = Object.freeze({
   // enums), so no entry set can overflow when the vocabulary grows.
   unavailable: PUBLISHED_UNAVAILABLE_FIELDS.length * UNAVAILABLE_REASONS.length,
 });
+const UNAVAILABLE_LIMIT = SHAPE_LIMITS.unavailable;
 
 const shapeLeaf = (check) => ({ check });
 
@@ -533,4 +534,4 @@ export function correctionChanges(current, record) {
   return Object.entries(record.fields).some(([key, value]) => JSON.stringify(current[key]) !== JSON.stringify(value));
 }
 
-export { CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME };
+export { CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };

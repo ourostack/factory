@@ -5,7 +5,14 @@ import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
 
-import { applyCorrection, correctionChanges, validateCorrectionRecord } from "../lib/corrections.mjs"
+import {
+  PUBLISHED_UNAVAILABLE_FIELDS,
+  UNAVAILABLE_LIMIT,
+  UNAVAILABLE_REASONS,
+  applyCorrection,
+  correctionChanges,
+  validateCorrectionRecord,
+} from "../lib/corrections.mjs"
 import { applyCorrectionsToStore, CorrectionsInvalidError } from "../apply-corrections.mjs"
 import { checkCorrections } from "../check-corrections.mjs"
 
@@ -410,16 +417,24 @@ const V2_REASONS = [
   "field_absent", "host_records_partly", "withheld_public",
 ]
 
-test("a correction may carry every /2 unavailable field and reason, all 220 pairs at once", () => {
-  const all = V2_FIELDS.flatMap((field) => V2_REASONS.map((reason) => ({ field, reason })))
-  assert.equal(all.length, 220)
+test("the unavailable list limit is every field with every reason once, computed from the two lists, and human_turns is a field", () => {
+  assert.ok(PUBLISHED_UNAVAILABLE_FIELDS.includes("human_turns"))
+  assert.deepEqual([...PUBLISHED_UNAVAILABLE_FIELDS].sort(), [...V2_FIELDS, "human_turns"].sort())
+  assert.deepEqual([...UNAVAILABLE_REASONS].sort(), [...V2_REASONS].sort())
+  assert.equal(UNAVAILABLE_LIMIT, PUBLISHED_UNAVAILABLE_FIELDS.length * UNAVAILABLE_REASONS.length)
+  assert.equal(UNAVAILABLE_LIMIT, 231)
+})
+
+test("a correction may carry every /2 unavailable field and reason, every pair at once", () => {
+  const all = PUBLISHED_UNAVAILABLE_FIELDS.flatMap((field) => UNAVAILABLE_REASONS.map((reason) => ({ field, reason })))
+  assert.equal(all.length, UNAVAILABLE_LIMIT)
   const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { unavailable: all } }), FILE_NAME)
   assert.deepEqual(errors, [])
   assert.equal(ok, true)
 })
 
-test("a correction's unavailable list over 220 entries is refused as too many", () => {
-  const all = V2_FIELDS.flatMap((field) => V2_REASONS.map((reason) => ({ field, reason })))
+test("a correction's unavailable list over the limit is refused as too many", () => {
+  const all = PUBLISHED_UNAVAILABLE_FIELDS.flatMap((field) => UNAVAILABLE_REASONS.map((reason) => ({ field, reason })))
   const { ok, errors } = validateCorrectionRecord(validRecord({ fields: { unavailable: [...all, all[0]] } }), FILE_NAME)
   assert.equal(ok, false)
   assert.ok(errors.some((e) => e.code === "correction_field_too_many"))
