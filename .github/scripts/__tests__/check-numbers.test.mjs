@@ -12,8 +12,8 @@ const good = () => ({
   schema: "factory-site/3",
   config: { thin_sample_min: 5 },
   jobs: [{ id: "a", status: "done", lead_time_ms: measured(5), active_time_ms: unavailable(["log_missing"]) }],
-  time_breakdown: [{ key: "k", median: rollup([measured(1), measured(2)], { of: "jobs", reduce: (v) => v[0] }) }],
-  headline: rollup([measured(1), measured(2)], { of: "jobs", reduce: (v) => v[0] }),
+  time_breakdown: [{ key: "k", median: rollup([measured(1), measured(2)], { of: "jobs", measure: "sum", reduce: (v) => v[0] }) }],
+  headline: rollup([measured(1), measured(2)], { of: "jobs", measure: "sum", reduce: (v) => v[0] }),
   takeaways: [{ id: "t", template: "Of {a} sessions", numbers: { a: measured(3) } }],
 })
 const codes = (d) => checkNumbers(d).map((v) => v.code)
@@ -180,4 +180,14 @@ test("a measure on the job page must be a stated number", () => {
   assert.ok(codes(d).includes("number_expected"))
   d.jobs[0].details = [{ key: "tokens_total", label: "Tokens", kind: "compact", number: measured(12) }]
   assert.deepEqual(codes(d), [])
+})
+
+test("every partial number says which way it lies; a whole number carries no bound", () => {
+  const d = good()
+  d.jobs[0].lead_time_ms = { state: "partial", value: 5, reasons: ["censored"] }
+  assert.ok(codes(d).includes("partial_without_direction"))
+  d.jobs[0].lead_time_ms = { state: "partial", value: 5, reasons: ["censored"], bound: "unknown" }
+  assert.deepEqual(codes(d), [])
+  d.jobs[0].lead_time_ms = { state: "measured", value: 5, reasons: [], bound: "lower" }
+  assert.ok(codes(d).includes("bound_on_whole_number"))
 })

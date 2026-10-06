@@ -5,27 +5,13 @@
 // null, and a formula the report lacks is unavailable (`not_recorded`),
 // never zero.
 
-import { fromFormula, unavailable, withBound } from "./state.mjs";
+import { direct } from "./bounds.mjs";
+import { fromFormula, unavailable } from "./state.mjs";
 
-// Reasons that only say part of a job's own work is copied in from a worker
-// it shares or splits with other jobs. Every other partial reason says some
-// of the work was not seen, which pulls the true figure up.
-const SHARING = new Set(["worker_shared", "worker_split"]);
-
-// Which way a partial figure lies. A time that includes a worker shared with
-// other jobs is copied, so it is an upper bound, unless some of the work was
-// also not seen: then the two pull opposite ways and no bound is shown. A
-// count that covers only the sessions that could supply it is a lower bound.
-// A censored lead time is a lower bound on a job still running.
-function bounded(formula, kind) {
-  const n = fromFormula(formula);
-  if (n.state !== "partial") return n;
-  if (kind === "count") return withBound(n, "lower");
-  if (kind === "time") {
-    return n.reasons.includes("worker_shared") && n.reasons.every((r) => SHARING.has(r)) ? withBound(n, "upper") : n;
-  }
-  if (kind === "lead") return n.reasons.includes("censored") ? withBound(n, "lower") : n;
-  return n;
+// Every partial figure carries its direction from the one table in
+// bounds.mjs, keyed by the measure.
+function bounded(formula, measure) {
+  return direct(fromFormula(formula), measure);
 }
 
 // One part of the `references` result. A current report has `parts`, each
@@ -44,29 +30,29 @@ function referencePart(refs, key) {
 // value reads, and where it sits in the report. A measure the report lacks
 // is no data with the reason `not_recorded`.
 const DETAILS = [
-  ["lead_time_ms", "Lead time", "duration", (F) => bounded(F.lead_time_ms, "lead")],
-  ["queue_before_start_ms", "Queue before the first session", "duration", (F) => fromFormula(F.queue_before_start_ms)],
-  ["active_time_ms", "Active time", "duration", (F) => bounded(F.active_time_ms, "time")],
-  ["busy_time_ms", "Busy time, all workers", "duration", (F) => bounded(F.busy_time_ms, "time")],
-  ["flow_efficiency", "Flow efficiency", "pct", (F) => bounded(F.flow_efficiency, "time")],
-  ["human_wait_ms", "Waiting on a human", "duration", (F) => fromFormula(F.waits?.human_wait_ms)],
-  ["permission_wait_ms", "Waiting on a permission prompt", "duration", (F) => fromFormula(F.waits?.permission_wait_ms)],
-  ["api_retry_ms", "Waiting on API retries", "duration", (F) => bounded(F.waits?.api_retry_ms, "count")],
-  ["compaction_ms", "Waiting on context compaction", "duration", (F) => fromFormula(F.waits?.compaction_ms)],
-  ["tool_failures", "Tool failures", "count", (F) => bounded(F.rework_signals?.tool_failures, "count")],
-  ["tool_retries", "Tool retries", "count", (F) => bounded(F.rework_signals?.tool_retries, "count")],
-  ["api_retries", "API retries", "count", (F) => bounded(F.rework_signals?.api_retries, "count")],
-  ["session_retouches", "Sessions that came back to it", "count", (F) => fromFormula(F.rework_signals?.session_retouches)],
-  ["public_prs", "Public pull requests", "count", (F) => bounded(referencePart(F.references, "public_prs"), "count")],
-  ["public_commits", "Public commits", "count", (F) => bounded(referencePart(F.references, "public_commits"), "count")],
-  ["private_prs", "Private pull requests (counted only)", "count", (F) => bounded(referencePart(F.references, "private_prs"), "count")],
-  ["private_commits", "Private commits (counted only)", "count", (F) => bounded(referencePart(F.references, "private_commits"), "count")],
-  ["tokens_total", "Tokens, input plus output", "compact", (F) => bounded(F.tokens_total?.total, "count")],
-  ["tokens_input", "Input tokens", "compact", (F) => bounded(F.tokens_total?.input, "count")],
-  ["tokens_output", "Output tokens", "compact", (F) => bounded(F.tokens_total?.output, "count")],
-  ["tokens_reasoning", "Reasoning tokens (inside output)", "compact", (F) => bounded(F.tokens_total?.reasoning, "count")],
-  ["tokens_cache_read", "Cache read tokens", "compact", (F) => bounded(F.tokens_total?.cache_read, "count")],
-  ["tokens_cache_write", "Cache write tokens", "compact", (F) => bounded(F.tokens_total?.cache_write, "count")],
+  ["lead_time_ms", "Lead time", "duration", (F) => bounded(F.lead_time_ms, "lead_time_ms")],
+  ["queue_before_start_ms", "Queue before the first session", "duration", (F) => bounded(F.queue_before_start_ms, "queue_before_start_ms")],
+  ["active_time_ms", "Active time", "duration", (F) => bounded(F.active_time_ms, "active_time_ms")],
+  ["busy_time_ms", "Busy time, all workers", "duration", (F) => bounded(F.busy_time_ms, "busy_time_ms")],
+  ["flow_efficiency", "Flow efficiency", "pct", (F) => bounded(F.flow_efficiency, "flow_efficiency")],
+  ["human_wait_ms", "Waiting on a human", "duration", (F) => bounded(F.waits?.human_wait_ms, "human_wait_ms")],
+  ["permission_wait_ms", "Waiting on a permission prompt", "duration", (F) => bounded(F.waits?.permission_wait_ms, "permission_wait_ms")],
+  ["api_retry_ms", "Waiting on API retries", "duration", (F) => bounded(F.waits?.api_retry_ms, "api_retry_ms")],
+  ["compaction_ms", "Waiting on context compaction", "duration", (F) => bounded(F.waits?.compaction_ms, "compaction_ms")],
+  ["tool_failures", "Tool failures", "count", (F) => bounded(F.rework_signals?.tool_failures, "tool_failures")],
+  ["tool_retries", "Tool retries", "count", (F) => bounded(F.rework_signals?.tool_retries, "tool_retries")],
+  ["api_retries", "API retries", "count", (F) => bounded(F.rework_signals?.api_retries, "api_retries")],
+  ["session_retouches", "Sessions that came back to it", "count", (F) => bounded(F.rework_signals?.session_retouches, "session_retouches")],
+  ["public_prs", "Public pull requests", "count", (F) => bounded(referencePart(F.references, "public_prs"), "public_prs")],
+  ["public_commits", "Public commits", "count", (F) => bounded(referencePart(F.references, "public_commits"), "public_commits")],
+  ["private_prs", "Private pull requests (counted only)", "count", (F) => bounded(referencePart(F.references, "private_prs"), "private_prs")],
+  ["private_commits", "Private commits (counted only)", "count", (F) => bounded(referencePart(F.references, "private_commits"), "private_commits")],
+  ["tokens_total", "Tokens, input plus output", "compact", (F) => bounded(F.tokens_total?.total, "tokens_total")],
+  ["tokens_input", "Input tokens", "compact", (F) => bounded(F.tokens_total?.input, "tokens_input")],
+  ["tokens_output", "Output tokens", "compact", (F) => bounded(F.tokens_total?.output, "tokens_output")],
+  ["tokens_reasoning", "Reasoning tokens (inside output)", "compact", (F) => bounded(F.tokens_total?.reasoning, "tokens_reasoning")],
+  ["tokens_cache_read", "Cache read tokens", "compact", (F) => bounded(F.tokens_total?.cache_read, "tokens_cache_read")],
+  ["tokens_cache_write", "Cache write tokens", "compact", (F) => bounded(F.tokens_total?.cache_write, "tokens_cache_write")],
 ];
 
 export function jobDetails(F) {
@@ -86,16 +72,16 @@ export function jobSummary(d, f) {
     id: d?.job || String(f).replace(/\.json$/, ""),
     status: statusValue,
     status_class: F.status?.class ?? "unavailable",
-    lead_time_ms: bounded(F.lead_time_ms, "lead"),
-    active_time_ms: bounded(F.active_time_ms, "time"),
-    flow_efficiency: bounded(F.flow_efficiency, "time"),
-    queue_before_start_ms: fromFormula(F.queue_before_start_ms),
-    human_wait_ms: fromFormula(waits.human_wait_ms),
-    api_retry_ms: fromFormula(waits.api_retry_ms),
-    tool_failures: bounded(F.rework_signals?.tool_failures, "count"),
-    tool_retries: bounded(F.rework_signals?.tool_retries, "count"),
-    sessions_bound: fromFormula(bound),
-    public_prs: bounded(prs, "count"),
+    lead_time_ms: bounded(F.lead_time_ms, "lead_time_ms"),
+    active_time_ms: bounded(F.active_time_ms, "active_time_ms"),
+    flow_efficiency: bounded(F.flow_efficiency, "flow_efficiency"),
+    queue_before_start_ms: bounded(F.queue_before_start_ms, "queue_before_start_ms"),
+    human_wait_ms: bounded(waits.human_wait_ms, "human_wait_ms"),
+    api_retry_ms: bounded(waits.api_retry_ms, "api_retry_ms"),
+    tool_failures: bounded(F.rework_signals?.tool_failures, "tool_failures"),
+    tool_retries: bounded(F.rework_signals?.tool_retries, "tool_retries"),
+    sessions_bound: bounded(bound, "sessions_bound"),
+    public_prs: bounded(prs, "public_prs"),
     details: jobDetails(F),
   };
 }

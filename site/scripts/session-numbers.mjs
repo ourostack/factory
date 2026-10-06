@@ -5,7 +5,11 @@
 // every total is a rollup over the measured members with n of N.
 
 import { activeMs } from "./active-time.mjs";
+import { direct } from "./bounds.mjs";
 import { measured, partial, rollup, unavailable } from "./state.mjs";
+
+// The population the site's own fact-level rollups count.
+export const SUBSTANTIAL = "substantial sessions";
 
 const sum = (v) => v.reduce((a, b) => a + b, 0);
 
@@ -14,7 +18,7 @@ const sum = (v) => v.reduce((a, b) => a + b, 0);
 // does not, so they are added when it is read (the file is not changed).
 // Mirrors Desk's host constants (contract for the store and the site,
 // section 1.7); `host_records_partly` means the number is a lower bound.
-const HOST_FLAGS = Object.freeze({
+export const HOST_FLAGS = Object.freeze({
   "claude-code": [
     ["compaction_waits", "host_does_not_record"],
     ["reasoning_tokens", "host_does_not_record"],
@@ -103,20 +107,20 @@ function subagentCount(d) {
 
 export function subagentRollups(sessions) {
   const per = sessions.map(subagentCount);
-  const of = "sessions";
+  const of = SUBSTANTIAL;
   const bucketOf = (c) => (c === 0 ? "0" : c <= 2 ? "1-2" : c <= 5 ? "3-5" : "6+");
   const buckets = {};
   for (const key of ["0", "1-2", "3-5", "6+"]) {
     buckets[key] = rollup(
       per.map((n) => (n.state === "measured" ? measured(bucketOf(n.value) === key ? 1 : 0) : n)),
-      { of, reduce: sum },
+      { of, measure: "sum", reduce: sum },
     );
   }
   return {
-    dispatches: rollup(per, { of, reduce: sum }),
+    dispatches: rollup(per, { of, measure: "sum", reduce: sum }),
     sessions_with_subagents: rollup(
       per.map((n) => (n.state === "measured" ? measured(n.value > 0 ? 1 : 0) : n)),
-      { of, reduce: sum },
+      { of, measure: "sum", reduce: sum },
     ),
     buckets,
   };
@@ -147,7 +151,7 @@ function failureNumber(t, pick) {
   const hard = (t.outcomes || []).filter((r) => r !== "host_records_partly");
   if (hard.length) return unavailable(hard);
   const reasons = [...new Set([...t.reasons, ...(t.outcomes || [])])].sort();
-  if (reasons.length) return { ...partial(pick(t), reasons), bound: "lower" };
+  if (reasons.length) return direct(partial(pick(t), reasons), "session_tool_failures");
   return measured(pick(t));
 }
 
@@ -158,7 +162,7 @@ function countOf(obj, key) {
 
 export function toolKindRollups(sessions) {
   const per = sessions.map(toolCounts);
-  const of = "sessions";
+  const of = SUBSTANTIAL;
   const asMember = (c, f) => {
     if (c.state === "unavailable") return unavailable(c.reasons);
     if (c.state === "partial") return partial(f(c), c.reasons);
@@ -166,6 +170,7 @@ export function toolKindRollups(sessions) {
   };
   const totalCalls = rollup(per.map((c) => asMember(c, (x) => sum(Object.values(x.calls).filter((v) => Number.isFinite(v))))), {
     of,
+    measure: "sum",
     reduce: sum,
   });
   const tools = new Set();
@@ -176,9 +181,9 @@ export function toolKindRollups(sessions) {
     }
   }
   const kinds = [...tools].map((tool) => {
-    const calls = rollup(per.map((c) => asMember(c, (x) => countOf(x.calls, tool))), { of, reduce: sum });
-    const failures = rollup(per.map((c) => failureNumber(c, (x) => countOf(x.failures, tool))), { of, reduce: sum });
-    const using = rollup(per.map((c) => asMember(c, (x) => (countOf(x.calls, tool) > 0 ? 1 : 0))), { of, reduce: sum });
+    const calls = rollup(per.map((c) => asMember(c, (x) => countOf(x.calls, tool))), { of, measure: "sum", reduce: sum });
+    const failures = rollup(per.map((c) => failureNumber(c, (x) => countOf(x.failures, tool))), { of, measure: "sum", reduce: sum });
+    const using = rollup(per.map((c) => asMember(c, (x) => (countOf(x.calls, tool) > 0 ? 1 : 0))), { of, measure: "sum", reduce: sum });
     // The rate divides failures by calls over the same sessions: those whose
     // calls and failures are both measured.
     const rateMembers = per.map((c) => {
@@ -191,7 +196,7 @@ export function toolKindRollups(sessions) {
     const callsCounted = sum(rateMembers.filter((m) => m.state === "measured").map((m) => m.aux));
     const rate =
       callsCounted > 0
-        ? rollup(rateMembers, { of, reduce: (v, ms) => sum(v) / sum(ms.map((m) => m.aux)) })
+        ? rollup(rateMembers, { of, measure: "rate", reduce: (v, ms) => sum(v) / sum(ms.map((m) => m.aux)) })
         : { ...unavailable(["no_calls"]), kind: "rollup", n: 0, N: per.length, of, out_of_scope: 0 };
     return { tool, calls, failures, sessions: using, failure_rate: rate };
   });
@@ -237,23 +242,23 @@ function counted(p, rows, key) {
   const bad = parts.find((x) => x.state !== "measured");
   if (bad) return bad;
   const total = sum(parts.map((x) => x.value));
-  return kindFlags.length ? { ...partial(total, kindFlags), bound: "lower" } : measured(total);
+  return kindFlags.length ? direct(partial(total, kindFlags), "session_counter") : measured(total);
 }
 
 export function modelRollups(sessions) {
   const per = sessions.map(modelsOf);
-  const of = "sessions";
+  const of = SUBSTANTIAL;
   const ids = new Set();
   for (const p of per) for (const m of p.list || []) if (m && typeof m.id === "string") ids.add(m.id);
   const member = (p, id, key) => (p.list ? counted(p, p.list.filter((m) => m && m.id === id), key) : unavailable(p.reasons));
   const totalMember = (p) => (p.list ? counted(p, p.list, "requests") : unavailable(p.reasons));
   const models = [...ids].map((id) => {
-    const row = { id, requests: rollup(per.map((p) => member(p, id, "requests")), { of, reduce: sum }) };
-    for (const k of COUNTERS) row[k] = rollup(per.map((p) => member(p, id, k)), { of, reduce: sum });
+    const row = { id, requests: rollup(per.map((p) => member(p, id, "requests")), { of, measure: "sum", reduce: sum }) };
+    for (const k of COUNTERS) row[k] = rollup(per.map((p) => member(p, id, k)), { of, measure: "sum", reduce: sum });
     return row;
   });
   models.sort((a, b) => (b.requests.value ?? -1) - (a.requests.value ?? -1) || a.id.localeCompare(b.id));
-  return { total_requests: rollup(per.map(totalMember), { of, reduce: sum }), models };
+  return { total_requests: rollup(per.map(totalMember), { of, measure: "sum", reduce: sum }), models };
 }
 
 // ---- one session on the featured card -------------------------------------
@@ -266,7 +271,7 @@ export function featuredNumbers(d) {
     active = unavailable(["no_intervals"]);
   } else {
     const reasons = incompleteReasons(d, ["turns", "tool_durations"]);
-    active = reasons.length ? partial(activeMs(d), reasons) : measured(activeMs(d));
+    active = reasons.length ? direct(partial(activeMs(d), reasons), "session_active_ms") : measured(activeMs(d));
   }
   const tools = toolCounts(d);
   const total = (obj) => sum(Object.values(obj).filter((v) => Number.isFinite(v)));
@@ -274,7 +279,7 @@ export function featuredNumbers(d) {
     tools.state === "unavailable"
       ? unavailable(tools.reasons)
       : tools.state === "partial"
-        ? partial(pick(tools), tools.reasons)
+        ? direct(partial(pick(tools), tools.reasons), "session_tool_calls")
         : measured(pick(tools));
   return {
     duration_ms: Number.isFinite(duration) ? measured(duration) : unavailable(["not_recorded"]),

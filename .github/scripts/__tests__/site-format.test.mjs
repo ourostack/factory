@@ -30,11 +30,11 @@ test("a measured number shows plainly, and a measured zero is a zero", () => {
 test("a partial number carries a marker word, its reason and its bound", () => {
   const d = F.describe(p(21, ["worker_split"], "lower"), "count")
   assert.equal(d.state, "partial")
-  assert.equal(d.text, "≥ 21")
+  assert.equal(d.text, "at least 21")
   assert.equal(d.marker, "partial")
   assert.match(d.reason, /split/)
   assert.match(F.toText(p(21, ["worker_split"], "lower"), "count"), /partial/)
-  assert.equal(F.describe(p(5, ["worker_shared"], "upper"), "count").text, "≤ 5")
+  assert.equal(F.describe(p(5, ["worker_shared"], "upper"), "count").text, "at most 5")
   assert.equal(F.describe(p(5, ["x"]), "count").text, "5")
 })
 
@@ -190,4 +190,15 @@ test("the job table opens a job page that shows each measure's state and reason 
 test("safeAnchor allows only a plain in-page id", () => {
   assert.equal(F.safeAnchor("job-abc_12"), "#job-abc_12")
   for (const bad of ["javascript:alert(1)", "a b", "", "x/y", "#x", null, 5]) assert.equal(F.safeAnchor(bad), null, String(bad))
+})
+
+test("a bound reads in words, a partial duration under a second shows milliseconds, and a lower bound of zero says none recorded", () => {
+  assert.equal(F.describe(p(412, ["host_records_partly"], "lower"), "duration").text, "at least 412 ms")
+  assert.equal(F.describe(p(0, ["host_records_partly"], "lower"), "count").text, "none recorded")
+  assert.equal(F.describe(p(0, ["host_records_partly"], "lower"), "count").reason, "the host records only part of this, so the figure is a lower bound")
+  assert.equal(F.describe(p(9, ["log_truncated"], "upper"), "count").text, "at most 9")
+  const unknown = F.describe(p(0.5, ["log_truncated", "worker_shared"], "unknown"), "pct")
+  assert.equal(unknown.text, "50%")
+  assert.match(unknown.reason, /not known/)
+  assert.equal(F.describe(m(0), "duration").text, "0s")
 })

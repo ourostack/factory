@@ -95,6 +95,7 @@
   const KINDS = {
     duration(v) {
       const x = Math.max(0, v);
+      if (x === 0) return "0s";
       if (x < 1000) return "<1s";
       const sec = x / 1000;
       if (sec < 60) return `${Math.round(sec)}s`;
@@ -152,10 +153,20 @@
     if (typeof number.value === "number" && !Number.isFinite(number.value)) {
       throw new TypeError("FactoryFormat: non-finite value");
     }
-    const body = KINDS[kind](number.value);
-    if (number.state === "measured") return { state: "measured", text: body, marker: null, reason: "", nofn, basis };
-    const sign = number.bound === "lower" ? "≥ " : number.bound === "upper" ? "≤ " : "";
-    return { state: "partial", text: sign + body, marker: "partial", reason, nofn, basis };
+    if (number.state === "measured") return { state: "measured", text: KINDS[kind](number.value), marker: null, reason: "", nofn, basis };
+    // A partial figure says which way the true figure lies, in words. A
+    // partial duration under a second shows its exact milliseconds ("<1s"
+    // would itself read as a bound). A lower bound of zero says nothing a
+    // reader can use, so it reads "none recorded" beside its reason.
+    const v = number.value;
+    let body = kind === "duration" && typeof v === "number" && v < 1000 ? `${Math.round(Math.max(0, v))} ms` : KINDS[kind](v);
+    let direction = number.bound === "lower" ? "at least " : number.bound === "upper" ? "at most " : "";
+    if (number.bound === "lower" && v === 0) {
+      body = "none recorded";
+      direction = "";
+    }
+    const unknownDirection = number.bound === "unknown";
+    return { state: "partial", text: direction + body, marker: "partial", reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason, nofn, basis };
   }
 
   // The same, as one line of text, for tooltips and labels.
@@ -290,6 +301,47 @@
     return typeof u === "string" && GITHUB_URL.test(u) && !u.split("/").some((seg) => seg === "." || seg === "..") ? u : null;
   }
 
+  // Each section's caption, by the population its numbers count. The build
+  // writes which population each section reads (`data.scopes`), and the page
+  // takes its caption from here, so a caption cannot name a population its
+  // data does not count. A section or scope with no caption throws.
+  const CAPTIONS = {
+    headlines: {
+      published:
+        "The three totals at the top (subagent dispatches, tool calls, model requests) count every published session; each says how many of those sessions it rests on.",
+      substantial:
+        "The three totals at the top (subagent dispatches, tool calls, model requests) count the substantial sessions described next; each says how many of those sessions it rests on.",
+    },
+    tool_calls: {
+      published:
+        "Calls recorded per tool kind, across every published session that used it. A session whose tool record is cut short, unreadable, capped or still open is left out, and each figure says how many sessions it rests on (n of N).",
+      substantial:
+        "Calls recorded per tool kind, across the substantial sessions whose tool counts are whole; each figure says how many sessions it rests on (n of N).",
+    },
+    tool_failures: {
+      published: "Share of calls that failed, for tool kinds used at least 20 times, across every published session that used them.",
+      substantial: "Share of calls that failed, for tool kinds used at least 20 times, across the substantial sessions.",
+    },
+    models: {
+      substantial:
+        'Requests by model, summed over the substantial sessions that recorded their models. A session that recorded none is not counted as zero requests; it is left out and shown in the "n of N".',
+    },
+    subagents: {
+      substantial:
+        'Subagents dispatched per session, across the substantial sessions. A session whose subagent logs could not be read is left out of every bucket, including "0", and shown in the "n of N".',
+    },
+    harnesses: {
+      substantial:
+        "Which tool ran each session, across the substantial sessions. Workers, subagents and depth count only sessions whose agent list is whole (n of N). Subagents are workers with a parent; depth counts parent links.",
+    },
+  };
+
+  function caption(section, scope) {
+    const text = CAPTIONS[section] && CAPTIONS[section][scope];
+    if (typeof text !== "string") throw new Error(`FactoryFormat: no caption for ${section} over ${scope} sessions`);
+    return text;
+  }
+
   // An in-page link built from data: only "#" and a plain id (letters,
   // digits, "-" and "_"), so data can never become a script or remote link.
   const ANCHOR = /^[A-Za-z0-9_-]{1,80}$/;
@@ -297,5 +349,5 @@
     return typeof id === "string" && ANCHOR.test(id) ? `#${id}` : null;
   }
 
-  return { describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  return { describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

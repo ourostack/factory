@@ -140,12 +140,12 @@
       <div class="chart-grid cols-2" style="margin-top:20px;">
         <div class="chart-card">
           <h3>Tool calls by kind</h3>
-          <p class="chart-caption" id="tool-calls-caption">Calls recorded per tool kind; each figure says how many sessions it rests on (n of N).</p>
+          <p class="chart-caption" id="caption-tool_calls"></p>
           <div id="chart-tool-calls"></div>
         </div>
         <div class="chart-card">
           <h3>Failure rate by tool kind</h3>
-          <p class="chart-caption">Share of calls that failed, for tool kinds used at least 20 times, across the substantial sessions.</p>
+          <p class="chart-caption" id="caption-tool_failures"></p>
           <div id="chart-tool-failures"></div>
         </div>
       </div>
@@ -153,25 +153,25 @@
       <div class="chart-grid cols-2" style="margin-top:20px;">
         <div class="chart-card">
           <h3>Model requests</h3>
-          <p class="chart-caption">Requests by model, summed over the substantial sessions that recorded their models. A session that recorded none is not counted as zero requests; it is left out and shown in the "n of N".</p>
+          <p class="chart-caption" id="caption-models"></p>
           <div id="chart-models"></div>
         </div>
         <div class="chart-card">
           <h3>Subagent fan-out</h3>
-          <p class="chart-caption">Subagents dispatched per session, across the substantial sessions. A session whose subagent logs could not be read is left out of every bucket, including "0", and shown in the "n of N".</p>
+          <p class="chart-caption" id="caption-subagents"></p>
           <div id="chart-subagents"></div>
         </div>
       </div>
 
       <div class="chart-card" style="margin-top:20px;">
         <h3>Harnesses</h3>
-        <p class="chart-caption">Which tool ran each session, across the substantial sessions. Subagents are workers with a parent; depth counts parent links.</p>
+        <p class="chart-caption" id="caption-harnesses"></p>
         <div id="harnesses"></div>
       </div>
 
       <div class="chart-card" style="margin-top:20px;">
         <h3>Every job</h3>
-        <p class="chart-caption">One row per job the store tracks. A figure marked "partial" covers only part of the job (hover for why; a bound sign shows which way the true figure lies), and "no data" means the store could not measure it, with the reason beside it. Zero appears only when zero was measured. Open a job for every measure it has, each with its state and reason.</p>
+        <p class="chart-caption">One row per job the store tracks. A figure marked "partial" covers only part of the job (hover for why; "at least" or "at most" shows which way the true figure lies), and "no data" means the store could not measure it, with the reason beside it. Zero appears only when zero was measured. Open a job for every measure it has, each with its state and reason.</p>
         <div id="jobs-table"></div>
       </div>
 

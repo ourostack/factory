@@ -67,9 +67,11 @@ test("time shared with other jobs is a partial upper bound", () => {
   assert.equal(s.active_time_ms.state, "partial")
   assert.equal(s.active_time_ms.bound, "upper")
   assert.deepEqual(s.flow_efficiency.reasons, ["worker_split", "worker_shared"])
-  assert.equal(s.flow_efficiency.bound, "upper")
+  // A ratio has no direction (bounds.mjs).
+  assert.equal(s.flow_efficiency.bound, "unknown")
+  // A split session's share is left out: a lower bound.
   const split = jobSummary({ formulas: { active_time_ms: { value: 5, partial: true, partial_reasons: ["worker_split"] } } }, "b.json")
-  assert.equal("bound" in split.active_time_ms, false)
+  assert.equal(split.active_time_ms.bound, "lower")
 })
 
 test("partial counts are lower bounds with their reasons; a zero is only a measured zero", () => {
@@ -87,7 +89,8 @@ test("partial counts are lower bounds with their reasons; a zero is only a measu
   assert.deepEqual(s.tool_retries, { state: "measured", value: 0, reasons: [] })
   assert.equal(s.public_prs.state, "partial")
   assert.equal(s.public_prs.value, 0)
-  assert.equal(s.public_prs.bound, "lower")
+  // A shared worker's pull requests are counted for each job: an upper bound.
+  assert.equal(s.public_prs.bound, "upper")
 })
 
 test("job ids and status stay plain labels", () => {
@@ -165,11 +168,11 @@ test("public pull requests come from the references part, with its own state", (
   assert.deepEqual(s.public_prs, { state: "partial", value: 2, reasons: ["host_records_partly"], bound: "lower" })
 })
 
-test("a time partial for missing data and for a shared worker has no bound: the two pull opposite ways", () => {
+test("a time partial for missing data and for a shared worker has no direction: the two pull opposite ways", () => {
   const s = jobSummary(v2, "j2.json")
   assert.equal(s.active_time_ms.state, "partial")
   assert.deepEqual(s.active_time_ms.reasons, ["log_truncated", "worker_shared"])
-  assert.equal("bound" in s.active_time_ms, false)
+  assert.equal(s.active_time_ms.bound, "unknown")
 })
 
 test("the job page lists every measure with its state: measured, partial and no data", () => {

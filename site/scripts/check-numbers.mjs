@@ -92,7 +92,12 @@ export function checkNumbers(data) {
       else if (typeof v === "string" && BAD_STRING.test(v)) bad(path, "bad_string_value");
       else if (typeof v !== "number" && typeof v !== "string") bad(path, "bad_value_type");
     }
-    if ("bound" in node && node.bound !== "lower" && node.bound !== "upper") bad(path, "bad_bound");
+    // Every partial number says which way the true figure lies: lower,
+    // upper, or unknown (bounds.mjs holds the table; a new partial measure
+    // without a row there stops the build).
+    if ("bound" in node && !["lower", "upper", "unknown"].includes(node.bound)) bad(path, "bad_bound");
+    else if (node.state === "partial" && !("bound" in node)) bad(path, "partial_without_direction");
+    else if (node.state !== "partial" && "bound" in node) bad(path, "bound_on_whole_number");
     if ("basis" in node && node.basis !== "declared" && node.basis !== "inferred") bad(path, "bad_basis");
     if ("run_url" in node && !(typeof node.run_url === "string" && node.run_url.startsWith("https://github.com/"))) bad(path, "bad_url");
     for (const [k, v] of Object.entries(node)) {

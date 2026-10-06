@@ -692,6 +692,9 @@
   // text beside it, not only on hover. Opened from the jobs table; its
   // address is #job-<id>, so a job page can be linked.
 
+  // Which entry of data.scopes each captioned section reads.
+  const SCOPE_OF = { headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" };
+
   const STATE_WORD = { measured: "measured", partial: "partial", unavailable: "no data" };
   const JOB_ID = /^[0-9A-Za-z_-]{1,64}$/;
 
@@ -714,7 +717,7 @@
       el(
         "p",
         "chart-caption",
-        `Status: ${j.status}. Every measure the store's report holds for this job. "Measured" is the whole figure, and a zero here is a measured zero. "Partial" covers only part of the job (a bound sign shows which way the true figure lies). "No data" means the store could not measure it. The reason is beside each.`,
+        `Status: ${j.status}. Every measure the store's report holds for this job. "Measured" is the whole figure, and a zero here is a measured zero. "Partial" covers only part of the job ("at least" or "at most" says which way the true figure lies, when that is known). "No data" means the store could not measure it. The reason is beside each.`,
       ),
     );
     const wrap = el("div", "table-wrap");
@@ -934,7 +937,9 @@
       scopeContextEl.innerHTML = "";
       const add = (x) => scopeContextEl.appendChild(typeof x === "string" ? document.createTextNode(x) : x);
       add(num(data.scope.sessions_total, "count"));
-      add(" sessions are published in total. Everything above and below in this section is scoped to the ");
+      add(" sessions are published in total. ");
+      add(F.caption("headlines", data.scopes.headlines));
+      add(" Each takeaway names the sessions it counts. The substantial sessions are the ");
       add(num(data.scope.sessions_scoped, "count"));
       add(` that were active at least ${minutes} minutes (turns, tools and subagents, not waiting) or are bound to a tracked job (`);
       add(entrypointNode(data.scope.entrypoints_scoped));
@@ -1005,12 +1010,10 @@
       emptyText: "No jobs tracked yet.",
     });
 
-    const toolCallsCaption = document.getElementById("tool-calls-caption");
-    if (toolCallsCaption) {
-      toolCallsCaption.textContent =
-        data.tool_kinds_scope === "published"
-          ? "Calls recorded per tool kind, across every published session that used it. A session whose tool record is cut short, unreadable, capped or still open is left out, and each figure says how many sessions it rests on (n of N)."
-          : "Total calls recorded across the substantial sessions whose tool counts are whole; each figure says how many sessions it rests on (n of N).";
+    // Every section caption names the population its data counts (format.js).
+    for (const section of F.CAPTION_SECTIONS) {
+      const node = document.getElementById(`caption-${section}`);
+      if (node) node.textContent = F.caption(section, data.scopes[SCOPE_OF[section]]);
     }
     const toolCallRows = data.tool_kinds.slice(0, 10).map((t) => ({
       label: t.tool,

@@ -9,6 +9,8 @@
 // (`of`). Only measured members enter it; a partial or unavailable member is
 // listed under `excluded`, and a rollup with any unmeasured member is partial.
 
+import { direct } from "./bounds.mjs";
+
 // Fewer measured members than this and a headline is a thin sample. One
 // constant, so changing the threshold changes it everywhere.
 export const THIN_SAMPLE_MIN = 5;
@@ -120,7 +122,7 @@ export function withBound(number, bound) {
 // Build a rollup over `members` (numbers with a state). `reduce` receives the
 // values of the measured members only, and the members themselves as a second
 // argument (a member may carry an `aux` number for a ratio of sums).
-export function rollup(members, { of, reduce }) {
+export function rollup(members, { of, reduce, measure }) {
   const all = Array.isArray(members) ? members : [];
   const outOfScope = all.filter(isNotApplicable).length;
   const list = all.filter((m) => !isNotApplicable(m));
@@ -135,18 +137,21 @@ export function rollup(members, { of, reduce }) {
     }
   }
   const base = { kind: "rollup", n: usable.length, N: list.length, of, out_of_scope: outOfScope };
+  direct(measured(0), measure);
   if (list.length === 0) return { ...unavailable(["no_applicable_members"]), ...base };
   if (usable.length === 0) {
     return { ...unavailable(["no_measured_members", ...reasons]), ...base, excluded };
   }
+  // The measure is known up front: a rollup with no direction cannot be built.
+  direct(measured(0), measure);
   const value = reduce(usable.map((m) => m.value), usable);
   if (!(typeof value === "number" && Number.isFinite(value)) && typeof value !== "string") {
     return { ...unavailable(["no_measured_members"]), ...base, excluded };
   }
   if (usable.length < list.length) {
-    return { state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base, excluded };
+    return direct({ state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base, excluded }, measure);
   }
-  return { state: "measured", value, reasons: [], ...base };
+  return direct({ state: "measured", value, reasons: [], ...base }, measure);
 }
 
 // Trust state for a headline: `ok`, `thin_sample`, `partial`, or (once a
@@ -174,7 +179,8 @@ export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
 // A rollup the pipeline already computed, with its own n of N (for example a
 // waste total over the jobs that are fully labeled). `n` of `N` must be
 // integers with n <= N.
-export function declareRollup({ value, n, N, of, reasons = [], outOfScope = 0 }) {
+export function declareRollup({ value, n, N, of, measure, reasons = [], outOfScope = 0 }) {
+  direct(measured(0), measure);
   if (!Number.isInteger(n) || !Number.isInteger(N) || n < 0 || n > N) {
     return {
       ...unavailable(["no_members"]),
@@ -188,7 +194,7 @@ export function declareRollup({ value, n, N, of, reasons = [], outOfScope = 0 })
   const base = { kind: "rollup", n, N, of, out_of_scope: outOfScope };
   const ok = (typeof value === "number" && Number.isFinite(value)) || typeof value === "string";
   if (n === 0 || !ok) return { ...unavailable(["no_measured_members", ...reasons]), ...base };
-  if (n < N) return { state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base };
+  if (n < N) return direct({ state: "partial", value, reasons: ["unmeasured_members", ...reasons], ...base }, measure);
   return { state: "measured", value, reasons: [], ...base };
 }
 
@@ -218,7 +224,7 @@ export function fromTotalsLeaf(leaf, of) {
   if (!reasons.length) return broken;
   if (want === "partial") {
     if (leaf.n === 0 && !reasons.includes("host_records_partly")) return broken;
-    return { ...partial(leaf.value, reasons), bound: "lower", ...base, n: leaf.n, N: leaf.N };
+    return direct({ ...partial(leaf.value, reasons), ...base, n: leaf.n, N: leaf.N }, "pipeline_total");
   }
   return { ...unavailable(reasons), ...base, n: leaf.n, N: leaf.N };
 }

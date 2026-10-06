@@ -206,3 +206,26 @@ test("a capped tool record is not whole", () => {
   assert.equal(featuredNumbers(s).tool_calls_total.state, "partial")
   assert.deepEqual(featuredNumbers(s).tool_calls_total.reasons, ["capped"])
 })
+
+// --- the site's copy of Desk's host table must match Desk's own ---
+
+import { existsSync } from "node:fs"
+import { join as joinPath } from "node:path"
+import { pathToFileURL } from "node:url"
+import { HOST_FLAGS } from "../../../site/scripts/session-numbers.mjs"
+
+// Desk main does not carry `src/factory/host-flags.js` until the published
+// facts /2 work lands there. Until then there is nothing to compare with in
+// CI; set DESK_DIR to a Desk checkout that has it to run the comparison.
+const deskHostFlags = process.env.DESK_DIR ? joinPath(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/host-flags.js") : null
+const deskReachable = Boolean(deskHostFlags && existsSync(deskHostFlags))
+
+test(
+  "the site's host table matches Desk's own, field for field",
+  { skip: deskReachable ? false : "Desk's host table is not reachable: Desk main does not carry src/factory/host-flags.js yet; set DESK_DIR to a Desk checkout that has it" },
+  async () => {
+    const desk = (await import(pathToFileURL(deskHostFlags).href)).HOST_FLAGS
+    const norm = (table) => Object.fromEntries(Object.entries(table).map(([host, flags]) => [host, flags.map((f) => (Array.isArray(f) ? `${f[0]}|${f[1]}` : `${f.field}|${f.reason}`)).sort()]))
+    assert.deepEqual(norm(HOST_FLAGS), norm(desk))
+  },
+)

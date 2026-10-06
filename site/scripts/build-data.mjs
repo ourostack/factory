@@ -42,7 +42,8 @@ import {
   trust,
   unavailable,
 } from "./state.mjs";
-import { entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
+import { direct } from "./bounds.mjs";
+import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
 
@@ -164,8 +165,8 @@ const jobMember = scopeMember;
 const timeRollups = (key) => {
   const members = jobs.map((j) => jobMember(j, key));
   return {
-    median: rollup(members, { of: "finished jobs", reduce: medianOf }),
-    p75: rollup(members, { of: "finished jobs", reduce: p75Of }),
+    median: rollup(members, { of: "finished jobs", measure: "median", reduce: medianOf }),
+    p75: rollup(members, { of: "finished jobs", measure: "p75", reduce: p75Of }),
   };
 };
 
@@ -252,8 +253,7 @@ function kindFromRow(row) {
     calls.state !== "unavailable" && failures.state === calls.state && calls.value > 0
       ? { ...calls, value: failures.value / calls.value }
       : { ...unavailable(calls.state === "unavailable" ? calls.reasons : ["no_calls"]), kind: "rollup", n: 0, N: calls.N, of: PUBLISHED, out_of_scope: 0 };
-  if (rate.state === "partial") delete rate.bound;
-  return { tool: row.tool, calls, failures, sessions, failure_rate: rate };
+  return { tool: row.tool, calls, failures, sessions, failure_rate: direct(rate, "rate") };
 }
 
 const siteToolRollups = toolKindRollups(scopedFacts);
@@ -383,7 +383,7 @@ for (const { d, prs } of featuredCandidates) {
     models: models.slice(0, 2),
     prs_total: measured(prs.length),
     prs_checked: measured(checked.length),
-    prs_merged: checked.length > 0 ? (checked.length < prs.length ? partial(merged, ["not_every_pull_request_checked"]) : measured(merged)) : unavailable(["github_api_unavailable"]),
+    prs_merged: checked.length > 0 ? (checked.length < prs.length ? direct(partial(merged, ["not_every_pull_request_checked"]), "prs_merged") : measured(merged)) : unavailable(["github_api_unavailable"]),
     sample_merged_prs: [...byRepoLatest.values()]
       .sort((a, b) => b.number - a.number)
       .map((p) => ({ ref: `#${p.number}`, url: p.url })),
@@ -511,13 +511,13 @@ const kaizenRaised =
   kaizenFetch.verification === "unavailable"
     ? unavailable(["github_api_unavailable"])
     : kaizenFetch.truncated
-      ? partial(kaizenIssues.length, ["first_page_only"])
+      ? direct(partial(kaizenIssues.length, ["first_page_only"]), "issues_first_page")
       : measured(kaizenIssues.length);
 const kaizenResolved =
   kaizenFetch.verification === "unavailable"
     ? unavailable(["github_api_unavailable"])
     : kaizenFetch.truncated
-      ? partial(kaizenIssues.filter((i) => i.issue_state === "closed").length, ["first_page_only"])
+      ? direct(partial(kaizenIssues.filter((i) => i.issue_state === "closed").length, ["first_page_only"]), "issues_first_page")
       : measured(kaizenIssues.filter((i) => i.issue_state === "closed").length);
 
 // ---------------------------------------------------------------------------
@@ -564,8 +564,8 @@ takeaways.push({
   if (worst) {
     takeaways.push({
       id: "tool_failures",
-      template: `Among the ${toolKindsScope === "published" ? "published" : "substantial"} sessions, "{tool}" calls fail most often of the tool kinds used at least {min_calls} times: {rate} of {calls} calls ({failures} failures).`,
-      slots: { tool: worst.tool, min_calls: measured(20), rate: worst.failure_rate, calls: worst.calls, failures: worst.failures },
+      template: `${toolKindsScope === "published" ? "Across every published session" : "Among the {scoped} substantial sessions"}, "{tool}" calls fail most often of the tool kinds used at least {min_calls} times: {rate} of {calls} calls ({failures} failures).`,
+      slots: { ...(toolKindsScope === "published" ? {} : { scoped }), tool: worst.tool, min_calls: measured(20), rate: worst.failure_rate, calls: worst.calls, failures: worst.failures },
       trust: trust(worst.calls),
     });
   }
@@ -581,7 +581,8 @@ if (modelRolls.models.length > 0 && modelRolls.total_requests.state !== "unavail
     return { ...(row ? row.requests : measured(0)), aux: tot.value };
   };
   const share = rollup(scopedFacts.map(topMember), {
-    of: "sessions",
+    of: SUBSTANTIAL,
+    measure: "share",
     reduce: (v, ms) => {
       const all = sum(ms.map((m) => m.aux));
       return all > 0 ? sum(v) / all : NaN;
@@ -589,8 +590,8 @@ if (modelRolls.models.length > 0 && modelRolls.total_requests.state !== "unavail
   });
   takeaways.push({
     id: "model_concentration",
-    template: "Among the substantial sessions, {model} accounts for {share} of the {total} model requests recorded.",
-    slots: { model: top.id, share, total: modelRolls.total_requests },
+    template: "Among the {scoped} substantial sessions, {model} accounts for {share} of the {total} model requests they recorded.",
+    slots: { scoped, model: top.id, share, total: modelRolls.total_requests },
     trust: trust(share),
   });
 }
@@ -599,8 +600,8 @@ if (subagentRolls.sessions_with_subagents.state !== "unavailable") {
   const w = subagentRolls.sessions_with_subagents;
   takeaways.push({
     id: "subagents",
-    template: "{with} substantial sessions dispatch at least one subagent, {dispatches} dispatches in total; sessions whose subagent logs could not be read are left out.",
-    slots: { with: w, dispatches: subagentRolls.dispatches },
+    template: "{with} of the {scoped} substantial sessions dispatch at least one subagent, {dispatches} dispatches in total across them; sessions whose subagent logs could not be read are left out.",
+    slots: { with: w, scoped, dispatches: subagentRolls.dispatches },
     trust: trust(w),
   });
 }
@@ -627,9 +628,9 @@ const wasteBreakdown = (mudaOverall?.wastes ?? [])
   .filter((w) => w && typeof w.waste === "string")
   .map((w) => ({
     waste: w.waste,
-    total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs" }),
+    total_ms: declareRollup({ value: w.total_ms, n: wasteN, N: wasteN_total, of: "jobs", measure: "sum" }),
     jobs: counted(w.jobs),
-    share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs" }),
+    share: declareRollup({ value: w.share, n: wasteN, N: wasteN_total, of: "jobs", measure: "share" }),
   }));
 
 // ---------------------------------------------------------------------------
@@ -653,9 +654,9 @@ const harnesses = harnessSummary(scopedFacts).map((h) => ({
   unproven: h.unproven,
   sessions: measured(h.sessions),
   // Counted only over sessions whose agent list is whole: n of N says how many.
-  workers: declareRollup({ value: h.workers, n: h.agents_recorded, N: h.sessions, of: "sessions" }),
-  subagents: declareRollup({ value: h.subagents, n: h.agents_recorded, N: h.sessions, of: "sessions" }),
-  max_depth: declareRollup({ value: h.max_depth, n: h.agents_recorded, N: h.sessions, of: "sessions" }),
+  workers: declareRollup({ value: h.workers, n: h.agents_recorded, N: h.sessions, of: SUBSTANTIAL, measure: "sum" }),
+  subagents: declareRollup({ value: h.subagents, n: h.agents_recorded, N: h.sessions, of: SUBSTANTIAL, measure: "sum" }),
+  max_depth: declareRollup({ value: h.max_depth, n: h.agents_recorded, N: h.sessions, of: SUBSTANTIAL, measure: "max" }),
   versions: asMeasured(h.versions),
   models: asMeasured(h.models),
   agent_types: asMeasured(h.agent_types),
@@ -692,7 +693,15 @@ const data = {
   },
   headlines,
   tool_kinds: toolRollups.kinds,
-  tool_kinds_scope: toolKindsScope,
+  // The population each captioned section counts; the page takes its
+  // captions from these (format.js `caption`).
+  scopes: {
+    headlines: pipelineTotals ? "published" : "substantial",
+    tool_kinds: toolKindsScope,
+    models: "substantial",
+    subagents: "substantial",
+    harnesses: "substantial",
+  },
   tool_calls_total: toolRollups.total_calls,
   time_breakdown: scopedTimeBreakdown,
   flow_efficiency: scopedFlowEfficiency,

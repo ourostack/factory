@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
+import { createRequire } from "node:module"
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -250,4 +251,73 @@ test("harness worker counts say how many sessions they rest on", () => {
   assert.equal(h.workers.kind, "rollup")
   assert.equal(h.workers.N, h.sessions.value)
   assert.ok(h.workers.n < h.workers.N)
+})
+
+// --- one stated population per caption ---
+
+const FMT = createRequire(import.meta.url)("../../../site/src/format.js")
+const WORD = { published: "published session", substantial: "substantial session" }
+const OF = { published: "published sessions", substantial: "substantial sessions" }
+
+function populationsAgree(data) {
+  const s = data.scopes
+  // Each caption names its section's population and not the other one.
+  for (const [section, key] of Object.entries({ headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" })) {
+    const text = FMT.caption(section, s[key])
+    const other = s[key] === "published" ? "substantial" : "published"
+    assert.ok(text.includes(WORD[s[key]]), `${section}: ${text}`)
+    assert.equal(text.includes(WORD[other]), false, `${section}: ${text}`)
+  }
+  // ...and each section's numbers count exactly that population.
+  for (const id of ["subagent_dispatches", "tool_calls", "model_requests"]) {
+    assert.equal(data.headlines.find((h) => h.id === id).number.of, OF[s.headlines], id)
+  }
+  for (const k of data.tool_kinds) for (const f of ["calls", "failures", "failure_rate"]) assert.equal(k[f].of, OF[s.tool_kinds], `${k.tool}.${f}`)
+  for (const m of data.models) assert.equal(m.requests.of, OF[s.models], m.id)
+  for (const b of Object.values(data.subagents.buckets)) assert.equal(b.of, OF[s.subagents])
+  for (const h of data.harnesses) assert.equal(h.workers.of, OF[s.harnesses], h.host)
+  // A takeaway names the population it reads, with its count shown.
+  for (const t of data.takeaways) {
+    if (t.id === "tool_failures") assert.ok(t.template.includes(s.tool_kinds === "published" ? "every published session" : "{scoped} substantial sessions"), t.template)
+    if (t.id === "model_concentration" || t.id === "subagents") assert.ok(t.template.includes("{scoped} substantial sessions"), t.template)
+  }
+}
+
+test("with the pipeline's totals and tool-kind rows, every caption names the population its numbers count", () => {
+  const fx = fixture()
+  write(join(fx.reports, "rollups/totals.json"), totals())
+  write(join(fx.reports, "rollups/tool-kinds.json"), {
+    schema: "desk.factory.rollups/1",
+    sessions: 3,
+    tool_kinds: [{ N: 3, calls: 40, failures: 4, n: 3, reasons: [], sessions: 3, state: "measured", tool: "shell" }],
+  })
+  assert.equal(build(fx).status, 0)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.scopes.headlines, "published")
+  assert.equal(data.scopes.tool_kinds, "published")
+  populationsAgree(data)
+})
+
+test("without them, every caption and number says substantial sessions", () => {
+  const fx = fixture()
+  assert.equal(build(fx).status, 0)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.scopes.headlines, "substantial")
+  assert.equal(data.scopes.tool_kinds, "substantial")
+  populationsAgree(data)
+})
+
+test("the page takes every section caption from the caption table, and the scope paragraph names the headline population", () => {
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  assert.match(app, /F\.caption\(section, data\.scopes\[SCOPE_OF\[section\]\]\)/)
+  assert.match(app, /F\.caption\("headlines", data\.scopes\.headlines\)/)
+  assert.doesNotMatch(app, /Everything above and below/)
+  // No blanket population claim: the takeaways each name their own.
+  assert.doesNotMatch(app, /Everything else in this section/)
+  assert.match(app, /Each takeaway names the sessions it counts/)
+  for (const section of FMT.CAPTION_SECTIONS.filter((x) => x !== "headlines")) {
+    assert.match(html, new RegExp(`<p class="chart-caption" id="caption-${section}"></p>`), section)
+  }
+  assert.doesNotMatch(html, /across the substantial sessions/)
 })
