@@ -121,6 +121,10 @@ const PUBLISHED_UNAVAILABLE_FIELDS = Object.freeze([
   "human_waits", "api_retries", "commits", "ci_runs", "plugins", "ended_at",
   "compaction_waits", "agents", "prs", "reasoning_tokens", "entrypoint", "tool_outcomes", "job_segments",
   "job_offsets", "human_turns",
+  // A session with more than 256 outcomes cut (Desk's `LIMITS.outcomes`) is flagged
+  // `outcomes` / `capped` instead of silently truncated. The store lists it before
+  // Desk does (store first, the version-skew rule); see STORE_AHEAD_OF_DESK.
+  "outcomes",
 ]);
 const UNAVAILABLE_REASONS = Object.freeze([
   "host_does_not_record", "log_missing", "log_truncated", "session_open",
@@ -376,15 +380,27 @@ const AGENT_SHAPE = {
   model: patternShapeField(MODEL_ID_PATTERN),
 };
 
-const PR_SHAPE = {
-  repo: patternShapeField(PR_REPO_PATTERN),
-  number: positiveIntShapeField(),
-};
+// A pull request may carry the worker that opened it (`agent`) and when it
+// was created (`at_ms`, milliseconds from the session start), both optional
+// as in Desk's `prFields`. A commit may carry `at_ms` too (published facts
+// `/3`; `/1` and `/2` commits have only `repo` and `sha`). Both forms stay
+// accepted, so a correction can restore either.
+function prShape(value) {
+  return {
+    repo: patternShapeField(PR_REPO_PATTERN),
+    number: positiveIntShapeField(),
+    ...(isPlainObject(value) && Object.hasOwn(value, "agent") ? { agent: rangeIntShapeField(0, 9999) } : {}),
+    ...(isPlainObject(value) && Object.hasOwn(value, "at_ms") ? { at_ms: nonNegIntShapeField() } : {}),
+  };
+}
 
-const COMMIT_SHAPE = {
-  repo: patternShapeField(PR_REPO_PATTERN),
-  sha: patternShapeField(COMMIT_SHA_PATTERN),
-};
+function commitShape(value) {
+  return {
+    repo: patternShapeField(PR_REPO_PATTERN),
+    sha: patternShapeField(COMMIT_SHA_PATTERN),
+    ...(isPlainObject(value) && Object.hasOwn(value, "at_ms") ? { at_ms: nonNegIntShapeField() } : {}),
+  };
+}
 
 function refsPrivateShape(value) {
   const fields = { prs: nonNegIntShapeField(), commits: nonNegIntShapeField() };
@@ -393,8 +409,8 @@ function refsPrivateShape(value) {
 }
 
 const REFS_SHAPE = {
-  prs: arrayShapeField(objectShapeField(PR_SHAPE), SHAPE_LIMITS.prs),
-  commits: arrayShapeField(objectShapeField(COMMIT_SHAPE), SHAPE_LIMITS.commits),
+  prs: arrayShapeField(objectShapeField(prShape), SHAPE_LIMITS.prs),
+  commits: arrayShapeField(objectShapeField(commitShape), SHAPE_LIMITS.commits),
   private: objectShapeField(refsPrivateShape),
 };
 
@@ -575,4 +591,13 @@ const MIRRORED_VOCABULARY = Object.freeze({
   unavailableReason: UNAVAILABLE_REASONS,
 });
 
-export { MIRRORED_VOCABULARY, CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };
+// Values the store accepts before Desk main does. A change to a frozen
+// contract lands in the store first (the version-skew rule), so for a while
+// the store's list holds a value Desk's does not. The comparison with Desk
+// allows exactly these and nothing else; a value Desk lacks and that is not
+// listed here is a drift. Remove an entry once Desk main has the value.
+const STORE_AHEAD_OF_DESK = Object.freeze({
+  publishedUnavailableField: Object.freeze(["outcomes"]),
+});
+
+export { MIRRORED_VOCABULARY, STORE_AHEAD_OF_DESK, CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };

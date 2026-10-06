@@ -43,6 +43,7 @@
     no_delivered_jobs: "no job with a sign-off record has been delivered yet",
     no_refusals: "no delivery has been sent back",
     no_labels: "no job is labeled for waste yet",
+    confidence_not_recorded: "the evaluator's confidence in these labels was not recorded",
     not_all_labeled: "not every finished job is labeled for waste",
     active_time_unavailable: "a job's active time could not be measured",
     catch_point_not_recorded: "some defect time has no recorded catch point",
