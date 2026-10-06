@@ -99,7 +99,7 @@ test("a labeled session whose share is not known adds nothing and leaves the row
   const doc = label("s2", [stretch(0, 9000, "muda", "waiting", "high")])
   const known = label("s1", [stretch(0, 60, "muda", "defects", "high")])
   // No binding, a binding without segments, and segments that are not spans are all unknown.
-  for (const bindings of [undefined, [], [{ job: "x", segments: [{ start_ms: 0, end_ms: 10 }] }], [{ job: "j" }], [{ job: "j", segments: [{ start_ms: 5, end_ms: 5 }, null, { start_ms: "0", end_ms: 9 }] }]]) {
+  for (const bindings of [undefined, [], [{ job: "x", segments: [{ start_ms: 0, end_ms: 10 }] }], [{ job: "j", agents: [0] }], [{ job: "j", segments: [{ start_ms: 5, end_ms: 5 }, null, { start_ms: "0", end_ms: 9 }] }]]) {
     assert.equal(ownShare(bindings, "j"), null)
     const w = jobWaste([known, doc], ["s1", "s2"], new Map([["s1", [[0, 100]]], ["s2", ownShare(bindings, "j")]]))
     assert.deepEqual(w.rows.map((r) => [r.key, r.total_ms.value, r.total_ms.state]), [["defects", 60, "partial"]])
@@ -109,6 +109,12 @@ test("a labeled session whose share is not known adds nothing and leaves the row
     assert.equal(w.sessions_share_unknown.value, 1)
     assert.deepEqual(checkNumbers({ jobs: [{ waste: w }] }), [])
   }
+  // An older binding with no segments and no workers owns the whole session only when it is the session's one job.
+  assert.deepEqual(ownShare([{ job: "j" }], "j"), [[0, Infinity]])
+  assert.equal(ownShare([{ job: "j" }, { job: "k" }], "j"), null)
+  assert.equal(ownShare([{ job: "j", agents: [3] }], "j"), null, "a subagent-only binding does not own the session")
+  const legacy = jobWaste([doc], ["s2"], new Map([["s2", ownShare([{ job: "j" }], "j")]]))
+  assert.deepEqual(legacy.rows.map((r) => [r.key, r.total_ms.value, r.total_ms.state]), [["waiting", 9000, "measured"]])
   // Without any shares at all nothing counts: no rows, never the whole session.
   const none = jobWaste([doc], ["s2"])
   assert.deepEqual(none.rows, [])

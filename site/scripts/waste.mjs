@@ -118,11 +118,17 @@ const LEVELS = new Set(CONFIDENCE_LEVELS);
 
 // The job's own share of one session: its binding's `segments` in the
 // session's published facts (`jobs`), as sorted, merged `[start, end]`
-// spans on the session clock. `null` when the facts are missing, do not
-// bind the job, or the binding carries no usable segments: the share is
-// then not known, which is never the whole session.
+// spans on the session clock. Desk writes segments for every binding that
+// holds the session's main worker; a binding from before Desk wrote them
+// (no `agents` either) that is the session's only job owns the whole
+// session, as Desk's own timeline reads it. `null` otherwise (facts
+// missing, no binding, a subagent-only binding, or an older binding the
+// session shares): the share is then not known, which is never the whole
+// session.
 export function ownShare(factsJobs, job) {
-  const binding = (Array.isArray(factsJobs) ? factsJobs : []).find((b) => b && b.job === job);
+  const bindings = Array.isArray(factsJobs) ? factsJobs : [];
+  const binding = bindings.find((b) => b && b.job === job);
+  if (binding && !("segments" in binding) && !("agents" in binding) && bindings.length === 1) return [[0, Infinity]];
   const segments = binding && Array.isArray(binding.segments) ? binding.segments : [];
   const spans = segments
     .filter((g) => g && Number.isFinite(g.start_ms) && Number.isFinite(g.end_ms) && g.end_ms > g.start_ms)
