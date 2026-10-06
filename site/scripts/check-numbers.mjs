@@ -21,12 +21,21 @@ const { hasReasonText } = createRequire(import.meta.url)("../src/format.js");
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
 const ROLLUP_KEYS = ["n", "N", "of", "out_of_scope", "excluded"];
+// Reasons under which a rollup may carry a value with n of zero: every
+// member is flagged, but the flag still leaves a value (a lower bound from a
+// host that records partly, a capture share from unverified hosts). Each
+// package adds its own reasons below, so the list grows in one place per
+// package.
+const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["host_records_partly", "unverified_host"]);
 
 // Paths in data.json that must be rollups (they sum, take a median or a
 // share over a population). A rollup that lost its marker and its counts is
 // caught here, by where it sits, not by what it still carries.
 const ROLLUP_PATHS = [
   /^time_breakdown\[\d+\]\.(median|p75)$/,
+  /^outcomes\.(unsigned|first_pass_yield)$/,
+  /^outcomes\.rework\.(changed_ask|returns\[\d+\]\.total|defects\.[a-z_]+)$/,
+  /^outcomes\.attention\.(headline|turns_per_accepted)$/,
   /^flow_efficiency\.(median|p75)$/,
   /^tool_calls_total$/,
   /^tool_kinds\[\d+\]\.(calls|failures|sessions|failure_rate)$/,
@@ -40,7 +49,10 @@ const ROLLUP_PATHS = [
 // Paths that must hold a stated number of some kind (not an empty object, a
 // string or anything else that would make the formatter throw).
 const NUMBER_PATHS = [
-  /^jobs\[\d+\]\.(lead_time_ms|active_time_ms|flow_efficiency|queue_before_start_ms|human_wait_ms|api_retry_ms|tool_failures|tool_retries|sessions_bound|public_prs)$/,
+  /^jobs\[\d+\]\.(lead_time_ms|active_time_ms|flow_efficiency|queue_before_start_ms|human_wait_ms|api_retry_ms|tool_failures|tool_retries|sessions_bound|public_prs|signoff|signoff_wait|first_pass|returns)$/,
+  /^outcomes\.signoff\.[a-z_]+$/,
+  /^outcomes\.(oldest_unsigned_wait|first_pass_counts\.[a-z_]+)$/,
+  /^outcomes\.rework\.reason_check\.(compared|disagree|compared_verified)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^coverage\.(sessions_with_facts|jobs|jobs_open|capture)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
@@ -65,6 +77,10 @@ const FREE_KEYS = new Set(["id", "session_id", "ref"]);
 function isStated(node) {
   return node && typeof node === "object" && !Array.isArray(node) && ("state" in node || "reasons" in node);
 }
+
+// Sign-off: a first-pass yield whose every job still awaits a witnessed
+// answer keeps its upper bound.
+for (const reason of ["awaiting_signoff", "signoff_unverified"]) VALUE_WITH_NO_WHOLE_MEMBER.add(reason);
 
 export function checkNumbers(data) {
   const out = [];
@@ -114,11 +130,11 @@ export function checkNumbers(data) {
       } else if (n > N) {
         bad(path, "rollup_n_exceeds_N");
       } else {
-        // n of zero is no data, except a total counted only from sessions the
-        // host records partly: that is a partial lower bound with a value
-        // (Desk's rollups/totals.json).
+        // n of zero is no data, except a figure every member of which is
+        // flagged by a named reason that still leaves a value
+        // (VALUE_WITH_NO_WHOLE_MEMBER).
         const lowerBoundOnly =
-          n === 0 && N > 0 && "value" in node && Array.isArray(node.reasons) && node.reasons.includes("host_records_partly");
+          n === 0 && N > 0 && "value" in node && Array.isArray(node.reasons) && node.reasons.some((r) => VALUE_WITH_NO_WHOLE_MEMBER.has(r));
         const want = N > 0 && n === N ? "measured" : n === 0 && !lowerBoundOnly ? "unavailable" : "partial";
         if (node.state !== want) bad(path, "rollup_state_mismatch");
       }
@@ -129,7 +145,10 @@ export function checkNumbers(data) {
     } else if (hasRollupKey || "kind" in node) {
       bad(path, "rollup_missing_kind");
     }
-    if (!isTop && node.kind !== "rollup" && ROLLUP_PATHS.some((re) => re.test(path))) {
+    // A figure whose source is not recorded yet has no population, so it may
+    // stand at a rollup path with no n of N.
+    const notYet = node.state === "unavailable" && Array.isArray(node.reasons) && node.reasons.length === 1 && node.reasons[0] === "not_recorded_yet";
+    if (!isTop && !notYet && node.kind !== "rollup" && ROLLUP_PATHS.some((re) => re.test(path))) {
       const m = path.match(/^headlines\[(\d+)\]\.number$/);
       const id = m ? data.headlines?.[Number(m[1])]?.id : null;
       if (!(m && COUNT_HEADLINES.has(id))) bad(path, "rollup_expected");
@@ -168,6 +187,13 @@ export function checkNumbers(data) {
   }
 
   walk(data, "", true);
+  // Human attention per accepted outcome has no value while no outcome was
+  // accepted: it reads "no accepted outcomes yet", never zero or infinity.
+  const accepted = data?.outcomes?.signoff?.accepted;
+  const headline = data?.outcomes?.attention?.headline;
+  if (accepted?.state === "measured" && accepted.value === 0 && headline && "value" in headline) {
+    bad("outcomes.attention.headline", "value_without_accepted_outcome");
+  }
   return out;
 }
 

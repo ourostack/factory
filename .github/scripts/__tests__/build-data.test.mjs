@@ -321,3 +321,37 @@ test("the page takes every section caption from the caption table, and the scope
   }
   assert.doesNotMatch(html, /across the substantial sessions/)
 })
+
+test("with no outcomes rollup the outcome figures and the unsigned deliveries slot read not recorded yet", () => {
+  const fx = fixture()
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.deepEqual(data.outcomes.first_pass_yield.reasons, ["not_recorded_yet"])
+  const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
+  assert.deepEqual(health.slots.unsigned_deliveries.reasons, ["not_recorded_yet"])
+  for (const j of data.jobs) assert.deepEqual(j.signoff.reasons, ["not_recorded"])
+})
+
+test("an outcomes rollup fills sign-off, yield and the unsigned deliveries slot, and passes the numbers check", () => {
+  const fx = fixture()
+  const w = (o = {}) => ({ lt_1h: 0, lt_1d: 0, lt_7d: 0, ge_7d: 0, ...o })
+  write(join(fx.reports, "rollups/outcomes.json"), {
+    schema: "desk.factory.rollups/1",
+    signoff: { recorded: true, jobs: 2, accepted: 1, accepted_unverified: 0, delivered_unsigned: 1, refused: 0, refused_unverified: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 1, jobs_without_work_record: 0, refusal_reasons: { not_what_was_asked: 0, defect: 0, changed_ask: 0, incomplete: 0, other: 0 }, waits: { signed: w({ lt_1h: 1 }), unsigned: w({ ge_7d: 1 }) } },
+    first_pass_yield: { state: "partial", value: 1, reasons: ["awaiting_signoff"], n: 2, N: 2, passed: 2, returned: 0, awaiting_signoff: 1, signoff_unverified: 0, changed_ask_only: 0, excluded: [{ reason: "not_recorded", jobs: 1 }] },
+    rework: { state: "measured", reasons: [], n: 2, N: 2, returns: { in_task: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 }, at_review: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 }, after_delivery: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 } }, changed_ask: 0, reason_check: { state: "unavailable", reasons: ["no_refusals"] }, defects: { state: "unavailable", reasons: ["no_labels"], n: 0, N: 2 } },
+  })
+  write(join(fx.reports, "jobs/a.json"), job("a", "done", { signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], verified: true, reason: null, wait: { class: "lt_1h", censored: false } } }))
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.deepEqual(checkNumbers(data), [])
+  assert.equal(data.outcomes.signoff.accepted.value, 1)
+  assert.equal(data.outcomes.first_pass_yield.bound, "upper")
+  assert.equal(data.jobs.find((j) => j.id === "a").signoff.value, "accepted")
+  const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
+  assert.deepEqual(checkNumbers(health), [])
+  assert.equal(health.slots.unsigned_deliveries.value, 1)
+  assert.equal(health.details.unsigned_deliveries[0].number.value, "waiting at least 7 days")
+})

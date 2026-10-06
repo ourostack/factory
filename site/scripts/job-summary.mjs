@@ -6,7 +6,8 @@
 // never zero.
 
 import { direct } from "./bounds.mjs";
-import { fromFormula, unavailable } from "./state.mjs";
+import { fromFormula, measured, unavailable } from "./state.mjs";
+import { waitWords } from "./outcomes.mjs";
 
 // Every partial figure carries its direction from the one table in
 // bounds.mjs, keyed by the measure.
@@ -53,7 +54,44 @@ const DETAILS = [
   ["tokens_reasoning", "Reasoning tokens (inside output)", "compact", (F) => bounded(F.tokens_total?.reasoning, "tokens_reasoning")],
   ["tokens_cache_read", "Cache read tokens", "compact", (F) => bounded(F.tokens_total?.cache_read, "tokens_cache_read")],
   ["tokens_cache_write", "Cache write tokens", "compact", (F) => bounded(F.tokens_total?.cache_write, "tokens_cache_write")],
+  ["signoff", "Sign-off", "text", signoffOf],
+  ["signoff_wait", "Wait for sign-off", "text", signoffWaitOf],
+  ["first_pass", "First pass", "pass", (F) => bounded(F.first_pass_yield, "first_pass_job")],
+  ["returns", "Times sent back", "count", returnsOf],
 ];
+
+// The human's answer to the job's delivery, in words. An acceptance or a
+// refusal no human was seen to make says so; the card's raw state is never
+// shown as an acceptance on its own.
+const SIGNOFF_WORDS = {
+  delivered_unsigned: "delivered, not signed yet",
+  reopened: "reopened",
+  not_delivered: "not delivered yet",
+};
+function signoffOf(F) {
+  const n = fromFormula(F.signoff);
+  if (n.state === "unavailable") return n;
+  const v = n.value;
+  const witnessed = F.signoff?.verified === true;
+  let words = SIGNOFF_WORDS[v];
+  if (v === "accepted") words = witnessed ? "accepted" : "accepted, not witnessed";
+  if (v === "refused") words = witnessed ? "sent back" : "sent back, not witnessed";
+  return words ? measured(words) : unavailable(["not_recorded"]);
+}
+function signoffWaitOf(F) {
+  const n = fromFormula(F.signoff);
+  if (n.state === "unavailable") return n;
+  const words = waitWords(F.signoff?.wait);
+  return words ? measured(words) : unavailable(["not_delivered"]);
+}
+// All returns of the job, whichever catch point caught them.
+function returnsOf(F) {
+  const r = F.rework;
+  if (!r || typeof r !== "object" || !r.value || typeof r.value !== "object") return bounded(r, "returns");
+  const parts = Object.values(r.value);
+  if (!parts.every((x) => Number.isSafeInteger(x) && x >= 0)) return unavailable(["not_recorded"]);
+  return bounded({ ...r, value: parts.reduce((a, b) => a + b, 0) }, "returns");
+}
 
 export function jobDetails(F) {
   return DETAILS.map(([key, label, kind, read]) => ({ key, label, kind, number: read(F || {}) }));
@@ -82,6 +120,10 @@ export function jobSummary(d, f) {
     tool_retries: bounded(F.rework_signals?.tool_retries, "tool_retries"),
     sessions_bound: bounded(bound, "sessions_bound"),
     public_prs: bounded(prs, "public_prs"),
+    signoff: signoffOf(F),
+    signoff_wait: signoffWaitOf(F),
+    first_pass: bounded(F.first_pass_yield, "first_pass_job"),
+    returns: returnsOf(F),
     details: jobDetails(F),
   };
 }

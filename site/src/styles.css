@@ -984,3 +984,15 @@ footer a {
 .state-partial { border-style: dashed; }
 .state-unavailable { border-style: dotted; font-style: italic; }
 .job-detail-table td.num-unavailable .num-value { font-style: italic; color: var(--text-secondary); }
+
+/* Sign-off and rework */
+.outcome-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.outcome-block { margin-bottom: 20px; }
+.outcome-block h4 { margin: 0 0 8px; font-size: 1em; }
+.outcome-block .stat-value { margin: 0 0 6px; }
+.outcome-block .stat-tile .health-facts, .stat-tile.outcome-block .health-facts { grid-template-columns: minmax(0, 1fr) auto; margin-top: 10px; }

@@ -46,6 +46,7 @@ import { direct } from "./bounds.mjs";
 import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
 import { checkNumbers } from "./check-numbers.mjs";
+import { outcomesSummary } from "./outcomes.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -116,6 +117,9 @@ const mudaFile = readJSON(join(reportsDir, "rollups/muda.json"), null);
 // a state; the site then computes those numbers from the facts itself.
 const totalsFile = readJSON(join(reportsDir, "rollups/totals.json"), null);
 const toolKindsFile = readJSON(join(reportsDir, "rollups/tool-kinds.json"), null);
+// Sign-off, first-pass yield and rework, from a Desk whose pipeline builds
+// rollups/outcomes.json. Absent, every outcome figure reads "not recorded yet".
+const outcomes = outcomesSummary(readJSON(join(reportsDir, "rollups/outcomes.json"), null));
 // If the reports branch is missing its rollups, the site says so (health
 // verdict `broken`) and every number the rollups would supply is unavailable.
 const reportsReadable = coverageFile !== null && measuresFile !== null && mudaFile !== null;
@@ -728,6 +732,7 @@ const data = {
   andon_verification: andonFetch.verification,
   featured,
   takeaways,
+  outcomes,
 };
 
 // The site's own health, built beside the data.
@@ -741,6 +746,8 @@ const health = buildHealth({
   newestIntake: intakeClass(newestIntakeMs, Date.parse(builtAt)),
   lastBuild,
   reportsReadable,
+  slots: { unsigned_deliveries: outcomes.unsigned },
+  details: { unsigned_deliveries: [{ label: "longest", kind: "text", number: outcomes.oldest_unsigned_wait }] },
 });
 
 // The numbers regression check. It runs before anything is written, so a

@@ -617,6 +617,135 @@
     );
   }
 
+  // ------------------------------------------------------------ outcomes
+  // Sign-off, first-pass yield, rework and attention, each a stated number
+  // from the reports. An unwitnessed answer is never an acceptance here.
+
+  const REFUSAL_WORD = {
+    not_what_was_asked: "not what was asked",
+    defect: "a defect",
+    changed_ask: "the ask changed",
+    incomplete: "incomplete",
+    other: "another reason",
+  };
+  const CATCH_WORD = { in_task: "inside the task", at_review: "at review", after_delivery: "after delivery" };
+  const RETURN_WORD = { agent_error: "agent error", changed_ask: "changed ask", new_information: "new information", external: "external" };
+
+  function figure(dl, label, number, kind) {
+    row(dl, label, num(number, kind || "count"));
+  }
+
+  function renderOutcomes(container, o) {
+    container.innerHTML = "";
+    if (!o || !o.signoff) {
+      emptyState(container, "Sign-off is not part of this build's data.");
+      return;
+    }
+    const grid = el("div", "outcome-tiles");
+
+    const head = el("div", "stat-tile outcome-block");
+    head.appendChild(el("h4", null, "Human attention per accepted outcome"));
+    const v = el("p", "stat-value");
+    v.appendChild(num(o.attention.headline, "duration"));
+    head.appendChild(v);
+    head.appendChild(el("div", "stat-note", "An estimate of the time a human spent reading and answering, over the outcomes they accepted."));
+    const turns = el("p", "stat-note");
+    turns.appendChild(document.createTextNode("Human turns per accepted outcome: "));
+    turns.appendChild(num(o.attention.turns_per_accepted, "count"));
+    head.appendChild(turns);
+    // A trust line speaks of a figure; with no figure there is nothing to trust.
+    if (o.attention.headline.state !== "unavailable") {
+      const t = el("p", "stat-trust");
+      t.appendChild(trustNode(o.attention.trust));
+      head.appendChild(t);
+    }
+    grid.appendChild(head);
+    container.appendChild(grid);
+
+    const so = el("div", "outcome-block");
+    so.appendChild(el("h4", null, "Sign-off"));
+    const dl = el("dl", "health-facts");
+    figure(dl, "Accepted, witnessed", o.signoff.accepted);
+    figure(dl, "Accepted, not witnessed", o.signoff.accepted_unverified);
+    const waiting = el("span");
+    waiting.appendChild(num(o.unsigned, "count"));
+    if (o.oldest_unsigned_wait.state !== "unavailable") {
+      waiting.appendChild(document.createTextNode(" \u00b7 longest: "));
+      waiting.appendChild(num(o.oldest_unsigned_wait, "text"));
+    }
+    row(dl, "Delivered, awaiting an answer", waiting);
+    const refused = el("span");
+    refused.appendChild(num(o.signoff.refused, "count"));
+    if (o.refusal_reasons.length) {
+      refused.appendChild(document.createTextNode(" \u00b7 "));
+      o.refusal_reasons.forEach((r, i) => {
+        if (i) refused.appendChild(document.createTextNode(", "));
+        refused.appendChild(num(r.jobs, "count"));
+        refused.appendChild(document.createTextNode(` ${REFUSAL_WORD[r.reason] || r.reason}`));
+      });
+    }
+    row(dl, "Sent back", refused);
+    figure(dl, "Sent back, not witnessed (part of sent back)", o.signoff.refused_unverified);
+    figure(dl, "Delivered before sign-off was recorded", o.signoff.not_recorded);
+    figure(dl, "Jobs with no sign-off record", o.signoff.no_record);
+    so.appendChild(dl);
+
+    const fp = el("div", "stat-tile outcome-block");
+    fp.appendChild(el("h4", null, "First-pass yield"));
+    const fv = el("p", "stat-value");
+    fv.appendChild(num(o.first_pass_yield, "pct"));
+    fp.appendChild(fv);
+    // The counts the percentage is computed from, so a reader can rebuild it.
+    const c = o.first_pass_counts;
+    if (c.passed.state === "measured" && c.counted.state === "measured" && c.final.state === "measured") {
+      const how = el("p", "stat-note");
+      how.textContent = `${c.passed.value} of ${c.counted.value} delivered jobs with a verdict passed first time so far; ${c.final.value} of those ${c.counted.value} verdicts are final.`;
+      fp.appendChild(how);
+    }
+    const fdl = el("dl", "health-facts");
+    figure(fdl, "Passed first time (so far)", o.first_pass_counts.passed);
+    figure(fdl, "Sent back at least once", o.first_pass_counts.returned);
+    figure(fdl, "Passed, with only changed-ask returns", o.first_pass_counts.changed_ask_only);
+    fp.appendChild(fdl);
+    grid.appendChild(fp);
+    container.appendChild(so);
+
+    const rw = el("div", "outcome-block");
+    rw.appendChild(el("h4", null, "What was sent back, and where it was caught"));
+    const rdl = el("dl", "health-facts");
+    for (const r of o.rework.returns) {
+      const node = el("span");
+      node.appendChild(num(r.total, "count"));
+      if (r.total.state !== "unavailable") {
+        const parts = Object.entries(r.by_reason).filter(([, n]) => n.state === "measured" && n.value > 0);
+        if (parts.length) {
+          node.appendChild(document.createTextNode(" \u00b7 "));
+          parts.forEach(([k, n], i) => {
+            if (i) node.appendChild(document.createTextNode(", "));
+            node.appendChild(num(n, "count"));
+            node.appendChild(document.createTextNode(` ${RETURN_WORD[k] || k}`));
+          });
+        }
+      }
+      row(rdl, `Caught ${CATCH_WORD[r.caught] || r.caught}`, node);
+    }
+    figure(rdl, "Returns because the ask changed (not counted against yield)", o.rework.changed_ask);
+    const check = el("span");
+    check.appendChild(num(o.rework.reason_check.disagree, "count"));
+    if (o.rework.reason_check.compared.state !== "unavailable") {
+      check.appendChild(document.createTextNode(" of "));
+      check.appendChild(num(o.rework.reason_check.compared, "count"));
+      check.appendChild(document.createTextNode(" refusals, "));
+      check.appendChild(num(o.rework.reason_check.compared_verified, "count"));
+      check.appendChild(document.createTextNode(" of them witnessed"));
+    }
+    row(rdl, "Agent's and human's reasons disagreed", check);
+    figure(rdl, "Defect time caught inside the task", o.rework.defects.in_task_ms, "duration");
+    figure(rdl, "Defect time with no catch point", o.rework.defects.not_placed_ms, "duration");
+    rw.appendChild(rdl);
+    container.appendChild(rw);
+  }
+
   // --------------------------------------------------------------- jobs
 
   function renderJobsTable(container, jobs) {
@@ -630,12 +759,12 @@
     table.className = "data-table";
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    const cols = ["Job", "Status", "Lead time", "Active time", "Flow eff.", "Tool failures", "Tool retries", "Sessions", "Public PRs"];
+    const cols = ["Job", "Status", "Sign-off", "Lead time", "Active time", "Flow eff.", "Tool failures", "Tool retries", "Sessions", "Public PRs"];
     for (const c of cols) {
       const th = document.createElement("th");
       th.textContent = c;
       if (c === "Flow eff.") th.title = "Active time ÷ lead time. Higher means less of the job's time was spent waiting.";
-      if (c !== "Job" && c !== "Status") th.className = "num";
+      if (c !== "Job" && c !== "Status" && c !== "Sign-off") th.className = "num";
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
@@ -662,6 +791,10 @@
       statusTd.appendChild(dot);
       statusTd.appendChild(document.createTextNode(j.status));
       tr.appendChild(statusTd);
+
+      const signTd = document.createElement("td");
+      signTd.appendChild(num(j.signoff, "text"));
+      tr.appendChild(signTd);
 
       const cells = [
         [j.lead_time_ms, "duration"],
@@ -852,7 +985,19 @@
     });
     row(dl, "Facts files by host", hostsNode);
     for (const [key, number] of Object.entries(health.slots || {})) {
-      row(dl, SLOT_LABEL[key] || key, num(number, "count"));
+      const node = el("span");
+      node.appendChild(num(number, "count"));
+      const detail = health.details && Array.isArray(health.details[key]) ? health.details[key] : [];
+      if (key !== "capture_coverage" && detail.length && number.state !== "unavailable") {
+        const per = el("span", "slot-detail");
+        for (const d of detail) {
+          if (!d || typeof d.label !== "string" || !d.number) continue;
+          per.appendChild(document.createTextNode(` \u00b7 ${d.label}: `));
+          per.appendChild(num(d.number, d.kind || "count", { nofn: false }));
+        }
+        node.appendChild(per);
+      }
+      row(dl, SLOT_LABEL[key] || key, node);
     }
     container.appendChild(dl);
   }
@@ -991,6 +1136,7 @@
     });
 
     renderWaste(document.getElementById("waste-caption"), document.getElementById("waste-panel"), data.waste);
+    renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes);
     renderKaizen(
       document.getElementById("kaizen-panel"),
       data.kaizen_issues,
