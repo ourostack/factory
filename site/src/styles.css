@@ -984,3 +984,7 @@ footer a {
 .state-partial { border-style: dashed; }
 .state-unavailable { border-style: dotted; font-style: italic; }
 .job-detail-table td.num-unavailable .num-value { font-style: italic; color: var(--text-secondary); }
+
+/* Sign-off and rework */
+.outcome-block h4 { margin: 0 0 8px; font-size: 1em; }
+.outcome-block .stat-value { margin: 0 0 6px; }
