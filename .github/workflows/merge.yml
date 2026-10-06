@@ -165,8 +165,13 @@ jobs:
                 codes+="$plugin_codes"$'\n'
               fi
               # The store's own rule on capture records, from main.
-              if [ -f .github/scripts/check-capture.sh ] && ! capture_codes=$(bash .github/scripts/check-capture.sh "$base_sha" "$HEAD_SHA"); then
-                codes+="$capture_codes"$'\n'
+              # A missing script is capture_check_unavailable, never a skip.
+              if ! capture_codes=$(bash .github/scripts/check-capture.sh "$base_sha" "$HEAD_SHA"); then
+                if printf '%s\n' "$capture_codes" | grep -qE '^[a-z][a-z0-9_]{0,63}$'; then
+                  codes+="$capture_codes"$'\n'
+                else
+                  codes+="capture_check_unavailable"$'\n'
+                fi
               fi
               if [ -n "$codes" ]; then
                 printf '%s' "$codes" | jq -R -s -c '{ok: false, errors: [split("\n")[] | select(length > 0) | {code: .}]}' > "$result"

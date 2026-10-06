@@ -162,8 +162,9 @@ export function rollup(members, { of, reduce, measure }) {
   return direct({ state: "measured", value, reasons: [], ...base }, measure);
 }
 
-// Trust state for a headline: `ok`, `thin_sample`, `partial`, or (once a
-// coverage record exists) `low_coverage`. `reasons` lists every cause that
+// Trust state for a headline: `ok`, `thin_sample`, `partial`, `coverage_unknown` (the
+// capture coverage could not be computed) or (once a coverage record exists)
+// `low_coverage`. `reasons` lists every cause that
 // applies; `status` is the first that does, in that order of severity.
 // `coverage` is the capture share the trust state rests on; the site build
 // passes it to every call. Without one it reads "not recorded yet".
@@ -171,6 +172,11 @@ export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   const n = Number.isInteger(headline?.n) ? headline.n : headline?.state === "measured" ? 1 : 0;
   const N = Number.isInteger(headline?.N) ? headline.N : n;
   const causes = [];
+  // Coverage that could not be computed (anything but a measured or partial
+  // record, or the plain "not recorded yet") is not "ok": it is not measured.
+  const notRecordedYet = coverage?.state === "unavailable" && Array.isArray(coverage.reasons) && coverage.reasons.length === 1 && coverage.reasons[0] === "not_recorded_yet";
+  const known = coverage?.state === "measured" || coverage?.state === "partial";
+  if (!known && !notRecordedYet && coverage !== undefined) causes.push("coverage_unknown");
   if ((coverage?.state === "measured" || coverage?.state === "partial") && typeof coverage.value === "number" && coverage.value < LOW_COVERAGE_BELOW) {
     causes.push("low_coverage");
   }
@@ -178,6 +184,7 @@ export function trust(headline, { coverage = COVERAGE_NOT_RECORDED } = {}) {
   if (n < N || headline?.state === "partial") causes.push("partial");
   const status = causes[0] ?? "ok";
   const text = {
+    coverage_unknown: `capture coverage not measured${Array.isArray(coverage?.reasons) && coverage.reasons.length ? ` (${coverage.reasons.join(", ")})` : ""}`,
     low_coverage: "capture coverage is low",
     thin_sample: `only ${n} measured (fewer than ${THIN_SAMPLE_MIN})`,
     partial: `${n} of ${N} measured`,

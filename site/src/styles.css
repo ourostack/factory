@@ -934,7 +934,8 @@ footer a {
 }
 .trust-ok .trust-label { border-style: solid; }
 .trust-thin_sample .trust-label,
-.trust-low_coverage .trust-label { border-style: double; border-width: 3px; }
+.trust-low_coverage .trust-label,
+.trust-coverage_unknown .trust-label { border-style: double; border-width: 3px; }
 .trust-partial .trust-label { border-style: dashed; }
 .stat-tile .stat-trust { margin: 8px 0 0; }
 .takeaway-trust { display: block; margin-top: 4px; }
