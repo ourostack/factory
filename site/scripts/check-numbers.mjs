@@ -23,9 +23,10 @@ const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kin
 const ROLLUP_KEYS = ["n", "N", "of", "out_of_scope", "excluded"];
 // Reasons under which a rollup may carry a value with n of zero: every
 // member is flagged, but the flag still leaves a value (a lower bound from a
-// host that records partly, a capture share from unverified hosts, a
-// first-pass yield whose every job still awaits a witnessed sign-off).
-const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["awaiting_signoff", "host_records_partly", "signoff_unverified", "unverified_host"]);
+// host that records partly, a capture share from unverified hosts). Each
+// package adds its own reasons below, so the list grows in one place per
+// package.
+const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["host_records_partly", "unverified_host"]);
 
 // Paths in data.json that must be rollups (they sum, take a median or a
 // share over a population). A rollup that lost its marker and its counts is
@@ -76,6 +77,10 @@ const FREE_KEYS = new Set(["id", "session_id", "ref"]);
 function isStated(node) {
   return node && typeof node === "object" && !Array.isArray(node) && ("state" in node || "reasons" in node);
 }
+
+// Sign-off: a first-pass yield whose every job still awaits a witnessed
+// answer keeps its upper bound.
+for (const reason of ["awaiting_signoff", "signoff_unverified"]) VALUE_WITH_NO_WHOLE_MEMBER.add(reason);
 
 export function checkNumbers(data) {
   const out = [];

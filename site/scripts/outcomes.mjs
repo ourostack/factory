@@ -149,7 +149,7 @@ function reworkOf(r) {
 
 // Human attention per accepted outcome (Package E). Read only when the
 // reports carry it; a value beside zero accepted outcomes is refused.
-function attentionOf(a, accepted) {
+function attentionOf(a, accepted, coverage) {
   const of = "accepted outcomes"
   const read = (h, measure) => {
     if (!isObject(h) || !Array.isArray(h.reasons)) return none(NOT_YET, of)
@@ -159,10 +159,12 @@ function attentionOf(a, accepted) {
     return declareRollup({ value: h.value, n: isCount(h.n) ? h.n : 0, N, of, measure, reasons: h.reasons })
   }
   const headline = read(a?.headline, "attention_per_accepted")
-  return { headline, turns_per_accepted: read(a?.turns_per_accepted, "turns_per_accepted"), trust: trust(headline) }
+  return { headline, turns_per_accepted: read(a?.turns_per_accepted, "turns_per_accepted"), trust: trust(headline, coverage ? { coverage } : {}) }
 }
 
-export function outcomesSummary(file) {
+// `coverage`: the capture share the attention trust state rests on, when
+// the build has one.
+export function outcomesSummary(file, { coverage = null } = {}) {
   const f = isObject(file) ? file : null
   const raw = isObject(f?.signoff) ? f.signoff : {}
   // true: published; false: the reports say no session published one; null:
@@ -189,6 +191,6 @@ export function outcomesSummary(file) {
       changed_ask_only: count(f?.first_pass_yield?.changed_ask_only, f ? ["not_recorded"] : NOT_YET),
     },
     rework: reworkOf(f?.rework ?? null),
-    attention: attentionOf(f?.attention ?? null, signoff.accepted),
+    attention: attentionOf(f?.attention ?? null, signoff.accepted, coverage),
   }
 }
