@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { AGE_ALARM_DAYS, LOOP_KEYS, QUIET_AFTER_HOURS, summarizeLoop } from "../../../site/scripts/loop-health.mjs"
+import { AGE_ALARM_DAYS, BLOCKING_HEADLESS, HEALTHY_RESTS_ON, LOOP_KEYS, QUIET_AFTER_HOURS, summarizeLoop } from "../../../site/scripts/loop-health.mjs"
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 
 const HOUR = 3600 * 1000
@@ -85,6 +85,14 @@ test("no open card means no oldest age, said as none open, never zero days", () 
   assert.deepEqual(l.oldest_open_age_days.reasons, ["none_open"])
 })
 
+
+test("a machine with nothing open counts as answering for the oldest age, beside a machine that has an open item", () => {
+  const l = summarizeLoop({ files: [file(rec(loop({ improvement_open: 0, improvement_claimed: 0, oldest_open_age_days: null }))), file(rec(loop({ oldest_open_age_days: 2 })))], nowMs: NOW })
+  assert.equal(l.oldest_open_age_days.value, 2)
+  assert.equal(l.oldest_open_age_days.n, 2)
+  assert.equal(l.oldest_open_age_days.state, "measured")
+  assert.ok(!l.oldest_open_age_days.reasons.includes("machine_sent_no_loop_record"))
+})
 test("an open item older than the age limit raises the age alarm", () => {
   const l = summarizeLoop({ files: [file(rec(loop({ oldest_open_age_days: AGE_ALARM_DAYS })))], nowMs: NOW })
   assert.deepEqual(l.alarms.map((a) => a.code), ["improvement_age"])
@@ -97,13 +105,35 @@ test("a stale step or a loop alarm on any machine is an alarm too", () => {
   assert.deepEqual(l.alarms.map((a) => a.code).sort(), ["loop_alarms_open", "steps_stale"])
 })
 
-test("a record not updated for over 72 hours is a quiet machine, still read, not an alarm", () => {
-  const l = summarizeLoop({ files: [file(rec(loop()), QUIET_AFTER_HOURS + 1)], nowMs: NOW })
+test("a record not updated for over 72 hours is a quiet machine, still read, with its ages aged by the record's age", () => {
+  const l = summarizeLoop({ files: [file(rec(loop({ oldest_open_age_days: 1 })), QUIET_AFTER_HOURS + 1)], nowMs: NOW })
   assert.equal(l.machines.quiet.value, 1)
   assert.equal(l.open.value, 3)
+  assert.equal(l.oldest_open_age_days.value, 1 + Math.floor((QUIET_AFTER_HOURS + 1) / 24))
   assert.deepEqual(l.alarms, [])
 })
 
+test("a record sent 40 days ago that said oldest 5 days shows 45 days and raises the age alarm", () => {
+  const l = summarizeLoop({ files: [file(rec(loop({ oldest_open_age_days: 5 })), 40 * 24)], nowMs: NOW })
+  assert.equal(l.oldest_open_age_days.value, 45)
+  assert.deepEqual(l.alarms.map((a) => a.code), ["improvement_age"])
+  assert.equal(l.verdict.status, "alarm")
+})
+
+test("a record past the 45-day stale rule is not read as current: its machine stays in N and every figure says so", () => {
+  const l = summarizeLoop({ files: [file(rec(loop())), file(rec(loop({ improvement_open: 9 })), 46 * 24)], nowMs: NOW })
+  assert.equal(l.open.value, 3)
+  assert.equal(l.open.n, 1)
+  assert.equal(l.open.N, 2)
+  assert.equal(l.open.state, "partial")
+  assert.ok(l.open.reasons.includes("record_stale"))
+  assert.equal(l.machines.stale.value, 1)
+  assert.equal(l.verdict.status, "cannot_tell")
+  const only = summarizeLoop({ files: [file(rec(loop()), 46 * 24)], nowMs: NOW })
+  assert.equal(only.open.state, "unavailable")
+  assert.deepEqual(only.open.reasons, ["record_stale"])
+  assert.deepEqual(checkNumbers({ loop_health: l }), [])
+})
 test("a slot of another version, a bad value or a code that is not a plain code is not read as a number", () => {
   const l = summarizeLoop({
     files: [file(rec({ ...loop(), v: 2 })), file(rec(loop({ improvement_open: -1, headless: "Has Spaces" })))],
@@ -112,4 +142,38 @@ test("a slot of another version, a bad value or a code that is not a plain code 
   assert.equal(l.machines.unreadable_loop.value, 1)
   assert.equal(l.open.state, "unavailable")
   assert.deepEqual(l.headless, [])
+})
+
+test("the no-alarm verdict is healthy only when every figure it rests on is measured, for every combination of missing figures", () => {
+  const keyOf = { oldest_open_age_days: "oldest_open_age_days", loop_alarms_open: "loop_alarms_open", steps_stale: "steps_stale" }
+  for (let mask = 0; mask < 1 << HEALTHY_RESTS_ON.length; mask++) {
+    const dropped = HEALTHY_RESTS_ON.filter((_, i) => mask & (1 << i))
+    const over = Object.fromEntries(dropped.map((k) => [keyOf[k], null]))
+    const l = summarizeLoop({ files: [file(rec(loop({ oldest_open_age_days: 2, ...over })))], nowMs: NOW })
+    if (dropped.length === 0) {
+      assert.equal(l.verdict.status, "healthy")
+      assert.deepEqual(l.verdict.missing, [])
+    } else {
+      assert.equal(l.verdict.status, "cannot_tell", dropped.join(","))
+      assert.deepEqual(l.verdict.missing.map((m) => m.figure), dropped)
+      for (const m of l.verdict.missing) assert.ok(m.codes.length > 0)
+    }
+  }
+  // The reviewer's case: a slot with only the open count.
+  const thin = summarizeLoop({ files: [file(rec({ v: 1, improvement_open: 2 }))], nowMs: NOW })
+  assert.equal(thin.verdict.status, "cannot_tell")
+  assert.deepEqual(thin.verdict.missing.map((m) => m.figure), [...HEALTHY_RESTS_ON])
+  // Nothing open anywhere is a measured fact, not a missing figure.
+  const none = summarizeLoop({ files: [file(rec(loop({ improvement_open: 0, improvement_claimed: 0, oldest_open_age_days: null })))], nowMs: NOW })
+  assert.equal(none.verdict.status, "healthy")
+})
+
+test("a blocked headless evaluator on any machine raises the headless_blocked alarm; a person's own switch does not", () => {
+  for (const code of BLOCKING_HEADLESS) {
+    const l = summarizeLoop({ files: [file(rec(loop({ headless: code })))], nowMs: NOW })
+    assert.deepEqual(l.alarms.map((a) => a.code), ["headless_blocked"], code)
+  }
+  for (const code of ["disabled", "disabled_would_bill", "budget_exhausted", "ran"]) {
+    assert.deepEqual(summarizeLoop({ files: [file(rec(loop({ headless: code })))], nowMs: NOW }).alarms, [], code)
+  }
 })

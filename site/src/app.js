@@ -1134,6 +1134,12 @@
     improvement_age: "an improvement item has been open for a week or more",
     loop_alarms_open: "the loop has raised an alarm about itself",
     steps_stale: "a loop step has stopped succeeding",
+    headless_blocked: "the waste evaluator is blocked on a machine (no agent command, not signed in, host not supported, or sign-in could not be told)",
+  };
+  const LOOP_FIGURE = {
+    oldest_open_age_days: "the oldest open item's age",
+    loop_alarms_open: "the loop's own alarms",
+    steps_stale: "whether every loop step is succeeding",
   };
   const HEADLESS_WORD = {
     idle: "idle",
@@ -1172,16 +1178,29 @@
     machinesNode.appendChild(num(m.without_loop, "count"));
     machinesNode.appendChild(document.createTextNode(" on a Desk that does not send it yet, "));
     machinesNode.appendChild(num(m.quiet, "count"));
-    machinesNode.appendChild(document.createTextNode(" quiet for over three days"));
+    machinesNode.appendChild(document.createTextNode(" quiet for over three days (their ages are counted from their last record)"));
+    if (m.stale) {
+      machinesNode.appendChild(document.createTextNode(", "));
+      machinesNode.appendChild(num(m.stale, "count"));
+      machinesNode.appendChild(document.createTextNode(" with a record older than 45 days, not read as current"));
+    }
     row(dl, "Machines", machinesNode);
     container.appendChild(dl);
     const alarms = Array.isArray(loop.alarms) ? loop.alarms : [];
     const al = el("p", alarms.length ? "capture-alarms capture-alarms-on" : "capture-alarms");
-    al.textContent = alarms.length
-      ? `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`
-      : loop.open.state === "unavailable"
-        ? "No alarm can be told until a machine sends its loop's health."
-        : "No loop alarm: nothing has been open for a week, and every loop step is succeeding.";
+    // The healthy sentence only when every figure it rests on is measured
+    // from current records; otherwise say which are not recorded, and why.
+    const verdict = loop.verdict || { status: "cannot_tell", missing: [] };
+    if (alarms.length) {
+      al.textContent = `Alarm: ${alarms.map((a) => LOOP_ALARM[a.code] || a.code).join("; ")}.`;
+    } else if (verdict.status === "healthy") {
+      al.textContent = "No loop alarm: nothing has been open for a week, the loop has no alarm of its own, and every loop step is succeeding.";
+    } else if (loop.open.state === "unavailable" && !verdict.missing.length) {
+      al.textContent = "No alarm can be told until a machine sends its loop's health.";
+    } else {
+      const parts = verdict.missing.map((x) => `${LOOP_FIGURE[x.figure] || x.figure} (${x.codes.map((c) => F.reasonText(c)).join("; ")})`);
+      al.textContent = `No alarm is raised, but the loop's health cannot be told: not recorded: ${parts.join("; ")}.`;
+    }
     container.appendChild(al);
   }
 

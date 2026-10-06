@@ -24,6 +24,11 @@
 // never zero. Improvement cards live on a desk, and two machines can work the
 // same desk, so counts across machines are never added: each figure is the
 // largest any one machine reports, with n of N machines.
+//
+// A record is only as current as its last refresh. An age it reports is aged
+// by the record's own age before it is shown or compared with the alarm
+// threshold, and a record past the 45-day stale rule is not read: its machine
+// stays in N, and every figure says some records are stale.
 
 import { declareRollup, measured, unavailable } from "./state.mjs"
 import { STALE_DAYS, parseCaptureRecord } from "./capture-coverage.mjs"
@@ -48,8 +53,17 @@ export const AGE_ALARM_DAYS = 7
 // A record not updated for this long is a quiet machine (no session started
 // there), shown as such, not an alarm.
 export const QUIET_AFTER_HOURS = 72
+// The headless evaluator states an agent can fix; Desk opens its
+// `loop_alarm:headless_blocked` card for these (after two blocked days on the
+// machine). The store raises the same alarm when any machine reports one.
+export const BLOCKING_HEADLESS = Object.freeze(["no_agent_cli", "no_credentials", "unsupported_host", "sign_in_unknown"])
+// The figures the "no loop alarm" sentence rests on.
+export const HEALTHY_RESTS_ON = Object.freeze(["oldest_open_age_days", "loop_alarms_open", "steps_stale"])
 
 const HOUR = 3600 * 1000
+const DAY = 24 * HOUR
+// A machine that reported it has nothing open: no oldest age, by fact.
+const NONE = Symbol("none open")
 const MACHINES = "machines' records"
 const CODE = /^[a-z_]{1,32}$/
 const isCount = (x) => Number.isSafeInteger(x) && x >= 0 && x <= 1_000_000
@@ -66,18 +80,24 @@ function slotOf(loop) {
   return slot
 }
 
-function largest(slots, N, valueOf) {
-  if (N === 0) return { ...unavailable(["no_records"]), kind: "rollup", n: 0, N: 0, of: MACHINES, out_of_scope: 0 }
-  const values = slots.map(valueOf).filter((v) => v !== null)
-  if (slots.length === 0) return { ...unavailable(["no_loop_records"]), kind: "rollup", n: 0, N, of: MACHINES, out_of_scope: 0 }
-  return declareRollup({
-    value: values.length ? Math.max(...values) : null,
-    n: values.length,
-    N,
-    of: MACHINES,
-    measure: "max",
-    reasons: values.length < N ? ["machine_sent_no_loop_record"] : [],
-  })
+// The largest value the machines report. `members` is one entry per machine
+// in N: { stale } for a record past the stale rule, { slot: null } for one
+// that sent no readable slot, or { slot, ageDays }.
+function largest(members, valueOf) {
+  const N = members.length
+  const rollup = (reasons, n = 0) => ({ ...unavailable(reasons), kind: "rollup", n, N, of: MACHINES, out_of_scope: 0 })
+  if (N === 0) return rollup(["no_records"])
+  const stale = members.filter((m) => m.stale).length
+  const readable = members.filter((m) => !m.stale && m.slot)
+  const values = readable.map((m) => valueOf(m.slot, m.ageDays)).filter((v) => v !== null)
+  const reasons = []
+  if (stale) reasons.push("record_stale")
+  if (values.length < N - stale) reasons.push(readable.length === 0 ? "no_loop_records" : "machine_sent_no_loop_record")
+  if (values.length === 0) return rollup(reasons.length ? reasons : ["no_loop_records"])
+  const numbers = values.filter((v) => v !== NONE)
+  // Every machine that answered has nothing open: there is no oldest item.
+  if (numbers.length === 0) return rollup(["none_open", ...reasons])
+  return declareRollup({ value: Math.max(...numbers), n: values.length, N, of: MACHINES, measure: "max", reasons })
 }
 
 const sumOrNull = (...xs) => (xs.every((x) => x !== null) ? xs.reduce((a, b) => a + b, 0) : null)
@@ -85,35 +105,42 @@ const sumOrNull = (...xs) => (xs.every((x) => x !== null) ? xs.reduce((a, b) => 
 // `files`: the capture files as build-data reads them ({ text, committedAtMs }).
 export function summarizeLoop({ files, nowMs }) {
   const list = Array.isArray(files) ? files : []
-  let N = 0
+  const members = []
   let withoutLoop = 0
   let unreadable = 0
   let quiet = 0
-  const slots = []
+  let stale = 0
   for (const f of list) {
     const parsed = parseCaptureRecord(f?.text)
     if (!parsed.ok || Object.keys(parsed.record.hosts).length === 0) continue
-    if (!Number.isFinite(f.committedAtMs) || nowMs - f.committedAtMs > STALE_DAYS * 24 * HOUR) continue
-    N += 1
-    if (nowMs - f.committedAtMs > QUIET_AFTER_HOURS * HOUR) quiet += 1
+    const ageMs = Number.isFinite(f.committedAtMs) ? Math.max(0, nowMs - f.committedAtMs) : Infinity
+    if (ageMs > STALE_DAYS * DAY) {
+      stale += 1
+      members.push({ stale: true })
+      continue
+    }
+    if (ageMs > QUIET_AFTER_HOURS * HOUR) quiet += 1
     if (!("loop" in parsed.record)) {
       withoutLoop += 1
+      members.push({ slot: null })
       continue
     }
     const slot = slotOf(parsed.record.loop)
     if (slot === null) unreadable += 1
-    else slots.push(slot)
+    members.push({ slot, ageDays: Math.floor(ageMs / DAY) })
   }
+  const slots = members.filter((m) => m.slot).map((m) => m.slot)
 
-  const fig = (valueOf) => largest(slots, N, valueOf)
+  const fig = (valueOf) => largest(members, valueOf)
   const open = fig((s) => s.improvement_open)
   const inProgress = fig((s) => sumOrNull(s.improvement_claimed, s.improvement_shipped, s.improvement_verifying))
   const notClosed = fig((s) => sumOrNull(s.improvement_open, s.improvement_claimed, s.improvement_shipped, s.improvement_verifying))
-  let oldest = fig((s) => s.oldest_open_age_days)
-  // Nothing open or taken anywhere that reported: there is no oldest card.
-  const noneOpen =
-    slots.length > 0 && slots.every((s) => s.oldest_open_age_days === null && s.improvement_open === 0 && s.improvement_claimed === 0)
-  if (oldest.state === "unavailable" && noneOpen) oldest = { ...unavailable(["none_open"]), kind: "rollup", n: 0, N, of: MACHINES, out_of_scope: 0 }
+  // The oldest age is aged by the record's own age: a record sent 40 days
+  // ago that said 5 days means at least 45 days now.
+  const oldest = fig((s, ageDays) => {
+    if (s.oldest_open_age_days !== null) return s.oldest_open_age_days + ageDays
+    return s.improvement_open === 0 && s.improvement_claimed === 0 ? NONE : null
+  })
 
   const figures = {
     open,
@@ -135,6 +162,14 @@ export function summarizeLoop({ files, nowMs }) {
   if (over(oldest, AGE_ALARM_DAYS)) alarms.push({ code: "improvement_age" })
   if (over(figures.loop_alarms_open, 1)) alarms.push({ code: "loop_alarms_open" })
   if (over(figures.steps_stale, 1)) alarms.push({ code: "steps_stale" })
+  if (slots.some((s) => BLOCKING_HEADLESS.includes(s.headless))) alarms.push({ code: "headless_blocked" })
+
+  // The "no loop alarm" sentence is said only when every figure it rests on
+  // is measured from current records; otherwise the page names the figures
+  // that are not recorded, with why. "None open" is a measured fact.
+  const known = (key) => figures[key].state === "measured" || (key === "oldest_open_age_days" && figures[key].reasons.length === 1 && figures[key].reasons[0] === "none_open")
+  const missing = HEALTHY_RESTS_ON.filter((key) => !known(key)).map((key) => ({ figure: key, codes: [...figures[key].reasons] }))
+  const verdict = alarms.length ? "alarm" : missing.length ? "cannot_tell" : "healthy"
 
   return {
     contract: "loop_slot_v1",
@@ -145,7 +180,9 @@ export function summarizeLoop({ files, nowMs }) {
       without_loop: measured(withoutLoop),
       unreadable_loop: measured(unreadable),
       quiet: measured(quiet),
+      stale: measured(stale),
     },
     alarms,
+    verdict: { status: verdict, missing },
   }
 }
