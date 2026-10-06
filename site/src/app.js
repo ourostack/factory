@@ -1070,10 +1070,11 @@
       // page and not only on hover.
       const records = h.records && h.records.state === "measured" ? h.records.value : 0;
       const unverified = h.unverified_machines && h.unverified_machines.state === "measured" ? h.unverified_machines.value : 0;
-      tr.appendChild(el("td", unverified ? "capture-records capture-unverified" : "capture-records", records ? F.recordsWords(records, unverified) : "none"));
+      const notCounted = h.not_counted_machines && h.not_counted_machines.state === "measured" ? h.not_counted_machines.value : 0;
+      tr.appendChild(el("td", unverified || notCounted ? "capture-records capture-unverified" : "capture-records", records ? F.recordsWords(records, unverified, notCounted) : "none"));
       for (const [key, , kind] of CAPTURE_COLUMNS) {
         const td = el("td", "num");
-        td.appendChild(num(h[key], kind, { nofn: false, shortMarker: true }));
+        td.appendChild(num(h[key], kind, { nofn: false }));
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -1092,7 +1093,7 @@
     showCue();
     window.addEventListener("resize", showCue);
     const notes = el("ul", "capture-notes");
-    notes.appendChild(el("li", null, "A share marked unverified or partial could be higher or lower: an unverified host could not check its own session count. Point at a mark to read why."));
+    notes.appendChild(el("li", null, "A share marked unverified or partial could be higher or lower: an unverified host could not check its own session count, and a host that could not be counted is left out of the sums."));
     for (const c of cov.caveats || []) notes.appendChild(el("li", null, c.text));
     const m = cov.machines || {};
     const parts = [["counted", "counted"], ["empty", "withdrawn"], ["stale", "older than 45 days"], ["invalid", "unreadable"], ["over_limit", "over the limit"]];
