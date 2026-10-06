@@ -10,7 +10,7 @@ import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 import { fixNext, SHOWN, WASTE_ACTIONS } from "../../../site/scripts/fix-next.mjs"
 import { jobSummary, sessionsOf } from "../../../site/scripts/job-summary.mjs"
 import { releaseTrend } from "../../../site/scripts/outcomes.mjs"
-import { compareVersions, jobWaste, labeledWaste, WASTE_NAMES } from "../../../site/scripts/waste.mjs"
+import { compareVersions, jobWaste, labeledWaste, ownShare, WASTE_NAMES } from "../../../site/scripts/waste.mjs"
 import { measured, unavailable } from "../../../site/scripts/state.mjs"
 import { createRequire } from "node:module"
 
@@ -20,9 +20,11 @@ const read = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf
 const stretch = (start, end, cls, waste = null, confidence) => ({ start_ms: start, end_ms: end, class: cls, waste, ...(confidence ? { confidence } : {}) })
 
 const label = (session, stretches, job = "j") => ({ job, session, stretches })
+// The job owns all of each named session, as a session with one job does.
+const owns = (...ids) => new Map(ids.map((id) => [id, [[0, 1e12]]]))
 
 test("a task with no label file has no waste rows and zero sessions labeled, never zero waste", () => {
-  const w = jobWaste([], ["s1", "s2"])
+  const w = jobWaste([], ["s1", "s2"], owns("s1", "s2"))
   assert.deepEqual(w.rows, [])
   assert.equal(w.sessions_labeled.value, 0)
   assert.equal(w.sessions_on_timeline.value, 2)
@@ -30,7 +32,7 @@ test("a task with no label file has no waste rows and zero sessions labeled, nev
 
 test("a task's labeled time sums per class and waste, largest first, with confidence per level", () => {
   const doc = label("s1", [stretch(0, 100, "value", null, "high"), stretch(100, 400, "muda", "waiting", "high"), stretch(400, 450, "muda", "waiting", "low"), stretch(450, 470, "unknown", "unknown", "medium")])
-  const w = jobWaste([doc], ["s1"])
+  const w = jobWaste([doc], ["s1"], owns("s1"))
   assert.deepEqual(w.rows.map((r) => [r.key, r.kind, r.total_ms.value, r.total_ms.state]), [["waiting", "waste", 350, "measured"], ["value", "value", 100, "measured"], ["unknown", "unknown", 20, "measured"]])
   const waiting = w.rows[0]
   assert.equal(waiting.confidence.high_ms.value, 300)
@@ -41,7 +43,7 @@ test("a task's labeled time sums per class and waste, largest first, with confid
 })
 
 test("with some timeline sessions unlabeled every row is at least its figure, and a /1 label has no recorded confidence", () => {
-  const w = jobWaste([label("s1", [stretch(0, 60, "muda", "defects")])], ["s1", "s2", "s3"])
+  const w = jobWaste([label("s1", [stretch(0, 60, "muda", "defects")])], ["s1", "s2", "s3"], owns("s1", "s2", "s3"))
   const r = w.rows[0]
   assert.equal(r.total_ms.state, "partial")
   assert.equal(r.total_ms.bound, "lower")
@@ -54,18 +56,18 @@ test("with some timeline sessions unlabeled every row is at least its figure, an
 test("a label counts for a task only when its session is on the task's timeline, matched by session, not by count", () => {
   // The label file names this job, but its session belongs to another job's timeline.
   const foreign = label("other", [stretch(0, 9000, "muda", "waiting", "high")])
-  const w = jobWaste([foreign], ["s1", "s2"])
+  const w = jobWaste([foreign], ["s1", "s2"], owns("s1", "s2", "other"))
   assert.deepEqual(w.rows, [])
   assert.equal(w.sessions_labeled.value, 0)
   assert.equal(w.foreign_sessions.value, 1)
   // Two label files for a two-session task are not "whole" when one is foreign.
-  const mixed = jobWaste([label("s1", [stretch(0, 60, "muda", "defects", "high")]), foreign], ["s1", "s2"])
+  const mixed = jobWaste([label("s1", [stretch(0, 60, "muda", "defects", "high")]), foreign], ["s1", "s2"], owns("s1", "s2"))
   assert.equal(mixed.sessions_labeled.value, 1)
   assert.equal(mixed.rows.length, 1)
   assert.equal(mixed.rows[0].total_ms.state, "partial")
   assert.equal(mixed.foreign_sessions.value, 1)
   // Two labels of the same session count once.
-  const twice = jobWaste([label("s1", [stretch(0, 10, "value", null, "high")]), label("s1", [stretch(10, 20, "value", null, "high")])], ["s1", "s2"])
+  const twice = jobWaste([label("s1", [stretch(0, 10, "value", null, "high")]), label("s1", [stretch(10, 20, "value", null, "high")])], ["s1", "s2"], owns("s1", "s2"))
   assert.equal(twice.sessions_labeled.value, 1)
   assert.equal(twice.rows[0].total_ms.state, "partial")
   // The foreign label raises an alarm naming the task, and drives no waste item.
@@ -75,9 +77,54 @@ test("a label counts for a task only when its session is on the task's timeline,
   assert.deepEqual(checkNumbers({ jobs: [{ waste: w }, { waste: mixed }], fix_next: items }), [])
 })
 
+test("a session shared by several jobs counts for each only inside its own segments, never whole", () => {
+  // One session, 0..1000, labeled whole by each job's evaluator; job a owns 0..300 and 600..700, job b owns 300..600.
+  const whole = [stretch(0, 200, "value", null, "high"), stretch(200, 800, "muda", "waiting", "high"), stretch(800, 1000, "muda", "defects", "low")]
+  const bindings = [
+    { job: "a", segments: [{ start_ms: 600, end_ms: 700 }, { start_ms: 0, end_ms: 300 }] },
+    { job: "b", segments: [{ start_ms: 300, end_ms: 600 }] },
+  ]
+  const a = jobWaste([label("s1", whole, "a")], ["s1"], new Map([["s1", ownShare(bindings, "a")]]))
+  const b = jobWaste([label("s1", whole, "b")], ["s1"], new Map([["s1", ownShare(bindings, "b")]]))
+  assert.deepEqual(a.rows.map((r) => [r.key, r.total_ms.value, r.total_ms.state]), [["value", 200, "measured"], ["waiting", 200, "measured"]])
+  assert.deepEqual(b.rows.map((r) => [r.key, r.total_ms.value]), [["waiting", 300]])
+  assert.equal(a.rows[1].confidence.high_ms.value, 200, "confidence follows the clipped time")
+  // The overview sums the shares, so the session's waiting time (600) is counted at most once: 200 + 300.
+  const lw = labeledWaste([{ status: "done", waste: a }, { status: "done", waste: b }])
+  assert.deepEqual(lw.rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["waiting", 500, 2]])
+  assert.deepEqual(checkNumbers({ jobs: [{ waste: a }, { waste: b }], labeled_waste: lw }), [])
+})
+
+test("a labeled session whose share is not known adds nothing and leaves the rows partial, never full-session", () => {
+  const doc = label("s2", [stretch(0, 9000, "muda", "waiting", "high")])
+  const known = label("s1", [stretch(0, 60, "muda", "defects", "high")])
+  // No binding, a binding without segments, and segments that are not spans are all unknown.
+  for (const bindings of [undefined, [], [{ job: "x", segments: [{ start_ms: 0, end_ms: 10 }] }], [{ job: "j" }], [{ job: "j", segments: [{ start_ms: 5, end_ms: 5 }, null, { start_ms: "0", end_ms: 9 }] }]]) {
+    assert.equal(ownShare(bindings, "j"), null)
+    const w = jobWaste([known, doc], ["s1", "s2"], new Map([["s1", [[0, 100]]], ["s2", ownShare(bindings, "j")]]))
+    assert.deepEqual(w.rows.map((r) => [r.key, r.total_ms.value, r.total_ms.state]), [["defects", 60, "partial"]])
+    assert.deepEqual(w.rows[0].total_ms.reasons, ["job_share_unknown"])
+    assert.equal(w.rows[0].total_ms.bound, "lower")
+    assert.equal(w.sessions_labeled.value, 2)
+    assert.equal(w.sessions_share_unknown.value, 1)
+    assert.deepEqual(checkNumbers({ jobs: [{ waste: w }] }), [])
+  }
+  // Without any shares at all nothing counts: no rows, never the whole session.
+  const none = jobWaste([doc], ["s2"])
+  assert.deepEqual(none.rows, [])
+  assert.equal(none.sessions_share_unknown.value, 1)
+  // Both reasons together when a session is also unlabeled.
+  const both = jobWaste([known, doc], ["s1", "s2", "s3"], new Map([["s1", [[0, 100]]]]))
+  assert.deepEqual(both.rows[0].total_ms.reasons, ["some_sessions_not_labeled", "job_share_unknown"])
+  // Overlapping and touching segments merge, so no time counts twice.
+  assert.deepEqual(ownShare([{ job: "j", segments: [{ start_ms: 50, end_ms: 80 }, { start_ms: 0, end_ms: 60 }, { start_ms: 80, end_ms: 90 }, { start_ms: 100, end_ms: 120, shared: true }] }], "j"), [[0, 90], [100, 120]])
+  const once = jobWaste([label("s1", [stretch(0, 200, "muda", "waiting", "high")])], ["s1"], new Map([["s1", ownShare([{ job: "j", segments: [{ start_ms: 0, end_ms: 60 }, { start_ms: 50, end_ms: 80 }] }], "j")]]))
+  assert.equal(once.rows[0].total_ms.value, 80)
+})
+
 test("the waste overview sums the same per-task labels, partial until every finished task is labeled", () => {
-  const a = { status: "done", waste: jobWaste([label("s1", [stretch(0, 100, "muda", "waiting", "high"), stretch(100, 150, "value", null, "high")])], ["s1"]) }
-  const b = { status: "done", waste: jobWaste([], ["s2"]) }
+  const a = { status: "done", waste: jobWaste([label("s1", [stretch(0, 100, "muda", "waiting", "high"), stretch(100, 150, "value", null, "high")])], ["s1"], owns("s1")) }
+  const b = { status: "done", waste: jobWaste([], ["s2"], owns("s2")) }
   const lw = labeledWaste([a, b])
   assert.equal(lw.jobs_with_labels.value, 1)
   assert.equal(lw.jobs_finished.value, 2)

@@ -131,6 +131,7 @@
     none_open: "no improvement item is open",
     // One job's labeled time (the page's per-task waste).
     some_sessions_not_labeled: "some of the job's sessions are not labeled yet, so this is at least this much",
+    job_share_unknown: "for some of the job's sessions there is no record of which part was this job's, so their labels are left out and this is at least this much",
   };
 
   // Every reason that can reach the page has words. The site build stops on

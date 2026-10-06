@@ -100,7 +100,13 @@ export function evaluatorVersionsFigure(raw) {
 // One job's labeled time, from the evaluator's label files for its sessions
 // (`labels/<job>/<session>.json`). A label counts only when its session is on
 // the job's own timeline (`sessionIds`); a label for any other session is not
-// this job's waste (the caller reports it as a data defect). Time is summed
+// this job's waste (the caller reports it as a data defect). A session can
+// hold several jobs, and its label file may cover the whole session, so each
+// stretch counts only for the part inside the job's own share of that
+// session (`shares`: session ID -> the job's segments on the session clock,
+// from the session's published facts, see `ownShare`). A labeled session
+// whose share is not known contributes nothing, never its whole length, and
+// leaves every row at least its figure (`job_share_unknown`). Time is summed
 // per class (value, support) and per waste (the eight, and `unknown` as its
 // own row), largest first. Each row carries the time resting on each
 // confidence level; a row with any stretch whose confidence was not recorded
@@ -110,28 +116,62 @@ export function evaluatorVersionsFigure(raw) {
 const ROW_KINDS = { value: "value", support: "support" };
 const LEVELS = new Set(CONFIDENCE_LEVELS);
 
-export function jobWaste(docs, sessionIds) {
+// The job's own share of one session: its binding's `segments` in the
+// session's published facts (`jobs`), as sorted, merged `[start, end]`
+// spans on the session clock. `null` when the facts are missing, do not
+// bind the job, or the binding carries no usable segments: the share is
+// then not known, which is never the whole session.
+export function ownShare(factsJobs, job) {
+  const binding = (Array.isArray(factsJobs) ? factsJobs : []).find((b) => b && b.job === job);
+  const segments = binding && Array.isArray(binding.segments) ? binding.segments : [];
+  const spans = segments
+    .filter((g) => g && Number.isFinite(g.start_ms) && Number.isFinite(g.end_ms) && g.end_ms > g.start_ms)
+    .map((g) => [g.start_ms, g.end_ms])
+    .sort((a, b) => a[0] - b[0]);
+  if (spans.length === 0) return null;
+  const merged = [spans[0]];
+  for (const [start, end] of spans.slice(1)) {
+    const last = merged[merged.length - 1];
+    if (start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  return merged;
+}
+
+// How much of [start, end] lies inside the spans.
+function inside(start, end, spans) {
+  return spans.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(end, b) - Math.max(start, a)), 0);
+}
+
+export function jobWaste(docs, sessionIds, shares) {
   const onTimeline = new Set(Array.isArray(sessionIds) ? sessionIds : []);
+  const shareOf = (session) => (shares instanceof Map ? shares.get(session) : undefined) ?? null;
   const all = (Array.isArray(docs) ? docs : []).filter((d) => d && Array.isArray(d.stretches));
   const usable = all.filter((d) => onTimeline.has(d.session));
   const labeled = new Set(usable.map((d) => d.session));
+  const unknownShare = new Set([...labeled].filter((session) => shareOf(session) === null));
   const foreign = [...new Set(all.filter((d) => !onTimeline.has(d.session)).map((d) => String(d.session)))];
   const rows = new Map();
   for (const d of usable) {
+    const spans = shareOf(d.session);
+    if (spans === null) continue;
     for (const s of d.stretches) {
       if (!s || !Number.isFinite(s.start_ms) || !Number.isFinite(s.end_ms) || s.end_ms < s.start_ms) continue;
       const key = s.class === "muda" && typeof s.waste === "string" ? s.waste : s.class === "unknown" ? UNKNOWN_WASTE : ROW_KINDS[s.class];
       if (!key) continue;
+      const ms = Math.round(inside(s.start_ms, s.end_ms, spans));
+      if (ms === 0) continue;
       const row = rows.get(key) || { total: 0, levels: { high: 0, medium: 0, low: 0 }, recorded: true };
-      const ms = Math.round(s.end_ms - s.start_ms);
       row.total += ms;
       if (LEVELS.has(s.confidence)) row.levels[s.confidence] += ms;
       else row.recorded = false;
       rows.set(key, row);
     }
   }
-  const whole = onTimeline.size > 0 && [...onTimeline].every((id) => labeled.has(id));
-  const figure = (ms) => (whole ? measured(ms) : direct(partial(ms, ["some_sessions_not_labeled"]), "job_waste_ms"));
+  const reasons = [];
+  if (!(onTimeline.size > 0 && [...onTimeline].every((id) => labeled.has(id)))) reasons.push("some_sessions_not_labeled");
+  if (unknownShare.size > 0) reasons.push("job_share_unknown");
+  const figure = (ms) => (reasons.length === 0 ? measured(ms) : direct(partial(ms, reasons), "job_waste_ms"));
   const conf = (r) => (r.recorded ? { recorded: true, parts: r.levels } : { recorded: false });
   const out = [...rows]
     .map(([key, r]) => ({
@@ -142,7 +182,13 @@ export function jobWaste(docs, sessionIds) {
       qualifiers: ROW_KINDS[key] ? [] : qualifiersOf(key, conf(r)),
     }))
     .sort((a, b) => b.total_ms.value - a.total_ms.value);
-  return { sessions_labeled: measured(labeled.size), sessions_on_timeline: measured(onTimeline.size), rows: out, foreign_sessions: measured(foreign.length) };
+  return {
+    sessions_labeled: measured(labeled.size),
+    sessions_on_timeline: measured(onTimeline.size),
+    sessions_share_unknown: measured(unknownShare.size),
+    rows: out,
+    foreign_sessions: measured(foreign.length),
+  };
 }
 
 // The page's one waste overview, from the same per-job rows: each waste's

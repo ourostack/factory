@@ -54,6 +54,7 @@ The waste table reads Desk's rollup of the evaluator's labels, and it never show
 - A row may record `confidence_ms` (`high`, `medium`, `low`, in milliseconds). It is recorded only when the three parts add up to the row's own time; anything else reads "not recorded", never zero.
 - A row with time on low-confidence labels, or with no recorded confidence, is marked not sound, in words under the table as well as on hover.
 - A row's `evaluator_versions` lists the distinct evaluator versions of the labels that contributed to it; the page names them, or says they were not recorded.
+- A task's own labeled time, and the labeled-waste overview summed from it, count a label only inside that task's own share of its session: the task's segments in the session's published facts. A session several tasks share is labeled whole by each task's evaluator, so without this its time would count once per task. A labeled session with no record of the task's share adds nothing and leaves the task's figures partial ("at least"), never the whole session.
 
 ## What the store guarantees
 
