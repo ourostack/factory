@@ -108,7 +108,9 @@ test("rollups over jobs take only measured members and show n of N", () => {
   assert.equal(active.median.out_of_scope, 1)
   assert.equal(active.median.value, 500)
   assert.equal(active.median.state, "partial")
-  assert.equal(active.trust.status, "thin_sample")
+  // No capture record: coverage is not measured, which outranks a thin sample.
+  assert.equal(active.trust.status, "coverage_unknown")
+  assert.ok(active.trust.causes.includes("thin_sample"))
 })
 
 test("every headline carries a trust state, and with no capture record its coverage is no data, never a share", () => {
@@ -117,7 +119,8 @@ test("every headline carries a trust state, and with no capture record its cover
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   assert.ok(data.headlines.length >= 5)
   for (const h of data.headlines) {
-    assert.ok(["ok", "thin_sample", "partial", "low_coverage"].includes(h.trust.status), h.id)
+    assert.equal(h.trust.status, "coverage_unknown", h.id)
+    assert.doesNotMatch(h.trust.reason, /no_records/, h.id)
     assert.ok(h.trust.reason.length > 0, h.id)
     assert.equal(h.trust.coverage.state, "unavailable", h.id)
     assert.deepEqual(h.trust.coverage.reasons, ["no_records"], h.id)

@@ -161,12 +161,34 @@ jobs:
             # request Desk passed; a failure becomes a rejection with its codes.
             if jq -e '.ok == true and .maintenance != true' "$result" > /dev/null 2>&1; then
               codes=""
-              if ! plugin_codes=$(bash .github/scripts/check-intake-plugins.sh "$base_sha" "$HEAD_SHA"); then
-                codes+="$plugin_codes"$'\n'
+              unavailable_check=""
+              # A store check that cannot run (its script is missing or crashes,
+              # or it reports a *_check_unavailable code) is the store's fault,
+              # not the contributor's: the pull request is left open and the job
+              # fails, exactly as for validator_unavailable. It is never rejected.
+              # Each check: a rejection code is the contributor's; anything else
+              # from a failed run means the check could not run.
+              if ! check_codes=$(bash .github/scripts/check-intake-plugins.sh "$base_sha" "$HEAD_SHA" 2> /dev/null); then
+                if printf '%s\n' "$check_codes" | grep -qE '_check_unavailable$'; then
+                  unavailable_check=$(printf '%s\n' "$check_codes" | grep -E '_check_unavailable$' | head -n 1)
+                elif printf '%s\n' "$check_codes" | grep -qE '^[a-z][a-z0-9_]{0,63}$'; then
+                  codes+="$check_codes"$'\n'
+                else
+                  unavailable_check=intake_check_unavailable
+                fi
               fi
-              # The store's own rule on capture records, from main.
-              if [ -f .github/scripts/check-capture.sh ] && ! capture_codes=$(bash .github/scripts/check-capture.sh "$base_sha" "$HEAD_SHA"); then
-                codes+="$capture_codes"$'\n'
+              if ! check_codes=$(bash .github/scripts/check-capture.sh "$base_sha" "$HEAD_SHA" 2> /dev/null); then
+                if printf '%s\n' "$check_codes" | grep -qE '_check_unavailable$'; then
+                  unavailable_check=$(printf '%s\n' "$check_codes" | grep -E '_check_unavailable$' | head -n 1)
+                elif printf '%s\n' "$check_codes" | grep -qE '^[a-z][a-z0-9_]{0,63}$'; then
+                  codes+="$check_codes"$'\n'
+                else
+                  unavailable_check=capture_check_unavailable
+                fi
+              fi
+              if [ -n "$unavailable_check" ]; then
+                jq -n -c --arg code "$unavailable_check" '{unavailable: $code}' > "$result"
+                codes=""
               fi
               if [ -n "$codes" ]; then
                 printf '%s' "$codes" | jq -R -s -c '{ok: false, errors: [split("\n")[] | select(length > 0) | {code: .}]}' > "$result"
@@ -209,7 +231,7 @@ jobs:
           while IFS=$'\t' read -r number association same_repo held; do
             result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
-              summary "factory-merge: #$number validator_unavailable; no action"
+              summary "factory-merge: #$number $(jq -r '(.unavailable // "") | if test("^[a-z][a-z0-9_]{0,63}_check_unavailable$") then . else "validator_unavailable" end' "$result" 2> /dev/null || echo validator_unavailable); no action"
               unavailable=1
               continue
             fi

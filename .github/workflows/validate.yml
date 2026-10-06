@@ -16,11 +16,11 @@
 # This file never checks out, installs or
 # executes the candidate's files. Failures report stable reason codes only.
 #
-# These checks are skipped (not failed) when the base checkout does not yet
-# have the script: the pull request that first adds a repo-owned check can
-# only be judged once it lands. The unit tests under
-# `.github/scripts/__tests__/` run from the base the same way, for the same
-# reason, and they test the code that judges this pull request.
+# A check that cannot run fails the job: a missing or crashing script is
+# `corrections_check_unavailable`, `capture_check_unavailable` or
+# `intake_check_unavailable`, never a skip. The unit tests under
+# `.github/scripts/__tests__/` run from the base the same way, and a missing
+# test folder fails too. They test the code that judges this pull request.
 #
 # The pull request's own tests run in a separate job, `head-tests`, which
 # `factory-validate` waits for and fails on. It executes the candidate's code,
@@ -235,11 +235,11 @@ jobs:
       - name: Run the store's own script tests
         run: |
           set -euo pipefail
-          if [ -d .github/scripts/__tests__ ]; then
-            node --test '.github/scripts/__tests__/*.test.mjs'
-          else
-            echo "factory-validate: no .github/scripts/__tests__ on the base yet; skipped"
+          if [ ! -d .github/scripts/__tests__ ]; then
+            printf 'factory-validate: tests_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          node --test '.github/scripts/__tests__/*.test.mjs'
 
       - name: Clone Desk main
         run: |
@@ -287,23 +287,24 @@ jobs:
             # The store's own rule on correction records, from the base, for
             # every pull request (maintenance or not): a corrections/*.json
             # file it adds or modifies must pass validateCorrectionRecord.
-            if [ -f .github/scripts/check-corrections.mjs ]; then
-              if ! codes=$(node .github/scripts/check-corrections.mjs "$BASE_SHA" "$HEAD_SHA"); then
-                printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
-                printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
-                exit 1
-              fi
+            # A missing script fails the job (corrections_check_unavailable):
+            # a check that cannot run is not a check that passed.
+            if ! codes=$(node .github/scripts/check-corrections.mjs "$BASE_SHA" "$HEAD_SHA"); then
+              printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+              stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
+              printf '%s\n' "${stable:-corrections_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
             # The store's own rule on capture records, from the base, for
             # every pull request: a capture/ file it adds or modifies must be
             # capture/<16 hex>.json, at most 2 KiB, with exactly the known
             # keys, and one per pull request.
-            if [ -f .github/scripts/check-capture.sh ]; then
-              if ! codes=$(bash .github/scripts/check-capture.sh "$BASE_SHA" "$HEAD_SHA"); then
-                printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
-                printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
-                exit 1
-              fi
+            # Likewise a missing script is capture_check_unavailable.
+            if ! codes=$(bash .github/scripts/check-capture.sh "$BASE_SHA" "$HEAD_SHA"); then
+              printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+              stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
+              printf '%s\n' "${stable:-capture_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
             if jq -e '.maintenance == true' "$result" > /dev/null; then
               printf 'factory-validate: passed (maintenance)\n' | tee -a "$GITHUB_STEP_SUMMARY"
@@ -315,7 +316,8 @@ jobs:
             # plugins.
             if ! codes=$(bash .github/scripts/check-intake-plugins.sh "$BASE_SHA" "$HEAD_SHA"); then
               printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
-              printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+              stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
+              printf '%s\n' "${stable:-intake_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
               exit 1
             fi
             printf 'factory-validate: passed\n' | tee -a "$GITHUB_STEP_SUMMARY"
