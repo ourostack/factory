@@ -1221,7 +1221,7 @@
     machinesNode.appendChild(num(m.reporting, "count"));
     machinesNode.appendChild(document.createTextNode(" reporting, "));
     machinesNode.appendChild(num(m.without_loop, "count"));
-    machinesNode.appendChild(document.createTextNode(" on a Desk that does not send it yet, "));
+    machinesNode.appendChild(document.createTextNode(F.WITHOUT_LOOP_WORDS));
     machinesNode.appendChild(num(m.quiet, "count"));
     machinesNode.appendChild(document.createTextNode(" quiet for over three days (their ages are counted from their last record)"));
     if (m.stale) {

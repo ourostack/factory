@@ -18,3 +18,9 @@ test("the README explains how the loop closes, so the doc and the scripts cannot
   // Every key of the loop slot the site reads is named.
   for (const key of LOOP_KEYS) assert.ok(section.includes(`\`${key}\``), key)
 })
+
+test("the README does not say Desk has yet to send the loop slot, and names why a record has none", () => {
+  assert.doesNotMatch(README, /does not yet \(that delivery/)
+  assert.match(README, /Desk sends each machine's loop health inside its capture record/)
+  assert.match(README, /an older Desk, or its loop has not run yet or has not measured for over three days/)
+})
