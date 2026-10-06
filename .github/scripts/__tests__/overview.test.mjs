@@ -95,6 +95,34 @@ test("a session shared by several jobs counts for each only inside its own segme
   assert.deepEqual(checkNumbers({ jobs: [{ waste: a }, { waste: b }], labeled_waste: lw }), [])
 })
 
+test("a shared segment counts for each job that holds it, and once in the overview", () => {
+  // Jobs a and b both hold 0..100 (a shared segment); a also owns 100..300. Each labeled the session whole, differently.
+  const bindings = [{ job: "a", segments: [{ start_ms: 0, end_ms: 100, shared: true }, { start_ms: 100, end_ms: 300 }] }, { job: "b", segments: [{ start_ms: 0, end_ms: 100, shared: true }] }]
+  const a = jobWaste([label("s1", [stretch(0, 300, "muda", "waiting", "high")], "a")], ["s1"], new Map([["s1", ownShare(bindings, "a")]]))
+  const b = jobWaste([label("s1", [stretch(0, 50, "muda", "defects", "high"), stretch(50, 300, "muda", "waiting", "high")], "b")], ["s1"], new Map([["s1", ownShare(bindings, "b")]]))
+  assert.deepEqual(a.rows.map((r) => [r.key, r.total_ms.value]), [["waiting", 300]])
+  assert.deepEqual(b.rows.map((r) => [r.key, r.total_ms.value]), [["defects", 50], ["waiting", 50]])
+  assert.ok(!Object.keys(a).includes("pieces"), "the counted stretches are not published")
+  // The first job by ID keeps the shared time: the session's 300 ms count once, all as a's waiting.
+  const lw = labeledWaste([{ id: "b", status: "done", waste: b }, { id: "a", status: "done", waste: a }])
+  assert.deepEqual(lw.rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["waiting", 300, 2], ["defects", 0, 1]])
+  assert.equal(JSON.parse(JSON.stringify(a)).pieces, undefined)
+  // Rows built without counted stretches are summed as they are.
+  const bare = { status: "done", waste: { rows: [{ key: "motion", kind: "waste", total_ms: measured(7) }, { key: "value", kind: "value", total_ms: measured(9) }] } }
+  assert.deepEqual(labeledWaste([bare]).rows.map((r) => [r.key, r.total_ms.value, r.jobs.value]), [["motion", 7, 1]])
+})
+
+test("a label file with no stretch inside the job's share is not labeled for the job, never a zero", () => {
+  const w = jobWaste([label("s1", [stretch(500, 900, "muda", "waiting", "high")])], ["s1"], new Map([["s1", [[0, 100]]]]))
+  assert.deepEqual(w.rows, [])
+  assert.equal(w.sessions_labeled.value, 0)
+  const mixed = jobWaste([label("s1", [stretch(500, 900, "muda", "waiting", "high")]), label("s2", [stretch(0, 40, "muda", "defects", "high")])], ["s1", "s2"], new Map([["s1", [[0, 100]]], ["s2", [[0, 100]]]]))
+  assert.equal(mixed.sessions_labeled.value, 1)
+  assert.deepEqual(mixed.rows[0].total_ms.reasons, ["some_sessions_not_labeled"])
+  // An empty label file (the evaluator found nothing) still counts as labeled.
+  assert.equal(jobWaste([label("s1", [])], ["s1"], owns("s1")).sessions_labeled.value, 1)
+})
+
 test("a labeled session whose share is not known adds nothing and leaves the rows partial, never full-session", () => {
   const doc = label("s2", [stretch(0, 9000, "muda", "waiting", "high")])
   const known = label("s1", [stretch(0, 60, "muda", "defects", "high")])

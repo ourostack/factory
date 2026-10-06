@@ -106,7 +106,11 @@ export function evaluatorVersionsFigure(raw) {
 // session (`shares`: session ID -> the job's segments on the session clock,
 // from the session's published facts, see `ownShare`). A labeled session
 // whose share is not known contributes nothing, never its whole length, and
-// leaves every row at least its figure (`job_share_unknown`). Time is summed
+// leaves every row at least its figure (`job_share_unknown`). A label file
+// with stretches but none inside the job's share labeled other jobs' time,
+// so its session counts as not labeled for this job. A segment Desk marks
+// `shared` is held by several jobs, and each holder's figures count it;
+// the overview (`labeledWaste`) counts each session's time once. Time is summed
 // per class (value, support) and per waste (the eight, and `unknown` as its
 // own row), largest first. Each row carries the time resting on each
 // confidence level; a row with any stretch whose confidence was not recorded
@@ -135,10 +139,15 @@ export function ownShare(factsJobs, job) {
     .map((g) => [g.start_ms, g.end_ms])
     .sort((a, b) => a[0] - b[0]);
   if (spans.length === 0) return null;
-  const merged = [spans[0]];
-  for (const [start, end] of spans.slice(1)) {
+  return merge(spans);
+}
+
+// Spans sorted and merged where they overlap or touch.
+function merge(spans) {
+  const merged = [];
+  for (const [start, end] of [...spans].sort((a, b) => a[0] - b[0])) {
     const last = merged[merged.length - 1];
-    if (start <= last[1]) last[1] = Math.max(last[1], end);
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);
   }
   return merged;
@@ -156,6 +165,8 @@ export function jobWaste(docs, sessionIds, shares) {
   const usable = all.filter((d) => onTimeline.has(d.session));
   const labeled = new Set(usable.map((d) => d.session));
   const unknownShare = new Set([...labeled].filter((session) => shareOf(session) === null));
+  const pieces = [];
+  const inShare = new Set();
   const foreign = [...new Set(all.filter((d) => !onTimeline.has(d.session)).map((d) => String(d.session)))];
   const rows = new Map();
   for (const d of usable) {
@@ -167,6 +178,8 @@ export function jobWaste(docs, sessionIds, shares) {
       if (!key) continue;
       const ms = Math.round(inside(s.start_ms, s.end_ms, spans));
       if (ms === 0) continue;
+      inShare.add(d.session);
+      for (const [a, b] of spans) if (Math.min(s.end_ms, b) > Math.max(s.start_ms, a)) pieces.push({ session: d.session, start: Math.max(s.start_ms, a), end: Math.min(s.end_ms, b), key });
       const row = rows.get(key) || { total: 0, levels: { high: 0, medium: 0, low: 0 }, recorded: true };
       row.total += ms;
       if (LEVELS.has(s.confidence)) row.levels[s.confidence] += ms;
@@ -174,6 +187,9 @@ export function jobWaste(docs, sessionIds, shares) {
       rows.set(key, row);
     }
   }
+  // A file with stretches, none inside the job's share, labeled other jobs' time: not labeled for this job.
+  const outsideShare = new Set(usable.filter((d) => shareOf(d.session) !== null && d.stretches.length > 0 && !inShare.has(d.session)).map((d) => d.session));
+  for (const session of outsideShare) labeled.delete(session);
   const reasons = [];
   if (!(onTimeline.size > 0 && [...onTimeline].every((id) => labeled.has(id)))) reasons.push("some_sessions_not_labeled");
   if (unknownShare.size > 0) reasons.push("job_share_unknown");
@@ -188,34 +204,54 @@ export function jobWaste(docs, sessionIds, shares) {
       qualifiers: ROW_KINDS[key] ? [] : qualifiersOf(key, conf(r)),
     }))
     .sort((a, b) => b.total_ms.value - a.total_ms.value);
-  return {
+  const result = {
     sessions_labeled: measured(labeled.size),
     sessions_on_timeline: measured(onTimeline.size),
     sessions_share_unknown: measured(unknownShare.size),
     rows: out,
     foreign_sessions: measured(foreign.length),
   };
+  // The counted stretches on the session clock, for the overview's once-per-session sum; not part of the published data.
+  Object.defineProperty(result, "pieces", { value: pieces, enumerable: false });
+  return result;
 }
 
-// The page's one waste overview, from the same per-job rows: each waste's
-// labeled time summed over the jobs that have any, largest first. It is at
-// least that much unless every finished job is fully labeled.
+// The page's one waste overview, from the same per-job labels: each waste's
+// labeled time, largest first, with the jobs whose own rows have it. A
+// session's time counts once even where several jobs hold it (a `shared`
+// segment): the first job by ID that counted a stretch of time keeps it. It
+// is at least that much unless every finished job is fully labeled.
 export function labeledWaste(jobs) {
   const finished = jobs.filter((j) => j.status === "done");
   const whole = finished.length > 0 && finished.every((j) => j.waste && j.waste.rows.length && j.waste.rows.every((r) => r.total_ms.state === "measured"));
   const sums = new Map();
-  for (const j of jobs) {
-    for (const r of (j.waste && j.waste.rows) || []) {
-      if (r.kind !== "waste" && r.kind !== "unknown") continue;
-      const e = sums.get(r.key) || { ms: 0, jobs: 0 };
-      e.ms += r.total_ms.value;
-      e.jobs += 1;
-      sums.set(r.key, e);
+  const add = (key, ms, job) => {
+    const e = sums.get(key) || { ms: 0, jobs: new Set() };
+    e.ms += ms;
+    if (job !== null) e.jobs.add(job);
+    sums.set(key, e);
+  };
+  const counted = (k) => k !== "value" && k !== "support";
+  const covered = new Map(); // session -> [[start, end]] already counted
+  for (const j of [...jobs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    if (!j.waste) continue;
+    for (const r of j.waste.rows) if (r.kind === "waste" || r.kind === "unknown") add(r.key, 0, j.id ?? j);
+    const pieces = Array.isArray(j.waste.pieces) ? j.waste.pieces : null;
+    if (pieces === null) {
+      // Rows built without pieces (an older caller) are summed as they are.
+      for (const r of j.waste.rows) if (r.kind === "waste" || r.kind === "unknown") add(r.key, r.total_ms.value, null);
+      continue;
+    }
+    for (const p of pieces) {
+      if (!counted(p.key)) continue;
+      const taken = covered.get(p.session) || [];
+      add(p.key, p.end - p.start - inside(p.start, p.end, taken), null);
+      covered.set(p.session, merge([...taken, [p.start, p.end]]));
     }
   }
   const rows = [...sums]
     .sort((a, b) => b[1].ms - a[1].ms)
-    .map(([key, e]) => ({ key, total_ms: whole ? measured(e.ms) : direct(partial(e.ms, ["not_all_labeled"]), "sum"), jobs: measured(e.jobs) }));
+    .map(([key, e]) => ({ key, total_ms: whole ? measured(Math.round(e.ms)) : direct(partial(Math.round(e.ms), ["not_all_labeled"]), "sum"), jobs: measured(e.jobs.size) }));
   return {
     jobs_with_labels: measured(jobs.filter((j) => j.waste && j.waste.rows.length).length),
     jobs_finished: measured(finished.length),

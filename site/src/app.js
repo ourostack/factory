@@ -1203,12 +1203,18 @@
     cap.appendChild(cellNum(j.waste ? j.waste.sessions_labeled : { state: "unavailable", reasons: ["not_labeled"] }, "count"));
     cap.appendChild(document.createTextNode(" of the "));
     cap.appendChild(cellNum(j.waste ? j.waste.sessions_on_timeline : { state: "unavailable", reasons: ["not_labeled"] }, "count"));
-    cap.appendChild(document.createTextNode(" sessions on this task's timeline. Labeled time covers each session's whole clock, including waiting on CI, tools and the operator."));
+    cap.appendChild(document.createTextNode(" sessions on this task's timeline. Labeled time covers this task's own part of each session's clock (the stretches the session's facts give to this task), including waiting on CI, tools and the operator. Where several tasks hold the same stretch, each of them counts it here."));
     waste.appendChild(cap);
+    const shareUnknown = j.waste && j.waste.sessions_share_unknown && j.waste.sessions_share_unknown.state === "measured" ? j.waste.sessions_share_unknown.value : 0;
+    if (shareUnknown > 0) {
+      waste.appendChild(el("p", "chart-caption", `For ${shareUnknown === 1 ? "1 labeled session" : `${shareUnknown} labeled sessions`}, the session's facts do not record which part was this task's, so those labels are not counted here.`));
+    }
     if (j.waste && j.waste.foreign_sessions && j.waste.foreign_sessions.value > 0) {
       waste.appendChild(el("p", "fix-action", "Data defect: some labels filed under this task name sessions that are not on its timeline. They are not counted here."));
     }
-    if (!rows.length) {
+    if (!rows.length && shareUnknown > 0 && j.waste.sessions_labeled.value === shareUnknown) {
+      waste.appendChild(el("p", "chart-empty", "No labeled time can be counted for this task, so its waste is no data, not zero: the facts of its labeled sessions do not record which part was this task's. Running the evaluator again will not change that."));
+    } else if (!rows.length) {
       waste.appendChild(el("p", "chart-empty", "Not labeled yet, so this task's waste is no data, not zero. Do: run the waste evaluator on this task's sessions."));
     } else {
       const barRows = rows.map((r) => ({
