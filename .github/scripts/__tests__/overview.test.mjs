@@ -379,3 +379,12 @@ test("at phone width a task card's values wrap inside the card, so the page neve
   assert.match(block, /table\.data-table\.task-table td \{ white-space: normal; \}/)
   assert.match(block, /\.task-table td > \* \{ min-width: 0; overflow-wrap: anywhere; \}/)
 })
+
+test("no view scrolls the page sideways: grids never ask for more than their column, and wide tables scroll inside their own box", () => {
+  const css = read("site/src/styles.css")
+  assert.doesNotMatch(css, /minmax\(\d+px, 1fr\)\)/)
+  assert.match(css, /minmax\(min\(320px, 100%\), 1fr\)/)
+  assert.match(css, /#jobs-table, \.chart-card:has\(> table\.data-table\) \{ overflow-x: auto; \}/)
+  assert.match(css, /#jobs-table, \.chart-card, \.table-wrap \{ position: relative; \}/)
+  assert.match(css, /@media \(min-width: 721px\) \{ table\.data-table\.task-table td:not\(\.num\) \{ white-space: normal; \} \}/)
+})
