@@ -1160,4 +1160,4 @@ body[data-view="job"] header.site-header, body[data-view="session"] header.site-
    the task table's text cells wrap. */
 #jobs-table, .chart-card:has(> table.data-table) { overflow-x: auto; }
 #jobs-table, .chart-card, .table-wrap { position: relative; }
-@media (min-width: 721px) { table.data-table.task-table td:not(.num) { white-space: normal; } }
+@media (min-width: 721px) { table.data-table.task-table td:not(.num):not(.task-cell) { white-space: normal; } }
