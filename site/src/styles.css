@@ -242,6 +242,8 @@ main:focus, h1:focus { outline: none; }
 .status-not_monitored .status-word { color: var(--text-primary); }
 .status-abnormal { color: var(--text-primary); }
 .status-abnormal .status-word, .status-abnormal .status-owner { color: var(--c-alarm); font-weight: 700; }
+/* An owner the build could not check is unknown, not absent: plain text. */
+.status-abnormal .status-owner.status-owner-unchecked { color: inherit; font-weight: 600; }
 .status-abnormal { border-left: 4px solid var(--c-alarm); padding-left: 10px; }
 
 /* ---------- Views and their text ---------- */
@@ -1027,7 +1029,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-wait-label { fill: var(--text-primary); font-size: 11px; font-family: system-ui, sans-serif; paint-order: stroke; stroke: var(--page-plane); stroke-width: 3px; }
 .lane-legend { list-style: none; margin: 10px 0 4px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; color: var(--text-secondary); }
 .lane-legend li { display: flex; align-items: center; gap: 6px; }
-.lane-key { display: inline-block; width: 14px; height: 12px; }
+.lane-key { display: inline-block; flex: none; width: 14px; height: 12px; }
 .lane-key-wait { background: repeating-linear-gradient(135deg, var(--c-waste-waiting) 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(45deg, var(--c-waste-waiting) 0 1.5px, transparent 1.5px 5px); }
 .lane-key-outside { background: var(--text-muted); opacity: 0.25; }
 .lane-key-act { height: 6px; background: var(--text-secondary); }
