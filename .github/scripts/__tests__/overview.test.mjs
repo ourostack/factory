@@ -315,9 +315,13 @@ test("the private-names overlay names tasks as text, and a missing or malformed 
     assert.deepEqual(Object.keys(F.parseLocalNames(bad)), [])
     assert.equal(F.jobLabel(F.parseLocalNames(bad), "abc"), "Task abc")
   }
+  // Only a page served from this machine asks for the names file.
+  for (const h of ["127.0.0.1", "localhost", "[::1]"]) assert.equal(F.servesLocalNames(h), true, h)
+  for (const h of ["ourostack.github.io", "", "127.0.0.1.example.com", "localhost.evil"]) assert.equal(F.servesLocalNames(h), false, h)
   // The page inserts every label as text only, and gives up on the file after a second.
   const app = read("site/src/app.js")
   assert.match(app, /fetch\("\.\/local-names\.json"/)
+  assert.match(app, /if \(!F\.servesLocalNames\(location\.hostname\)\) return;/)
   assert.match(app, /setTimeout\(\(\) => ctrl\.abort\(\), 1000\)/)
   assert.doesNotMatch(app, /innerHTML = [^"']/)
   // The public build never produces or names the file.
