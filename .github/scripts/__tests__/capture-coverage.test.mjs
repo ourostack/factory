@@ -115,11 +115,11 @@ test("a stale record is left out and counted as stale, which makes the total par
 })
 
 test("an unverified host makes that host partial with unverified_host, even when it is the only record", () => {
-  const cov = summarizeCapture({ files: [file(record({ "codex-cli": codex() }))], nowMs: NOW })
-  const x = host(cov, "codex-cli")
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": claude({ unverified: true }) }))], nowMs: NOW })
+  const x = host(cov, "claude-code")
   assert.equal(x.share.state, "partial")
   assert.deepEqual(x.share.reasons, ["unverified_host"])
-  assert.equal(x.share.value, 0.25)
+  assert.equal(x.share.value, 248 / 280)
   assert.equal(x.unverified_machines.value, 1)
   assert.equal(cov.share.state, "partial")
   assert.equal(cov.share.n, 0)
@@ -130,7 +130,7 @@ test("an unverified host makes that host partial with unverified_host, even when
 test("share and capturable share are no data when their denominator is 0", () => {
   const zero = { on_disk: 0, derived: 0, held: 0, frozen: 0, pending: 0, not_seen: 0, not_in_a_desk: 0, unverified: false }
   const held = { ...zero, on_disk: 3, held: 3 }
-  const cov = summarizeCapture({ files: [file(record({ "claude-code": zero, "copilot-cli": { ...held, not_in_a_desk: null } }))], nowMs: NOW })
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": zero, "copilot-cli": { ...held, not_in_a_desk: 0 } }))], nowMs: NOW })
   assert.equal(host(cov, "claude-code").share.state, "unavailable")
   assert.ok(host(cov, "claude-code").share.reasons.includes("no_sessions_on_disk"))
   assert.equal(host(cov, "claude-code").on_disk.value, 0)
@@ -267,16 +267,16 @@ test("a host no machine could count has no figure at all, never a zero, and says
 })
 
 test("a machine that could not count a host adds to N, not to the sums, and makes the host's figures partial", () => {
-  const cov = summarizeCapture({ files: [file(record({ "codex-cli": codex({ unverified: false }) })), file(record({ "codex-cli": NOT_COUNTED }))], nowMs: NOW })
-  const row = host(cov, "codex-cli")
-  assert.equal(row.on_disk.value, 4)
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": claude() })), file(record({ "claude-code": NOT_COUNTED }))], nowMs: NOW })
+  const row = host(cov, "claude-code")
+  assert.equal(row.on_disk.value, 280)
   assert.equal(row.on_disk.state, "partial")
   assert.equal(row.on_disk.N, 2)
   assert.equal(row.on_disk.n, 1)
   assert.ok(row.on_disk.reasons.includes("host_not_counted"))
   assert.equal(row.share.state, "partial")
   assert.deepEqual(row.share.reasons, ["host_not_counted"])
-  assert.equal(row.share.value, 0.25)
+  assert.equal(row.share.value, 248 / 280)
   assert.equal(row.records.value, 2)
   assert.equal(row.not_counted_machines.value, 1)
   assert.equal(checkNumbers({ capture_coverage: cov }).filter((p) => /capture_coverage/.test(String(p))).length, 0)
@@ -318,4 +318,70 @@ test("the store-wide share keeps every reason: no sessions on disk among the cou
   assert.deepEqual(cov.share.reasons, ["no_sessions_on_disk", "host_not_counted"])
   const row = host(summarizeCapture({ files: [file(record({ "claude-code": empty })), file(record({ "claude-code": NOT_COUNTED }))], nowMs: NOW }), "claude-code")
   assert.deepEqual(row.share.reasons, ["no_sessions_on_disk", "host_not_counted"])
+})
+
+// A host whose folders do not say which desk a session belongs to (`not_in_a_desk: null`) has no honest share.
+const silentReason = ["host_does_not_say_desk"]
+
+test("the live case: 1 owned derived Copilot session and 124 unowned ones that Desk withholds reads unavailable, not 100% and not low", () => {
+  // What Desk publishes for this machine's Copilot CLI: the unowned sessions are out of every count, the host keeps not_in_a_desk null.
+  const live = { on_disk: 1, derived: 1, held: 0, frozen: 0, pending: 0, not_seen: 0, not_in_a_desk: null, unverified: false }
+  const cov = summarizeCapture({ files: [file(record({ "copilot-cli": live }))], nowMs: NOW })
+  const x = host(cov, "copilot-cli")
+  for (const share of [x.share, x.capturable_share]) {
+    assert.equal(share.state, "unavailable")
+    assert.deepEqual(share.reasons, silentReason)
+    assert.equal("value" in share, false)
+    assert.equal(share.N, 1)
+    assert.equal(share.n, 0)
+  }
+  assert.equal(x.derived.value, 1, "the counts stay published")
+  assert.deepEqual(cov.alarms, [])
+  assert.deepEqual(checkNumbers({ capture_coverage: cov }), [])
+})
+
+test("the same host with 124 unowned sessions counted as misses would have been low; no alarm and no share either way", () => {
+  const counted = { on_disk: 125, derived: 1, held: 0, frozen: 0, pending: 0, not_seen: 124, not_in_a_desk: null, unverified: false }
+  const cov = summarizeCapture({ files: [file(record({ "copilot-cli": counted }))], nowMs: NOW })
+  assert.equal(host(cov, "copilot-cli").share.state, "unavailable")
+  assert.deepEqual(cov.alarms, [])
+})
+
+test("a silent host raises no dropped alarm against its previous record", () => {
+  const before = record({ "codex-cli": codex({ unverified: false, derived: 4, not_seen: 0, on_disk: 4 }) })
+  const cov = summarizeCapture({ files: [file(record({ "codex-cli": codex({ unverified: false, derived: 0, not_seen: 4, on_disk: 4 }) }), { previous: before })], nowMs: NOW })
+  assert.deepEqual(cov.alarms, [])
+})
+
+test("a Claude Code host is unchanged beside a silent one", () => {
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": claude(), "copilot-cli": copilot() }))], nowMs: NOW })
+  assert.equal(host(cov, "claude-code").share.state, "measured")
+  assert.equal(host(cov, "claude-code").share.value, 248 / 280)
+  assert.equal(host(cov, "copilot-cli").share.state, "unavailable")
+})
+
+test("a Claude Code alarm still fires beside a silent host", () => {
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": claude({ derived: 1, pending: 0, not_seen: 31, on_disk: 44, not_in_a_desk: 12 }), "copilot-cli": copilot() }))], nowMs: NOW })
+  assert.deepEqual(cov.alarms, [{ host: "claude-code", code: "coverage_low" }])
+})
+
+test("the store-wide share is partial with host_does_not_say_desk, and valid for the numbers check", () => {
+  const cov = summarizeCapture({ files: [file(record({ "claude-code": claude(), "copilot-cli": copilot() }))], nowMs: NOW })
+  assert.equal(cov.share.state, "partial")
+  assert.deepEqual(cov.share.reasons, silentReason)
+  assert.equal(cov.share.n, 0)
+  assert.equal(cov.share.bound, "unknown")
+  assert.deepEqual(checkNumbers({ capture_coverage: cov }), [])
+  const only = summarizeCapture({ files: [file(record({ "copilot-cli": copilot() }))], nowMs: NOW })
+  assert.equal(only.share.state, "partial")
+  assert.deepEqual(only.share.reasons, silentReason)
+  assert.deepEqual(checkNumbers({ capture_coverage: only }), [])
+})
+
+test("a silent host that one machine could not count also says host_not_counted, and with a Claude Code-only store the reason is absent", () => {
+  const cov = summarizeCapture({ files: [file(record({ "codex-cli": codex() })), file(record({ "codex-cli": NOT_COUNTED }))], nowMs: NOW })
+  assert.deepEqual(host(cov, "codex-cli").share.reasons, ["host_does_not_say_desk", "host_not_counted"])
+  assert.deepEqual(checkNumbers({ capture_coverage: cov }), [])
+  const plain = summarizeCapture({ files: [file(record({ "claude-code": claude() }))], nowMs: NOW })
+  assert.equal(plain.share.state, "measured")
 })
