@@ -1071,7 +1071,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .sb-key { display: inline-block; flex: none; width: 12px; height: 12px; vertical-align: -1px; }
 .sb-key-unsplit { background: repeating-linear-gradient(135deg, var(--baseline) 0 2px, transparent 2px 6px); box-shadow: inset 0 0 0 1px var(--baseline); }
 .sb-key-open { border: 1.5px dashed var(--text-secondary); }
-.sb-key-nodata { border: 1px dashed var(--text-muted); }
+.sb-key-nodata { border: 1px dashed var(--text-muted); font-size: 10px; font-weight: 700; line-height: 10px; text-align: center; color: var(--text-muted); }
 .sb-key-star::before { content: "*"; display: block; font-weight: 700; line-height: 12px; text-align: center; color: var(--text-primary); }
 .fe-dot { fill: var(--text-primary); stroke: var(--text-primary); stroke-width: 1.5; }
 .fe-hollow { fill: var(--page-plane); }
@@ -1083,6 +1083,28 @@ table.data-table td, table.data-table th { min-width: 60px; }
 .pareto-line { fill: none; stroke: var(--text-primary); stroke-width: 1.6; }
 .pareto-dot { fill: var(--page-plane); stroke: var(--text-primary); stroke-width: 1.6; }
 .pareto-key { display: flex; align-items: center; gap: 8px; }
+/* The Pareto's frame shrinks to its bars, so the right axis sits beside them. */
+.pareto-row .pareto-frame { flex: 0 1 auto; }
+/* The direct label on the finished task with the most waste. */
+.sb-callout { font-size: 12px; font-weight: 700; fill: var(--text-primary); paint-order: stroke; stroke: var(--page-plane); stroke-width: 3px; stroke-linejoin: round; }
+.sb-callout-line { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 2 2; }
+.chart-other:focus { outline: none; }
+.chart-other:focus-visible .hit { fill: transparent; stroke: var(--focus); stroke-width: 2; }
+.chart-other .hit { fill: transparent; }
+.unlabeled-note a { white-space: normal; }
+p.unlabeled-note:not(.chart-caption) { font-size: 15px; color: var(--text-secondary); margin-top: 0; }
+/* On a phone a wide table reads as one card per row, each value beside its
+   column's name, so no number hides behind a sideways scroll. */
+@media (max-width: 599px) {
+  table.data-table.phone-cards { min-width: 0; }
+  table.data-table.phone-cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  table.data-table.phone-cards, table.data-table.phone-cards tbody, table.data-table.phone-cards tr { display: block; width: 100%; }
+  table.data-table.phone-cards tr { border-bottom: 1px solid var(--border); padding: 8px 0; }
+  table.data-table.phone-cards td { display: flex; align-items: baseline; gap: 6px; border: 0; padding: 3px 0; white-space: normal; text-align: right; max-width: none; min-width: 0; }
+  table.data-table.phone-cards td::before { content: attr(data-label); margin-right: auto; padding-right: 12px; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; text-align: left; flex: none; }
+  table.data-table.phone-cards td:first-child { font-weight: 600; }
+  table.data-table.phone-cards td.empty-cell { display: none; }
+}
 .pareto-line-key { display: inline-block; flex: none; width: 22px; height: 0; border-top: 1.6px solid var(--text-primary); position: relative; }
 .pareto-line-key::after { content: ""; position: absolute; left: 7px; top: -5px; width: 6px; height: 6px; border-radius: 50%; border: 1.6px solid var(--text-primary); background: var(--page-plane); }
 .pareto-table td:nth-child(2) { white-space: normal; min-width: 14em; }

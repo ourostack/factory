@@ -507,6 +507,7 @@
   //   #/task/<job>/session/<id>   one session of that task
   //   #/session/<id>              one session whose task is not known
   //   #/compare  #/causes  #/act  the walk's other three steps
+  //   #/compare?mode=working      a chart in agent working time mode
   //   #/why  #/about  #/store     reference pages
   // Old links keep working: #job-<id> and #session-<id> (the first site's
   // task and session pages) and its section anchors redirect.
@@ -580,7 +581,11 @@
       }
       return CAUSE_ID.test(key) ? { view: "cause", cause: key } : { view: "missing" };
     }
-    if (parts.length === 1 && PAGES.includes(parts[0])) return { view: parts[0] };
+    if (parts.length === 1 && PAGES.includes(parts[0])) {
+      // Compare tasks and Rank causes keep their chart mode in the URL.
+      const mode = qi >= 0 && (parts[0] === "compare" || parts[0] === "causes") && full.slice(qi + 1) === "mode=working" ? "working" : null;
+      return mode ? { view: parts[0], mode } : { view: parts[0] };
+    }
     return { view: "missing" };
   }
 
@@ -718,8 +723,8 @@
       const codes = loop.verdict && Array.isArray(loop.verdict.missing) ? [...new Set(loop.verdict.missing.flatMap((m) => m.codes || []))] : [];
       missing.push(`the improvement loop's health (${codes.length ? codes.map(reasonText).join("; ") : "not recorded"})`);
     }
-    // Every alarm the Rank causes page raises reaches this line too, so the two
-    // never disagree. Alarms already told from their own source above are not
+    // Every fix-next alarm reaches this line too, so the status line and the
+    // build's alarms never disagree. Alarms already told from their own source above are not
     // repeated; any other (a labels mismatch, or one whose source this line
     // did not see) is named here with no one on it.
     // Each alarm carries a stable key (its fix-next id), so a repeat is
@@ -845,5 +850,5 @@
   ];
 
   return { LANDING_MIN_WORK_MS, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+    barRow, finishCell, finishWords, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

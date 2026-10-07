@@ -12,15 +12,15 @@
 // number { state, value?, reasons } from Desk's rollups (tasks.json,
 // stackup.json, causes.json) or data.json. No date is read or written.
 //
-// Loaded as a plain script in the browser after walk.js (global
-// `FactorySteps`) and required by the tests in Node.
+// Loaded as a plain script in the browser after format.js and walk.js
+// (global `FactorySteps`) and required by the tests in Node.
 
 (function (root, factory) {
   const node = typeof module === "object" && module.exports;
-  const api = factory(node ? require("./walk.js") : root.FactoryWalk);
+  const api = node ? factory(require("./walk.js"), require("./format.js")) : factory(root.FactoryWalk, root.FactoryFormat);
   if (node) module.exports = api;
   else root.FactorySteps = api;
-})(typeof self !== "undefined" ? self : this, function (W) {
+})(typeof self !== "undefined" ? self : this, function (W, F) {
   "use strict";
 
   const MINUTE = 60000;
@@ -167,6 +167,52 @@
     });
   }
 
+  // The parts of a working bar that carry no evaluator label.
+  const UNLABELED = new Set(["agents_working_unlabeled", "not_labeled", "working_unsplit", "no_session", "unsplit"]);
+  const labeledMs = (b) => arr(b && b.segments).filter((s) => !s.cause && !UNLABELED.has(s.key)).reduce((a, s) => a + (s.ms > 0 ? s.ms : 0), 0);
+
+  // "Agent working time" mode shows only the tasks whose working time
+  // carries the evaluator's labels, so the chart's scale fits them and a
+  // defect of minutes is not flattened by hundreds of unlabeled hours. One
+  // sentence accounts for every task left out: the open ones (with their
+  // unlabeled hours and the largest), the done ones not labeled yet, and
+  // the ones with no working time measured. `bars` are stackBars in
+  // "working" mode. Returns { bars, left_out, text }.
+  function workingView(bars) {
+    const list = arr(bars);
+    const kept = list.filter((b) => b.state === "ok" && labeledMs(b) > 0);
+    const out = list.filter((b) => !kept.includes(b));
+    if (!out.length) return { bars: kept, left_out: 0, text: "" };
+    const measured = out.filter((b) => b.state === "ok");
+    const open = measured.filter((b) => b.open);
+    const done = measured.filter((b) => !b.open);
+    const none = out.length - measured.length;
+    const sum = (xs) => xs.reduce((a, b) => a + (b.total_ms || 0), 0);
+    const parts = [];
+    if (open.length) {
+      const top = open.slice().sort((a, b) => b.total_ms - a.total_ms)[0];
+      parts.push(`${open.length} still open ${open.length === 1 ? "holds" : "hold"} ${hoursWords(sum(open))} of working time not labeled yet${open.length > 1 ? `, the most in “${top.name}” (${hoursWords(top.total_ms)})` : ` (“${top.name}”)`}`);
+    }
+    if (done.length) parts.push(`${done.length} done but not labeled yet ${done.length === 1 ? "holds" : "hold"} ${hoursWords(sum(done))}`);
+    if (none) parts.push(`${none} ${none === 1 ? "has" : "have"} no working time measured`);
+    const head = `${plural(out.length, "task")} ${out.length === 1 ? "is" : "are"} left out because none of ${out.length === 1 ? "its" : "their"} working time is labeled yet`;
+    return { bars: kept, left_out: out.length, text: `${head}: ${parts.join("; ")}. The table below lists every task.` };
+  }
+
+  // The finished task with the most waste, for a label on its bar: waiting
+  // and labeled waste in "all" mode, labeled waste only in "working" mode.
+  const WASTE_SEGMENTS = new Set(["waiting", "defects", "extra_processing", "overproduction", "motion", "transportation", "inventory", "non_utilized_talent", "unknown"]);
+  function mostWaste(bars, mode) {
+    let best = null;
+    arr(bars).forEach((b, index) => {
+      if (b.group !== "finished" || b.state !== "ok") return;
+      const ms = arr(b.segments).filter((s) => (s.cause ? mode !== "working" : WASTE_SEGMENTS.has(s.key))).reduce((a, s) => a + (s.ms > 0 ? s.ms : 0), 0);
+      if (ms > 0 && (!best || ms > best.ms)) best = { job: b.job, index, ms };
+    });
+    if (!best) return null;
+    return { ...best, label: `${mode === "working" ? "Most labeled waste" : "Most waste"}: ${hoursShort(best.ms)}` };
+  }
+
   // A linear scale from zero for a chart of durations: hours, or minutes
   // when every value is under an hour. Returns { unit, per, max_ms, ticks }
   // with round tick steps (1, 2, 2.5 or 5 times a power of ten).
@@ -305,7 +351,9 @@
 
   // -------------------------------------------------- the Pareto of causes
 
-  const CAUSE_KEY = /^[a-z][a-z_]{0,40}:[a-z0-9][a-z0-9_.-]{0,60}$/;
+  // One pattern with the route parser (format.js), so a link this builds
+  // is always a page that parser opens.
+  const CAUSE_KEY = F.CAUSE_ID;
   const isCauseKey = (k) => typeof k === "string" && CAUSE_KEY.test(k);
   const causeRoute = (k) => (isCauseKey(k) ? `#/causes/${k}` : "#/causes");
   // A running total in words: it reads 100% only at the last bar.
@@ -355,14 +403,28 @@
     };
   }
 
-  // Rank causes' lede, with real numbers: the largest cause and its share,
-  // how few causes carry four fifths of the time (the vital few), and the
-  // largest cause agents can fix once waiting is left out.
-  function causesLede(all, working) {
+  // Rank causes' lede, with real numbers: how many tasks the ranking
+  // counts, the largest cause and its share (and when one task holds most
+  // of it), how few causes carry four fifths of the time (the vital few),
+  // and the largest cause agents can fix once waiting is left out. `opts`
+  // ({ doc, taskRows, stackRows, nameOf }) lets it read the top cause's
+  // tasks.
+  function causesLede(all, working, opts) {
     if (!all || all.state === "absent") return "The causes file is not published yet, so this page cannot rank causes. No bar is drawn rather than a zero.";
     if (!all.bars.length) return "No cause of waste is recorded yet in the tasks the ranking counts.";
+    const o = opts || {};
     const top = all.bars[0];
-    const parts = [`The largest cause, ${top.label.charAt(0).toLowerCase()}${top.label.slice(1)}, cost ${hoursWords(top.ms)}: ${W.pctWords(top.share)} of the ${hoursWords(all.total_ms)} ranked.`];
+    const parts = [];
+    if (all.n !== null && all.N !== null) parts.push(`The ranking counts ${all.n} of the ${all.N} tasks; the note under the chart says why the rest are left out. Across those ${all.n}, the`);
+    else parts.push("The");
+    parts.push(` largest cause, ${top.label.charAt(0).toLowerCase()}${top.label.slice(1)}, cost ${hoursWords(top.ms)}: ${W.pctWords(top.share)} of the ${hoursWords(all.total_ms)} ranked`);
+    let one = "";
+    if (o.doc && top.href) {
+      const d = causeDetail(o.doc, top.key, { taskRows: o.taskRows, stackRows: o.stackRows, nameOf: o.nameOf });
+      const t = d.state === "ok" ? d.tasks[0] : null;
+      if (t && t.ms !== null && d.jobs > 1 && t.ms > 0.5 * top.ms) one = `; ${hoursWords(t.ms).replace(/ hours?$/, "")} of its ${hoursWords(top.ms)} are in one task, “${t.name}”`;
+    }
+    parts.push(`${one}.`);
     const k = all.bars.findIndex((b) => b.cum >= 0.8) + 1;
     if (k > 1 && k < all.bars.length) parts.push(` ${k === 2 ? "Two causes" : k === 3 ? "Three causes" : `${k} causes`} of ${all.bars.length} carry ${W.pctWords(all.bars[k - 1].cum)} of the time: those are the vital few.`);
     else if (k === 1 && all.bars.length > 1) parts.push(` That one cause of ${all.bars.length} carries most of the time: it is the vital few on its own.`);
@@ -371,6 +433,31 @@
       parts.push(` Leave waiting out, and the largest cause agents can fix in their own work is ${w.label.charAt(0).toLowerCase()}${w.label.slice(1)}, at ${hoursWords(w.ms)}.`);
     } else if (working) parts.push(" No labeled waste in agents' working time is recorded yet, so with waiting left out there is nothing to rank.");
     return parts.join("");
+  }
+
+  // The Pareto chart's caption in each mode, with the ranking's coverage.
+  function paretoCaption(model) {
+    const m = model || {};
+    const cover = typeof m.n === "number" && typeof m.N === "number" ? ` It counts ${m.n} of ${m.N} tasks.` : "";
+    return m.mode === "working"
+      ? `Agent working time only: waiting is left out (${hoursWords(m.left_out || 0)} of it), which ranks the causes agents can fix in their own work. Select a bar to open its cause.${cover}`
+      : `Every cause, waiting included, by the time it cost. Select a bar to open its cause: its tasks, its stretches, and a prompt to start an A3.${cover}`;
+  }
+
+  // Finished tasks (their card says done) that the evaluator has not
+  // labeled yet: the ranking leaves them out and no check can count them.
+  function unlabeledFinished(jobs, nameOf) {
+    const name = typeof nameOf === "function" ? nameOf : (j) => `Task ${String(j.id).slice(0, 8)}`;
+    return arr(jobs)
+      .filter((j) => j && typeof j.id === "string" && j.status === "done" && j.finish_basis !== "labels")
+      .map((j) => ({ job: j.id, name: name(j), href: `#/task/${j.id}` }));
+  }
+  // The sentence that leads into their links, on Rank causes or on Act.
+  function unlabeledWords(n, where) {
+    if (!(n > 0)) return "";
+    const one = n === 1;
+    const head = `${plural(n, "finished task")} ${one ? "is" : "are"} waiting for the evaluator's waste labels; until ${one ? "it is" : "they are"} labeled, `;
+    return where === "act" ? `${head}${one ? "it cannot" : "they cannot"} count toward any check:` : `${head}the ranking leaves ${one ? "it" : "them"} out:`;
   }
 
   // What a cause means, in one sentence, for its own page.
@@ -519,15 +606,16 @@
 
   // The prompt "Start an A3 with your agent" copies: the cause by name and
   // key, its time and share, its largest tasks, a link that reopens its page
-  // and where it sits in the data file.
+  // and its entry in the data file, found by key (never by position, which
+  // moves when the ranking changes).
   function a3Prompt(d, links) {
     const l = links || {};
     const top = arr(d.tasks).filter((t) => t.ms !== null).slice(0, 3);
-    const named = top.map((t) => `${t.promptName || `factory task ${String(t.job).slice(0, 8)}`} (${t.bound === "lower" ? "at least " : ""}${hoursWords(t.ms)})`);
-    const tasksText = named.length ? ` Its largest ${named.length === 1 ? "task is" : "tasks are"} ${named.join(", ")}${d.jobs > named.length ? `, of ${d.jobs} tasks in all` : ""}.` : "";
+    const named = top.map((t) => `${t.promptName || `factory task ${String(t.job).slice(0, 8)}`}, ${t.bound === "lower" ? "at least " : ""}${hoursWords(t.ms)}`);
+    const tasksText = named.length ? ` Its largest ${named.length === 1 ? "task is" : "tasks are"} ${named.join("; ")}${d.jobs > named.length ? `; of ${d.jobs} tasks in all` : ""}.` : "";
     const share = d.all && typeof d.all.share === "number" ? `, ${W.pctWords(d.all.share)} of all the time ranked` : "";
     const rank = d.all && d.all.rank ? ` It ranks ${ordinal(d.all.rank)} of ${d.all.of} causes by time.` : "";
-    return `Help me start an A3 on factory cause "${d.label}" (${d.key}). It cost ${hoursWords(d.ms)}, counted per task${share}.${rank}${tasksText} Its page is ${l.route}, and its data is causes[${d.index}] in ${l.dataUrl}. Walk me through its biggest stretches first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.`;
+    return `Help me start an A3 on factory cause "${d.label}" (${d.key}). It cost ${hoursWords(d.ms)}, counted per task${share}.${rank}${tasksText} Its page is ${l.route}, and its data is the entry with cause "${d.key}" in ${l.dataUrl}. Walk me through its biggest stretches first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.`;
   }
 
   // ------------------------------------------------------------- act
@@ -627,16 +715,22 @@
     totalWords,
     feBound,
     stackBars,
+    workingView,
+    mostWaste,
     timeScale,
     tickWords,
     compareLede,
     feDots,
+    CAUSE_KEY,
     isCauseKey,
     causeRoute,
     paretoModel,
     paretoNote,
     cumWords,
     causesLede,
+    paretoCaption,
+    unlabeledFinished,
+    unlabeledWords,
     causeMeaning,
     causeDetail,
     spanItem,

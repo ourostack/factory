@@ -76,6 +76,36 @@ test("each bar stacks working time by label from the base up, then waiting by ca
   assert.equal(bar.words, "8 hours")
 })
 
+test("agent working time mode shows only tasks with labeled working time, at their own scale, and one sentence accounts for the rest", () => {
+  const { tasks, stackup, jobs } = snap()
+  const bars = S.stackBars(jobs, stackup, tasks, { mode: "working", segments: F.SEGMENTS, nameOf: (j) => `Task ${j.id.slice(0, 8)}` })
+  const v = S.workingView(bars)
+  assert.equal(v.bars.length, 8)
+  assert.ok(v.bars.every((b) => b.group === "finished" && b.state === "ok"))
+  assert.ok(Math.max(...v.bars.map((b) => b.total_ms)) < 20 * H, "the scale fits the labeled tasks, not the open ones")
+  assert.equal(v.left_out, 23)
+  assert.match(v.text, /^23 tasks are left out because none of their working time is labeled yet: 8 still open hold \d+ hours of working time not labeled yet, the most in “Task 1f0ae588” \(258 hours\); 1 done but not labeled yet holds 3\.6 hours; 14 have no working time measured\. The table below lists every task\.$/)
+  // A bar whose working time is all "not labeled yet" is left out; one with any label stays.
+  const a = rows("a")
+  const o = rows("o", { status: "processing", leadN: p(8 * H, ["censored"]) })
+  o.stack.working = { class_ms: {}, waste_ms: {}, agents_working_unlabeled_ms: m(0), not_labeled_ms: m(1.75 * H) }
+  const two = S.stackBars([job("a", 1, "labels"), job("o", 2, "facts", "processing")], [a.stack, o.stack], [a.task, o.task], { mode: "working", segments: F.SEGMENTS, nameOf })
+  assert.deepEqual(S.workingView(two).bars.map((b) => b.job), ["a"])
+  assert.equal(S.workingView([]).text, "")
+})
+
+test("the chart marks the finished task with the most waste, in either mode", () => {
+  const { tasks, stackup, jobs } = snap()
+  const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => `Task ${j.id.slice(0, 8)}` })
+  const all = S.mostWaste(S.stackBars(jobs, stackup, tasks, opts("all")), "all")
+  assert.equal(all.job.slice(0, 8), "c9235d85")
+  assert.match(all.label, /^Most waste: \d+h$/)
+  const work = S.mostWaste(S.workingView(S.stackBars(jobs, stackup, tasks, opts("working"))).bars, "working")
+  assert.equal(work.job.slice(0, 8), "690331dd")
+  assert.equal(work.label, "Most labeled waste: 17m")
+  assert.equal(S.mostWaste([], "all"), null)
+})
+
 test("agent working time mode keeps only the working group, so a 20-minute task is not drowned out by waiting", () => {
   const a = rows("a")
   const [bar] = S.stackBars([job("a", 1, "labels")], [a.stack], [a.task], { mode: "working", segments: F.SEGMENTS, nameOf })
@@ -245,7 +275,7 @@ test("the Pareto's bars are in strictly descending time, the running total rises
   }
   assert.equal(all.bars.at(-1).cum, 1)
   assert.equal(all.total_ms, 16.5 * H)
-  assert.equal(all.bars[0].label, "Waiting for the next prompt (the agent had stopped)")
+  assert.equal(all.bars[0].label, "Waiting · next prompt (the agent had stopped)")
   assert.equal(all.bars[2].label, "Defects · failed shell calls")
   assert.equal(all.bars[0].href, "#/causes/waiting:next_prompt")
   const folded = S.paretoModel(doc, "all", { maxBars: 3 })
@@ -288,9 +318,33 @@ test("a running total reads 100% only at the last bar", () => {
 test("Rank causes' lede names the largest cause, the vital few, and the largest cause agents can fix", () => {
   const { causes } = snap()
   const t = S.causesLede(S.paretoModel(causes, "all"), S.paretoModel(causes, "working"))
-  assert.match(t, /^The largest cause, waiting · no session running, cost 117 hours: 69% of the 171 hours ranked\. Two causes of 9 carry 92% of the time: those are the vital few\./)
+  assert.match(t, /^The ranking counts 8 of the 31 tasks; the note under the chart says why the rest are left out\. Across those 8, the largest cause, waiting · no session running, cost 117 hours: 69% of the 171 hours ranked\. Two causes of 9 carry 92% of the time: those are the vital few\./)
   assert.match(t, /Leave waiting out, and the largest cause agents can fix in their own work is extra processing, at 17 minutes\.$/)
   assert.match(S.causesLede({ state: "absent", bars: [] }, null), /not published yet/)
+})
+
+test("the lede says when one task holds most of the top cause, and the chart caption carries the ranking's coverage", () => {
+  const { causes, tasks, stackup } = snap()
+  const t = S.causesLede(S.paretoModel(causes, "all"), S.paretoModel(causes, "working"), { doc: causes, taskRows: tasks, stackRows: stackup, nameOf: (j) => `Task ${j.slice(0, 8)}` })
+  assert.match(t, /cost 117 hours: 69% of the 171 hours ranked; 92 of its 117 hours are in one task, “Task c9235d85”\./)
+  // No clause when no one task holds most of it.
+  const spread = causesDoc([cause("waiting:no_session", 10 * H, ["a", "b"]), cause("defects:shell", H)])
+  const rowsAB = [{ job: "a", waiting_by_waited_on_ms: { no_session: m(5 * H) } }, { job: "b", waiting_by_waited_on_ms: { no_session: m(5 * H) } }]
+  assert.doesNotMatch(S.causesLede(S.paretoModel(spread, "all"), null, { doc: spread, taskRows: rowsAB }), /in one task/)
+  const all = S.paretoModel(causes, "all")
+  assert.match(S.paretoCaption(all), /It counts 8 of 31 tasks\.$/)
+  assert.match(S.paretoCaption(S.paretoModel(causes, "working")), /^Agent working time only: waiting is left out \(\d.* of it\).*It counts 8 of 31 tasks\.$/)
+})
+
+test("finished tasks with no waste labels are counted and named, for the ranking note and Act", () => {
+  const { jobs } = snap()
+  const list = S.unlabeledFinished(jobs, (j) => `Task ${j.id.slice(0, 8)}`)
+  assert.equal(list.length, 9)
+  assert.ok(list.every((x) => /^#\/task\/[0-9a-f]+$/.test(x.href)))
+  assert.deepEqual(S.unlabeledFinished([job("a", 1, "labels"), job("b", 2, "facts"), job("c", 3, "facts", "processing")]).map((x) => x.job), ["b"])
+  assert.equal(S.unlabeledWords(9, "causes"), "9 finished tasks are waiting for the evaluator's waste labels; until they are labeled, the ranking leaves them out:")
+  assert.equal(S.unlabeledWords(1, "act"), "1 finished task is waiting for the evaluator's waste labels; until it is labeled, it cannot count toward any check:")
+  assert.equal(S.unlabeledWords(0, "act"), "")
 })
 
 // ------------------------------------------------------------ the routes
@@ -298,6 +352,13 @@ test("Rank causes' lede names the largest cause, the vital few, and the largest 
 test("each cause has its own route, #/causes/<key>, under the Rank causes tab; a bad key is not a page", () => {
   assert.deepEqual(F.parseRoute("#/causes/waiting:next_prompt"), { view: "cause", cause: "waiting:next_prompt" })
   assert.deepEqual(F.parseRoute("#/causes/waiting%3Anext_prompt"), { view: "cause", cause: "waiting:next_prompt" })
+  // The chart mode is in the URL, so a link opens the same view.
+  assert.deepEqual(F.parseRoute("#/compare?mode=working"), { view: "compare", mode: "working" })
+  assert.deepEqual(F.parseRoute("#/causes?mode=working"), { view: "causes", mode: "working" })
+  assert.deepEqual(F.parseRoute("#/compare?mode=other"), { view: "compare" })
+  assert.deepEqual(F.parseRoute("#/act?mode=working"), { view: "act" })
+  // One cause-key pattern serves the route parser and the link builder.
+  assert.equal(S.CAUSE_KEY, F.CAUSE_ID)
   assert.deepEqual(F.parseRoute("#/causes/defects:shell/"), { view: "cause", cause: "defects:shell" })
   for (const bad of ["#/causes/nope", "#/causes/<x>:y", "#/causes/a:b/c", "#/causes/%E0%A4%A", "#/causes/waiting:"]) assert.deepEqual(F.parseRoute(bad), { view: "missing" }, bad)
   assert.equal(F.stepOf("cause"), "causes")
@@ -351,9 +412,10 @@ test("the A3 prompt names the cause and its key, its time and share, its largest
   const { causes, tasks, stackup } = snap()
   const d = S.causeDetail(causes, "waiting:next_prompt", { taskRows: tasks, stackRows: stackup, promptNameOf: (j) => `factory task ${j.slice(0, 8)} (private)` })
   const t = S.a3Prompt(d, { route: "https://x.test/#/causes/waiting:next_prompt", dataUrl: "https://x.test/rollups/causes.json" })
-  assert.match(t, /^Help me start an A3 on factory cause "Waiting for the next prompt \(the agent had stopped\)" \(waiting:next_prompt\)\. It cost 39 hours, counted per task, 23% of all the time ranked\. It ranks 2nd of 9 causes by time\./)
-  assert.match(t, /Its largest tasks are factory task 825084c9 \(private\) \(36 hours\), factory task 690331dd \(private\) \(2\.5 hours\), factory task c87c243f \(private\) \(33 minutes\), of 4 tasks in all\./)
-  assert.match(t, /Its page is https:\/\/x\.test\/#\/causes\/waiting:next_prompt, and its data is causes\[1\] in https:\/\/x\.test\/rollups\/causes\.json\./)
+  assert.match(t, /^Help me start an A3 on factory cause "Waiting · next prompt \(the agent had stopped\)" \(waiting:next_prompt\)\. It cost 39 hours, counted per task, 23% of all the time ranked\. It ranks 2nd of 9 causes by time\./)
+  assert.match(t, /Its largest tasks are factory task 825084c9 \(private\), 36 hours; factory task 690331dd \(private\), 2\.5 hours; factory task c87c243f \(private\), 33 minutes; of 4 tasks in all\./)
+  assert.match(t, /Its page is https:\/\/x\.test\/#\/causes\/waiting:next_prompt, and its data is the entry with cause "waiting:next_prompt" in https:\/\/x\.test\/rollups\/causes\.json\./)
+  assert.doesNotMatch(t, /causes\[|\) \(/)
   assert.match(t, /draft the A3 with me/)
 })
 
@@ -386,7 +448,7 @@ test("Act lists one row per kaizen issue with its countermeasure, a cause only f
   assert.deepEqual(rows.map((r) => r.ref), ["ourostack/factory#70", "ourostack/factory#53", "ourostack/factory#52", "#9"], "open first, then the newest; a URL that is not GitHub keeps its plain ref (the page shows it as text)")
   assert.equal(rows[0].cause, null, "a title that names a cause does not map it: only the table does")
   assert.equal(rows[0].countermeasure, null)
-  assert.deepEqual(rows[1].cause, { key: "waiting:next_prompt", label: "Waiting for the next prompt (the agent had stopped)", href: "#/causes/waiting:next_prompt", ranked: true })
+  assert.deepEqual(rows[1].cause, { key: "waiting:next_prompt", label: "Waiting · next prompt (the agent had stopped)", href: "#/causes/waiting:next_prompt", ranked: true })
   assert.equal(rows[2].cause.ranked, false)
   assert.deepEqual(rows[1].countermeasure, { ref: "ourostack/desk#65", url: "https://github.com/ourostack/desk/pull/65", merged: true, kind: "countermeasure" })
   assert.equal(rows[1].title, "desk skill friction, human_wait")
@@ -459,4 +521,20 @@ test("llms.txt describes the files behind steps 2 to 4 in the page's words", asy
   assert.match(t, /- rollups\/causes\.json \(1 KB, small enough to read whole\): each cause's time in job-hours/)
   assert.match(t, /alarm_issues \(who owns each alarm\) are step 4, Act/)
   assert.match(t, /`#\/causes\/<key>`/)
+})
+
+test("the page wires fix round 1: the working view, the waste label, phone cards, pinned Pareto axes, a reachable Other bar and the unlabeled notes", () => {
+  const app = read("site/src/app.js")
+  const html = read("site/src/index.html")
+  assert.match(app, /S\.workingView\(S\.stackBars\(data\.jobs, stackRows, taskRows, opts\("working"\)\)\)/)
+  assert.match(app, /drawStackup\(document\.getElementById\("stackup"\), bars, mode, S\.mostWaste\(bars, mode\)\)/)
+  for (const t of ["sb-table", "pareto-table", "cause-tasks"]) assert.ok(app.includes(`"data-table ${t}"`), t)
+  assert.equal((app.match(/labelCells\(table\);/g) || []).length, 3)
+  assert.match(app, /svg\("g", \{ class: "chart-other", tabindex: "0"/)
+  assert.match(app, /row\.append\(left, frame, right\)/)
+  assert.match(app, /unlabeledNote\(document\.getElementById\("act-unlabeled"\), data, "act"\)/)
+  assert.match(app, /unlabeledNote\(document\.getElementById\("causes-unlabeled"\), data, "causes"\)/)
+  assert.match(app, /history\.replaceState\(null, "", `#\/\$\{which\}\$\{modes\[which\] === "working" \? "\?mode=working" : ""\}`\)/)
+  for (const id of ["stackup-left-out", "causes-unlabeled", "act-unlabeled"]) assert.match(html, new RegExp(`id="${id}"`), id)
+  assert.match(read("site/src/styles.css"), /@media \(max-width: 599px\) \{\n  table\.data-table\.phone-cards/)
 })
