@@ -11,10 +11,8 @@ const signoff = (o = {}) => ({
   recorded: true,
   jobs: 6,
   accepted: 2,
-  accepted_unverified: 1,
   delivered_unsigned: 1,
   refused: 1,
-  refused_unverified: 0,
   reopened: 0,
   not_recorded: 1,
   not_delivered: 0,
@@ -27,13 +25,12 @@ const signoff = (o = {}) => ({
 const yieldRollup = (o = {}) => ({
   state: "partial",
   value: 0.75,
-  reasons: ["awaiting_signoff", "signoff_unverified"],
+  reasons: ["awaiting_signoff"],
   n: 3,
   N: 4,
   passed: 3,
   returned: 1,
   awaiting_signoff: 1,
-  signoff_unverified: 1,
   changed_ask_only: 0,
   excluded: [{ reason: "history_not_recorded", jobs: 4 }, { reason: "not_recorded", jobs: 1 }],
   ...o,
@@ -49,7 +46,7 @@ const rework = (o = {}) => ({
     after_delivery: { agent_error: 1, changed_ask: 0, new_information: 0, external: 0 },
   },
   changed_ask: 1,
-  reason_check: { state: "partial", compared: 1, disagree: 0, compared_verified: 1, reasons: ["history_not_recorded"] },
+  reason_check: { state: "partial", compared: 1, disagree: 0, reasons: ["history_not_recorded"] },
   defects: { state: "unavailable", reasons: ["no_labels"], n: 0, N: 3 },
   ...o,
 })
@@ -86,10 +83,9 @@ test("a store where no session published an outcomes key says sign-off is not pu
   assert.deepEqual(checkNumbers({ outcomes: s }), [])
 })
 
-test("sign-off counts are measured, and an unverified acceptance is apart from accepted", () => {
+test("sign-off counts are measured", () => {
   const s = outcomesSummary(file())
   assert.equal(s.signoff.accepted.value, 2)
-  assert.equal(s.signoff.accepted_unverified.value, 1)
   assert.equal(s.signoff.refused.value, 1)
   assert.equal(s.signoff.no_record.value, 4)
   assert.deepEqual(s.refusal_reasons.map((r) => [r.reason, r.jobs.value]), [["defect", 1]])
@@ -103,7 +99,7 @@ test("unsigned deliveries count jobs with a sign-off record, with jobs that pred
   assert.equal(s.unsigned.N, 5)
   assert.equal(s.unsigned.out_of_scope, 5)
   // With no delivered job on record the reason says so, not "no member was measured".
-  const empty = outcomesSummary(file({ signoff: signoff({ jobs: 4, not_recorded: 4, not_delivered: 0, no_record: 0, delivered_unsigned: 0, accepted: 0, accepted_unverified: 0, refused: 0 }) })).unsigned
+  const empty = outcomesSummary(file({ signoff: signoff({ jobs: 4, not_recorded: 4, not_delivered: 0, no_record: 0, delivered_unsigned: 0, accepted: 0, refused: 0 }) })).unsigned
   assert.equal(empty.state, "unavailable")
   assert.deepEqual(empty.reasons, ["no_signoff_records"])
   // A job not delivered yet cannot be unsigned, so it is out of scope.
@@ -121,7 +117,7 @@ test("an awaiting-sign-off yield is an upper bound, with jobs that predate sign-
   assert.equal(y.state, "partial")
   assert.equal(y.value, 0.75)
   assert.equal(y.bound, "upper")
-  assert.equal(y.n, 2)
+  assert.equal(y.n, 3)
   assert.equal(y.N, 4)
   assert.equal(y.out_of_scope, 5)
   // The shown percentage can be rebuilt from counts shown beside it.
@@ -132,20 +128,20 @@ test("an awaiting-sign-off yield is an upper bound, with jobs that predate sign-
   assert.equal(lost.N, 5)
   assert.ok(lost.reasons.includes("returns_not_fully_recorded"))
   assert.equal(lost.bound, "unknown")
-  const whole = outcomesSummary(file({ first_pass_yield: yieldRollup({ state: "measured", reasons: [], awaiting_signoff: 0, signoff_unverified: 0, excluded: [] }) })).first_pass_yield
+  const whole = outcomesSummary(file({ first_pass_yield: yieldRollup({ state: "measured", reasons: [], awaiting_signoff: 0, excluded: [] }) })).first_pass_yield
   assert.equal(whole.state, "measured")
   assert.ok(!("bound" in whole))
 })
 
 test("a yield whose every job awaits sign-off still shows its upper bound with n of zero", () => {
-  const y = outcomesSummary(file({ first_pass_yield: yieldRollup({ value: 1, reasons: ["awaiting_signoff"], n: 2, N: 2, passed: 2, returned: 0, awaiting_signoff: 2, signoff_unverified: 0, excluded: [] }) })).first_pass_yield
+  const y = outcomesSummary(file({ first_pass_yield: yieldRollup({ value: 1, reasons: ["awaiting_signoff"], n: 2, N: 2, passed: 2, returned: 0, awaiting_signoff: 2, excluded: [] }) })).first_pass_yield
   assert.equal(y.n, 0)
   assert.equal(y.state, "partial")
   assert.deepEqual(checkNumbers({ outcomes: { first_pass_yield: y } }), [])
 })
 
 test("no delivered job is no data for yield, never zero", () => {
-  const y = outcomesSummary(file({ first_pass_yield: { state: "unavailable", reasons: ["no_delivered_jobs"], n: 0, N: 0, passed: 0, returned: 0, awaiting_signoff: 0, signoff_unverified: 0, changed_ask_only: 0, excluded: [] } })).first_pass_yield
+  const y = outcomesSummary(file({ first_pass_yield: { state: "unavailable", reasons: ["no_delivered_jobs"], n: 0, N: 0, passed: 0, returned: 0, awaiting_signoff: 0, changed_ask_only: 0, excluded: [] } })).first_pass_yield
   assert.equal(y.state, "unavailable")
   assert.ok(!("value" in y))
   assert.deepEqual(y.reasons, ["no_delivered_jobs"])
@@ -169,26 +165,45 @@ test("rework with no recorded history is no data", () => {
   assert.equal(r.changed_ask.state, "unavailable")
 })
 
-test("a disagreement counted over unverified refusals is a lower bound", () => {
-  const r = outcomesSummary(file({ rework: rework({ reason_check: { state: "measured", compared: 3, disagree: 1, compared_verified: 1, reasons: [] } }) })).rework
-  assert.equal(r.reason_check.disagree.state, "partial")
-  assert.equal(r.reason_check.disagree.bound, "lower")
-  assert.deepEqual(r.reason_check.disagree.reasons, ["refusal_unverified"])
+test("a report without the removed fields has a measured yield and a measured reason check", () => {
+  const y0 = yieldRollup({ state: "measured", value: 0.75, reasons: [], awaiting_signoff: 0, n: 4, N: 4, excluded: [] })
+  const r0 = rework({ reason_check: { state: "measured", compared: 3, disagree: 1, reasons: [] } })
+  for (const k of ["signoff_unverified"]) assert.ok(!(k in y0))
+  assert.ok(!("compared_verified" in r0.reason_check))
+  const s = outcomesSummary(file({ first_pass_yield: y0, rework: r0 }))
+  assert.equal(s.first_pass_yield.state, "measured")
+  assert.equal(s.first_pass_yield.value, 0.75)
+  assert.equal(s.first_pass_counts.final.value, 4)
+  assert.equal(s.rework.reason_check.compared.state, "measured")
+  assert.equal(s.rework.reason_check.disagree.state, "measured")
+  assert.equal(s.rework.reason_check.disagree.value, 1)
+  assert.ok(!("compared_verified" in s.rework.reason_check))
+})
+
+test("a legacy report that still carries the removed fields as zero builds the same", () => {
+  const modern = outcomesSummary(file())
+  const legacy = outcomesSummary(file({
+    signoff: signoff({ accepted_unverified: 0, refused_unverified: 0 }),
+    first_pass_yield: yieldRollup({ signoff_unverified: 0 }),
+    rework: rework({ reason_check: { state: "partial", compared: 1, disagree: 0, compared_verified: 1, reasons: ["history_not_recorded"] } }),
+  }))
+  assert.deepEqual(legacy, modern)
+  assert.equal(legacy.first_pass_yield.state, "partial")
+  assert.equal(legacy.rework.reason_check.disagree.state, "measured")
 })
 
 test("one source for acceptance: the accepted count and the headline are Desk's own, never a sum the site makes", () => {
-  // Desk counts 2 accepted and 1 accepted-unverified, and divides the headline by its 2.
+  // Desk counts 2 accepted (the operator's recorded sign-off) and divides the headline by its 2.
   const s = outcomesSummary(file({ attention: { headline: { state: "measured", value: 3600000, reasons: [], n: 2, N: 2 } } }))
   assert.equal(s.signoff.accepted.value, 2)
-  assert.equal(s.signoff.accepted_unverified.value, 1)
   assert.equal(s.attention.headline.value, 3600000)
   assert.equal(s.attention.headline.n, s.signoff.accepted.value)
   // When Desk counts every acceptance as accepted, the site follows without a change.
-  const all = outcomesSummary(file({ signoff: signoff({ accepted: 3, accepted_unverified: 0 }), attention: { headline: { state: "measured", value: 1200000, reasons: [], n: 3, N: 3 } } }))
+  const all = outcomesSummary(file({ signoff: signoff({ accepted: 3 }), attention: { headline: { state: "measured", value: 1200000, reasons: [], n: 3, N: 3 } } }))
   assert.equal(all.signoff.accepted.value, 3)
   assert.equal(all.attention.headline.value, 1200000)
   // With Desk counting no acceptance, the headline is no data with Desk's reason, never zero.
-  const none = outcomesSummary(file({ signoff: signoff({ accepted: 0, accepted_unverified: 3 }), attention: { headline: { state: "unavailable", reasons: ["no_accepted_outcomes"], n: 0, N: 0 } } }))
+  const none = outcomesSummary(file({ signoff: signoff({ accepted: 0 }), attention: { headline: { state: "unavailable", reasons: ["no_accepted_outcomes"], n: 0, N: 0 } } }))
   assert.equal(none.signoff.accepted.value, 0)
   assert.equal(none.attention.headline.state, "unavailable")
 })

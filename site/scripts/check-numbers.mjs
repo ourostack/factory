@@ -57,7 +57,7 @@ const NUMBER_PATHS = [
   /^outcomes\.signoff\.[a-z_]+$/,
   /^waste\.breakdown\[\d+\]\.confidence\.(high|medium|low)_ms$/,
   /^outcomes\.(oldest_unsigned_wait|first_pass_counts\.[a-z_]+)$/,
-  /^outcomes\.rework\.reason_check\.(compared|disagree|compared_verified)$/,
+  /^outcomes\.rework\.reason_check\.(compared|disagree)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^jobs\[\d+\]\.(attention_ms|human_turns)$/,
   /^jobs\[\d+\]\.waste\.(sessions_labeled|sessions_on_timeline|foreign_sessions|rows\[\d+\]\.total_ms)$/,
@@ -95,9 +95,8 @@ function isStated(node) {
   return node && typeof node === "object" && !Array.isArray(node) && ("state" in node || "reasons" in node);
 }
 
-// Sign-off: a first-pass yield whose every job still awaits a witnessed
-// answer keeps its upper bound.
-for (const reason of ["awaiting_signoff", "signoff_unverified"]) VALUE_WITH_NO_WHOLE_MEMBER.add(reason);
+// Sign-off: a first-pass yield whose every job still awaits a sign-off keeps its upper bound.
+VALUE_WITH_NO_WHOLE_MEMBER.add("awaiting_signoff");
 
 export function checkNumbers(data) {
   const out = [];

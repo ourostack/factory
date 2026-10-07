@@ -74,9 +74,8 @@ test("every partial measure a job summary or job page shows carries a direction"
   for (const k of ["queue_before_start_ms", "human_wait_ms", "api_retry_ms", "flow_efficiency"]) assert.ok(s[k].bound, k)
 })
 
-test("a first pass that only awaits a witnessed sign-off is an upper bound; with lost returns too, its direction is unknown", () => {
+test("a first pass that only awaits a sign-off is an upper bound; with lost returns too, its direction is unknown", () => {
   assert.equal(directionOf("first_pass_yield", ["awaiting_signoff"]), "upper")
-  assert.equal(directionOf("first_pass_yield", ["awaiting_signoff", "signoff_unverified"]), "upper")
   assert.equal(directionOf("first_pass_yield", ["awaiting_signoff", "returns_not_fully_recorded"]), "unknown")
   assert.equal(directionOf("returns", ["returns_not_fully_recorded"]), "lower")
 })
