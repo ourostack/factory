@@ -1160,61 +1160,19 @@
     return wrap;
   }
 
-  // What the Elapsed tile says its figure is. A lead time Desk raised to the span of the job's recorded work (the card's dates were shorter) says so.
-  function elapsedCaption(n) {
-    if (Array.isArray(n.reasons) && n.reasons.includes("card_dates_shorter_than_work")) return "at least the span of its recorded work";
-    return n.basis === "declared" ? "from the task card's dates" : "from the task card to its last session";
-  }
-
   // Where a task sits in finish order, in words.
   function finishWords(j, jobs) {
     return F.finishWords(j, jobs);
   }
 
-  // The walk between tasks: the one that finished before, the one after,
-  // and a picker with every task, the last to finish first.
-  function renderTaskPicker(container, jobs, current) {
-    container.innerHTML = "";
-    const ordered = byFinishDesc(jobs);
-    const nav = el("nav", "task-walk");
-    nav.setAttribute("aria-label", "Other tasks");
-    // The walk steps through finished (labeled) tasks only; an open task has no place in finish order.
-    const placed = ordered.filter((x) => x.finish_basis === "labels" && x.finish_order && x.finish_order.state === "measured");
-    const i = placed.findIndex((x) => x.id === current);
-    const step = (j, word) => {
-      const span = el("span", "task-walk-step");
-      if (!j) return span;
-      span.appendChild(document.createTextNode(`${word}: `));
-      span.appendChild(jobLink(j.id, jobLabel(j)));
-      return span;
-    };
-    nav.appendChild(step(i >= 0 ? placed[i + 1] : null, "\u2190 Earlier in finish order"));
-    nav.appendChild(step(i > 0 ? placed[i - 1] : null, "Later in finish order \u2192"));
-    const label = el("label", "task-select-label", "Any task ");
-    const select = el("select", "task-select");
-    for (const j of ordered) {
-      const pre = F.finishCell(j);
-      const o = el("option", null, `${pre} \u00b7 ${jobLabel(j)}`);
-      o.value = j.id;
-      if (j.id === current) o.selected = true;
-      select.appendChild(o);
-    }
-    select.addEventListener("change", () => {
-      const safe = F.safeRoute("task", select.value);
-      if (safe) window.location.hash = safe;
-    });
-    label.appendChild(select);
-    nav.appendChild(label);
-    container.appendChild(nav);
-  }
-
-  function renderJobDetail(container, jobs, id, sessions) {
+  // The task's name, key, place in finish order and status: the head of step 1.
+  function renderTaskHead(container, jobs, id) {
     container.innerHTML = "";
     const j = id ? jobs.find((x) => x.id === id) : null;
     if (!j) {
       container.appendChild(el("h1", "view-title", "Task not found"));
       container.appendChild(el("p", "lede", "No task in this build has that key. It may have been re-derived or withdrawn. Pick another task above, or see every task under Compare tasks."));
-      return;
+      return null;
     }
     const name = localName(j.id);
     const tn = F.taskName(localNames, j);
@@ -1244,24 +1202,13 @@
       status.appendChild(cellNum(j.signoff_wait, "text"));
     }
     container.appendChild(status);
+    return j;
+  }
 
-    const tiles = el("dl", "facts-row");
-    const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", basis: false, reason: false });
-    tile(tiles, "Elapsed", fig(j.lead_time_ms, "duration"), [elapsedCaption(j.lead_time_ms)]);
-    tile(tiles, "Working time", fig(j.active_time_ms, "duration"), ["agents busy: turns, tools and subagents, waits excluded"]);
-    tile(tiles, "Operator attention", fig(j.attention_ms, "duration"), [words("over ", fig(j.human_turns, "count"), " operator turns")]);
-    tile(tiles, "Sent back", fig(j.returns, "count"), [words("first pass: ", fig(j.first_pass, "pass"))]);
-    tile(tiles, "Gaps between the operator's prompts", fig(j.human_wait_ms, "duration"), ["inside sessions; not the evaluator's waiting"]);
-    container.appendChild(tiles);
-    const tileNotes = [[j.lead_time_ms, "duration"], [j.active_time_ms, "duration"], [j.attention_ms, "duration"], [j.human_turns, "count"], [j.returns, "count"], [j.first_pass, "pass"], [j.human_wait_ms, "duration"]].filter(([n]) => n.state !== "measured");
-    if (tileNotes.length) {
-      const reasons = [...new Set(tileNotes.map(([n, kind]) => F.describe(n, kind).reason))];
-      container.appendChild(el("p", "chart-caption", `Why some figures say no data or partial: ${reasons.join("; ")}.`));
-    }
-
-    // Waste, with confidence.
-    const waste = el("section", "block");
-    waste.appendChild(el("h2", "block-title", "Where the time went"));
+  // The labeled time the store's own report holds for a task (data.json),
+  // shown under "Where this task's time went" only when the walk's
+  // stack-up file is not published.
+  function renderStoreWaste(waste, j) {
     const rows = (j.waste && j.waste.rows) || [];
     const cap = el("p", "chart-caption");
     cap.appendChild(document.createTextNode("Labeled by the independent waste evaluator: "));
@@ -1299,8 +1246,12 @@
         waste.appendChild(p);
       }
     }
-    container.appendChild(waste);
+  }
 
+  function renderJobDetail(container, jobs, id, sessions) {
+    container.innerHTML = "";
+    const j = id ? jobs.find((x) => x.id === id) : null;
+    if (!j) return;
     // Pull requests.
     const prs = el("section", "block");
     prs.appendChild(el("h2", "block-title", "Pull requests"));
@@ -1419,6 +1370,953 @@
     container.appendChild(card);
   }
 
+  // ------------------------------------------------------- step 1: the walk
+  // "Follow a task" (design section 4): the lede, the task picker, the value
+  // stream map with its timeline ladder, where the task's time went, the
+  // session swimlane and the evidence drawer. The rules live in walk.js
+  // (FactoryWalk); this part only draws what it returns. The walk's files
+  // load on demand: rollups/tasks.json and rollups/stackup.json once,
+  // map/<job>.json per task, jobs/<job>/<session>.json per swimlane. A file
+  // that is not published reads as "not published yet", never as zeros.
+
+  const W = window.FactoryWalk;
+  const SECOND_MS = 1000;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const walkFiles = new Map();
+
+  // One published file, fetched once. Resolves to null when it is missing or
+  // unreadable, so a view can say so instead of failing.
+  function walkFile(path) {
+    if (!walkFiles.has(path)) {
+      walkFiles.set(
+        path,
+        fetch(`./${path}`, { cache: "no-store" })
+          .then((res) => (res.ok ? res.json() : null))
+          .catch(() => null),
+      );
+    }
+    return walkFiles.get(path);
+  }
+
+  const mapPath = (job) => `map/${job}.json`;
+  // A page or data link that stays valid when copied out of the page.
+  function absolute(hashOrPath) {
+    const base = `${location.origin}${location.pathname}`;
+    return hashOrPath.startsWith("#") ? `${base}${hashOrPath}` : new URL(hashOrPath, base).href;
+  }
+
+  function svg(tag, attrs) {
+    const e = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v));
+    return e;
+  }
+
+  // A segment's fill: its color, or its hatch where the meaning is "not
+  // measured work" (format.js SEGMENTS).
+  function segmentFill(key, css) {
+    const seg = SEGMENT_BY_KEY.get(key);
+    if (!seg) return css ? "var(--c-waste-unknown)" : "var(--c-waste-unknown)";
+    if (seg.fill === "hatch") return css ? `var(--hatch-${key === "no_session" ? "no-session" : "agents-working"})` : `url(#hatch-${key === "no_session" ? "no-session" : "agents-working"})`;
+    if (seg.fill === "outline") return "transparent";
+    return `var(${seg.token})`;
+  }
+
+  function swatch(key) {
+    const seg = SEGMENT_BY_KEY.get(key);
+    const sw = el("span", `swatch${seg && seg.fill === "hatch" ? " swatch-hatch" : ""}${seg && seg.fill === "outline" ? " swatch-outline" : ""}`);
+    sw.setAttribute("aria-hidden", "true");
+    sw.style.setProperty("--sw", seg ? `var(${seg.token})` : "var(--c-waste-unknown)");
+    return sw;
+  }
+
+  // ------------------------------------------------------------- the drawer
+
+  const drawerEl = document.getElementById("evidence-drawer");
+  const drawerBody = document.getElementById("drawer-body");
+  let drawerOpener = null;
+  if (drawerEl) {
+    document.getElementById("drawer-close").addEventListener("click", () => drawerEl.close());
+    drawerEl.addEventListener("close", () => {
+      if (drawerOpener && document.contains(drawerOpener)) drawerOpener.focus();
+      drawerOpener = null;
+    });
+    // A click on the backdrop (outside the panel) closes it.
+    drawerEl.addEventListener("click", (evt) => {
+      if (evt.target === drawerEl) drawerEl.close();
+    });
+  }
+
+  // Fills the drawer with one thing's content (walk.js drawer) and opens it.
+  // `extra` holds links ({ text, href, external }), the prompt ({ what, name,
+  // route, dataPath }) and an optional `more(container)` that loads deeper
+  // evidence on request.
+  function openDrawer(opener, content, extra) {
+    if (!drawerEl) return;
+    const x = extra || {};
+    if (opener) drawerOpener = opener;
+    document.getElementById("drawer-title").textContent = content.title;
+    drawerBody.innerHTML = "";
+    const what = el("p", "drawer-what");
+    what.appendChild(swatch(content.segment));
+    what.appendChild(document.createTextNode(content.rows.length ? content.rows[0][1] : ""));
+    drawerBody.appendChild(what);
+    const dl = el("dl", "drawer-facts");
+    for (const [label, text] of content.rows.slice(1)) {
+      const d = el("div");
+      d.appendChild(el("dt", null, label));
+      d.appendChild(el("dd", null, text));
+      dl.appendChild(d);
+    }
+    drawerBody.appendChild(dl);
+    if (content.evidence && content.evidence.length) {
+      drawerBody.appendChild(el("h3", "drawer-sub", `The evidence it rests on (${content.evidence.length} interval${content.evidence.length === 1 ? "" : "s"})`));
+      const table = el("table", "data-table drawer-table");
+      tableHead(table, [["Kind", ""], ["Tool kind", ""], ["Outcome", ""], ["Lane", ""], ["Length", "num"]]);
+      const tb = document.createElement("tbody");
+      for (const e of content.evidence.slice(0, 60)) {
+        const tr = document.createElement("tr");
+        for (const [v, c] of [[e.kind, ""], [e.tool || "—", ""], [e.outcome || "—", e.outcome === "error" || e.outcome === "timeout" ? "drawer-failed" : ""], [e.lane, ""], [e.duration, "num"]]) tr.appendChild(el("td", c, v));
+        tb.appendChild(tr);
+      }
+      table.appendChild(tb);
+      const wrap = el("div", "table-wrap");
+      wrap.appendChild(table);
+      drawerBody.appendChild(wrap);
+      if (content.evidence.length > 60) drawerBody.appendChild(el("p", "chart-caption", `The first 60 of ${content.evidence.length} are listed; the data file holds every one.`));
+    } else if (content.evidence) {
+      // Nothing to list: say so rather than leave a gap.
+    }
+    if (typeof x.more === "function") {
+      const more = el("div", "drawer-more");
+      drawerBody.appendChild(more);
+      x.more(more);
+    }
+    if (x.links && x.links.length) {
+      const ul = el("ul", "drawer-links");
+      for (const l of x.links) {
+        const li = document.createElement("li");
+        if (l.external) li.appendChild(safeLink(l.text, l.href));
+        else {
+          const a = el("a", null, l.text);
+          // Only an in-page route built by F.safeRoute reaches here.
+          const safe = typeof l.href === "string" && /^#\/[0-9A-Za-z_\/-]+$/.test(l.href) ? l.href : null;
+          if (safe) a.href = safe;
+          a.addEventListener("click", () => drawerEl.close());
+          li.appendChild(a);
+        }
+        ul.appendChild(li);
+      }
+      drawerBody.appendChild(ul);
+    }
+    if (x.prompt) {
+      const text = W.promptText({ what: x.prompt.what, name: x.prompt.name, route: absolute(x.prompt.route), dataUrl: absolute(x.prompt.dataPath) });
+      const box = el("div", "drawer-prompt");
+      const btn = el("button", "copy-prompt", "Copy as a prompt for your agent");
+      btn.type = "button";
+      const status = el("span", "copy-status");
+      status.setAttribute("role", "status");
+      const pre = el("p", "prompt-text", text);
+      btn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          status.textContent = "Copied.";
+        } catch (err) {
+          // No clipboard (an insecure page or a refused permission): select the text so it can be copied by hand.
+          const range = document.createRange();
+          range.selectNodeContents(pre);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          status.textContent = "The prompt is selected; copy it with the keyboard.";
+        }
+      });
+      box.append(btn, status, pre);
+      drawerBody.appendChild(box);
+    }
+    if (!drawerEl.open) drawerEl.showModal();
+    drawerBody.scrollTop = 0;
+    // When the drawer is refilled from inside, the control that was used is
+    // gone; keep the keyboard inside the dialog.
+    if (!drawerEl.contains(document.activeElement) || document.activeElement === drawerEl) document.getElementById("drawer-close").focus();
+  }
+
+  // ---------------------------------------------------------------- picker
+
+  function renderPicker(container, jobs, taskRows, current) {
+    container.innerHTML = "";
+    const wrap = el("nav", "picker");
+    wrap.setAttribute("aria-label", "Every task");
+    const head = el("div", "picker-head");
+    const label = el("label", "picker-label", "Find a task");
+    const input = el("input", "picker-search");
+    input.type = "search";
+    input.placeholder = "Name or key";
+    input.setAttribute("aria-controls", "picker-list");
+    label.appendChild(input);
+    head.appendChild(label);
+    const count = el("p", "picker-count");
+    head.appendChild(count);
+    wrap.appendChild(head);
+    const list = el("ul", "picker-list");
+    list.id = "picker-list";
+    wrap.appendChild(list);
+    const fig = (n, kind) => {
+      if (!n) return "no data";
+      const d = F.describe(n, kind);
+      return d.state === "unavailable" ? "no data" : d.text;
+    };
+    const draw = () => {
+      const rows = W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value);
+      list.innerHTML = "";
+      count.textContent = `${rows.length} of ${jobs.length} tasks, the latest to finish first`;
+      for (const r of rows) {
+        const li = document.createElement("li");
+        const a = el("a", "picker-row");
+        const safe = F.safeRoute("task", r.id);
+        if (safe) a.href = safe;
+        if (r.id === current) a.setAttribute("aria-current", "page");
+        const name = el("span", "picker-name", r.name);
+        if (!/\b[0-9a-f]{8}\b/.test(r.name)) name.appendChild(el("span", "picker-key", ` ${r.short}`));
+        a.appendChild(name);
+        const meta = el("span", "picker-meta");
+        meta.appendChild(el("span", null, r.status || "status unknown"));
+        meta.appendChild(el("span", null, `lead ${fig(r.lead, "duration")}`));
+        meta.appendChild(el("span", null, `flow ${fig(r.fe, "pct")}`));
+        if (r.badge) meta.appendChild(el("span", `picker-badge picker-badge-${r.badge === "partial" ? "partial" : "none"}`, r.badge));
+        a.appendChild(meta);
+        li.appendChild(a);
+        list.appendChild(li);
+      }
+      if (!rows.length) list.appendChild(el("li", "chart-empty", "No task matches."));
+    };
+    input.addEventListener("input", draw);
+    draw();
+    container.appendChild(wrap);
+    // Keep the current task in view inside the list.
+    const cur = list.querySelector('[aria-current="page"]');
+    if (cur) list.scrollTop = Math.max(0, cur.parentElement.offsetTop - 4);
+  }
+
+  // ------------------------------------------------------------------ lede
+
+  function renderLede(container, row, published, onToken) {
+    const model = W.lede(row, F.reasonText, { published });
+    container.innerHTML = "";
+    container.classList.toggle("lede-missing", model.state !== "ok");
+    const parts = model.parts.slice();
+    for (let k = 0; k < parts.length; k++) {
+      const p = parts[k];
+      if (typeof p === "string") container.appendChild(document.createTextNode(p));
+      else if (p.term) container.appendChild(el("dfn", null, p.text));
+      else {
+        const b = el("button", "lede-num", p.text);
+        b.type = "button";
+        b.dataset.hl = p.key;
+        b.setAttribute("aria-pressed", "false");
+        b.title = "Highlight this on the map";
+        b.addEventListener("click", () => onToken(p.key, b));
+        // Punctuation right after a number stays on its line.
+        const next = parts[k + 1];
+        const m = typeof next === "string" ? /^[.,;:]/.exec(next) : null;
+        if (m) {
+          const keep = el("span", "nowrap");
+          keep.append(b, document.createTextNode(m[0]));
+          container.appendChild(keep);
+          parts[k + 1] = next.slice(1);
+        } else container.appendChild(b);
+      }
+    }
+    return model;
+  }
+
+  // ------------------------------------------------- the value stream map
+
+  // What each lede number lights up on the map.
+  function highlight(root, key, item) {
+    const on = root.dataset.hl === key && (!item || root.dataset.hlItem === String(item));
+    root.dataset.hl = on ? "" : key;
+    root.dataset.hlItem = on || item === undefined ? "" : String(item);
+    for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
+    if (on) return false;
+    const pick = {
+      lead: ".vsm-box, .vsm-wait, .lad, .sum-lead",
+      working: ".vsm-box, .lad-low, .sum-working",
+      value: ".sum-value",
+      waiting: ".vsm-wait, .lad-high, .sum-waiting",
+      wait_cause: ".vsm-wait.cause-next_prompt, .vsm-wait.cause-mixed, .lad-high",
+      longest: item !== undefined ? `[data-item="${item}"]` : ".vsm-wait",
+      fe: ".sum-fe",
+    }[key];
+    if (pick) for (const n of root.querySelectorAll(pick)) n.classList.add("is-hl");
+    return true;
+  }
+
+  function renderMap(container, ctx) {
+    const { j, map, row, tasksPublished } = ctx;
+    container.innerHTML = "";
+    if (!map) {
+      emptyState(container, tasksPublished === false ? "The value stream map is not published yet: the walk's data files are not part of this build." : "This task's value stream map is not published yet, so no box or triangle is drawn rather than empty ones.");
+      return null;
+    }
+    const width = container.clientWidth || 1000;
+    const phone = width < 640;
+    // As many boxes as fit at a readable width; the rest of the work is folded.
+    const maxBoxes = phone ? 6 : Math.max(2, Math.floor((width - 190 + 84) / 212));
+    const model = W.mapModel(map, { maxBoxes });
+    if (!model.items.length) {
+      emptyState(container, "No work burst or wait was recorded for this task, so there is nothing to draw.");
+      return null;
+    }
+    const lw = map.lead_window || {};
+    const origin = typeof lw.start_ms === "number" ? lw.start_ms : model.items[0].start_ms;
+    const leadMs = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? lw.end_ms - lw.start_ms : null;
+    const name = jobLabel(j);
+    const marks = W.statusMarks(map, model);
+    const segs = W.ladder(model);
+    const longest = row && row.longest_gap && row.longest_gap.state !== "unavailable" ? row.longest_gap.value : null;
+    const longestItem = longest ? model.items.find((it) => it.type === "wait" && longest.start_ms >= it.start_ms && longest.end_ms <= it.end_ms) : null;
+
+    const root = el("div", `vsm ${phone ? "vsm-phone" : "vsm-wide"}`);
+    root.dataset.hl = "";
+    const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText };
+    const sessionsOf = (it) => {
+      if (it.type === "box") return it.sessions;
+      return (map.sessions || []).filter((s) => typeof s.offset_ms === "number" && s.offset_ms <= it.end_ms && (typeof s.end_ms !== "number" || s.end_ms >= it.start_ms)).map((s) => s.id);
+    };
+    const linksFor = (it) => {
+      const links = sessionsOf(it)
+        .map((sid) => ({ sid, route: F.safeRoute("task", j.id, "session", sid) }))
+        .filter((x) => x.route)
+        .map((x) => ({ text: `Open session ${x.sid.slice(0, 8)} to scale`, href: x.route }));
+      for (const p of j.pull_requests || []) links.push({ text: `Pull request ${p.ref}`, href: p.url, external: true });
+      return links;
+    };
+    const open = (opener, thing) => {
+      const it = thing.item;
+      const content = W.drawer(thing, ctxDrawer);
+      const route = F.safeRoute("task", j.id) || "#/";
+      openDrawer(opener, content, {
+        links: linksFor(it),
+        prompt: { what: it.type === "box" ? (it.count === 1 ? "this work burst" : `these ${it.count} work bursts`) : thing.seg && thing.seg.folded ? "the short waits inside this work box" : "this wait", name, route, dataPath: mapPath(j.id) },
+        more: (box) => stretchesIn(box, j, map, it, ctxDrawer),
+      });
+    };
+
+    // Each item's column (wide) or row (phone).
+    const cols = model.items.map((it) => (it.type === "box" ? "minmax(112px, 1.5fr)" : "minmax(84px, 1fr)"));
+    if (!phone) root.style.gridTemplateColumns = `${cols.join(" ")} minmax(178px, 1.25fr)`;
+    const place = (node, col, row, span) => {
+      if (phone) return node;
+      node.style.gridColumn = String(col + 1);
+      node.style.gridRow = span ? `${row} / span ${span}` : String(row);
+      return node;
+    };
+
+    // The top row: the operator as customer, top right, and the card's status changes.
+    const customer = el("div", "vsm-customer");
+    customer.appendChild(el("span", "vsm-customer-name", "The operator"));
+    customer.appendChild(el("span", "vsm-customer-role", "customer: asks for the work and accepts it"));
+    const oc = el("span", "vsm-customer-outcome");
+    oc.appendChild(outcomeNode(j));
+    customer.appendChild(oc);
+    root.appendChild(place(customer, model.items.length, 1));
+    const markCells = new Map();
+    for (const m of marks) {
+      if (!markCells.has(m.item)) markCells.set(m.item, []);
+      markCells.get(m.item).push(m);
+    }
+
+    let prevLevel = null;
+    let segIndex = 0;
+    for (const it of model.items) {
+      const i = it.index;
+      const cell = phone ? el("div", "vsm-row") : null;
+      // Status changes over this item.
+      const ms = markCells.get(i);
+      const info = el("div", "vsm-info");
+      if (ms) for (const m of ms) info.appendChild(el("span", "vsm-status", `card: ${m.status}${m.observed ? " (last seen)" : ""}`));
+      // The ladder for this item.
+      const lad = el("div", "vsm-lad");
+      for (; segIndex < segs.length && segs[segIndex].item === i; segIndex++) {
+        const sg = segs[segIndex];
+        const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}`);
+        b.type = "button";
+        b.dataset.item = String(i);
+        b.appendChild(el("span", "lad-label", sg.label));
+        b.setAttribute("aria-label", `${sg.level === "low" ? "Working" : sg.folded ? "Short waits inside the box" : "Waiting"}: ${W.durationWords(sg.ms)}`);
+        b.addEventListener("click", () => open(b, { kind: "ladder", seg: sg, item: it }));
+        lad.appendChild(b);
+        prevLevel = sg.level;
+      }
+      let main;
+      let data = null;
+      if (it.type === "box") {
+        main = el("button", "vsm-box");
+        main.type = "button";
+        main.dataset.item = String(i);
+        main.appendChild(el("span", "vsm-box-title", W.boxTitle(it)));
+        main.appendChild(el("span", "vsm-box-work", `${W.durationShort(it.working_ms)} working`));
+        const rw = W.reworkWords(it);
+        if (rw) {
+          const r = el("span", "vsm-rework");
+          const icon = svg("svg", { viewBox: "0 0 20 14", width: 20, height: 14, "aria-hidden": "true", class: "vsm-rework-icon" });
+          icon.appendChild(svg("path", { d: "M3 10 C3 2, 17 2, 17 10", fill: "none", "stroke-width": 1.8 }));
+          icon.appendChild(svg("path", { d: "M1 7 L3 11 L6 7.5", fill: "none", "stroke-width": 1.8 }));
+          r.appendChild(icon);
+          r.appendChild(document.createTextNode(`rework: ${rw}`));
+          main.appendChild(r);
+        }
+        main.setAttribute("aria-label", `${W.boxTitle(it)}: ${W.durationWords(it.working_ms)} working${rw ? `; rework: ${rw}` : ""}. Opens the evidence.`);
+        main.addEventListener("click", () => open(main, { kind: "box", item: it }));
+        data = el("div", "vsm-data");
+        const rows = W.dataBox(it, model.session_count);
+        const dl = el("dl", "vsm-data-list");
+        rows.forEach((r, k) => {
+          const d = el("div", k >= 2 ? "vsm-data-more" : "");
+          d.appendChild(el("dt", null, r.label));
+          d.appendChild(el("dd", null, r.text));
+          dl.appendChild(d);
+        });
+        data.appendChild(dl);
+        const more = el("button", "vsm-data-toggle", "All figures");
+        more.type = "button";
+        more.setAttribute("aria-expanded", "false");
+        more.addEventListener("click", () => {
+          const openNow = data.classList.toggle("is-open");
+          more.setAttribute("aria-expanded", String(openNow));
+          more.textContent = openNow ? "Fewer figures" : "All figures";
+        });
+        data.appendChild(more);
+      } else {
+        main = el("button", `vsm-wait cause-${it.waited_on}${longestItem === it ? " is-longest" : ""}`);
+        main.type = "button";
+        main.dataset.item = String(i);
+        const tri = svg("svg", { viewBox: "0 0 40 34", width: 40, height: 34, "aria-hidden": "true", class: "vsm-tri" });
+        tri.appendChild(svg("path", { d: "M20 2 L38 32 L2 32 Z", "stroke-width": 1.6, "stroke-linejoin": "round" }));
+        const t = svg("text", { x: 20, y: 28, "text-anchor": "middle", class: "vsm-tri-i" });
+        t.textContent = "I";
+        tri.appendChild(t);
+        main.appendChild(tri);
+        main.appendChild(el("span", "vsm-wait-dur", W.durationShort(it.duration_ms)));
+        main.appendChild(el("span", "vsm-wait-what", W.waitTitle(it)));
+        main.setAttribute("aria-label", `Wait of ${W.durationWords(it.duration_ms)}: ${W.waitTitle(it)}. Opens the evidence.`);
+        main.addEventListener("click", () => open(main, { kind: "wait", item: it }));
+      }
+      if (phone) {
+        const body = el("div", "vsm-row-body");
+        if (ms) body.appendChild(info);
+        body.appendChild(main);
+        if (data) body.appendChild(data);
+        cell.append(lad, body);
+        cell.classList.add(it.type === "box" ? "row-box" : "row-wait");
+        root.appendChild(cell);
+      } else {
+        root.appendChild(place(info, i, 1));
+        root.appendChild(place(main, i, 2));
+        if (data) root.appendChild(place(data, i, 3));
+        root.appendChild(place(lad, i, 4));
+      }
+    }
+
+    // The summary box: lead time; working time, of which value-adding; flow efficiency.
+    const sum = el("div", "vsm-summary");
+    const line = (cls, label, node, note) => {
+      const d = el("div", `sum-line ${cls}`);
+      d.appendChild(el("span", "sum-label", label));
+      const v = el("span", "sum-value-text");
+      v.appendChild(node);
+      d.appendChild(v);
+      if (note) d.appendChild(el("span", "sum-note", note));
+      sum.appendChild(d);
+    };
+    // The same words as the lede, so the two never disagree.
+    const words = new Map();
+    for (const p of W.lede(row, F.reasonText, { published: tasksPublished }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, p.text);
+    const fig = (key, n) => {
+      if (words.has(key)) return document.createTextNode((key === "lead" && n && n.state === "partial" && !/^at /.test(words.get(key)) ? "at least " : "") + words.get(key));
+      return el("span", "num num-unavailable", n && n.state === "unavailable" ? `no data (${n.reasons.map(F.reasonText).join("; ")})` : "no data");
+    };
+    line("sum-lead", "Lead time", fig("lead", row && row.lead_time_ms), "from start to end");
+    line("sum-working", "Working time", fig("working", row && row.working_ms), "agents busy");
+    line("sum-value", "of which value-adding", fig("value", row && row.value_in_working_ms), "as the evaluator labeled it");
+    line("sum-fe", "Flow efficiency", fig("fe", row && row.flow_efficiency), "working time ÷ lead time");
+    if (phone) root.appendChild(sum);
+    else root.appendChild(place(sum, model.items.length, 3, 2));
+
+    container.appendChild(root);
+
+    // The legend and how the map was folded.
+    const legend = el("div", "vsm-legend");
+    const lg = (cls, text) => {
+      const p = el("p", "vsm-legend-item");
+      p.appendChild(el("span", `vsm-key ${cls}`));
+      p.appendChild(document.createTextNode(text));
+      legend.appendChild(p);
+    };
+    lg("key-box", "A box is a burst of agent work; its data box lists what happened in it.");
+    lg("key-tri", "A triangle is work waiting between steps. Lean calls it inventory, but its time counts as the waiting waste.");
+    lg("key-ladder", phone ? "The ladder runs down the left: a line on the left is working time, a line on the right is waiting." : "The ladder under the map: the low line is working time, the high line is waiting, each step labeled with its length.");
+    lg("key-rework", "A loop arrow marks rework: stretches the evaluator labeled as defects inside that box.");
+    container.appendChild(legend);
+    container.appendChild(el("p", "chart-caption", `${W.foldWords(model)} Lead time ${W.durationWords(model.totals.lead_ms)} = working ${W.durationWords(model.totals.working_ms)} + waits inside boxes ${W.durationWords(model.totals.inner_wait_ms)} + waits between boxes ${W.durationWords(model.totals.waiting_ms)}.`));
+    // A map Desk states as incomplete (unreadable stretches of a log, or
+    // bursts with no labels) says so under the drawing.
+    for (const [env, what] of [[map.bursts_state, "The bursts and waits are only partly recorded"], [map.bursts_labels, "The bursts' labels are not all recorded, so value-adding and defect figures read no data where there are none"]]) {
+      if (env && env.state && env.state !== "measured") container.appendChild(el("p", "chart-caption", `${what}: ${(env.reasons || []).map(F.reasonText).join("; ") || "not recorded"}. A gap may be a stretch the log could not show, not idle time.`));
+    }
+    if (lw.state === "unavailable") container.appendChild(el("p", "chart-caption", `This task's start could not be placed (${(lw.reasons || []).map(F.reasonText).join("; ") || "not recorded"}), so its share of lead time is not known.`));
+
+    // The text equivalent: the map as a table.
+    const det = el("details", "more-details");
+    det.appendChild(el("summary", null, "The map as a table"));
+    const table = el("table", "data-table vsm-table");
+    tableHead(table, [["Step", ""], ["On the task clock", ""], ["Working", "num"], ["Waiting", "num"], ["Tool calls", "num"], ["Failed", "num"], ["Operator turns", "num"], ["Defect stretches", "num"]]);
+    const tb = document.createElement("tbody");
+    for (const it of model.items) {
+      const tr = document.createElement("tr");
+      const cells = it.type === "box"
+        ? [W.boxTitle(it), W.clockWords(it.start_ms, it.end_ms, origin), W.durationShort(it.working_ms), it.inner_wait_ms ? W.durationShort(it.inner_wait_ms) : "—", W.statedText(it.tool_calls), W.statedText(it.tool_failures), W.statedText(it.operator_turns), W.statedText(it.defect_stretches)]
+        : [`Wait: ${W.waitTitle(it)}`, W.clockWords(it.start_ms, it.end_ms, origin), "—", W.durationShort(it.duration_ms), "—", "—", "—", "—"];
+      cells.forEach((c, k) => tr.appendChild(el("td", k >= 2 ? "num" : "", c)));
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    const tw = el("div", "table-wrap");
+    tw.appendChild(table);
+    det.appendChild(tw);
+    container.appendChild(det);
+
+    return {
+      root,
+      model,
+      highlight: (key) => highlight(root, key, key === "longest" && longestItem ? longestItem.index : undefined),
+    };
+  }
+
+  // The labeled stretches inside one map item, loaded from its sessions'
+  // swimlane files on request; each opens its own evidence.
+  function stretchesIn(box, j, map, it, ctxDrawer) {
+    const files = (map.detail_files || []).filter((p) => typeof p === "string" && /^jobs\/[0-9A-Za-z_-]+\/[0-9A-Za-z_-]+\.json$/.test(p));
+    const sessions = it.type === "box" ? it.sessions : (map.sessions || []).map((s) => s.id);
+    const mine = files.filter((p) => sessions.some((sid) => p.endsWith(`/${sid}.json`)));
+    if (!mine.length) {
+      box.appendChild(el("p", "chart-caption", "No labeled session file is published for this span, so there are no labeled stretches to list."));
+      return;
+    }
+    const btn = el("button", "drawer-load", "Show the labeled stretches in this span");
+    btn.type = "button";
+    box.appendChild(btn);
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Loading…";
+      const details = (await Promise.all(mine.map(walkFile))).filter(Boolean);
+      btn.remove();
+      const list = el("ul", "stretch-list");
+      let n = 0;
+      for (const d of details) {
+        const lanesOf = W.lanes(d, map.agents);
+        for (const s of d.stretches || []) {
+          if (s.end_ms <= it.start_ms || s.start_ms >= it.end_ms) continue;
+          n += 1;
+          const li = document.createElement("li");
+          const b = el("button", "stretch-row");
+          b.type = "button";
+          b.appendChild(swatch(W.stretchSegment(s)));
+          const c = W.drawer({ kind: "stretch", stretch: s, intervals: d.intervals || [], lanes: lanesOf }, ctxDrawer);
+          b.appendChild(document.createTextNode(`${c.title}, ${W.durationShort(s.end_ms - s.start_ms)}${s.waited_on ? ` (${W.waitedOnWords(s.waited_on, "short")})` : ""}`));
+          b.addEventListener("click", () => openStretch(null, j, d, s, lanesOf, ctxDrawer));
+          li.appendChild(b);
+          list.appendChild(li);
+        }
+      }
+      box.appendChild(el("h3", "drawer-sub", n ? `Labeled stretches in this span (${n})` : "No labeled stretch falls in this span"));
+      if (n) box.appendChild(list);
+    });
+  }
+
+  function openStretch(opener, j, detail, s, lanesOf, ctxDrawer) {
+    const content = W.drawer({ kind: "stretch", stretch: s, intervals: detail.intervals || [], lanes: lanesOf }, ctxDrawer);
+    const route = F.safeRoute("task", j.id, "session", detail.session) || F.safeRoute("task", j.id) || "#/";
+    const links = [{ text: `Open session ${String(detail.session).slice(0, 8)} to scale`, href: route }];
+    for (const p of j.pull_requests || []) links.push({ text: `Pull request ${p.ref}`, href: p.url, external: true });
+    if (detail.labels_from_shared_session) content.rows.push(["Labels", "These labels come from a session this task shared with other tasks"]);
+    openDrawer(opener, content, { links, prompt: { what: "this stretch", name: jobLabel(j), route, dataPath: `jobs/${j.id}/${detail.session}.json` } });
+  }
+
+  // ------------------------------------------- where this task's time went
+
+  function renderTimeWent(container, ctx) {
+    const { j, row, stackRow, stackPublished } = ctx;
+    container.innerHTML = "";
+    if (!stackRow) {
+      container.appendChild(el("p", "chart-caption", stackPublished === false ? "The walk's stack-up file is not published yet, so this shows the labeled time the store's own report holds instead." : "This task has no row in the walk's stack-up file, so this shows the labeled time the store's own report holds instead."));
+      renderStoreWaste(container, j);
+      return;
+    }
+    const bar = W.timeBar(stackRow, F.SEGMENTS);
+    if (bar.state !== "ok") {
+      container.appendChild(el("p", "chart-empty", `Not measured for this task, because ${(bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded"}. No bar is drawn rather than an empty one.`));
+      return;
+    }
+    container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${W.durationWords(bar.total_ms)}. Each part keeps its color on every chart in the walk.`));
+    const track = el("div", "tw-bar");
+    track.setAttribute("role", "img");
+    track.setAttribute("aria-label", `Lead time ${W.durationWords(bar.total_ms)}: ${bar.segments.map((s) => `${s.label} ${W.durationWords(s.ms)}`).join(", ")}. The list below gives every part.`);
+    for (const s of bar.segments) {
+      const d = el("div", `tw-seg tw-${s.key}`);
+      d.style.width = `${Math.max(0, s.share * 100)}%`;
+      d.style.background = segmentFill(s.key, true);
+      const seg = SEGMENT_BY_KEY.get(s.key);
+      if (seg && seg.fill === "outline") d.style.boxShadow = `inset 0 0 0 1.5px var(${seg.token})`;
+      d.title = `${s.label}: ${W.durationWords(s.ms)} (${W.pctWords(s.share)})`;
+      track.appendChild(d);
+    }
+    container.appendChild(track);
+    const ul = el("ul", "tw-legend");
+    for (const s of bar.segments) {
+      const li = document.createElement("li");
+      li.appendChild(swatch(s.key));
+      li.appendChild(el("span", "tw-name", s.label));
+      li.appendChild(el("span", "tw-ms", `${W.durationWords(s.ms)} · ${W.pctWords(s.share)}`));
+      ul.appendChild(li);
+    }
+    container.appendChild(ul);
+    if (bar.partial) container.appendChild(el("p", "chart-caption", `Partial: ${[...new Set([stackRow.lead_time_ms, ...Object.values(stackRow.waste_ms || {}), ...Object.values(stackRow.class_ms || {})].flatMap((n) => (n && n.state === "partial" ? n.reasons : [])))].map(F.reasonText).join("; ")}.`));
+
+    // Its top causes, by hours.
+    const tc = row && row.top_causes;
+    container.appendChild(el("h3", "bars-title", "Its top causes of waste, by time"));
+    if (!tc || tc.state === "unavailable" || !Array.isArray(tc.value) || !tc.value.length) {
+      container.appendChild(el("p", "chart-empty", tc && tc.state === "unavailable" ? `Not measured: ${tc.reasons.map(F.reasonText).join("; ")}.` : "No cause of waste is labeled for this task."));
+      return;
+    }
+    const ol = el("ol", "cause-list");
+    for (const c of tc.value) {
+      const li = document.createElement("li");
+      li.appendChild(swatch(W.causeSegment(c.cause)));
+      const a = el("a", "cause-link", W.causeWords(c.cause));
+      // Each cause's own page (#/causes/<key>) arrives with Rank causes; until then the link opens Rank causes.
+      const safe = F.safeRoute("causes");
+      if (safe) a.href = safe;
+      li.appendChild(a);
+      li.appendChild(el("span", "cause-ms", W.durationWords(c.total_ms)));
+      ol.appendChild(li);
+    }
+    container.appendChild(ol);
+    container.appendChild(el("p", "chart-caption", "Each cause opens Rank causes, which ranks it against every task. That is step 3; step 2 compares this task's bar with every other task's."));
+  }
+
+  // -------------------------------------------------------- the task view
+
+  let walkSeq = 0;
+  async function renderTaskWalk(data, id) {
+    const seq = ++walkSeq;
+    const j = renderTaskHead(document.getElementById("task-head"), data.jobs, id);
+    const ledeEl = document.getElementById("task-lede");
+    const vsmEl = document.getElementById("vsm");
+    const twEl = document.getElementById("time-went");
+    renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
+    if (!j) {
+      ledeEl.textContent = "";
+      vsmEl.innerHTML = "";
+      twEl.innerHTML = "";
+      renderPicker(document.getElementById("task-picker"), data.jobs, null, id);
+      return;
+    }
+    ledeEl.textContent = "Loading…";
+    const [tasks, stack, map] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile(mapPath(j.id))]);
+    if (seq !== walkSeq) return;
+    const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
+    const row = taskRows ? taskRows.find((r) => r.job === j.id) || null : null;
+    const stackRow = stack && Array.isArray(stack.jobs) ? stack.jobs.find((r) => r.job === j.id) || null : null;
+    safely("task-picker", () => renderPicker(document.getElementById("task-picker"), data.jobs, taskRows, j.id));
+    let drawn = null;
+    const tokens = [];
+    safely("vsm", () => {
+      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows });
+    });
+    safely("task-lede", () => {
+      renderLede(ledeEl, row, !!taskRows, (key, btn) => {
+        if (!drawn) return;
+        const on = drawn.highlight(key);
+        for (const b of tokens) b.setAttribute("aria-pressed", String(on && b === btn));
+        if (on) drawn.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+      tokens.push(...ledeEl.querySelectorAll(".lede-num"));
+    });
+    safely("time-went", () => renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack }));
+    // Redraw the map when the width crosses between phone and wide or
+    // changes how many boxes fit.
+    lastMapWidth = vsmEl.clientWidth;
+    lastMapRender = () => safely("vsm", () => {
+      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows });
+    });
+  }
+
+  let lastMapWidth = 0;
+  let lastMapRender = null;
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const vsmEl = document.getElementById("vsm");
+      if (!lastMapRender || !vsmEl || document.getElementById("view-task").hidden) return;
+      if (Math.abs(vsmEl.clientWidth - lastMapWidth) < 40) return;
+      lastMapWidth = vsmEl.clientWidth;
+      lastMapRender();
+    }, 150);
+  });
+
+  // ------------------------------------------------------- the swimlane
+
+  const LANE_H = 26;
+  const LABEL_ROW_H = 30;
+  const AXIS_H = 24;
+
+  async function renderSwimlane(container, data, jobId, sessionId) {
+    const seq = ++walkSeq;
+    container.innerHTML = "";
+    const j = jobId ? data.jobs.find((x) => x.id === jobId) : null;
+    if (!j) {
+      emptyState(container, "This session's task is not known, so its swimlane cannot be placed on a task clock.");
+      return;
+    }
+    container.appendChild(el("p", "chart-empty", "Loading…"));
+    const map = await walkFile(mapPath(j.id));
+    if (seq !== walkSeq) return;
+    container.innerHTML = "";
+    const path = map && Array.isArray(map.detail_files) ? map.detail_files.find((p) => typeof p === "string" && p === `jobs/${j.id}/${sessionId}.json`) : null;
+    if (!map) {
+      emptyState(container, "The walk's data for this task is not published yet, so the swimlane cannot be drawn.");
+      return;
+    }
+    if (!path) {
+      emptyState(container, "No swimlane file is published for this session (only labeled sessions get one), so nothing is drawn rather than an empty lane.");
+      return;
+    }
+    container.appendChild(el("p", "chart-empty", "Loading the session…"));
+    const detail = await walkFile(path);
+    if (seq !== walkSeq) return;
+    container.innerHTML = "";
+    if (!detail) {
+      emptyState(container, "The session's swimlane file could not be read.");
+      return;
+    }
+    const lw = map.lead_window || {};
+    const origin = typeof lw.start_ms === "number" ? lw.start_ms : detail.offset_ms;
+    const leadMs = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? lw.end_ms - lw.start_ms : null;
+    const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText };
+    const intervals = Array.isArray(detail.intervals) ? detail.intervals : [];
+    const stretches = Array.isArray(detail.stretches) ? detail.stretches : [];
+    const allLanes = W.lanes(detail, map.agents);
+    const subs = allLanes.filter((l) => l.worker !== 0);
+    const t0 = typeof detail.offset_ms === "number" ? detail.offset_ms : Math.min(...intervals.map((i) => i.start_ms));
+    const t1 = typeof detail.end_ms === "number" ? detail.end_ms : Math.max(...intervals.map((i) => i.end_ms));
+    const span = Math.max(1, t1 - t0);
+
+    container.appendChild(el("p", "chart-caption", `This session ran ${W.clockWords(t0, t1, origin)}. Drawn to scale: each lane is one agent, gray marks are its activity, colored bands are the evaluator's labeled stretches and red ticks are failed tool calls.${detail.labels_from_shared_session ? "" : ""}`));
+    if (detail.labels_from_shared_session) container.appendChild(el("p", "fix-action", "Labels come from a shared session: this session also worked on other tasks, so its labels were made for the whole session and only partly describe this task."));
+    if (detail.intervals_binned) container.appendChild(el("p", "chart-caption", `This session's activity is published binned${typeof detail.resolution_ms === "number" ? ` to ${W.durationWords(detail.resolution_ms)}` : typeof detail.resolution === "number" ? ` to ${W.durationWords(detail.resolution)}` : ""}, so marks closer than that are merged.`));
+    if (!detail.labeled) container.appendChild(el("p", "chart-caption", "This session is not labeled yet, so no stretch is drawn."));
+
+    const controls = el("div", "lane-controls");
+    const mk = (text, label) => {
+      const b = el("button", "lane-btn", text);
+      b.type = "button";
+      b.setAttribute("aria-label", label);
+      controls.appendChild(b);
+      return b;
+    };
+    const fitB = mk("Fit", "Fit the whole session in the frame");
+    const inB = mk("Zoom in", "Zoom in");
+    const outB = mk("Zoom out", "Zoom out");
+    const expandB = subs.length ? mk(`Show ${subs.length} subagent lane${subs.length === 1 ? "" : "s"}`, "Show one lane per subagent") : null;
+    container.appendChild(controls);
+
+    const frame = el("div", "lane-frame");
+    frame.setAttribute("tabindex", "0");
+    frame.setAttribute("aria-label", "The session swimlane; scroll sideways to move along the session");
+    const inner = el("div", "lane-inner");
+    const labels = el("div", "lane-labels");
+    const plot = el("div", "lane-plot");
+    inner.append(labels, plot);
+    frame.appendChild(inner);
+    container.appendChild(frame);
+
+    let zoom = 1;
+    let expanded = false;
+
+    const draw = () => {
+      const frameW = Math.max(200, frame.clientWidth - 112);
+      const steps = W.zoomSteps(span, frameW, 32768);
+      zoom = Math.min(Math.max(1, zoom), steps[steps.length - 1]);
+      inB.disabled = zoom >= steps[steps.length - 1];
+      outB.disabled = zoom <= 1;
+      const width = Math.round(frameW * zoom);
+      const msPerPx = span / width;
+      const x = (ms) => ((ms - t0) / span) * width;
+      const lanesShown = expanded ? allLanes : [allLanes[0], ...(subs.length ? [{ worker: "subs", depth: 0, label: `Subagents (${subs.length})` }] : [])];
+      const laneY = new Map();
+      lanesShown.forEach((l, k) => laneY.set(l.worker, AXIS_H + LABEL_ROW_H + k * LANE_H));
+      const laneOf = (w) => (expanded || w === 0 ? w : "subs");
+      const height = AXIS_H + LABEL_ROW_H + lanesShown.length * LANE_H + 6;
+
+      // Pinned labels.
+      labels.innerHTML = "";
+      labels.style.height = `${height}px`;
+      const lab = (text, y, h, depth, cls) => {
+        const d = el("div", `lane-label ${cls || ""}`, text);
+        d.style.top = `${y}px`;
+        d.style.height = `${h}px`;
+        d.style.paddingLeft = `${6 + 10 * Math.min(3, depth)}px`;
+        labels.appendChild(d);
+      };
+      lab("Labels", AXIS_H, LABEL_ROW_H, 0, "lane-label-labels");
+      for (const l of lanesShown) lab(l.label, laneY.get(l.worker), LANE_H, l.depth);
+
+      plot.innerHTML = "";
+      const s = svg("svg", { width, height, class: "lane-svg", role: "group", "aria-label": "Swimlane of the session" });
+      // Axis: ticks on the task clock.
+      const tickMs = [SECOND_MS, 5 * SECOND_MS, 15 * SECOND_MS, 60000, 5 * 60000, 15 * 60000, 30 * 60000, 3600000, 2 * 3600000, 4 * 3600000, 8 * 3600000, 12 * 3600000, 86400000, 2 * 86400000].find((t) => t / msPerPx >= 90) || 7 * 86400000;
+      const first = Math.ceil((t0 - origin) / tickMs) * tickMs + origin;
+      for (let t = first; t <= t1; t += tickMs) {
+        const xx = x(t);
+        s.appendChild(svg("line", { x1: xx, x2: xx, y1: AXIS_H - 6, y2: height, class: "lane-grid" }));
+        const tl = svg("text", { x: xx + 3, y: AXIS_H - 9, class: "lane-tick" });
+        tl.textContent = W.durationShort(t - origin);
+        s.appendChild(tl);
+      }
+      // Lane rules.
+      for (const l of lanesShown) s.appendChild(svg("line", { x1: 0, x2: width, y1: laneY.get(l.worker) + LANE_H, y2: laneY.get(l.worker) + LANE_H, class: "lane-rule" }));
+
+      // Stretch bands across the lanes their evidence names (labels carry no lane).
+      for (const st of stretches) {
+        const seg = W.stretchSegment(st);
+        const xa = x(st.start_ms);
+        const w = Math.max(1, x(st.end_ms) - xa);
+        const fill = st.class === "muda" && st.waste === "waiting" ? "url(#hatch-waiting)" : segmentFill(seg, false);
+        for (const wk of new Set(W.stretchWorkers(st, intervals).map(laneOf))) {
+          if (!laneY.has(wk)) continue;
+          s.appendChild(svg("rect", { x: xa, y: laneY.get(wk) + 2, width: w, height: LANE_H - 4, fill, class: "lane-band" }));
+        }
+      }
+      // Activity: runs per lane, or density for the collapsed subagent lane.
+      const actY = (wk) => laneY.get(wk) + LANE_H / 2 - 4;
+      if (!expanded && subs.length) {
+        for (const c of W.density(intervals, subs.map((l) => l.worker), t0, msPerPx, width)) {
+          s.appendChild(svg("rect", { x: c.x, y: actY("subs"), width: 1, height: 8, class: "lane-act", "fill-opacity": Math.min(1, 0.25 + 0.15 * c.n) }));
+        }
+      }
+      for (const l of expanded ? allLanes : [allLanes[0]]) {
+        for (const [a, b] of W.activityRuns(intervals, l.worker, msPerPx)) {
+          s.appendChild(svg("rect", { x: x(a), y: actY(l.worker), width: Math.max(1, x(b) - x(a)), height: 8, class: "lane-act" }));
+        }
+      }
+      // Failed tool calls: red ticks, binned to pixel columns.
+      for (const l of lanesShown) {
+        const ws = l.worker === "subs" ? subs.map((q) => q.worker) : [l.worker];
+        for (const tk of W.failureTicks(intervals, ws, t0, msPerPx)) {
+          const r = svg("rect", { x: tk.x, y: laneY.get(l.worker) + 3, width: tk.n > 1 ? 3 : 2, height: LANE_H - 6, class: "lane-fail" });
+          const tt = svg("title", {});
+          tt.textContent = `${tk.n} failed tool call${tk.n === 1 ? "" : "s"}${tk.tools.length ? ` (${tk.tools.join(", ")})` : ""}`;
+          r.appendChild(tt);
+          s.appendChild(r);
+        }
+      }
+      // The labels row: every stretch, focusable, opening its evidence.
+      const ly = AXIS_H + 3;
+      for (const st of stretches) {
+        const seg = W.stretchSegment(st);
+        const xa = x(st.start_ms);
+        const w = Math.max(2, x(st.end_ms) - xa);
+        const g = svg("g", { class: "lane-stretch", tabindex: 0, role: "button" });
+        const c = W.drawer({ kind: "stretch", stretch: st, intervals, lanes: allLanes }, ctxDrawer);
+        g.setAttribute("aria-label", `${c.title}, ${W.durationWords(st.end_ms - st.start_ms)}${st.waited_on ? `, ${W.waitedOnWords(st.waited_on, "short")}` : ""}. Opens the evidence.`);
+        const isWait = st.class === "muda" && st.waste === "waiting";
+        g.appendChild(svg("rect", { x: xa, y: ly, width: w, height: LABEL_ROW_H - 6, fill: isWait ? "url(#hatch-waiting)" : segmentFill(seg, false), class: `lane-stretch-rect seg-${seg}` }));
+        if (isWait && w > 120) {
+          const t = svg("text", { x: xa + 4, y: ly + LABEL_ROW_H - 11, class: "lane-wait-label" });
+          t.textContent = W.waitLabel(st.waited_on);
+          g.appendChild(t);
+        }
+        const go = () => openStretch(g, j, detail, st, allLanes, ctxDrawer);
+        g.addEventListener("click", go);
+        g.addEventListener("keydown", (evt) => {
+          if (evt.key === "Enter" || evt.key === " ") {
+            evt.preventDefault();
+            go();
+          }
+        });
+        s.appendChild(g);
+      }
+      plot.appendChild(s);
+    };
+
+    const zoomTo = (z) => {
+      const center = (frame.scrollLeft + frame.clientWidth / 2) / Math.max(1, frame.scrollWidth);
+      zoom = z;
+      draw();
+      frame.scrollLeft = Math.max(0, center * frame.scrollWidth - frame.clientWidth / 2);
+    };
+    fitB.addEventListener("click", () => zoomTo(1));
+    inB.addEventListener("click", () => zoomTo(zoom * 2));
+    outB.addEventListener("click", () => zoomTo(zoom / 2));
+    if (expandB) {
+      expandB.addEventListener("click", () => {
+        expanded = !expanded;
+        expandB.textContent = expanded ? "Collapse subagents into one lane" : `Show ${subs.length} subagent lane${subs.length === 1 ? "" : "s"}`;
+        expandB.setAttribute("aria-expanded", String(expanded));
+        draw();
+      });
+      expandB.setAttribute("aria-expanded", "false");
+    }
+    draw();
+
+    // Legend.
+    const legend = el("ul", "lane-legend");
+    const li = (node, text) => {
+      const x = document.createElement("li");
+      x.appendChild(node);
+      x.appendChild(document.createTextNode(text));
+      legend.appendChild(x);
+    };
+    const keyFor = (cls) => {
+      const k = el("span", `lane-key ${cls}`);
+      k.setAttribute("aria-hidden", "true");
+      return k;
+    };
+    const present = new Set(stretches.map(W.stretchSegment));
+    for (const sg of F.SEGMENTS) if (present.has(sg.key) && sg.key !== "waiting") li(swatch(sg.key), sg.label);
+    if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), "Waiting (hatched), with what it waited on");
+    li(keyFor("lane-key-act"), "Agent activity (turns, tool calls, subagents)");
+    li(keyFor("lane-key-fail"), "Failed tool call (wider where several share a pixel)");
+    container.appendChild(legend);
+    container.appendChild(el("p", "chart-caption", "Labels carry no lane: the evaluator labels a stretch of the session, and the band is drawn on each lane its evidence names. The Labels row shows every stretch once; select one for its evidence."));
+
+    // Text equivalent: every stretch as a table.
+    const det = el("details", "more-details");
+    det.appendChild(el("summary", null, `The ${stretches.length} labeled stretches as a table`));
+    const table = el("table", "data-table vsm-table");
+    tableHead(table, [["Stretch", ""], ["On the task clock", ""], ["Length", "num"], ["Waited on", ""], ["Confidence", ""], ["Evidence", "num"]]);
+    const tb = document.createElement("tbody");
+    for (const st of stretches) {
+      const tr = document.createElement("tr");
+      const c = W.drawer({ kind: "stretch", stretch: st, intervals, lanes: allLanes }, ctxDrawer);
+      const b = el("button", "link-button", c.title);
+      b.type = "button";
+      b.addEventListener("click", () => openStretch(b, j, detail, st, allLanes, ctxDrawer));
+      const td = el("td");
+      td.appendChild(b);
+      tr.appendChild(td);
+      for (const [v, cl] of [[W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    const tw = el("div", "table-wrap");
+    tw.appendChild(table);
+    det.appendChild(tw);
+    container.appendChild(det);
+  }
   // ------------------------------------------------------------- routing
   // Hash routes (format.js parseRoute): #/task/<key> (and #/ for the task
   // that finished last), #/task/<key>/session/<id>, #/compare, #/causes,
@@ -1472,15 +2370,18 @@
       else a.removeAttribute("aria-current");
     }
     let title = VIEW_TITLE[r.view];
+    if (drawerEl && drawerEl.open) drawerEl.close();
     if (r.view === "task") {
       const fallback = F.defaultTask(data.jobs);
       const id = r.job || (fallback ? fallback.id : null);
-      renderTaskPicker(document.getElementById("task-picker"), data.jobs, id);
-      renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
+      renderTaskWalk(data, id).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
       const j = data.jobs.find((x) => x.id === id);
       if (j) title = jobLabel(j);
     }
-    if (r.view === "session") renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, r.session, r.job);
+    if (r.view === "session") {
+      renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, r.session, r.job);
+      renderSwimlane(document.getElementById("swimlane"), data, r.job, r.session).catch((err) => emptyState(document.getElementById("swimlane"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
+    }
     document.title = `${title} \u00b7 The factory`;
     window.scrollTo(0, 0);
     // After the first page load, move focus to the new view's heading, so a
@@ -1493,6 +2394,19 @@
       }
     }
     routedOnce = true;
+  }
+
+  // The router under the same guard as every other part: if drawing a view
+  // throws, the page says so in place of that view instead of going blank.
+  function routeSafely(data) {
+    try {
+      route(data);
+    } catch (err) {
+      for (const v of VIEWS) document.getElementById(`view-${v}`).hidden = v !== "missing";
+      const view = document.getElementById("view-missing");
+      const p = view.querySelector(".lede");
+      if (p) p.textContent = `This view could not be drawn (${err && err.message ? err.message : "an error"}). Try another task, or reload the page.`;
+    }
   }
 
   // -------------------------------------------------------------- health
@@ -1870,8 +2784,8 @@
     // Route first: the view the reader asked for never waits on, or fails
     // with, the store page's charts below. Each of those is drawn on its own,
     // so one that throws says so in its place and the rest still draw.
-    route(data);
-    window.addEventListener("hashchange", () => route(data));
+    routeSafely(data);
+    window.addEventListener("hashchange", () => routeSafely(data));
     safely("answer-tiles", () => renderAnswer(document.getElementById("answer-tiles"), data.outcomes));
     safely("trend", () => renderTrend(document.getElementById("trend"), data.trend));
     safely("fix-list", () => renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs));

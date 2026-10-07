@@ -132,6 +132,9 @@
     none_open: "no improvement item is open",
     // One job's labeled time (the page's per-task waste).
     some_sessions_not_labeled: "some of the job's sessions are not labeled yet, so this is at least this much",
+    // The Lean walk's files (Desk's rollups/tasks.json, stackup.json and the per-session swimlane files).
+    labels_from_shared_session: "this task's labels come from a session it shared with other tasks, so how its time splits is only partly known",
+    agents_working: "agents were working during this stretch, so it is not counted as waiting; the evaluator had labeled it waiting",
     job_share_unknown: "for some of the job's sessions there is no record of which part was this job's, so their labels are left out and this is at least this much",
   };
 
@@ -664,7 +667,7 @@
     const checked = [];
     const missing = [];
     if (verdict.status === "broken" || verdict.status === "stale") {
-      alarms.push({ text: `the site data is ${verdict.status === "stale" ? "out of date" : "broken"}: ${verdict.reason}`, owner: null });
+      alarms.push({ key: "site", text: `the site data is ${verdict.status === "stale" ? "out of date" : "broken"}: ${verdict.reason}`, owner: null });
     } else if (verdict.status === "alive") {
       checked.push("the site's own build");
     } else {
@@ -674,14 +677,14 @@
     if (x.andonVerification === "unavailable") missing.push("andon issues (GitHub could not be reached for this build)");
     else {
       checked.push("andon issues");
-      for (const a of andon.filter((i) => i && i.issue_state === "open")) alarms.push({ text: `andon: a tracked release made a quality measure worse (${a.ref})`, owner: { ref: a.ref, url: a.url } });
+      for (const a of andon.filter((i) => i && i.issue_state === "open")) alarms.push({ key: "andon", text: `andon: a tracked release made a quality measure worse (${a.ref})`, owner: { ref: a.ref, url: a.url } });
     }
     const cov = x.capture || {};
-    for (const a of Array.isArray(cov.alarms) ? cov.alarms : []) alarms.push({ text: `capture coverage on ${a.host}: ${a.code === "coverage_dropped" ? "a machine's capture share fell by 15 points or more" : "less than 80% of capturable sessions were captured"}`, owner: null });
+    for (const a of Array.isArray(cov.alarms) ? cov.alarms : []) alarms.push({ key: "capture_alarm", text: `capture coverage on ${a.host}: ${a.code === "coverage_dropped" ? "a machine's capture share fell by 15 points or more" : "less than 80% of capturable sessions were captured"}`, owner: null });
     if (cov.share && cov.share.state !== "unavailable") checked.push("capture coverage");
     else missing.push(`capture coverage (${cov.share ? cov.share.reasons.map(reasonText).join("; ") : "not part of this build"})`);
     const loop = x.loop || {};
-    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : "the loop raised an alarm about itself"}`, owner: null });
+    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ key: "loop_alarm", text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : "the loop raised an alarm about itself"}`, owner: null });
     if (loop.verdict && loop.verdict.status === "healthy") checked.push("the improvement loop");
     else if (!(Array.isArray(loop.alarms) && loop.alarms.length)) {
       const codes = loop.verdict && Array.isArray(loop.verdict.missing) ? [...new Set(loop.verdict.missing.flatMap((m) => m.codes || []))] : [];
@@ -691,11 +694,13 @@
     // never disagree. Alarms already told from their own source above are not
     // repeated; any other (a labels mismatch, or one whose source this line
     // did not see) is named here with no one on it.
-    const told = { andon: alarms.some((a) => a.text.startsWith("andon")), capture_alarm: alarms.some((a) => a.text.startsWith("capture coverage")), loop_alarm: alarms.some((a) => a.text.startsWith("improvement loop")) };
+    // Each alarm carries a stable key (its fix-next id), so a repeat is
+    // found by key, never by matching words.
+    const told = new Set(alarms.map((a) => a.key));
     for (const item of Array.isArray(x.fixNext) ? x.fixNext : []) {
-      if (!item || item.severity !== "alarm" || told[item.id]) continue;
+      if (!item || item.severity !== "alarm" || told.has(item.id)) continue;
       const title = String(item.title || "an alarm was raised");
-      alarms.push({ text: title.charAt(0).toLowerCase() + title.slice(1), owner: null });
+      alarms.push({ key: String(item.id || "alarm"), text: title.charAt(0).toLowerCase() + title.slice(1), owner: null });
     }
     if (alarms.length) return { state: "abnormal", alarms, checked, missing };
     if (missing.length) return { state: "not_monitored", alarms, checked, missing };

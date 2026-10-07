@@ -17,6 +17,9 @@
     <pattern id="hatch-agents-working" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-agents-working)" stroke-width="2" />
     </pattern>
+    <pattern id="hatch-waiting" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-waste-waiting)" stroke-width="2.5" />
+    </pattern>
     <pattern id="hatch-no-session" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-no-session)" stroke-width="2" />
     </pattern>
@@ -45,8 +48,18 @@
 <div id="view-task" class="view">
   <div class="wrap">
     <p class="step-label">Step 1 of 4 &middot; Follow a task</p>
-    <p class="lede">Lean starts by following one real piece of work from start to finish, before looking at any average. This is one task, end to end: how long it took, how much of that time agents were working, and where the evaluator says the time went. Most of a task's time is usually waiting, not work; that is normal, and it is where Lean looks first.</p>
     <div id="task-picker"></div>
+    <div id="task-head"></div>
+    <p id="task-lede" class="lede task-lede">Loading&hellip;</p>
+    <section class="block vsm-block" aria-labelledby="vsm-title">
+      <h2 class="block-title" id="vsm-title">The value stream map</h2>
+      <p class="chart-caption">A value stream map draws one piece of work from start to finish. Each box is a burst of agent work (a new burst starts after 15 minutes idle or when an operator turn arrives); each triangle between boxes is a wait, labeled with how long it lasted and what it waited on. The map is not to scale: the ladder under it carries the time. Select any box, triangle or ladder step to see the evidence behind it.</p>
+      <div id="vsm"></div>
+    </section>
+    <section class="block" aria-labelledby="time-went-title">
+      <h2 class="block-title" id="time-went-title">Where this task's time went</h2>
+      <div id="time-went"></div>
+    </section>
     <div id="job-detail"><p class="chart-empty">Loading&hellip;</p></div>
   </div>
 </div>
@@ -56,6 +69,10 @@
   <div class="wrap">
     <p class="step-label">Step 1 of 4 &middot; Follow a task &middot; one session</p>
     <div id="session-detail"></div>
+    <section class="block" aria-labelledby="swimlane-title">
+      <h2 class="block-title" id="swimlane-title">The session, to scale</h2>
+      <div id="swimlane"></div>
+    </section>
   </div>
 </div>
 
@@ -317,7 +334,17 @@
 </footer>
 
 <div id="tooltip" class="tooltip" role="tooltip"></div>
+
+<!-- The evidence drawer: one dialog, filled by whatever was selected. -->
+<dialog id="evidence-drawer" class="drawer" aria-labelledby="drawer-title">
+  <div class="drawer-head">
+    <h2 id="drawer-title" class="drawer-title">Evidence</h2>
+    <button type="button" class="drawer-close" id="drawer-close" aria-label="Close the evidence">Close</button>
+  </div>
+  <div id="drawer-body"></div>
+</dialog>
 <script src="format.js"></script>
+<script src="walk.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
