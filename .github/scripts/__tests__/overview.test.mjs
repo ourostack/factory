@@ -354,3 +354,20 @@ test("a no-data count line says the reason once, in words, and the page code doe
   const app = read("site/src/app.js")
   assert.match(app, /shared \|\| reasons\[i\] \? el\("span", "num num-unavailable", "no data"\)/)
 })
+
+test("the Elapsed tile says a raised lead time is at least the span of the job's recorded work, and keeps its other captions", () => {
+  const source = read("site/src/app.js")
+  const body = source.match(/function elapsedCaption\(n\) \{[\s\S]*?\n  \}\n/)[0]
+  const elapsedCaption = new Function(`${body}; return elapsedCaption;`)()
+  assert.equal(elapsedCaption({ state: "partial", value: 9000, reasons: ["card_dates_shorter_than_work"] }), "at least the span of its recorded work")
+  assert.equal(elapsedCaption({ state: "partial", value: 9000, reasons: ["card_dates_shorter_than_work", "censored"] }), "at least the span of its recorded work")
+  assert.equal(elapsedCaption({ state: "measured", value: 5, basis: "declared", reasons: [] }), "from the task card's dates")
+  assert.equal(elapsedCaption({ state: "measured", value: 5, reasons: [] }), "from the task card to its last session")
+  assert.match(source, /elapsedCaption\(j\.lead_time_ms\)/u)
+})
+
+test("an unavailable flow efficiency carrying the lead-time floor reason passes the numbers check and has words", () => {
+  const flow = unavailable(["card_dates_shorter_than_work"])
+  assert.ok(F.hasReasonText("card_dates_shorter_than_work"))
+  assert.deepEqual(checkNumbers({ jobs: [{ flow_efficiency: flow }] }), checkNumbers({ jobs: [{ flow_efficiency: unavailable(["zero_lead_time"]) }] }))
+})

@@ -1157,6 +1157,12 @@
     return wrap;
   }
 
+  // What the Elapsed tile says its figure is. A lead time Desk raised to the span of the job's recorded work (the card's dates were shorter) says so.
+  function elapsedCaption(n) {
+    if (Array.isArray(n.reasons) && n.reasons.includes("card_dates_shorter_than_work")) return "at least the span of its recorded work";
+    return n.basis === "declared" ? "from the task card's dates" : "from the task card to its last session";
+  }
+
   function renderJobDetail(container, jobs, id, sessions) {
     container.innerHTML = "";
     const j = id ? jobs.find((x) => x.id === id) : null;
@@ -1184,7 +1190,7 @@
 
     const tiles = el("div", "answer-tiles task-tiles");
     const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", basis: false, reason: false });
-    tile(tiles, "Elapsed", fig(j.lead_time_ms, "duration"), [j.lead_time_ms.basis === "declared" ? "from the task card's dates" : "from the task card to its last session"]);
+    tile(tiles, "Elapsed", fig(j.lead_time_ms, "duration"), [elapsedCaption(j.lead_time_ms)]);
     tile(tiles, "Agent time", fig(j.active_time_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
     tile(tiles, "Operator attention", fig(j.attention_ms, "duration"), [words("over ", fig(j.human_turns, "count"), " operator turns")]);
     tile(tiles, "Sent back", fig(j.returns, "count"), [words("first pass: ", fig(j.first_pass, "pass"))]);
