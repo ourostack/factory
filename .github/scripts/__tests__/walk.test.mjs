@@ -11,7 +11,7 @@ import { dirname, join } from "node:path"
 import { test } from "node:test"
 
 import { finishOrder, firstAdded } from "../../../site/scripts/finish-order.mjs"
-import { cleanTitle, taskNames } from "../../../site/scripts/task-names.mjs"
+import { cleanTitle, orderByOpened, prOpenedAt, taskNames } from "../../../site/scripts/task-names.mjs"
 import { READ_WHOLE_BYTES, llmsText, publishData, sizeLine } from "../../../site/scripts/publish-files.mjs"
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 import { measured, unavailable } from "../../../site/scripts/state.mjs"
@@ -78,6 +78,80 @@ test("#/ opens the labeled done task that finished last, and falls back without 
   assert.equal(F.defaultTask([j("c", "processing", 2, "facts"), j("e", "drafting", 1, "facts")]).id, "c")
   assert.equal(F.defaultTask([j("x", "drafting", null, "none")]).id, "x")
   assert.equal(F.defaultTask([]), null)
+})
+
+test("#/ lands on a done task with at least ten minutes of work from the latest finish group, preferring a named one", () => {
+  const j = (id, order, group, workMs, name, status = "done") => ({ id, status, finish_order: measured(order), finish_group: measured(group), finish_basis: "labels", active_time_ms: workMs === null ? unavailable(["source_unreadable"]) : measured(workMs), ...(name ? { name } : {}) })
+  const MIN = 60000
+  // Group 2 is the latest; within it the 37-second task is skipped, and the named task wins over a later unnamed one.
+  const jobs = [j("old", 1, 1, 50 * MIN, "Old named"), j("tiny", 6, 2, 30000), j("unnamed", 5, 2, 40 * MIN), j("named", 4, 2, 12 * MIN, "Fix the build"), j("unread", 3, 2, null, "No working time")]
+  assert.equal(F.defaultTask(jobs).id, "named")
+  // Without a named task in the group, the latest position with enough work.
+  assert.equal(F.defaultTask(jobs.filter((x) => x.id !== "named")).id, "unnamed")
+  // A partial working time counts by its lower bound.
+  assert.equal(F.defaultTask([j("p", 2, 1, 0), { ...j("q", 1, 1, 0), active_time_ms: { state: "partial", value: 11 * MIN, reasons: ["session_open"], bound: "lower" } }]).id, "q")
+  // When the latest group has nothing long enough, an earlier group is used.
+  assert.equal(F.defaultTask([j("tiny", 3, 2, 1000), j("old", 1, 1, 50 * MIN)]).id, "old")
+  // An open task never lands, however long.
+  assert.equal(F.defaultTask([j("open", 9, 3, 90 * MIN, "Open", "processing"), j("old", 1, 1, 50 * MIN)]).id, "old")
+  assert.equal(F.LANDING_MIN_WORK_MS, 10 * MIN)
+  // About states both rules.
+  const about = read("site/src/index.html")
+  assert.match(about, /Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position\./)
+  assert.match(about, /opens on a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name\./)
+})
+
+test("tasks first labeled in the same commit share a finish group and are ordered by lead time, the longest latest", () => {
+  const lead = (v) => (v === null ? unavailable(["not_recorded"]) : measured(v))
+  const jobs = [
+    { id: "short", lead_time_ms: lead(37000), sessions: [{ session_id: "s1" }] },
+    { id: "long", lead_time_ms: lead(9e6), sessions: [{ session_id: "s2" }] },
+    { id: "mid", lead_time_ms: { state: "partial", value: 5e6, reasons: ["censored"], bound: "lower" }, sessions: [{ session_id: "s3" }] },
+    { id: "none", lead_time_ms: lead(null), sessions: [{ session_id: "s4" }] },
+    { id: "first", lead_time_ms: lead(1), sessions: [{ session_id: "s5" }] },
+  ]
+  const labelAdded = new Map([["labels/first/a.json", 0], ...["short", "long", "mid", "none"].map((id) => [`labels/${id}/a.json`, 3])])
+  const out = finishOrder(jobs, { labelAdded })
+  const order = [...out].sort((a, b) => a[1].finish_order.value - b[1].finish_order.value).map(([id]) => id)
+  assert.deepEqual(order, ["first", "none", "short", "mid", "long"])
+  assert.deepEqual(out.get("first").finish_group, measured(1))
+  for (const id of ["short", "long", "mid", "none"]) assert.deepEqual(out.get(id).finish_group, measured(2))
+  assert.deepEqual(checkNumbers({ jobs: [...out.values()] }), [])
+})
+
+test("a task is named after its earliest-opened public pull request, on the job clock, falling back to the report's order", async () => {
+  const pr = (repo, n) => ({ ref: `#${n}`, url: `https://github.com/${repo}/pull/${n}` })
+  const list = [pr("o/desk", 1), pr("o/desk", 2), pr("o/app", 7)]
+  // From facts: session s2 starts later on the job clock, but its reference to app#7 comes first overall.
+  const report = { timeline: { sessions: [{ id: "s1", offset_ms: -5000 }, { id: "s2", offset_ms: 1000 }] } }
+  const prsOfSession = new Map([
+    ["s1", [{ repo: "o/desk", number: 1, at_ms: 9000 }, { repo: "o/desk", number: 2, at_ms: 20000 }, { repo: "o/app", number: 7 }]],
+    ["s2", [{ repo: "o/app", number: 7, at_ms: 100 }, { repo: "o/desk", number: 1, at_ms: 50 }]],
+  ])
+  const at = prOpenedAt(report, prsOfSession)
+  assert.deepEqual([...at].sort(), [["o/app#7", 1100], ["o/desk#1", 1050], ["o/desk#2", 15000]].sort())
+  assert.deepEqual(orderByOpened(list, at).map((p) => p.url.split("/").slice(-3).join("/")), ["desk/pull/1", "app/pull/7", "desk/pull/2"])
+  // The report's own pull request times, when present, win.
+  const withTimes = prOpenedAt({ timeline: { prs: [{ repo: "o/desk", number: 2, at_ms: -3 }], sessions: report.timeline.sessions } }, prsOfSession)
+  assert.deepEqual([...withTimes], [["o/desk#2", -3]])
+  assert.equal(orderByOpened(list, withTimes)[0].url, "https://github.com/o/desk/pull/2")
+  // No time at all: the report's order stands.
+  assert.deepEqual(orderByOpened(list, prOpenedAt({}, new Map())), list)
+  // The name follows the order it is given.
+  const names = await taskNames([{ id: "j", pull_requests: orderByOpened(list, at) }], async (repo, n) => ({ title: `${repo} ${n}`, private: false }))
+  assert.equal(names.get("j").name, "o/desk 1")
+  const names2 = await taskNames([{ id: "j", pull_requests: orderByOpened(list, withTimes) }], async (repo, n) => ({ title: `${repo} ${n}`, private: false }))
+  assert.equal(names2.get("j").name, "o/desk 2")
+  // The build wires it in and publishes no time.
+  const build = read("site/scripts/build-data.mjs")
+  assert.match(build, /j\.pull_requests = orderByOpened\(j\.pull_requests, prOpenedAt\(jobReports\.get\(j\.id\), prsOfSession\)\)/)
+})
+
+test("the Act lede does not promise a check that does not exist yet", () => {
+  const html = read("site/src/index.html")
+  const act = html.slice(html.indexOf('id="view-act"'), html.indexOf('id="view-why"'))
+  assert.match(act, /a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet/)
+  assert.doesNotMatch(act, /a check that the countermeasure worked/)
 })
 
 test("ordinals read in words a reader expects", () => {
@@ -409,4 +483,55 @@ test("the Pages workflow publishes the data files and llms.txt, and writes the s
   assert.match(wf, /node site\/scripts\/publish-files\.mjs --reports _reports --dist site\/dist --template site\/src\/llms-template\.txt \| tee -a "\$GITHUB_STEP_SUMMARY"/)
   // It runs after the data build and before the upload.
   assert.ok(wf.indexOf("Build site data") < wf.indexOf("Publish data files") && wf.indexOf("Publish data files") < wf.indexOf("Upload Pages artifact"))
+})
+
+// A text cell must never collapse to a few characters wide on a phone (the
+// store page's sign-off labels once rendered one letter per line at 390 px).
+// The browser check behind this is in the S1 report; these are the CSS rules
+// that cause or prevent it, checked without a browser.
+test("no label or value column can collapse to a sliver at 320 or 390 px", () => {
+  const css = read("site/src/styles.css").replace(/\/\*[\s\S]*?\*\//g, "")
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2], at: m.index }))
+  // 1. No grid gives its text column a zero minimum beside an auto column sized by the content.
+  for (const r of rules) {
+    assert.doesNotMatch(r.body, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/, `${r.sel} lets its label column shrink to nothing`)
+  }
+  // 2. Every grid of label/value pairs becomes one column at phone width, and that phone rule comes after (or is as specific as) any wider rule for it.
+  const phoneOneCol = (sel) => {
+    const re = new RegExp(`@media \\(max-width: (\\d+)px\\)\\s*\\{[^@]*?${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(,[^{]*)?\\{\\s*grid-template-columns:\\s*1fr;`, "g")
+    return [...css.matchAll(re)].filter((m) => Number(m[1]) >= 560).map((m) => m.index)
+  }
+  for (const sel of [".health-facts", ".outcome-block .health-facts", ".facts-list"]) {
+    const wide = rules.filter((r) => r.sel === sel && /grid-template-columns/.test(r.body) && !/grid-template-columns:\s*1fr;/.test(r.body)).map((r) => r.at)
+    const phone = phoneOneCol(sel)
+    assert.ok(phone.length, `${sel} has no one-column rule for phones`)
+    assert.ok(Math.max(...phone) > Math.max(...wide), `${sel}: a wider rule after its phone rule would win on a phone`)
+  }
+  // 3. A label column that does keep two columns keeps a readable minimum width.
+  const outcome = rules.find((r) => r.sel === ".outcome-block .health-facts" && /minmax/.test(r.body))
+  assert.match(outcome.body, /minmax\(min\(12em, 100%\)/)
+  // 4. A bar label keeps a readable minimum width; its value wraps between its own parts instead of squeezing the label.
+  const label = rules.find((r) => r.sel === ".bar-label")
+  const value = rules.find((r) => r.sel === ".bar-value")
+  assert.match(label.body, /min-width:\s*min\(9em, 45%\)/)
+  assert.match(value.body, /white-space:\s*normal/)
+  assert.match(value.body, /min-width:\s*5em/)
+  // 5. Grid and table cells may wrap long words rather than force their column wider.
+  assert.match(css, /\.health-facts dt, \.health-facts dd \{ min-width: 0; overflow-wrap: break-word; \}/)
+})
+
+test("the store page renders each outcome section once, and the headline figure only once", () => {
+  const app = read("site/src/app.js")
+  const body = app.slice(app.indexOf("function renderOutcomes("), app.indexOf("// --------------------------------------------------------------- jobs"))
+  for (const h of ["Sign-off", "First-pass yield", "What was sent back, and where it was caught"]) {
+    assert.equal(body.split(`"${h}"`).length - 1, 1, h)
+  }
+  // The cost per accepted outcome is the headline above; this section does not repeat it.
+  assert.doesNotMatch(body, /attention per accepted outcome|o\.attention\.headline/)
+  assert.equal((app.match(/renderOutcomes\(document/g) || []).length, 1)
+})
+
+test("the task table shows a finish position only for a labeled task; an open one says open", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /const pos = j\.finish_basis === "labels" && placed \? F\.ordinal\(j\.finish_order\.value\) : !placed \? "no session" : j\.status === "done" \? "not labeled" : "open";/)
 })

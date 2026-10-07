@@ -265,7 +265,8 @@
 
     const step = innerW / items.length;
     const barW = Math.max(2, step - 4);
-    const tickEvery = Math.max(1, Math.ceil(items.length / 6));
+    // Days with no intake have no bar, so every bar is labeled when they fit: the gaps between day numbers then show.
+    const tickEvery = Math.max(1, Math.ceil(items.length / 10));
 
     items.forEach((item, idx) => {
       const x = padL + idx * step + 2;
@@ -612,25 +613,9 @@
       emptyState(container, "Sign-off is not part of this build's data.");
       return;
     }
+    // The cost per accepted outcome is the page's headline, shown once, above;
+    // this section holds what it rests on.
     const grid = el("div", "outcome-tiles");
-
-    const head = el("div", "outcome-block");
-    head.appendChild(el("h4", null, "Human attention per accepted outcome"));
-    const v = el("p", "big-figure");
-    v.appendChild(num(o.attention.headline, "duration"));
-    head.appendChild(v);
-    head.appendChild(el("div", "stat-note", "An estimate of the time a human spent reading and answering, over the outcomes they accepted."));
-    const turns = el("p", "stat-note");
-    turns.appendChild(document.createTextNode("Human turns per accepted outcome: "));
-    turns.appendChild(num(o.attention.turns_per_accepted, "count"));
-    head.appendChild(turns);
-    // A trust line speaks of a figure; with no figure there is nothing to trust.
-    if (o.attention.headline.state !== "unavailable") {
-      const t = el("p", "stat-trust");
-      t.appendChild(trustNode(o.attention.trust));
-      head.appendChild(t);
-    }
-    grid.appendChild(head);
     container.appendChild(grid);
 
     const so = el("div", "outcome-block");
@@ -657,7 +642,9 @@
     row(dl, "Sent back", refused);
     figure(dl, "Delivered before sign-off was recorded", o.signoff.not_recorded);
     figure(dl, "Jobs with no sign-off record", o.signoff.no_record);
+    figure(dl, "Operator turns per accepted outcome", o.attention.turns_per_accepted);
     so.appendChild(dl);
+    grid.appendChild(so);
 
     const fp = el("div", "outcome-block");
     fp.appendChild(el("h4", null, "First-pass yield"));
@@ -677,7 +664,6 @@
     figure(fdl, "Passed, with only changed-ask returns", o.first_pass_counts.changed_ask_only);
     fp.appendChild(fdl);
     grid.appendChild(fp);
-    container.appendChild(so);
 
     const rw = el("div", "outcome-block");
     rw.appendChild(el("h4", null, "What was sent back, and where it was caught"));
@@ -798,7 +784,7 @@
     const rows = (j.waste && j.waste.rows) || [];
     const top = rows.find((r) => r.kind === "waste" || r.kind === "unknown");
     if (!top) return el("span", "muted", rows.length ? "none labeled" : "not labeled yet");
-    const span = el("span");
+    const span = el("span", "top-waste");
     const seg = SEGMENT_BY_KEY.get(top.key);
     const sw = el("span", "swatch");
     sw.style.setProperty("--sw", segmentColor(top.key));
@@ -871,7 +857,9 @@
     const notes = new Map();
     for (const j of byFinishDesc(jobs)) {
       const tr = document.createElement("tr");
-      const pos = j.finish_order && j.finish_order.state === "measured" ? F.ordinal(j.finish_order.value) : "none";
+      // Only a labeled task has finished in the store's sense; the rest are listed after it, so their cell says why instead of showing a position.
+      const placed = j.finish_order && j.finish_order.state === "measured";
+      const pos = j.finish_basis === "labels" && placed ? F.ordinal(j.finish_order.value) : !placed ? "no session" : j.status === "done" ? "not labeled" : "open";
       plainCell(tr, "Finish order", el("span", j.finish_basis === "labels" ? "finish-pos" : "finish-pos muted", pos), "num");
       const name = el("span", "task-name");
       name.appendChild(jobLink(j.id, jobLabel(j)));
@@ -1223,7 +1211,8 @@
     const label = el("label", "task-select-label", "Any task ");
     const select = el("select", "task-select");
     for (const j of ordered) {
-      const o = el("option", null, `${j.finish_order && j.finish_order.state === "measured" ? `${F.ordinal(j.finish_order.value)} \u00b7 ` : ""}${jobLabel(j)}`);
+      const pre = j.finish_basis === "labels" && j.finish_order.state === "measured" ? F.ordinal(j.finish_order.value) : j.status === "done" ? "not labeled" : "open";
+      const o = el("option", null, `${pre} \u00b7 ${jobLabel(j)}`);
       o.value = j.id;
       if (j.id === current) o.selected = true;
       select.appendChild(o);
@@ -1943,7 +1932,7 @@
       timeBreakdownNoteEl.appendChild(num(measuredCount(fe.N), "count"));
       timeBreakdownNoteEl.appendChild(document.createTextNode(" of "));
       timeBreakdownNoteEl.appendChild(num(data.coverage.jobs, "count", { nofn: false }));
-      timeBreakdownNoteEl.appendChild(document.createTextNode(" tracked jobs apply here (finished, whole life inside capture); each figure below says how many of those it rests on and how many jobs are out of scope."));
+      timeBreakdownNoteEl.appendChild(document.createTextNode(" tracked jobs apply here (finished, whole life inside capture); each figure above says how many of those it rests on and how many jobs are out of scope."));
     }
 
     const timeBreakdownRows = data.time_breakdown.map((r) => ({

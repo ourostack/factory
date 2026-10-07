@@ -4,10 +4,11 @@
 // added any file under labels/<job>/ to `main` marks when the task finished.
 // Only the position (1st, 2nd, ...) is published, never the commit's date.
 // Tasks with no labels (open tasks, and done tasks not labeled yet) follow,
-// in the order their first facts file landed. Tasks whose first files landed
-// in the same commit are ordered by their first facts file, then by key, so
-// the order is the same on every build. A task with neither labels nor facts
-// has no position.
+// in the order their first facts file landed. Tasks first labeled in the
+// same commit are ordered by lead time, the longest last (so it reads as the
+// latest to finish), then by their first facts file, then by key; open tasks
+// whose first facts landed together are ordered by key. The order is the
+// same on every build. A task with neither labels nor facts has no position.
 
 import { execFileSync } from "node:child_process";
 import { measured, unavailable } from "./state.mjs";
@@ -45,8 +46,10 @@ function earliest(positions) {
 // labelAdded: path ("labels/<job>/<file>") -> commit position
 // factsAdded: path ("facts/<file>") -> commit position
 // factsFileOf: session id -> facts file name
-// Returns Map job id -> { finish_order, finish_basis } where finish_order is
-// a stated number and finish_basis is "labels", "facts" or "none".
+// Returns Map job id -> { finish_order, finish_basis, finish_group? } where
+// finish_order is a stated number, finish_basis is "labels", "facts" or
+// "none", and finish_group (labeled tasks only) is the position of the
+// commit that first labeled the task: tasks labeled together share it.
 export function finishOrder(jobs, { labelAdded = new Map(), factsAdded = new Map(), factsFileOf = new Map() } = {}) {
   const labelOf = new Map();
   for (const [path, pos] of labelAdded) {
@@ -58,13 +61,21 @@ export function finishOrder(jobs, { labelAdded = new Map(), factsAdded = new Map
   const rows = jobs.map((j) => {
     const facts = earliest((j.sessions || []).map((s) => factsFileOf.get(s.session_id)).filter(Boolean).map((f) => factsAdded.get(`facts/${f}`)));
     const label = labelOf.has(j.id) ? labelOf.get(j.id) : null;
-    return { id: j.id, label, facts };
+    const lt = j.lead_time_ms;
+    const lead = lt && lt.state !== "unavailable" && typeof lt.value === "number" ? lt.value : -1;
+    return { id: j.id, label, facts, lead };
   });
   const cmp = (a, b) => (a ?? Infinity) - (b ?? Infinity);
-  const labeled = rows.filter((r) => r.label !== null).sort((a, b) => a.label - b.label || cmp(a.facts, b.facts) || a.id.localeCompare(b.id));
+  // Tasks whose first labels landed in the same commit share a finish group;
+  // within it the longest task (by lead time) finishes last, so a bulk
+  // labeling commit puts its most substantial task in the latest position.
+  const labeled = rows.filter((r) => r.label !== null).sort((a, b) => a.label - b.label || a.lead - b.lead || cmp(a.facts, b.facts) || a.id.localeCompare(b.id));
+  const groups = [...new Set(labeled.map((r) => r.label))];
   const open = rows.filter((r) => r.label === null && r.facts !== null).sort((a, b) => a.facts - b.facts || a.id.localeCompare(b.id));
   const out = new Map();
-  [...labeled, ...open].forEach((r, i) => out.set(r.id, { finish_order: measured(i + 1), finish_basis: r.label !== null ? "labels" : "facts" }));
+  [...labeled, ...open].forEach((r, i) =>
+    out.set(r.id, { finish_order: measured(i + 1), finish_basis: r.label !== null ? "labels" : "facts", ...(r.label !== null ? { finish_group: measured(groups.indexOf(r.label) + 1) } : {}) }),
+  );
   for (const r of rows) if (!out.has(r.id)) out.set(r.id, { finish_order: unavailable(["no_facts"]), finish_basis: "none" });
   return out;
 }

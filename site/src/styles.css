@@ -316,9 +316,12 @@ h3.bars-title, h3.sub-title { font-size: 16px; margin: 24px 0 8px; }
 
 .bars { display: flex; flex-direction: column; gap: 12px; }
 .bar-row { display: block; font-size: 14px; border-radius: 4px; }
+/* Label and value share one line in every row. The label keeps a readable width; the value takes the rest and wraps between its parts (figure, flag, "n of N"), never inside one, so no row squeezes its label and every row of a list looks alike. */
 .bar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 4px; }
-.bar-label { color: var(--text-primary); min-width: 0; overflow-wrap: anywhere; }
-.bar-value { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; text-align: right; }
+.bar-label { color: var(--text-primary); flex: 0 1 auto; min-width: min(9em, 45%); overflow-wrap: break-word; }
+.bar-value { flex: 1 1 0; min-width: 5em; font-variant-numeric: tabular-nums; font-weight: 650; white-space: normal; text-align: right; }
+.bar-value .num-value { white-space: nowrap; }
+.bar-value .num-flag { white-space: normal; }
 .bar-track {
   position: relative;
   height: 12px;
@@ -413,7 +416,7 @@ table.data-table tbody tr:hover { background: var(--surface-1); }
 .task-select-label { flex: 1 1 100%; order: -1; }
 .fix-action.task-do { margin-top: 16px; }
 .task-select {
-  max-width: min(100%, 26em);
+  max-width: min(100%, 48em);
   font: inherit;
   font-size: 14px;
   padding: 4px 6px;
@@ -489,7 +492,7 @@ table.data-table tbody tr:hover { background: var(--surface-1); }
 .issue-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
 .issue-num { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 13px; }
 .issue-resolution { color: var(--text-secondary); font-size: 13.5px; }
-@media (max-width: 560px) { .issue-right { align-items: flex-start; text-align: left; } }
+@media (max-width: 560px) { .issue-list li { flex-direction: column; align-items: flex-start; } .issue-right { align-items: flex-start; text-align: left; } }
 
 .fix-list { list-style: none; margin: 0; padding: 0; }
 .fix-item { padding: 12px 0 12px 14px; border-left: 3px solid var(--baseline); margin: 0 0 10px; }
@@ -583,8 +586,10 @@ footer a, footer a:visited { color: var(--text-secondary); }
 .verdict-unknown .verdict-word { color: var(--text-primary); }
 .health-facts { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 6px 16px; margin: 0; font-size: 14.5px; }
 .health-facts dt { color: var(--text-secondary); }
+.health-facts dt, .health-facts dd { min-width: 0; overflow-wrap: break-word; }
 .health-facts dd { margin: 0; }
 @media (max-width: 640px) {
+  /* One column on a phone: each label on its own line, its value below it. */
   .health-facts { grid-template-columns: 1fr; }
   .health-facts dt { margin-top: 6px; }
 }
@@ -602,7 +607,10 @@ footer a, footer a:visited { color: var(--text-secondary); }
 .outcome-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px 32px; margin-bottom: 12px; }
 .outcome-block { margin-bottom: 20px; min-width: 0; }
 .outcome-block h4 { margin: 0 0 8px; font-size: 1em; }
-.outcome-block .health-facts { grid-template-columns: minmax(0, 1fr) auto; margin-top: 10px; }
+/* The label column never shrinks below a readable width; a long value wraps instead. */
+.outcome-block .health-facts { grid-template-columns: minmax(min(12em, 100%), 1fr) minmax(0, max-content); margin-top: 10px; }
+/* This rule is more specific than the phone rule for .health-facts, so it needs its own phone rule. */
+@media (max-width: 640px) { .outcome-block .health-facts { grid-template-columns: 1fr; } }
 
 /* Capture coverage */
 .capture-total { margin: 4px 0 12px; }
@@ -644,7 +652,10 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
   .task-table td.task-cell::before { content: none; }
 }
 @media (min-width: 721px) {
-  .task-table .outcome, .task-table td.num, .task-table td.num .num { white-space: nowrap; }
+  /* A figure stays on one line; its "partial" flag may drop below it, so the number columns do not crowd out the task name. */
+  .task-table .outcome, .task-table .top-waste { white-space: nowrap; }
+  table.data-table.task-table td.num { white-space: normal; }
+  .task-table td.num .num-value, .task-table td.num .num-flag { white-space: nowrap; }
   table.data-table.task-table th, table.data-table.task-table td { padding-left: 6px; padding-right: 6px; }
   table.data-table.task-table th { white-space: normal; }
   .task-table .num-flag { margin-left: 0.25em; }
@@ -659,6 +670,6 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 @media (min-width: 721px) {
   table.data-table.task-table td:not(.num) { white-space: normal; }
   /* A task name (or anonymous key) wraps between words only, in a column wide enough to read. */
-  table.data-table.task-table td.task-cell { min-width: 14ch; max-width: 30ch; }
+  table.data-table.task-table td.task-cell { min-width: 18ch; max-width: 30ch; }
   table.data-table.task-table td.task-cell a { overflow-wrap: normal; word-break: normal; }
 }

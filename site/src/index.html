@@ -102,7 +102,7 @@
   <div class="wrap">
     <p class="step-label">Step 4 of 4</p>
     <h1 class="view-title">Act</h1>
-    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem: the evidence, a countermeasure, and a check that the countermeasure worked. These are the problems the factory has taken on, each with the pull request that answered it. Andon issues are the stop-the-line signal: a tracked release made a quality measure clearly worse.</p>
+    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem: the evidence, a countermeasure, and then a check of whether it worked. These are the problems the factory has taken on, each with the pull request that answered it. None has been checked yet: a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet. Andon issues are the stop-the-line signal: a tracked release made a quality measure clearly worse.</p>
     <section class="block" id="kaizen-panel"></section>
   </div>
 </div>
@@ -184,12 +184,12 @@
       <li><strong>No when.</strong> Facts carry durations and offsets from the session start, never a date, a time of day or an epoch value. The site shows no calendar date for any task.</li>
       <li><strong>No content.</strong> No transcript text, prompt, response, tool argument, file content, file path or task card title ever leaves the contributor's machine.</li>
       <li><strong>Public references only.</strong> References to private repositories are dropped and only counted. Public pull requests and commits are, like any GitHub contribution, already public.</li>
-      <li><strong>Public work is named publicly.</strong> A task's name is the title of its first public pull request, plus how many more it has. A task with no public pull request is shown as "Private task" with a short key.</li>
+      <li><strong>Public work is named publicly.</strong> A task's name is the title of the first public pull request its sessions opened, plus how many more it has. A task with no public pull request is shown as "Private task" with a short key.</li>
       <li><strong>Operator turns appear only as counts.</strong> The site does not place the operator's individual prompts on a task's clock.</li>
     </ul>
 
     <h2 class="block-title">Finish order</h2>
-    <p>Tasks are ordered without dates. A task's waste labels are written when it reaches done, so the order in which each task's first label file landed in the store is the order in which tasks finished. Only the position (1st, 2nd, 3rd) is published, never the date. Tasks whose labels landed together are ordered by their first published session, then by key. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on the labeled task that finished last.</p>
+    <p>Tasks are ordered without dates. A task's waste labels are written when it reaches done, so the order in which each task's first label file landed in the store is the order in which tasks finished. Only the position (1st, 2nd, 3rd) is published, never the date. Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name.</p>
 
     <h2 class="block-title">How to read the numbers</h2>
     <ul class="plain-list" id="guide">

@@ -567,15 +567,24 @@
     return `#/${parts.join("/")}`;
   }
 
-  // The task #/ opens: the done task that finished last. Finish order comes
-  // from labels when a task has them; a done task ordered only by its facts
-  // is chosen only when no done task has labels.
+  // The task #/ opens: a done, labeled task with at least ten minutes of
+  // working time, from the latest finish group (the tasks first labeled in
+  // the same commit), preferring a task with a public name within that
+  // group, then the latest finish position. Without such a task: the done
+  // task that finished last, then any task with a position, then the first.
+  const LANDING_MIN_WORK_MS = 10 * 60000;
   function defaultTask(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
     const pos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
+    const group = (j) => (j && j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : -1);
+    const work = (j) => (j && j.active_time_ms && j.active_time_ms.state !== "unavailable" && typeof j.active_time_ms.value === "number" ? j.active_time_ms.value : -1);
+    const named = (j) => (typeof j.name === "string" && j.name ? 1 : 0);
     const best = (xs) => xs.reduce((a, j) => (a === null || pos(j) > pos(a) ? j : a), null);
     const done = list.filter((j) => j.status === "done" && pos(j) > 0);
-    return best(done.filter((j) => j.finish_basis === "labels")) || best(done) || best(list.filter((j) => pos(j) > 0)) || list[0] || null;
+    const landing = done
+      .filter((j) => j.finish_basis === "labels" && work(j) >= LANDING_MIN_WORK_MS)
+      .sort((a, b) => group(b) - group(a) || named(b) - named(a) || pos(b) - pos(a))[0];
+    return landing || best(done.filter((j) => j.finish_basis === "labels")) || best(done) || best(list.filter((j) => pos(j) > 0)) || list[0] || null;
   }
 
   // An English ordinal for a finish position: 1st, 2nd, 3rd, 11th, 22nd.
@@ -709,5 +718,5 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { parseRoute, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  return { LANDING_MIN_WORK_MS, parseRoute, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });
