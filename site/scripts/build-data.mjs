@@ -50,6 +50,8 @@ import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
 import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, labeledWaste, ownShare, qualifiersOf } from "./waste.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
+import { finishOrder, firstAdded } from "./finish-order.mjs";
+import { taskNames } from "./task-names.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -283,9 +285,12 @@ const jobSessionIds = new Set(jobs.flatMap((j) => j.sessions.map((s) => s.sessio
 const sessions = [];
 // Each such session's job bindings, for each job's own share of it.
 const sessionBindings = new Map();
+// Each session's facts file, for the order in which tasks' first facts landed.
+const factsFileOf = new Map();
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
+  if (typeof d.session?.id === "string" && !factsFileOf.has(d.session.id)) factsFileOf.set(d.session.id, f);
   if (jobSessionIds.has(d.session?.id)) sessionBindings.set(d.session.id, d.jobs);
   if (jobSessionIds.has(d.session?.id) && /^[A-Za-z0-9._-]+\.json$/.test(f)) {
     const models = [...(d.models || [])].filter((m) => m && typeof m.id === "string").sort((a, b) => (b.requests ?? -1) - (a.requests ?? -1)).map((m) => m.id);
@@ -322,6 +327,14 @@ for (const j of jobs) {
   const docs = /^[0-9A-Za-z_-]{1,64}$/.test(j.id) ? listJSON(dir).map((f) => readJSON(join(dir, f), null)).filter((d) => d && d.job === j.id) : [];
   const shares = new Map(j.sessions.map((x) => [x.session_id, ownShare(sessionBindings.get(x.session_id), j.id)]));
   j.waste = jobWaste(docs, j.sessions.map((x) => x.session_id), shares);
+}
+
+// Finish order (finish-order.mjs): the position of the commit that first
+// added the task's labels to main, then open tasks by their first facts
+// file. Only the position is published, never a date.
+{
+  const order = finishOrder(jobs, { labelAdded: firstAdded(mainDir, "labels/"), factsAdded: firstAdded(mainDir, "facts/"), factsFileOf });
+  for (const j of jobs) Object.assign(j, order.get(j.id));
 }
 
 // Fact-level totals. The pipeline's own totals (rollups/totals.json) apply
@@ -432,8 +445,17 @@ async function ghGet(url) {
   }
 }
 
+// One read per pull request per build: merge state for the featured
+// sessions and the kaizen countermeasures, title and visibility for names.
+const pullCache = new Map();
+function pullInfo(repo, number) {
+  const key = `${repo}#${number}`;
+  if (!pullCache.has(key)) pullCache.set(key, ghGet(`https://api.github.com/repos/${repo}/pulls/${number}`));
+  return pullCache.get(key);
+}
+
 async function checkMerged(repo, number) {
-  const body = await ghGet(`https://api.github.com/repos/${repo}/pulls/${number}`);
+  const body = await pullInfo(repo, number);
   return body ? { merged: body.merged === true, url: body.html_url } : null;
 }
 
@@ -488,6 +510,17 @@ for (const { d, prs } of featuredCandidates) {
       .map((p) => ({ ref: `#${p.number}`, url: p.url })),
     verification: checked.length === prs.length ? "verified" : checked.length > 0 ? "partial" : "unavailable",
   });
+}
+
+// Task names (task-names.mjs): the title of each task's first public pull
+// request, read from the same pulls API, and how many more it has.
+{
+  const names = await taskNames(jobs, async (repo, number) => {
+    const body = await pullInfo(repo, number);
+    if (!body || typeof body.title !== "string") return null;
+    return { title: body.title, private: body.base?.repo?.private === false ? false : true };
+  });
+  for (const j of jobs) Object.assign(j, names.get(j.id));
 }
 
 // ---------------------------------------------------------------------------

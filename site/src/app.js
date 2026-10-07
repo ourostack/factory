@@ -143,50 +143,50 @@
     }
   }
 
+  // Every bar list is linear from zero on a stated scale (F.barScale): a
+  // share runs 0 to 100%, a count or a duration 0 to a round number shown in
+  // the list's title. The track spans the full width and stays visible
+  // behind the fill; every bar has its value written beside it.
   function renderBarList(container, rows, opts) {
     container.innerHTML = "";
+    const raw = (n) => (n && n.state !== "unavailable" ? n.value : null);
+    const values = rows.flatMap((r) => [raw(r.number), raw(r.secondary)].filter((v) => typeof v === "number"));
+    const scale = F.barScale(values, { kind: opts.kind, scale: opts.scale });
+    if (opts.title) {
+      const h = el(opts.titleTag || "h3", "bars-title", opts.title);
+      if (rows.length) h.appendChild(el("span", "bars-scale", ` · ${scale.label}${opts.unit ? ` ${opts.unit}` : ""}`));
+      container.appendChild(h);
+    }
+    if (opts.caption) container.appendChild(el("p", "chart-caption", opts.caption));
     if (!rows.length) {
-      emptyState(container, opts.emptyText || "No data yet.");
+      container.appendChild(el("p", "chart-empty", opts.emptyText || "No data yet."));
       return;
     }
     const wrap = el("div", "bars");
+    wrap.dataset.scaleMax = String(scale.max);
     const color = opts.color || "var(--series-1)";
-    const raw = (n) => (n && n.state !== "unavailable" ? n.value : null);
-    const values = rows.flatMap((r) => [raw(r.number), raw(r.secondary)].filter((v) => typeof v === "number"));
-    const maxVal = opts.max ?? Math.max(1, ...values);
-    const useLog = opts.scale === "log";
-    const denom = useLog ? Math.log1p(maxVal) || 1 : maxVal || 1;
-    function widthPct(v) {
-      if (!v || v <= 0) return 0;
-      const scaled = useLog ? Math.log1p(v) : v;
-      return Math.min(100, (scaled / denom) * 100);
-    }
 
     for (const row of rows) {
       const rowEl = el("div", "bar-row");
       rowEl.tabIndex = 0;
+      const head = el("div", "bar-head");
       const labelEl = el("span", "bar-label", row.label);
-      labelEl.title = row.label;
-      if (row.flag) {
-        // The doubt must stay readable: let the label wrap rather than cut it off.
-        labelEl.appendChild(el("span", "bar-flag", ` (${row.flag})`));
-        labelEl.style.whiteSpace = "normal";
-        labelEl.style.overflow = "visible";
-      }
+      if (row.flag) labelEl.appendChild(el("span", "bar-flag", ` (${row.flag})`));
       const trackEl = el("div", "bar-track");
       if (typeof raw(row.secondary) === "number") {
         const secEl = el("div", "bar-fill secondary");
-        secEl.style.width = `${widthPct(raw(row.secondary))}%`;
+        secEl.style.width = `${scale.width(raw(row.secondary))}%`;
         trackEl.appendChild(secEl);
       }
       const fillEl = el("div", "bar-fill");
-      fillEl.style.width = `${widthPct(raw(row.number))}%`;
+      fillEl.style.width = `${scale.width(raw(row.number))}%`;
       fillEl.style.background = row.color || color;
       trackEl.appendChild(fillEl);
       const valueEl = el("span", "bar-value");
       valueEl.appendChild(num(row.number, opts.kind, { nofn: opts.nofn, flag: opts.flag, basis: opts.basis }));
       if (opts.suffix) valueEl.appendChild(document.createTextNode(opts.suffix));
-      rowEl.append(labelEl, trackEl, valueEl);
+      head.append(labelEl, valueEl);
+      rowEl.append(head, trackEl);
 
       const showTT = (evt) => {
         const rect = rowEl.getBoundingClientRect();
@@ -207,12 +207,13 @@
 
   // -------------------------------------------------------- intake chart
   // The one true time-series in this page: daily count of facts files
-  // first landing on `main`, from ordinary public Git commit metadata.
+  // first landing on `main`, from ordinary public Git commit metadata. The
+  // page shows no calendar date: days are counted from the first intake.
 
-  function formatDayLabel(dayStr) {
-    const m = dayStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return dayStr;
-    return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
+  function dayNumber(first, dayStr) {
+    const a = Date.parse(`${first}T00:00:00Z`);
+    const b = Date.parse(`${dayStr}T00:00:00Z`);
+    return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / 86400000) + 1 : null;
   }
 
   function renderIntakeChart(container, rawItems) {
@@ -225,7 +226,8 @@
     let running = 0;
     const items = rawItems.map((i) => {
       running += i.count.value;
-      return { day: i.day, count: running, added: i.count };
+      const n = dayNumber(rawItems[0].day, i.day);
+      return { day: n === null ? "a day" : `day ${n}`, count: running, added: i.count };
     });
     const width = 600;
     const height = 190;
@@ -241,7 +243,7 @@
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("class", "svg-chart");
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", "Cumulative sessions published, by day");
+    svg.setAttribute("aria-label", "Cumulative sessions published, by day since the first intake");
 
     [0, 0.5, 1].forEach((frac) => {
       const y = padT + innerH * (1 - frac);
@@ -300,7 +302,7 @@
         tick.setAttribute("y", String(height - 8));
         tick.setAttribute("text-anchor", "middle");
         tick.setAttribute("class", "tick-label");
-        tick.textContent = formatDayLabel(item.day);
+        tick.textContent = item.day;
         svg.appendChild(tick);
       }
     });
@@ -385,22 +387,23 @@
 
   const KPI_KIND = { tool_calls: "compact", model_requests: "compact" };
 
+  // The store's counts as a plain list: label, figure, what it counts and
+  // how far it can be trusted. No tiles: nothing here is clickable.
   function renderKPIs(container, headlines) {
     container.innerHTML = "";
+    const dl = el("dl", "facts-list");
     for (const h of headlines) {
-      const tile = el("div", "stat-tile");
-      tile.appendChild(el("p", "stat-label", h.label));
-      const value = el("p", "stat-value");
-      value.appendChild(num(h.number, KPI_KIND[h.id] || "count"));
-      tile.appendChild(value);
-      const note = el("p", "stat-note");
+      const dd = el("dd");
+      dd.appendChild(num(h.number, KPI_KIND[h.id] || "count"));
+      const note = el("span", "fact-note");
+      note.appendChild(document.createTextNode(" \u00b7 "));
       note.appendChild(templated(h.note.template, h.note.slots));
-      tile.appendChild(note);
-      const t = el("p", "stat-trust");
-      t.appendChild(trustNode(h.trust));
-      tile.appendChild(t);
-      container.appendChild(tile);
+      note.appendChild(document.createTextNode(". "));
+      note.appendChild(trustNode(h.trust));
+      dd.appendChild(note);
+      dl.append(el("dt", null, h.label), dd);
     }
+    container.appendChild(dl);
   }
 
   // ----------------------------------------------------------- takeaways
@@ -420,23 +423,24 @@
       emptyState(container, "Not enough evidence yet for a computed takeaway.");
       return;
     }
-    takeaways.forEach((t, idx) => {
-      const row = el("div", "takeaway");
-      row.appendChild(el("span", "takeaway-index", String(idx + 1)));
-      const textEl = el("span", "takeaway-text");
+    const ol = el("ol", "plain-list");
+    for (const t of takeaways) {
+      const li = el("li");
       // The model-request total is a compact count; everything else is a count
       // or a share. The slot's own name picks the kind.
-      textEl.appendChild(templated(t.template, t.slots, TAKEAWAY_KINDS, true));
+      li.appendChild(templated(t.template, t.slots, TAKEAWAY_KINDS, true));
       const tr = el("span", "takeaway-trust");
       tr.appendChild(trustNode(t.trust));
-      textEl.appendChild(tr);
-      row.appendChild(textEl);
-      container.appendChild(row);
-    });
+      li.appendChild(tr);
+      ol.appendChild(li);
+    }
+    container.appendChild(ol);
   }
 
   // ------------------------------------------------------------ featured
 
+  // The longest sessions, one plain list item each: how long, what it did,
+  // and how many of its pull requests merged.
   function renderFeatured(container, featured) {
     container.innerHTML = "";
     if (!featured.length) {
@@ -446,72 +450,61 @@
       );
       return;
     }
+    const ol = el("ol", "plain-list featured-list");
     for (const f of featured) {
-      const card = el("div", "featured-card");
-
-      const figure = el("div", "featured-figure");
-      figure.appendChild(num(f.duration_ms, "hours"));
-      figure.appendChild(el("span", "unit", " hours, one session"));
-      card.appendChild(figure);
-
-      card.appendChild(el("p", "featured-sub", `${f.host} · session ${f.session_id.slice(0, 8)}`));
-
-      const stats = el("div", "featured-stats");
-      const statDefs = [
-        ["Active time", f.active_ms, "duration"],
-        ["Subagents dispatched", f.subagent_count, "count"],
-        ["Tool calls", f.tool_calls_total, "count"],
-        ["Tool failures", f.tool_failures_total, "count"],
-      ];
-      for (const [label, number, kind] of statDefs) {
-        const s = el("div");
-        const strong = el("strong");
-        strong.appendChild(num(number, kind));
-        s.appendChild(strong);
-        s.appendChild(document.createTextNode(label));
-        stats.appendChild(s);
-      }
-      card.appendChild(stats);
-
+      const li = el("li");
+      const head = el("p", "featured-head");
+      const strong = el("strong");
+      strong.appendChild(num(f.duration_ms, "hours"));
+      strong.appendChild(document.createTextNode(" hours in one session"));
+      head.appendChild(strong);
+      head.appendChild(el("span", "muted", ` \u00b7 ${f.host} \u00b7 session ${f.session_id.slice(0, 8)}`));
+      li.appendChild(head);
+      const stats = el("p", "featured-stats");
+      [["active", f.active_ms, "duration"], ["subagents", f.subagent_count, "count"], ["tool calls", f.tool_calls_total, "count"], ["failed", f.tool_failures_total, "count"]].forEach(([label, number, kind], i) => {
+        if (i) stats.appendChild(document.createTextNode(" \u00b7 "));
+        stats.appendChild(num(number, kind));
+        stats.appendChild(document.createTextNode(` ${label}`));
+      });
+      li.appendChild(stats);
       const mergeLine = el("p", "featured-merge");
-      const merged = el("span", "merge-count");
-      merged.appendChild(num(f.prs_merged, "count", { nofn: false }));
-      merged.appendChild(document.createTextNode(" of "));
-      merged.appendChild(num(f.prs_total, "count"));
-      mergeLine.appendChild(merged);
+      mergeLine.appendChild(num(f.prs_merged, "count", { nofn: false }));
+      mergeLine.appendChild(document.createTextNode(" of "));
+      mergeLine.appendChild(num(f.prs_total, "count"));
       mergeLine.appendChild(document.createTextNode(" referenced pull requests confirmed merged"));
-      card.appendChild(mergeLine);
-      if (f.verification === "partial") {
-        card.appendChild(el("p", "featured-sub", "Not every reference could be checked live against GitHub for this build."));
-      } else if (f.verification === "unavailable") {
-        card.appendChild(el("p", "featured-sub", "Merge status could not be verified for this build."));
-      }
-
       if (f.sample_merged_prs.length) {
-        const list = el("ul", "pr-repo-list");
-        for (const pr of f.sample_merged_prs) {
-          const li = document.createElement("li");
-          li.appendChild(safeLink(`merged pull request ${pr.ref}`, pr.url));
-          list.appendChild(li);
-        }
-        card.appendChild(list);
+        mergeLine.appendChild(document.createTextNode(", for example "));
+        f.sample_merged_prs.forEach((pr, i) => {
+          if (i) mergeLine.appendChild(document.createTextNode(", "));
+          mergeLine.appendChild(safeLink(`pull request ${pr.ref}`, pr.url));
+        });
       }
-
-      if (f.models.length) {
-        card.appendChild(el("p", "featured-models", `Models: ${f.models.join(", ")}`));
-      }
-
-      container.appendChild(card);
+      mergeLine.appendChild(document.createTextNode("."));
+      li.appendChild(mergeLine);
+      if (f.verification === "partial") li.appendChild(el("p", "muted", "Not every reference could be checked live against GitHub for this build."));
+      else if (f.verification === "unavailable") li.appendChild(el("p", "muted", "Merge status could not be verified for this build."));
+      if (f.models.length) li.appendChild(el("p", "muted", `Models: ${f.models.join(", ")}`));
+      ol.appendChild(li);
     }
+    container.appendChild(ol);
   }
 
   // -------------------------------------------------------------- waste
+
+  // One meaning, one color: each class and waste draws in its own token
+  // (styles.css), the same on every chart (F.SEGMENTS).
+  const SEGMENT_BY_KEY = new Map(F.SEGMENTS.map((x) => [x.key, x]));
+  function segmentColor(key) {
+    const seg = SEGMENT_BY_KEY.get(key);
+    return seg ? `var(${seg.token})` : "var(--c-waste-unknown)";
+  }
 
   // The waste overview: each kind's labeled time summed over the tasks, from
   // the same per-task labels the task pages show (data.labeled_waste).
   function renderLabeledWaste(container, lw) {
     container.innerHTML = "";
     if (!lw || !lw.rows.length) {
+      container.appendChild(el("h2", "block-title", "Waste across every labeled task"));
       container.appendChild(el("p", "chart-empty", "No task's own sessions are labeled for waste yet, so waste is no data, not zero. Each task's page shows its labels as they arrive."));
       return;
     }
@@ -520,10 +513,10 @@
     cap.appendChild(num(lw.jobs_with_labels, "count"));
     cap.appendChild(document.createTextNode(" tasks with labels, out of "));
     cap.appendChild(num(lw.jobs_finished, "count"));
-    cap.appendChild(document.createTextNode(" finished tasks. It is the same data the task pages show."));
-    container.appendChild(cap);
+    cap.appendChild(document.createTextNode(" finished tasks, largest first. It is the same data the task pages show. Where two tasks share a stretch of a session, it counts once here."));
     const bars = el("div");
-    renderBarList(bars, lw.rows.map((r) => ({ label: wasteName(r.key), number: r.total_ms, color: r.key === "unknown" ? "var(--text-muted)" : "var(--series-8)" })), { kind: "duration", flag: "short" });
+    renderBarList(bars, lw.rows.map((r) => ({ label: wasteName(r.key), number: r.total_ms, color: segmentColor(r.key) })), { kind: "duration", flag: "short", title: "Waste across every labeled task", titleTag: "h2" });
+    bars.insertBefore(cap, bars.children[1] || null);
     container.appendChild(bars);
   }
 
@@ -547,7 +540,7 @@
     function list(title, issues, emptyNote) {
       const wrap = document.createElement("div");
       wrap.style.marginBottom = "14px";
-      wrap.appendChild(el("p", "stat-label", title));
+      wrap.appendChild(el("h2", "block-title", title));
       if (!issues.length) {
         wrap.appendChild(el("p", "chart-empty", emptyNote));
         return wrap;
@@ -621,9 +614,9 @@
     }
     const grid = el("div", "outcome-tiles");
 
-    const head = el("div", "stat-tile outcome-block");
+    const head = el("div", "outcome-block");
     head.appendChild(el("h4", null, "Human attention per accepted outcome"));
-    const v = el("p", "stat-value");
+    const v = el("p", "big-figure");
     v.appendChild(num(o.attention.headline, "duration"));
     head.appendChild(v);
     head.appendChild(el("div", "stat-note", "An estimate of the time a human spent reading and answering, over the outcomes they accepted."));
@@ -666,9 +659,9 @@
     figure(dl, "Jobs with no sign-off record", o.signoff.no_record);
     so.appendChild(dl);
 
-    const fp = el("div", "stat-tile outcome-block");
+    const fp = el("div", "outcome-block");
     fp.appendChild(el("h4", null, "First-pass yield"));
-    const fv = el("p", "stat-value");
+    const fv = el("p", "big-figure");
     fv.appendChild(num(o.first_pass_yield, "pct"));
     fp.appendChild(fv);
     // The counts the percentage is computed from, so a reader can rebuild it.
@@ -748,15 +741,19 @@
   }
 
   const localName = (id) => (Object.prototype.hasOwnProperty.call(localNames, id) ? localNames[id] : null);
-  const jobLabel = (j) => F.jobLabel(localNames, j.id);
 
+  // A link to one task's page, #/task/<key>.
   function jobLink(id, text) {
     const a = document.createElement("a");
-    const safe = F.safeAnchor(`job-${id}`);
+    const safe = F.safeRoute("task", id);
     if (safe) a.href = safe;
     a.textContent = text;
     return a;
   }
+
+  // A task's name as text: its public pull request title "and N more", or
+  // "Private task" and a short key (format.js taskName).
+  const jobLabel = (j) => F.taskNameText(localNames, j);
 
   // A figure in a dense table or a list: "partial" beside it, its reason in
   // the title and in the table's one note; no "declared" chip.
@@ -802,7 +799,11 @@
     const top = rows.find((r) => r.kind === "waste" || r.kind === "unknown");
     if (!top) return el("span", "muted", rows.length ? "none labeled" : "not labeled yet");
     const span = el("span");
-    span.appendChild(document.createTextNode(`${wasteName(top.key)} `));
+    const seg = SEGMENT_BY_KEY.get(top.key);
+    const sw = el("span", "swatch");
+    sw.style.setProperty("--sw", segmentColor(top.key));
+    span.appendChild(sw);
+    span.appendChild(document.createTextNode(`${seg ? seg.label : wasteName(top.key)} `));
     span.appendChild(cellNum(top.total_ms, "duration"));
     return span;
   }
@@ -851,6 +852,13 @@
     table.appendChild(thead);
   }
 
+  // Tasks in finish order, the one that finished last first; tasks with no
+  // position (no facts at all) last.
+  function byFinishDesc(jobs) {
+    const pos = (j) => (j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
+    return [...jobs].sort((a, b) => pos(b) - pos(a));
+  }
+
   function renderJobsTable(container, jobs) {
     container.innerHTML = "";
     if (!jobs.length) {
@@ -858,11 +866,13 @@
       return;
     }
     const table = el("table", "data-table task-table");
-    tableHead(table, [["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Agent time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
+    tableHead(table, [["Finish order", "num"], ["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Agent time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
     const tbody = document.createElement("tbody");
     const notes = new Map();
-    for (const j of jobs) {
+    for (const j of byFinishDesc(jobs)) {
       const tr = document.createElement("tr");
+      const pos = j.finish_order && j.finish_order.state === "measured" ? F.ordinal(j.finish_order.value) : "none";
+      plainCell(tr, "Finish order", el("span", j.finish_basis === "labels" ? "finish-pos" : "finish-pos muted", pos), "num");
       const name = el("span", "task-name");
       name.appendChild(jobLink(j.id, jobLabel(j)));
       plainCell(tr, "Task", name, "task-cell");
@@ -955,34 +965,51 @@
     return span;
   }
 
+  // The status line under the tabs: abnormal, normal or not monitored
+  // (format.js statusLine). Normal is quiet; abnormal is loud and names each
+  // alarm with who is on it, or says no one is; not monitored says what is
+  // not recorded, so no data never reads as normal.
+  const STATUS_WORD = { abnormal: "Abnormal", normal: "Normal", not_monitored: "Not monitored" };
+  const STATUS_MARK = { abnormal: "\u25a0", normal: "\u25cf", not_monitored: "\u25cb" };
+
+  function listWords(xs) {
+    if (xs.length <= 1) return xs.join("");
+    return `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+  }
+
   function renderStatusLine(container, data, health) {
     container.innerHTML = "";
-    let v;
+    let verdict;
     try {
-      v = F.pageVerdict(health, Date.now());
+      verdict = F.pageVerdict(health, Date.now());
     } catch (err) {
-      v = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
+      verdict = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
     }
-    const line = el("p", `status-line status-${v.status}`);
-    const verdict = el("strong", `verdict-inline verdict-inline-${v.status}`, `${VERDICT_MARK[v.status]} ${VERDICT_WORD[v.status]}`);
-    verdict.title = v.reason;
-    line.appendChild(verdict);
-    line.appendChild(document.createTextNode(" · real work captured: "));
-    const cov = data.capture_coverage && data.capture_coverage.share;
-    line.appendChild(cov && cov.state !== "unavailable" ? cellNum(cov, "pct") : el("span", "muted", "not measured yet"));
-    line.appendChild(document.createTextNode(" · improvement loop: "));
-    const k = data.kaizen;
-    if (k.resolved.state === "unavailable" || k.raised.state === "unavailable") {
-      line.appendChild(el("span", "muted", "not known for this build"));
-      line.title = `Improvement cards: ${F.describe(k.raised.state === "unavailable" ? k.raised : k.resolved, "count").reason}`;
+    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health });
+    container.className = `status-line status-${s.state}`;
+    const word = el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`);
+    container.appendChild(word);
+    container.appendChild(document.createTextNode(": "));
+    if (s.state === "abnormal") {
+      s.alarms.forEach((a, i) => {
+        if (i) container.appendChild(document.createTextNode("; "));
+        container.appendChild(document.createTextNode(`${a.text}, `));
+        if (a.owner) {
+          container.appendChild(document.createTextNode("tracked in "));
+          container.appendChild(safeLink(`issue ${a.owner.ref}`, a.owner.url));
+        } else container.appendChild(el("span", "status-owner", "no one is on this"));
+      });
+      container.appendChild(document.createTextNode(". "));
+    } else if (s.state === "normal") {
+      container.appendChild(document.createTextNode(`no alarm. Checked ${listWords(s.checked)}. `));
     } else {
-      line.appendChild(cellNum(k.resolved, "count"));
-      line.appendChild(document.createTextNode(" of "));
-      line.appendChild(cellNum(k.raised, "count"));
-      line.appendChild(document.createTextNode(" cards closed"));
+      container.appendChild(document.createTextNode(`no alarm is raised, but not everything is watched. Not recorded: ${listWords(s.missing)}.${s.checked.length ? ` Checked: ${listWords(s.checked)}.` : ""} `));
     }
-    container.appendChild(line);
-    if (v.status !== "alive") container.appendChild(el("p", "status-reason", `Why: ${v.reason}.`));
+    const more = document.createElement("a");
+    const safe = F.safeRoute("store");
+    if (safe) more.href = safe;
+    more.textContent = "Health details";
+    container.appendChild(more);
   }
 
   // Several figures that are all no data for one reason say it once.
@@ -1000,10 +1027,11 @@
     return p;
   }
 
+  // A headline figure as plain text: its label, the figure, and its notes.
   function headlineTile(container, label, valueNode, notes) {
-    const t = el("div", "stat-tile answer-headline");
-    t.appendChild(el("p", "stat-label", label));
-    const v = el("p", "stat-value");
+    const t = el("div", "answer-line");
+    t.appendChild(el("p", "answer-label", label));
+    const v = el("p", "big-figure");
     v.appendChild(valueNode);
     t.appendChild(v);
     for (const n of notes) t.appendChild(n);
@@ -1020,7 +1048,7 @@
     container.innerHTML = "";
     const h = o.attention.headline;
     const noneAccepted = o.signoff.accepted.state === "measured" && o.signoff.accepted.value === 0;
-    const row = el("div", "answer-tiles headline-row");
+    const row = el("div", "answer-lines");
     if (h.state !== "unavailable") {
       headlineTile(row, "Operator attention per accepted outcome", num(h, "duration", { nofn: false }), [
         note("stat-note", "An estimate of the operator's reading and answering time, over the outcomes accepted. Attention spent on work sent back or still waiting stays in the cost."),
@@ -1040,7 +1068,7 @@
       }
     } else {
       const fix = document.createElement("a");
-      const safe = F.safeAnchor("fix");
+      const safe = F.safeRoute("causes");
       if (safe) fix.href = safe;
       fix.textContent = "What unblocks it";
       headlineTile(row, "Operator attention per accepted outcome", el("span", "num num-unavailable", "no data"), [
@@ -1117,14 +1145,16 @@
     return parts.length ? `confidence: ${parts.join(", ")}` : "confidence: none recorded";
   }
 
+  // One figure in a plain row of facts: its label, the figure and a short
+  // note on what it counts. No boxes: none of these is clickable.
   function tile(container, label, valueNode, notes) {
-    const t = el("div", "stat-tile");
-    t.appendChild(el("p", "stat-label", label));
-    const v = el("p", "stat-value");
+    const t = el("div", "fact");
+    t.appendChild(el("dt", null, label));
+    const v = el("dd", "fact-value");
     v.appendChild(valueNode);
     t.appendChild(v);
     for (const n of notes) {
-      const p = el("p", "stat-note");
+      const p = el("dd", "fact-note");
       p.appendChild(typeof n === "string" ? document.createTextNode(n) : n);
       t.appendChild(p);
     }
@@ -1163,18 +1193,72 @@
     return n.basis === "declared" ? "from the task card's dates" : "from the task card to its last session";
   }
 
+  // Where a task sits in finish order, in words.
+  function finishWords(j, jobs) {
+    const labeled = jobs.filter((x) => x.finish_basis === "labels").length;
+    if (!j.finish_order || j.finish_order.state !== "measured") return "It has no place in finish order: no session of it is published.";
+    if (j.finish_basis === "labels") return `It was the ${F.ordinal(j.finish_order.value)} of ${labeled} labeled tasks to finish.`;
+    if (j.status === "done") return "It is done but not labeled for waste yet, so it is listed after the labeled tasks, by its first session.";
+    return "It is still open, so it is listed after the finished tasks, by its first session.";
+  }
+
+  // The walk between tasks: the one that finished before, the one after,
+  // and a picker with every task, the last to finish first.
+  function renderTaskPicker(container, jobs, current) {
+    container.innerHTML = "";
+    const ordered = byFinishDesc(jobs);
+    const nav = el("nav", "task-walk");
+    nav.setAttribute("aria-label", "Other tasks");
+    const placed = ordered.filter((x) => x.finish_order && x.finish_order.state === "measured");
+    const i = placed.findIndex((x) => x.id === current);
+    const step = (j, word) => {
+      const span = el("span", "task-walk-step");
+      if (!j) return span;
+      span.appendChild(document.createTextNode(`${word}: `));
+      span.appendChild(jobLink(j.id, jobLabel(j)));
+      return span;
+    };
+    nav.appendChild(step(i >= 0 ? placed[i + 1] : null, "\u2190 Earlier in finish order"));
+    nav.appendChild(step(i > 0 ? placed[i - 1] : null, "Later in finish order \u2192"));
+    const label = el("label", "task-select-label", "Any task ");
+    const select = el("select", "task-select");
+    for (const j of ordered) {
+      const o = el("option", null, `${j.finish_order && j.finish_order.state === "measured" ? `${F.ordinal(j.finish_order.value)} \u00b7 ` : ""}${jobLabel(j)}`);
+      o.value = j.id;
+      if (j.id === current) o.selected = true;
+      select.appendChild(o);
+    }
+    select.addEventListener("change", () => {
+      const safe = F.safeRoute("task", select.value);
+      if (safe) window.location.hash = safe;
+    });
+    label.appendChild(select);
+    nav.appendChild(label);
+    container.appendChild(nav);
+  }
+
   function renderJobDetail(container, jobs, id, sessions) {
     container.innerHTML = "";
     const j = id ? jobs.find((x) => x.id === id) : null;
     if (!j) {
-      container.appendChild(el("h2", "section-title", "Task not found"));
-      container.appendChild(el("p", "section-sub", "No task in this build has that key. It may have been re-derived or withdrawn."));
+      container.appendChild(el("h1", "view-title", "Task not found"));
+      container.appendChild(el("p", "lede", "No task in this build has that key. It may have been re-derived or withdrawn. Pick another task above, or see every task under Compare tasks."));
       return;
     }
     const name = localName(j.id);
-    container.appendChild(el("h2", "section-title", jobLabel(j)));
+    const tn = F.taskName(localNames, j);
+    const h = el("h1", "view-title task-title", tn.title);
+    if (tn.more) h.appendChild(el("span", "task-more", ` and ${tn.more} more pull request${tn.more === 1 ? "" : "s"}`));
+    container.appendChild(h);
     const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
-    container.appendChild(el("p", "task-key", name ? `${where ? `${where} · ` : ""}key ${j.id}` : `Anonymous task key ${j.id}. The task's name stays private on the operator's machine.`));
+    const keyLine = tn.kind === "local"
+      ? `${where ? `${where} · ` : ""}key ${j.id}`
+      : tn.kind === "public"
+        ? `Named after its first public pull request. Task key ${j.id}.`
+        : tn.kind === "unnamed"
+          ? `Its pull requests' titles could not be read for this build. Task key ${j.id}.`
+          : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
+    container.appendChild(el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
 
     const status = el("p", "task-status");
     status.appendChild(outcomeNode(j));
@@ -1188,7 +1272,7 @@
     }
     container.appendChild(status);
 
-    const tiles = el("div", "answer-tiles task-tiles");
+    const tiles = el("dl", "facts-row");
     const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", basis: false, reason: false });
     tile(tiles, "Elapsed", fig(j.lead_time_ms, "duration"), [elapsedCaption(j.lead_time_ms)]);
     tile(tiles, "Agent time", fig(j.active_time_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
@@ -1203,8 +1287,8 @@
     }
 
     // Waste, with confidence.
-    const waste = el("div", "chart-card");
-    waste.appendChild(el("h3", null, "Where the time went"));
+    const waste = el("section", "block");
+    waste.appendChild(el("h2", "block-title", "Where the time went"));
     const rows = (j.waste && j.waste.rows) || [];
     const cap = el("p", "chart-caption");
     cap.appendChild(document.createTextNode("Labeled by the independent waste evaluator: "));
@@ -1228,15 +1312,15 @@
       const barRows = rows.map((r) => ({
         label: wasteName(r.key),
         flag: r.kind === "value" || r.kind === "support" ? "" : confidenceWords(r),
-        color: r.kind === "value" ? "var(--status-good)" : r.kind === "support" ? "var(--series-1)" : r.kind === "unknown" ? "var(--text-muted)" : "var(--series-8)",
+        color: segmentColor(r.key),
         number: r.total_ms,
       }));
       const bars = el("div");
-      renderBarList(bars, barRows, { kind: "duration", flag: "short" });
+      renderBarList(bars, barRows, { kind: "duration", flag: "short", title: "Labeled time by class and waste", titleTag: "h3" });
       waste.appendChild(bars);
       const top = rows.find((r) => r.kind === "waste" || r.kind === "unknown");
       if (top) {
-        const p = el("p", "fix-action");
+        const p = el("p", "fix-action task-do");
         p.appendChild(el("span", "fix-do", "Do: "));
         p.appendChild(document.createTextNode(wasteActions[top.key] || "Look at the labeled stretches and remove the cause."));
         waste.appendChild(p);
@@ -1245,8 +1329,8 @@
     container.appendChild(waste);
 
     // Pull requests.
-    const prs = el("div", "chart-card");
-    prs.appendChild(el("h3", null, "Pull requests"));
+    const prs = el("section", "block");
+    prs.appendChild(el("h2", "block-title", "Pull requests"));
     const prLine = el("p", "chart-caption");
     prLine.appendChild(document.createTextNode("Public pull requests the task's sessions referenced: "));
     prLine.appendChild(cellNum(j.public_prs, "count"));
@@ -1263,8 +1347,8 @@
     container.appendChild(prs);
 
     // Sessions.
-    const ses = el("div", "chart-card");
-    ses.appendChild(el("h3", null, "Sessions"));
+    const ses = el("section", "block");
+    ses.appendChild(el("h2", "block-title", "Sessions"));
     const byId = new Map((sessions || []).map((s) => [s.session_id, s]));
     if (!j.sessions.length) {
       ses.appendChild(el("p", "chart-empty", "No session is on this task's timeline."));
@@ -1278,7 +1362,7 @@
         const f = byId.get(s.session_id);
         const tr = document.createElement("tr");
         const link = document.createElement("a");
-        const safe = F.safeAnchor(`session-${s.session_id}`);
+        const safe = F.safeRoute("task", j.id, "session", s.session_id);
         if (safe) link.href = safe;
         link.textContent = `${s.host} · ${s.session_id.slice(0, 8)}`;
         plainCell(tr, "Session", link, "task-cell");
@@ -1313,17 +1397,30 @@
 
   // --------------------------------------------------------- session page
 
-  function renderSessionDetail(container, sessions, jobs, id) {
+  function renderSessionDetail(container, sessions, jobs, id, jobId) {
     container.innerHTML = "";
+    const back = el("p", "back-link");
+    const parent = jobId ? jobs.find((x) => x.id === jobId) : null;
+    if (parent) {
+      back.appendChild(document.createTextNode("\u2190 "));
+      back.appendChild(jobLink(parent.id, jobLabel(parent)));
+    } else {
+      const a = document.createElement("a");
+      const safe = F.safeRoute("compare");
+      if (safe) a.href = safe;
+      a.textContent = "\u2190 Every task";
+      back.appendChild(a);
+    }
+    container.appendChild(back);
     const s = id ? (sessions || []).find((x) => x.session_id === id) : null;
     if (!s) {
-      container.appendChild(el("h2", "section-title", "Session not found"));
-      container.appendChild(el("p", "section-sub", "This build has no published facts for that session."));
+      container.appendChild(el("h1", "view-title", "Session not found"));
+      container.appendChild(el("p", "lede", "This build has no published facts for that session."));
       return;
     }
-    container.appendChild(el("h2", "section-title", `Session ${s.session_id.slice(0, 8)}`));
+    container.appendChild(el("h1", "view-title", `Session ${s.session_id.slice(0, 8)}`));
     container.appendChild(el("p", "task-key", `${s.host} · ${s.entrypoint} · ${s.session_id}`));
-    const tiles = el("div", "answer-tiles task-tiles");
+    const tiles = el("dl", "facts-row");
     const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", reason: false });
     tile(tiles, "Length", fig(s.duration_ms, "duration"), ["from the session's first record to its last"]);
     tile(tiles, "Agent time", fig(s.active_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
@@ -1332,8 +1429,8 @@
     container.appendChild(tiles);
     const partly = [s.duration_ms, s.active_ms, s.tool_calls_total, s.tool_failures_total, s.subagent_count].filter((n) => n.state !== "measured");
     if (partly.length) container.appendChild(el("p", "chart-caption", `Why some figures say no data or partial: ${[...new Set(partly.map((n) => F.describe(n, "count").reason))].join("; ")}.`));
-    const card = el("div", "chart-card");
-    card.appendChild(el("h3", null, "Tasks this session worked on"));
+    const card = el("section", "block");
+    card.appendChild(el("h2", "block-title", "Tasks this session worked on"));
     const ul = el("ul", "pr-list");
     for (const ref of s.jobs) {
       const li = document.createElement("li");
@@ -1350,24 +1447,59 @@
   }
 
   // ------------------------------------------------------------- routing
-  // #job-<key> shows one task, #session-<id> one session; anything else is
-  // the overview (and an in-page anchor there).
+  // Hash routes (format.js parseRoute): #/task/<key> (and #/ for the task
+  // that finished last), #/task/<key>/session/<id>, #/compare, #/causes,
+  // #/act, #/why, #/about and #/store. The first site's #job-<key>,
+  // #session-<id> and section anchors redirect to their new homes.
+
+  const VIEWS = ["task", "session", "compare", "causes", "act", "why", "about", "store", "missing"];
+  const VIEW_TITLE = { task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", act: "Act", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
+  let routedOnce = false;
 
   function route(data) {
-    const jobId = idFromHash("job");
-    const sessionId = idFromHash("session");
-    const views = { overview: !jobId && !sessionId, job: !!jobId, session: !!sessionId };
-    for (const [name, on] of Object.entries(views)) document.getElementById(`view-${name}`).hidden = !on;
-    document.body.dataset.view = jobId ? "job" : sessionId ? "session" : "overview";
-    if (jobId) renderJobDetail(document.getElementById("job-detail"), data.jobs, jobId, data.sessions);
-    if (sessionId) renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, sessionId);
-    if (jobId || sessionId) window.scrollTo(0, 0);
-    else {
-      // Coming back from a task, the anchor was hidden when the browser looked for it.
-      const anchor = /^#([A-Za-z][A-Za-z0-9_-]{0,40})$/.exec(window.location.hash || "");
-      const target = anchor && document.getElementById(anchor[1]);
-      if (target) target.scrollIntoView({ block: "start" });
+    const jobOfSession = (sid) => {
+      const j = data.jobs.find((x) => x.sessions.some((s) => s.session_id === sid));
+      return j ? j.id : null;
+    };
+    let r = F.parseRoute(window.location.hash, jobOfSession);
+    if (r.view === "skip") {
+      const main = document.getElementById("main");
+      if (main) main.focus();
+      return;
     }
+    if (r.view === "redirect") {
+      history.replaceState(null, "", r.to);
+      r = F.parseRoute(r.to, jobOfSession);
+    }
+    for (const v of VIEWS) document.getElementById(`view-${v}`).hidden = v !== r.view;
+    document.body.dataset.view = r.view;
+    const step = F.stepOf(r.view);
+    for (const a of document.querySelectorAll("[data-step]")) {
+      if (a.dataset.step === step || a.dataset.step === r.view) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    }
+    let title = VIEW_TITLE[r.view];
+    if (r.view === "task") {
+      const fallback = F.defaultTask(data.jobs);
+      const id = r.job || (fallback ? fallback.id : null);
+      renderTaskPicker(document.getElementById("task-picker"), data.jobs, id);
+      renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
+      const j = data.jobs.find((x) => x.id === id);
+      if (j) title = jobLabel(j);
+    }
+    if (r.view === "session") renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, r.session, r.job);
+    document.title = `${title} \u00b7 The factory`;
+    window.scrollTo(0, 0);
+    // After the first page load, move focus to the new view's heading, so a
+    // keyboard or screen reader user lands where the content changed.
+    if (routedOnce) {
+      const h = document.querySelector(`#view-${r.view} h1`);
+      if (h) {
+        h.tabIndex = -1;
+        h.focus({ preventScroll: true });
+      }
+    }
+    routedOnce = true;
   }
 
   // -------------------------------------------------------------- health
@@ -1387,6 +1519,11 @@
     open_improvement_items: "Open improvement items (count and oldest age)",
     unsigned_deliveries: "Unsigned deliveries",
   };
+
+  function hoursAgo(h) {
+    const n = Math.max(0, Math.floor(h));
+    return n < 1 ? "less than an hour" : `${F.toText(measuredCount(n), "count")} hour${n === 1 ? "" : "s"}`;
+  }
 
   function row(dl, label, node) {
     dl.appendChild(el("dt", null, label));
@@ -1428,14 +1565,8 @@
 
   function drawHealthDetails(container, health, v) {
     const dl = el("dl", "health-facts");
-    const builtDate = new Date(health.built_at);
-    row(
-      dl,
-      "Last successful data build",
-      Number.isFinite(builtDate.getTime())
-        ? `${builtDate.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}${v.ageHours !== null ? ` (${Math.max(0, Math.floor(v.ageHours))} hours ago)` : ""}`
-        : "no data (the build stamp could not be read)",
-    );
+    // How long ago, never a calendar date.
+    row(dl, "Last successful data build", v.ageHours !== null ? `${hoursAgo(v.ageHours)} ago` : "no data (the build stamp could not be read)");
     const ni = health.newest_intake;
     row(dl, "Newest intake", ni.state === "unavailable" ? num(ni, "text") : `${INTAKE_CLASS[ni.value] || "unrecognized"} (at the last build)`);
     const fb = health.factory_build;
@@ -1716,8 +1847,13 @@
     } catch (err) {
       renderHealth(document.getElementById("health-panel"), health, false, err.message);
       const msg = "This page could not load the store's data (" + err.message + "). Try reloading, or check the reports branch directly.";
-      emptyState(document.getElementById("featured-grid"), msg);
-      emptyState(document.getElementById("answer-tiles"), msg);
+      const line = document.getElementById("status-line");
+      line.className = "status-line status-abnormal";
+      line.textContent = `\u25a0 Abnormal: the store's data could not be loaded (${err.message}), no one is on this.`;
+      for (const id of ["job-detail", "jobs-table", "fix-list", "kaizen-panel", "featured-grid", "answer-tiles"]) {
+        const node = document.getElementById(id);
+        if (node) emptyState(node, msg);
+      }
       return;
     }
     renderHealth(document.getElementById("health-panel"), health, true, "");
@@ -1733,15 +1869,11 @@
     renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs);
     renderLabeledWaste(document.getElementById("labeled-waste"), data.labeled_waste);
 
-    // Build metadata footer
-    const built = new Date(data.built_at);
+    // Build metadata footer: how long ago, never a calendar date.
+    const builtMs = Date.parse(data.built_at);
     const meta = document.getElementById("build-meta");
     meta.innerHTML = "";
-    meta.appendChild(
-      document.createTextNode(
-        `Built ${built.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} from the store's public data`,
-      ),
-    );
+    meta.appendChild(document.createTextNode(Number.isFinite(builtMs) ? `Built ${hoursAgo((Date.now() - builtMs) / 3600000)} ago from the store's public data` : "Built from the store's public data"));
     if (typeof data.reports_commit === "string" && /^[0-9a-f]{7,40}$/.test(data.reports_commit)) {
       meta.appendChild(document.createTextNode(", reports commit "));
       const a = document.createElement("a");
@@ -1826,10 +1958,11 @@
       trust: r.trust,
     }));
     renderBarList(document.getElementById("chart-time-breakdown"), timeBreakdownRows, {
-      scale: "log",
+      title: "Where time goes in a finished task",
+      titleTag: "h2",
       color: "var(--series-1)",
       kind: "duration",
-      suffix: " med.",
+      suffix: " median",
       emptyText: "Not enough measured jobs yet.",
     });
     // Beside each row's figure: its trust state, as text.
@@ -1856,6 +1989,8 @@
       .sort((a, b) => b[1].value - a[1].value)
       .map(([status, count]) => ({ label: status, number: count, color: statusColor(status) }));
     renderBarList(document.getElementById("chart-job-status"), statusRows, {
+      title: "Job lifecycle",
+      unit: "jobs",
       kind: "count",
       emptyText: "No jobs tracked yet.",
     });
@@ -1875,6 +2010,8 @@
       ],
     }));
     renderBarList(document.getElementById("chart-tool-calls"), toolCallRows, {
+      title: "Tool calls by kind",
+      unit: "calls",
       color: "var(--series-1)",
       kind: "compact",
       emptyText: "No tool calls recorded yet.",
@@ -1894,8 +2031,8 @@
         ],
       }));
     renderBarList(document.getElementById("chart-tool-failures"), failureRows, {
+      title: "Failure rate by tool kind",
       color: "var(--series-2)",
-      max: Math.max(0.05, ...failureRows.map((r) => (r.number.state === "unavailable" ? 0 : r.number.value))),
       kind: "pct1",
       emptyText: "No tool kind has 20 or more recorded calls yet.",
     });
@@ -1910,6 +2047,8 @@
       ],
     }));
     renderBarList(document.getElementById("chart-models"), modelRows, {
+      title: "Model requests",
+      unit: "requests",
       color: "var(--series-3)",
       kind: "compact",
       emptyText: "No model usage recorded yet.",
@@ -1923,6 +2062,8 @@
       number: data.subagents.buckets[k],
     }));
     renderBarList(document.getElementById("chart-subagents"), subagentRows, {
+      title: "Subagent fan-out",
+      unit: "sessions",
       color: "var(--series-1)",
       kind: "count",
       suffix: " sessions",

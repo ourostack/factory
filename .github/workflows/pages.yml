@@ -5,7 +5,8 @@
 # published) and the facts on `main`, makes a handful of unauthenticated,
 # read-only calls to the public GitHub REST API (pull request merge state,
 # kaizen/andon issues), and writes one data.json next to the static
-# HTML/CSS/JS in site/src. The page itself fetches that data.json at runtime;
+# HTML/CSS/JS in site/src. It also publishes the reports branch's job and
+# rollup JSON files beside the page, and llms.txt, the index agents read. The page itself fetches that data.json at runtime;
 # nothing here talks to a database or holds a token beyond the ambient
 # GITHUB_TOKEN used only to raise the GitHub API rate limit.
 #
@@ -86,6 +87,14 @@ jobs:
           node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json
           cp site/src/index.html site/src/styles.css site/src/format.js site/src/app.js site/dist/
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The task, session and rollup files the views load on demand, and
+      # llms.txt, the index agents read. Whatever the reports branch holds is
+      # published; a file the pipeline does not write yet is simply absent.
+      - name: Publish data files
+        run: |
+          set -euo pipefail
+          node site/scripts/publish-files.mjs --reports _reports --dist site/dist --template site/src/llms-template.txt | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
