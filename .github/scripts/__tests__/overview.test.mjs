@@ -386,5 +386,8 @@ test("no view scrolls the page sideways: grids never ask for more than their col
   assert.match(css, /minmax\(min\(320px, 100%\), 1fr\)/)
   assert.match(css, /#jobs-table, \.chart-card:has\(> table\.data-table\) \{ overflow-x: auto; \}/)
   assert.match(css, /#jobs-table, \.chart-card, \.table-wrap \{ position: relative; \}/)
-  assert.match(css, /@media \(min-width: 721px\) \{ table\.data-table\.task-table td:not\(\.num\):not\(\.task-cell\) \{ white-space: normal; \} \}/)
+  assert.match(css, /table\.data-table\.task-table td:not\(\.num\) \{ white-space: normal; \}/)
+  // Task names wrap between words only, so a key never splits mid-word and a long name never pushes the other columns away.
+  assert.match(css, /table\.data-table\.task-table td\.task-cell \{ min-width: 14ch; max-width: 30ch; \}/)
+  assert.match(css, /table\.data-table\.task-table td\.task-cell a \{ overflow-wrap: normal; word-break: normal; \}/)
 })
