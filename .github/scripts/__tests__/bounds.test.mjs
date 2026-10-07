@@ -46,6 +46,10 @@ test("ratios, medians and shares have no direction", () => {
 test("a lead time is a lower bound only when the job is still open", () => {
   assert.equal(direct(p(["censored"]), "lead_time_ms").bound, "lower")
   assert.equal(direct(p(["censored", "worker_shared"]), "lead_time_ms").bound, "unknown")
+  // Desk raised the lead time to the span of the job's recorded work: the true figure is at least that.
+  assert.equal(direct(p(["card_dates_shorter_than_work"]), "lead_time_ms").bound, "lower")
+  assert.equal(direct(p(["card_dates_shorter_than_work", "censored"]), "lead_time_ms").bound, "lower")
+  assert.equal(direct(p(["card_dates_shorter_than_work", "worker_shared"]), "lead_time_ms").bound, "unknown")
 })
 
 test("a number that is not partial carries no bound", () => {
