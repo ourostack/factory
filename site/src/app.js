@@ -725,14 +725,16 @@
   // --------------------------------------------------------- task names
   // Private desks publish only anonymous job keys. On the operator's own
   // machine a `local-names.json` beside the page may name them (format.js
-  // parseLocalNames). A missing, slow or malformed file is the public view,
-  // silently: the fetch gives up after a second.
+  // parseLocalNames). The public page never asks for it (servesLocalNames). A
+  // missing, slow or malformed file is the public view, silently: the fetch
+  // gives up after a second.
 
   let localNames = {};
   // What to do about each kind of waste, from the build (fix-next.mjs).
   let wasteActions = {};
 
   async function loadLocalNames() {
+    if (!F.servesLocalNames(location.hostname)) return;
     const ctrl = typeof AbortController === "function" ? new AbortController() : null;
     const timer = ctrl ? setTimeout(() => ctrl.abort(), 1000) : null;
     try {

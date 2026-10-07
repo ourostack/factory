@@ -485,11 +485,17 @@
     return out;
   }
 
+  // Only the private view, served from this machine, can have the names file;
+  // the public page never asks for it.
+  function servesLocalNames(hostname) {
+    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
+  }
+
   // A job's label: its local name when there is one, else its short key.
   function jobLabel(names, id) {
     const n = names && Object.prototype.hasOwnProperty.call(names, id) ? names[id] : null;
     return n ? n.title : `Task ${String(id).slice(0, 10)}`;
   }
 
-  return { parseLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  return { parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });
