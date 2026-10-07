@@ -20,6 +20,10 @@
     <pattern id="hatch-waiting" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-waste-waiting)" stroke-width="2.5" />
     </pattern>
+    <pattern id="hatch-labeled-wait" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-waste-waiting)" stroke-width="1.5" />
+      <line x1="0" y1="1" x2="6" y2="1" style="stroke: var(--c-waste-waiting)" stroke-width="1.5" />
+    </pattern>
     <pattern id="hatch-no-session" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-no-session)" stroke-width="2" />
     </pattern>
@@ -167,6 +171,7 @@
       <dt><span class="swatch swatch-hatch" style="--sw: var(--c-agents-working)"></span>Agents working, not labeled</dt><dd>Working time when an agent was busy but the evaluator's labels do not say what the work was.</dd>
       <dt><span class="swatch swatch-outline" style="--sw: var(--c-not-labeled)"></span>Not labeled yet</dt><dd>Working time the waste evaluator has not classified yet. It is shown as its own part, never as zero.</dd>
       <dt><span class="swatch swatch-hatch" style="--sw: var(--c-no-session)"></span>No session running</dt><dd>Waiting in which no agent session of the task was open at all; the queue before the first session is shown apart.</dd>
+      <dt>Labeled wait</dt><dd>A stretch of a session the evaluator labeled as waiting, with what it waited on. The session swimlane draws it cross-hatched. It is the evaluator's label, not the page's waiting: waiting always means idle time.</dd>
       <dt>Value stream map</dt><dd>Lean's picture of one item's journey: each step as a box, the waits between steps as triangles, and a timeline underneath (<a href="https://www.lean.org/the-lean-post/articles/understanding-the-fundamentals-of-value-stream-mapping" target="_blank" rel="noopener">LEI</a>). On this site a step is a burst of agent work.</dd>
       <dt>Timeline ladder</dt><dd>The square wave under a value stream map: one level for waiting, one for working, each segment labeled with its duration, so it is plain how much of the lead time was waiting.</dd>
       <dt>Inventory triangle</dt><dd>On a value stream map, the triangle between two steps marks work waiting between them. On this map it marks waiting, idle time, with what it waited on; its time is waiting, not the inventory waste.</dd>

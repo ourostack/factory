@@ -718,11 +718,17 @@
     }
     // An open issue labeled factory-alarm whose title carries an alarm's key
     // (capture:<host>, loop:<code>) owns that alarm (desk#232).
+    // When the build could not look (GitHub unreachable, or a build from
+    // before owner issues were read), an alarm with no owner says so rather
+    // than claiming no one is on it.
     const owners = Array.isArray(x.alarmIssues) ? x.alarmIssues : [];
+    const ownersChecked = x.alarmIssuesVerification !== "unavailable" && Array.isArray(x.alarmIssues);
+    const notChecked = x.alarmIssuesVerification === "unavailable" ? "owner not checked (GitHub could not be reached for this build)" : "owner not checked (this build did not look for owner issues)";
     for (const a of alarms) {
       if (a.owner) continue;
       const i = owners.find((o) => o && o.issue_state !== "closed" && Array.isArray(o.keys) && o.keys.includes(a.key));
       if (i) a.owner = { ref: i.ref, url: i.url };
+      else a.ownerText = ownersChecked ? "no one is on this" : notChecked;
     }
     if (alarms.length) return { state: "abnormal", alarms, checked, missing };
     if (missing.length) return { state: "not_monitored", alarms, checked, missing };

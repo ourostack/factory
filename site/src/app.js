@@ -980,7 +980,7 @@
     } catch (err) {
       verdict = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
     }
-    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues });
+    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues, alarmIssuesVerification: data.alarm_issues_verification });
     container.className = `status-line status-${s.state}`;
     const word = el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`);
     container.appendChild(word);
@@ -992,7 +992,7 @@
         if (a.owner) {
           container.appendChild(document.createTextNode("tracked in "));
           container.appendChild(safeLink(`issue ${a.owner.ref}`, a.owner.url));
-        } else container.appendChild(el("span", "status-owner", "no one is on this"));
+        } else container.appendChild(el("span", a.ownerText === "no one is on this" ? "status-owner" : "status-owner status-owner-unchecked", a.ownerText || "no one is on this"));
       });
       container.appendChild(document.createTextNode(". "));
     } else if (s.state === "normal") {
@@ -1574,15 +1574,18 @@
       if (d.state === "unavailable") return "no data";
       // A share above zero never reads 0%. A lead time uses the lede's units
       // (hours up to three days) and says "at least" when it is partial.
-      if (kind !== "pct") return W.statedText(n, "duration");
-      const b = d.state === "partial" ? n.bound : null;
-      return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${W.pctWords(n.value)}`;
+      return W.statedText(n, "duration");
     };
     const draw = () => {
       const rows = W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value);
       list.innerHTML = "";
-      count.textContent = `${rows.length} of ${jobs.length} tasks, the latest to finish first`;
+      count.textContent = `${rows.length} of ${jobs.length} tasks`;
+      let group = null;
       for (const r of rows) {
+        if (r.group !== group) {
+          group = r.group;
+          list.appendChild(el("li", "picker-group", group === "finished" ? "Finished, the latest first" : "Still open or not labeled yet"));
+        }
         const li = document.createElement("li");
         const a = el("a", "picker-row");
         const safe = F.safeRoute("task", r.id);
@@ -1594,7 +1597,7 @@
         const meta = el("span", "picker-meta");
         meta.appendChild(el("span", null, r.status || "status unknown"));
         meta.appendChild(el("span", null, `lead ${fig(r.lead, "duration")}`));
-        meta.appendChild(el("span", null, `flow ${fig(r.fe, "pct")}`));
+        meta.appendChild(el("span", null, `flow ${r.feText || "no data"}`));
         if (r.badge) meta.appendChild(el("span", `picker-badge picker-badge-${r.badge === "partial" ? "partial" : "none"}`, r.badge));
         a.appendChild(meta);
         li.appendChild(a);
@@ -1847,8 +1850,8 @@
     };
     // The same words as the lede, so the two never disagree.
     const words = new Map();
-    for (const p of W.lede(row, F.reasonText, { published: tasksPublished, idle }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, p.text);
-    const leadWords = (words.has("lead") && row && row.lead_time_ms && row.lead_time_ms.state === "partial" ? "at least " : "") + (words.get("lead") || "");
+    for (const p of W.lede(row, F.reasonText, { published: tasksPublished, idle }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, `${p.q || ""}${p.text}`);
+    const leadWords = (words.has("lead") && row && row.lead_time_ms && row.lead_time_ms.state === "partial" && !/^at /.test(words.get("lead")) ? "at least " : "") + (words.get("lead") || "");
     const fig = (key, n) => {
       if (words.has(key)) return document.createTextNode((key === "lead" && n && n.state === "partial" && !/^at /.test(words.get(key)) ? "at least " : "") + words.get(key));
       const nd = el("span", "num num-unavailable", "no data");
@@ -1860,7 +1863,7 @@
     line("sum-lead", "Lead time", fig("lead", row && row.lead_time_ms), "from start to end");
     line("sum-working", "Working time", fig("working", row && row.working_ms), "agents busy");
     line("sum-value", "of which value-adding", fig("value", row && row.value_in_working_ms), "as the evaluator labeled it");
-    line("sum-waiting", "Waiting", idle && idle.state !== "unavailable" && words.has("waiting") ? document.createTextNode(`${idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : ""}${words.get("waiting")}`) : el("span", "num num-unavailable", "no data"), "idle: lead time − working time");
+    line("sum-waiting", "Waiting", idle && idle.state !== "unavailable" && words.has("waiting") ? document.createTextNode(words.get("waiting")) : el("span", "num num-unavailable", "no data"), "idle: lead time − working time");
     line("sum-fe", "Flow efficiency", fig("fe", row && row.flow_efficiency), "working time ÷ lead time");
     if (phone) root.appendChild(sum);
     else root.appendChild(place(sum, model.items.length, 3, 2));
@@ -2049,8 +2052,8 @@
       container.appendChild(ul);
     }
     for (const n of bar.notes) container.appendChild(el("p", "chart-caption", n));
-    if (bar.partial) container.appendChild(el("p", "chart-caption", `Partial: ${[...new Set([stackRow.lead_time_ms, row && row.working_ms, ...Object.values(stackRow.waste_ms || {}), ...Object.values(stackRow.class_ms || {})].flatMap((n) => (n && n.state === "partial" ? n.reasons : [])))].map(F.reasonText).join("; ") || "some parts are partial"}.`));
-    if (idle.source === "map") container.appendChild(el("p", "chart-caption", "The waiting split comes from this task's map: each wait between bursts with what it waited on, and idle moments inside bursts as cause not recorded."));
+    if (bar.partial) container.appendChild(el("p", "chart-caption", W.barPartialNote([...new Set([stackRow.lead_time_ms, row && row.working_ms, ...Object.values(stackRow.waste_ms || {}), ...Object.values(stackRow.class_ms || {})].flatMap((n) => (n && n.state === "partial" ? n.reasons : [])))].map(F.reasonText), bar.groups)));
+    if (idle.source === "map") container.appendChild(el("p", "chart-caption", idle.burst_causes ? "The waiting split comes from this task's map: each wait between bursts and the idle moments inside bursts, each with what it waited on." : "The waiting split comes from this task's map: each wait between bursts with what it waited on, and idle moments inside bursts as cause not recorded."));
 
     // Its top causes, by hours.
     // Waiting causes come from the same idle split as the bar, so the list
@@ -2292,7 +2295,7 @@
         const seg = W.stretchSegment(st);
         const xa = x(st.start_ms);
         const w = Math.max(1, x(st.end_ms) - xa);
-        const fill = st.class === "muda" && st.waste === "waiting" ? "url(#hatch-waiting)" : segmentFill(seg, false);
+        const fill = st.class === "muda" && st.waste === "waiting" ? "url(#hatch-labeled-wait)" : segmentFill(seg, false);
         for (const wk of new Set(W.stretchWorkers(st, intervals).map(laneOf))) {
           if (!laneY.has(wk)) continue;
           s.appendChild(svg("rect", { x: xa, y: laneY.get(wk) + 2, width: w, height: LANE_H - 4, fill, class: "lane-band" }));
@@ -2334,7 +2337,7 @@
         const c = W.drawer({ kind: "stretch", stretch: st, index: k, total: stretches.length, intervals, lanes: allLanes }, ctxDrawer);
         g.setAttribute("aria-label", `Stretch ${k + 1} of ${stretches.length}: ${c.title}, ${W.durationWords(st.end_ms - st.start_ms)}${st.waited_on ? `, ${W.waitedOnWords(st.waited_on, "short")}` : ""}. Opens the evidence.`);
         const isWait = st.class === "muda" && st.waste === "waiting";
-        g.appendChild(svg("rect", { x: xa, y: ly, width: w, height: LABEL_ROW_H - 6, fill: isWait ? "url(#hatch-waiting)" : segmentFill(seg, false), class: `lane-stretch-rect seg-${seg}` }));
+        g.appendChild(svg("rect", { x: xa, y: ly, width: w, height: LABEL_ROW_H - 6, fill: isWait ? "url(#hatch-labeled-wait)" : segmentFill(seg, false), class: `lane-stretch-rect seg-${seg}` }));
         if (isWait && w > 120) {
           const t = svg("text", { x: xa + 4, y: ly + LABEL_ROW_H - 11, class: "lane-wait-label" });
           t.textContent = W.waitLabel(st.waited_on);
@@ -2429,7 +2432,7 @@
     };
     const present = new Set(stretches.map(W.stretchSegment));
     for (const sg of F.SEGMENTS) if (present.has(sg.key) && sg.key !== "waiting") li(swatch(sg.key), sg.label);
-    if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), "Waiting (hatched), with what it waited on");
+    if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), "Labeled wait (cross-hatched): the evaluator's label, with what it waited on; it is not the page's waiting, which is idle time");
     if (leadMs !== null && (t0 < origin || t1 > origin + leadMs)) li(keyFor("lane-key-outside"), "Shaded: outside this task's lead time");
     li(keyFor("lane-key-act"), "Agent activity (turns, tool calls, subagents)");
     li(keyFor("lane-key-fail"), "Failed tool call (wider where several share a pixel)");
@@ -2454,7 +2457,7 @@
       tr.appendChild(td);
       // Idle bands carry no clock time: their length only.
       const waitSt = st.class === "muda" && st.waste === "waiting";
-      for (const [v, cl] of [[waitSt ? "idle; length only" : W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
+      for (const [v, cl] of [[waitSt ? "length only" : W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
       tb.appendChild(tr);
     }
     table.appendChild(tb);

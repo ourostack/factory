@@ -759,6 +759,7 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .picker-row[aria-current="page"] { background: var(--surface-1); box-shadow: inset 3px 0 0 var(--focus); font-weight: 600; }
 .picker-name { flex: 1 1 18em; min-width: 0; overflow-wrap: anywhere; }
 .picker-key { color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.picker-group { padding: 10px 6px 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
 .picker-meta { display: flex; flex-wrap: wrap; gap: 0 12px; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 400; }
 /* No text cell narrower than 60px, even at 320px. */
 .picker-meta > span { min-width: 60px; }
@@ -829,9 +830,11 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 
 .vsm-data { margin: 6px 6px 0; padding: 6px 2px 4px; border-top: 1px solid var(--gridline); font-size: 12px; }
 .vsm-data-list { margin: 0; display: grid; gap: 1px; }
-.vsm-data-list > div { display: flex; justify-content: space-between; gap: 6px; line-height: 1.35; }
-.vsm-data-list dt { color: var(--text-muted); flex: 1 0 auto; white-space: nowrap; }
-.vsm-data-list dd { margin: 0; min-width: 0; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+/* A value never wraps inside a narrow cell: when label and value do not fit
+   on one line, the value takes its own line, right-aligned. */
+.vsm-data-list > div { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 6px; line-height: 1.35; }
+.vsm-data-list dt { color: var(--text-muted); white-space: nowrap; }
+.vsm-data-list dd { margin: 0 0 0 auto; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 .vsm-data-toggle { display: none; }
 
 /* The ladder: low is working, high is waiting. Each step is a button. */
@@ -1025,7 +1028,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-legend { list-style: none; margin: 10px 0 4px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; color: var(--text-secondary); }
 .lane-legend li { display: flex; align-items: center; gap: 6px; }
 .lane-key { display: inline-block; width: 14px; height: 12px; }
-.lane-key-wait { background: repeating-linear-gradient(135deg, var(--c-waste-waiting) 0 2px, transparent 2px 5px); }
+.lane-key-wait { background: repeating-linear-gradient(135deg, var(--c-waste-waiting) 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(45deg, var(--c-waste-waiting) 0 1.5px, transparent 1.5px 5px); }
 .lane-key-outside { background: var(--text-muted); opacity: 0.25; }
 .lane-key-act { height: 6px; background: var(--text-secondary); }
 .lane-key-fail { width: 3px; height: 14px; background: var(--c-alarm); }
