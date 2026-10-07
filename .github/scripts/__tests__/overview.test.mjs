@@ -371,3 +371,11 @@ test("an unavailable flow efficiency carrying the lead-time floor reason passes 
   assert.ok(F.hasReasonText("card_dates_shorter_than_work"))
   assert.deepEqual(checkNumbers({ jobs: [{ flow_efficiency: flow }] }), checkNumbers({ jobs: [{ flow_efficiency: unavailable(["zero_lead_time"]) }] }))
 })
+
+test("at phone width a task card's values wrap inside the card, so the page never scrolls sideways", () => {
+  const css = read("site/src/styles.css")
+  const phone = css.slice(css.indexOf("@media (max-width: 720px) {\n  .task-table thead"))
+  const block = phone.slice(0, phone.indexOf("\n}\n"))
+  assert.match(block, /table\.data-table\.task-table td \{ white-space: normal; \}/)
+  assert.match(block, /\.task-table td > \* \{ min-width: 0; overflow-wrap: anywhere; \}/)
+})

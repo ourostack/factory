@@ -1118,6 +1118,9 @@ h3.sub-title { font-size: 17px; margin: 30px 0 12px; }
   .task-table td { border: 0; padding: 3px 0; text-align: right; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .task-table td.num { text-align: right; }
   .task-table td::before { content: attr(data-label); color: var(--text-secondary); font-size: 13px; text-align: left; flex: none; }
+  /* A card's value wraps inside the card instead of pushing the page sideways. */
+  table.data-table.task-table td { white-space: normal; }
+  .task-table td > * { min-width: 0; overflow-wrap: anywhere; }
   .task-table td.task-cell { display: block; text-align: left; font-size: 16px; padding-bottom: 6px; }
   .task-table td.task-cell::before { content: none; }
   .task-table tbody tr:hover { background: var(--surface-2); }
