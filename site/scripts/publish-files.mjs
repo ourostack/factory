@@ -81,13 +81,13 @@ export function sizeLine(files, label = "Published data files") {
 // What each file is for, in the walk's order. A file is listed only when
 // it was published in this build.
 const GROUPS = [
-  { title: "Start here: the whole site in one file", match: (p) => p === "data.json", what: () => "every number on the page, each with its state (measured, partial or no data) and reasons; kaizen_issues is step 4" },
+  { title: "Start here: the whole site in one file", match: (p) => p === "data.json", what: () => "every number on the page, each with its state (measured, partial or no data) and reasons; kaizen_issues (the problems in hand) and alarm_issues (who owns each alarm) are step 4, Act" },
   { title: "Step 1, follow a task: each task's answer", match: (p) => p === "rollups/tasks.json", what: () => "each task's lead time, working time, top causes and longest wait, in the page's words" },
   { title: "Step 1, follow a task: one task's map", match: (p) => /^map\/[^/]+\.json$/.test(p), what: (p) => `the work bursts, waits, card status changes and pull request numbers of task ${p.slice(4, 12)}: what its value stream map draws` },
   { title: "Step 1, follow a task: one task's timeline", match: (p) => /^jobs\/[^/]+\.json$/.test(p), what: (p) => `the timeline and measures of task ${p.slice(5, 13)}` },
   { title: "Step 1, follow a task: one session in detail", match: (p) => /^jobs\/[^/]+\/[^/]+\.json$/.test(p), what: (p) => `one session of task ${p.slice(5, 13)}` },
-  { title: "Step 2, compare tasks", match: (p) => p === "rollups/stackup.json", what: () => "one row per task: where its time went, by class and waste" },
-  { title: "Step 3, rank causes", match: (p) => p === "rollups/causes.json", what: () => "hours by cause, with the tasks and stretches behind each" },
+  { title: "Step 2, compare tasks", match: (p) => p === "rollups/stackup.json", what: () => "one row per task: its lead time split into working time by the evaluator's labels and waiting (idle time) by what it waited on; what each bar of the stack-up draws" },
+  { title: "Step 3, rank causes", match: (p) => p === "rollups/causes.json", what: () => "each cause's time in job-hours (a moment two tasks share counts for each), largest first with its running share, and the tasks and stretches behind it; what the Pareto chart and each #/causes/<key> page draw" },
   { title: "Other rollups", match: (p) => /^rollups\/[^/]+\.json$/.test(p), what: (p) => `the pipeline's ${p.slice(8, -5)} rollup` },
   { title: "The site's own health", match: (p) => p === "health.json", what: () => "whether the site data is current" },
 ];

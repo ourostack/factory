@@ -170,7 +170,7 @@ test("when a pull request cannot be read, the name comes from what was read and 
 test("the Act lede does not promise a check that does not exist yet", () => {
   const html = read("site/src/index.html")
   const act = html.slice(html.indexOf('id="view-act"'), html.indexOf('id="view-why"'))
-  assert.match(act, /a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet/)
+  assert.match(act, /[Aa] check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet/)
   assert.doesNotMatch(act, /a check that the countermeasure worked/)
 })
 
@@ -509,8 +509,8 @@ test("public copy says the operator, not you, and shows no calendar date", () =>
   const text = html.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ")
   assert.doesNotMatch(text, /\byou(r|rs|rself)?\b/i)
   const app = read("site/src/app.js")
-  // The drawer's button keeps the wording the design gives it, "Copy as a prompt for your agent": it names the reader's own agent, not the operator.
-  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "")
+  // The drawer's button and the cause page's button keep the wording the design gives them, "Copy as a prompt for your agent" and "Start an A3 with your agent": they name the reader's own agent, not the operator.
+  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "").replace("Start an A3 with your agent", "")
   assert.doesNotMatch(strings, /\byou(r|rs|rself)?\b/i)
   assert.doesNotMatch(app, /dateStyle/)
   assert.doesNotMatch(app, /toLocaleDateString|toISOString/)
@@ -649,7 +649,7 @@ test("a reload at #main opens the default view, and the view routes before the s
 
 test("the Act page does not call a closed issue fixed: its pull request is a countermeasure, merged and not yet checked", () => {
   const app = read("site/src/app.js")
-  assert.match(app, /"countermeasure: "/)
+  assert.match(app, /fact\("Countermeasure", span\)/)
   assert.match(app, /" \(merged, not yet checked\)"/)
   assert.doesNotMatch(app, /"fixed by "/)
   assert.doesNotMatch(app, /: "var\(--status-good\)"\);\n/)

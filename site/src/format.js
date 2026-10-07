@@ -511,6 +511,8 @@
   // Old links keep working: #job-<id> and #session-<id> (the first site's
   // task and session pages) and its section anchors redirect.
   const ROUTE_ID = /^[0-9A-Za-z_-]{1,64}$/;
+  // A cause key from Desk's causes rollup: "<waste>:<what>".
+  const CAUSE_ID = /^[a-z][a-z_]{0,40}:[a-z0-9][a-z0-9_.-]{0,60}$/;
   const PAGES = ["compare", "causes", "act", "why", "about", "store"];
   // The first site's in-page sections, and where each one lives now.
   const OLD_ANCHORS = {
@@ -567,6 +569,17 @@
       return { view: "missing" };
     }
     if (parts[0] === "session" && parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "session", job: null, session: parts[1] };
+    // One cause of Rank causes: "#/causes/waiting:next_prompt" (a pasted
+    // link may arrive with its colon encoded).
+    if (parts[0] === "causes" && parts.length === 2) {
+      let key = parts[1];
+      try {
+        key = decodeURIComponent(key);
+      } catch (err) {
+        return { view: "missing" };
+      }
+      return CAUSE_ID.test(key) ? { view: "cause", cause: key } : { view: "missing" };
+    }
     if (parts.length === 1 && PAGES.includes(parts[0])) return { view: parts[0] };
     return { view: "missing" };
   }
@@ -574,6 +587,7 @@
   // Which of the four steps a view belongs to, for the tab that shows as current.
   function stepOf(view) {
     if (view === "task" || view === "session") return "task";
+    if (view === "cause") return "causes";
     return ["compare", "causes", "act"].includes(view) ? view : null;
   }
 

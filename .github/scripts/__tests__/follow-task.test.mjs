@@ -671,7 +671,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
   assert.deepEqual(readdirSync(join(emptyRoot, "dist")), [])
   // The workflow prints the map files' size line and publishes walk.js.
   const wf = read(".github/workflows/pages.yml")
-  assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/app\.js site\/dist\//)
+  assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
   assert.match(read("site/scripts/publish-files.mjs"), /Task map files \(new\)/)
 })
 
@@ -679,7 +679,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
 
 test("the page loads walk.js, opens evidence in a real dialog, and never draws per-turn operator markers or pull request times", () => {
   const html = read("site/src/index.html")
-  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="app\.js"><\/script>/)
+  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="app\.js"><\/script>/)
   assert.match(html, /<dialog id="evidence-drawer" class="drawer" aria-labelledby="drawer-title">/)
   for (const id of ["task-picker", "task-head", "task-lede", "vsm", "time-went", "job-detail", "swimlane"]) assert.match(html, new RegExp(`id="${id}"`))
   const app = read("site/src/app.js")

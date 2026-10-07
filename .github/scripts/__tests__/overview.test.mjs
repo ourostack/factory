@@ -326,12 +326,12 @@ test("the private-names overlay names tasks as text, and a missing or malformed 
   assert.doesNotMatch(app, /innerHTML = [^"']/)
   // The public build never produces or names the file.
   for (const p of [".github/workflows/pages.yml", "site/scripts/build-data.mjs"]) assert.doesNotMatch(read(p), /local-names/, p)
-  assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/app\.js site\/dist\//)
+  assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
 })
 
 test("the page is the four-step walk, with Why Lean?, About and the store's numbers, and a guide on how to read it", () => {
   const html = read("site/src/index.html")
-  for (const id of ["status-line", "view-task", "view-session", "view-compare", "view-causes", "view-act", "view-why", "view-about", "view-store", "jobs-table", "labeled-waste", "fix-list", "kaizen-panel", "guide"]) assert.match(html, new RegExp(`id="${id}"`), id)
+  for (const id of ["status-line", "view-task", "view-session", "view-compare", "view-causes", "view-act", "view-cause", "view-why", "view-about", "view-store", "jobs-table", "stackup", "fe-dots", "stackup-table", "pareto", "pareto-table", "cause-detail", "problems", "alarm-owners", "guide"]) assert.match(html, new RegExp(`id="${id}"`), id)
   assert.match(html, /recorded by the agent through Desk's sign-off tool|on the operator's word/)
   assert.doesNotMatch(html, /witnessed/)
   // The tabs, in the walk's order, then the Why Lean? link.
