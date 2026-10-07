@@ -26,7 +26,7 @@ const ROLLUP_KEYS = ["n", "N", "of", "out_of_scope", "excluded"];
 // host that records partly, a capture share from unverified hosts). Each
 // package adds its own reasons below, so the list grows in one place per
 // package.
-const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["host_records_partly", "unverified_host", "host_not_counted"]);
+const VALUE_WITH_NO_WHOLE_MEMBER = new Set(["host_records_partly", "unverified_host", "host_not_counted", "host_does_not_say_desk"]);
 
 // Paths in data.json that must be rollups (they sum, take a median or a
 // share over a population). A rollup that lost its marker and its counts is

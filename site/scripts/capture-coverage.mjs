@@ -14,6 +14,14 @@
 // this module checks the shape again, so a file that slipped past is left
 // out of every sum and counted as invalid instead of breaking the build.
 //
+// A host whose folders do not say which desk a session belongs to (Copilot CLI,
+// Codex) sends `not_in_a_desk: null`. It cannot tell a session in no desk from
+// a missed one, and Desk leaves its unowned sessions out of a store's record
+// because they may belong to another store. The shares of such a host measure
+// only the delivery of sessions that were already marked, never coverage, so
+// they are unavailable with `host_does_not_say_desk`, raise no alarm, and make
+// the store-wide share partial with that reason. The counts stay published.
+//
 // What the site publishes: sums per host over the machines whose record is
 // fresh and valid, each with n of N machines, and two shares per host. It
 // publishes no date, no intake id and no per-machine figure. The age of a
@@ -179,14 +187,17 @@ export function summarizeCapture({ files, nowMs }) {
     const row = { host }
     for (const key of ["on_disk", ...BUCKETS]) row[key] = sumOf(entries, key, notCounted)
     const split = { counted: entries.length, notCounted }
-    row.share = shareOf(total("derived"), total("on_disk"), verified, N, "no_sessions_on_disk", split)
+    const silent = entries.length > 0 && entries.every((e) => e.not_in_a_desk === null)
+    // No share for a host that cannot say which unmarked sessions were missed; the reason says so, and a machine that could not count it still says that too.
+    const noShare = { ...unavailable(["host_does_not_say_desk", ...(notCounted > 0 ? ["host_not_counted"] : [])]), kind: "rollup", n: 0, N, of: VERIFIED, out_of_scope: 0 }
+    row.share = silent ? noShare : shareOf(total("derived"), total("on_disk"), verified, N, "no_sessions_on_disk", split)
     const den = entries.reduce((s, e) => s + capturable(e), 0)
-    row.capturable_share = shareOf(total("derived"), den, verified, N, "nothing_capturable", split)
+    row.capturable_share = silent ? { ...noShare } : shareOf(total("derived"), den, verified, N, "nothing_capturable", split)
     row.records = measured(N)
     row.unverified_machines = N === 0 ? unavailable(["no_records"]) : measured(entries.length - verified)
     row.not_counted_machines = N === 0 ? unavailable(["no_records"]) : measured(notCounted)
-    if (N > 0 && den >= MIN_SESSIONS && total("derived") / den < LOW_SHARE) alarms.push({ host, code: "coverage_low" })
-    const dropped = fresh.some(({ record, previous }) => {
+    if (!silent && N > 0 && den >= MIN_SESSIONS && total("derived") / den < LOW_SHARE) alarms.push({ host, code: "coverage_low" })
+    const dropped = !silent && fresh.some(({ record, previous }) => {
       const now = record.hosts[host]
       const before = previous?.hosts?.[host]
       if (!now || !before || isNotCounted(now) || isNotCounted(before) || capturable(now) === 0 || capturable(before) === 0) return false
@@ -206,7 +217,8 @@ export function summarizeCapture({ files, nowMs }) {
   // host is a machine not counted whole, so either makes the figure partial
   // with why. A retraction (empty record) is out of scope.
   const N = counts.counted + counts.stale + counts.invalid + counts.over_limit
-  const whole = fresh.filter((r) => Object.values(r.record.hosts).every((e) => !isNotCounted(e) && e.unverified === false)).length
+  const isSilent = (e) => !isNotCounted(e) && e.not_in_a_desk === null
+  const whole = fresh.filter((r) => Object.values(r.record.hosts).every((e) => !isNotCounted(e) && e.unverified === false && !isSilent(e))).length
   const anyNotCounted = fresh.some((r) => Object.values(r.record.hosts).some(isNotCounted))
   const reasons = []
   if (counts.stale) reasons.push("record_stale")
@@ -214,6 +226,7 @@ export function summarizeCapture({ files, nowMs }) {
   if (counts.over_limit) reasons.push("records_over_limit")
   if (fresh.some((r) => Object.values(r.record.hosts).some((e) => !isNotCounted(e) && e.unverified !== false))) reasons.push("unverified_host")
   if (anyNotCounted) reasons.push("host_not_counted")
+  if (fresh.some((r) => Object.values(r.record.hosts).some(isSilent))) reasons.push("host_does_not_say_desk")
   const base = { kind: "rollup", n: whole, N, of: CURRENT_VERIFIED, out_of_scope: counts.empty }
   const sumAll = (key) => fresh.reduce((s, r) => s + Object.values(r.record.hosts).reduce((t, e) => t + (isNotCounted(e) ? 0 : e[key]), 0), 0)
   const derived = sumAll("derived")
