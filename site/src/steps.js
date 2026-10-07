@@ -199,19 +199,39 @@
     return { bars: kept, left_out: out.length, text: `${head}: ${parts.join("; ")}. The table below lists every task.` };
   }
 
-  // The finished task with the most waste, for a label on its bar: waiting
-  // and labeled waste in "all" mode, labeled waste only in "working" mode.
+  // The finished task to label on the chart. In "all" mode it is the one
+  // that waited longest, by idle waiting only (lead time minus working
+  // time), in the lede's own words; labeled waste describes working time
+  // and never counts toward it. In "working" mode it is the one with the
+  // most labeled waste.
   const WASTE_SEGMENTS = new Set(["waiting", "defects", "extra_processing", "overproduction", "motion", "transportation", "inventory", "non_utilized_talent", "unknown"]);
   function mostWaste(bars, mode) {
+    const working = mode === "working";
     let best = null;
     arr(bars).forEach((b, index) => {
       if (b.group !== "finished" || b.state !== "ok") return;
-      const ms = arr(b.segments).filter((s) => (s.cause ? mode !== "working" : WASTE_SEGMENTS.has(s.key))).reduce((a, s) => a + (s.ms > 0 ? s.ms : 0), 0);
+      const ms = arr(b.segments).filter((s) => (working ? !s.cause && WASTE_SEGMENTS.has(s.key) : !!s.cause)).reduce((a, s) => a + (s.ms > 0 ? s.ms : 0), 0);
       if (ms > 0 && (!best || ms > best.ms)) best = { job: b.job, index, ms };
     });
     if (!best) return null;
-    return { ...best, label: `${mode === "working" ? "Most labeled waste" : "Most waste"}: ${hoursShort(best.ms)}` };
+    return { ...best, label: `${working ? "Most labeled waste" : "Waited longest"}: ${hoursShort(best.ms)}` };
   }
+
+  // A bar group's time with its bound; a true zero is "none", never
+  // "at least none".
+  const groupWords = (g) => (g && g.ms > 0 ? `${g.qualifier || ""}${hoursWords(g.ms)}` : "none");
+
+  // One row of Compare's phone table: the task, its lead time and its
+  // waiting, the figures a reader on a small screen needs first, in the
+  // bars' short form ("≥5.5h") so each row stays on one line.
+  const SHORT_Q = { "at least ": "≥", "at most ": "≤", "about ": "~" };
+  function compactRow(b) {
+    const waiting = arr(b.groups).find((g) => g.key === "waiting");
+    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${hoursShort(waiting.ms)}` : "none";
+    return { job: b.job, name: b.name, href: b.href, lead: b.state === "no_data" ? "no data" : b.label, waiting: wait };
+  }
+  // The disclosure that holds every figure on a phone.
+  const fullTableSummary = (n) => `Every figure, as a table (${plural(n, "task")})`;
 
   // A linear scale from zero for a chart of durations: hours, or minutes
   // when every value is under an hour. Returns { unit, per, max_ms, ticks }
@@ -457,7 +477,7 @@
     if (!(n > 0)) return "";
     const one = n === 1;
     const head = `${plural(n, "finished task")} ${one ? "is" : "are"} waiting for the evaluator's waste labels; until ${one ? "it is" : "they are"} labeled, `;
-    return where === "act" ? `${head}${one ? "it cannot" : "they cannot"} count toward any check:` : `${head}the ranking leaves ${one ? "it" : "them"} out:`;
+    return where === "act" ? `${head}${one ? "it cannot" : "they cannot"} count toward any check.` : `${head}the ranking leaves ${one ? "it" : "them"} out.`;
   }
 
   // What a cause means, in one sentence, for its own page.
@@ -717,6 +737,9 @@
     stackBars,
     workingView,
     mostWaste,
+    groupWords,
+    compactRow,
+    fullTableSummary,
     timeScale,
     tickWords,
     compareLede,

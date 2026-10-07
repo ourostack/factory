@@ -2413,13 +2413,14 @@
   }
 
   // A bar group's time with its bound; a true zero is "none", never "at least none".
-  const groupWords = (g) => (g.ms > 0 ? `${g.qualifier || ""}${S.hoursWords(g.ms)}` : "none");
+  const groupWords = S.groupWords;
 
   // Text cut to fit a label: "Revocable sessions: sign…".
   const clip = (t, n) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 
-  // A sentence, then a link to each task it counts (finished tasks with no
-  // waste labels, on Rank causes and on Act).
+  // A sentence with the count, then the tasks it counts behind a
+  // disclosure, by full name (finished tasks with no waste labels, on Rank
+  // causes and on Act).
   function unlabeledNote(node, data, where) {
     if (!node) return;
     node.innerHTML = "";
@@ -2427,11 +2428,17 @@
     const words = S.unlabeledWords(list.length, where);
     node.hidden = !words;
     if (!words) return;
-    node.appendChild(document.createTextNode(`${words} `));
-    list.forEach((t, i) => {
-      node.appendChild(jobLink(t.job, clip(t.name, 48)));
-      node.appendChild(document.createTextNode(i === list.length - 1 ? "." : ", "));
-    });
+    node.appendChild(el("p", "unlabeled-words", words));
+    const det = el("details", "unlabeled-list");
+    det.appendChild(el("summary", null, `Show the ${list.length === 1 ? "task" : `${list.length} tasks`}`));
+    const ul = el("ul", "plain-list");
+    for (const t of list) {
+      const li = document.createElement("li");
+      li.appendChild(jobLink(t.job, t.name));
+      ul.appendChild(li);
+    }
+    det.appendChild(ul);
+    node.appendChild(det);
   }
 
   // ------------------------------------------------- step 2: the stack-up
@@ -2639,21 +2646,37 @@
   }
 
   // The stack-up as a table: every figure in words.
-  // On a phone a wide table reads as one card per row: each cell carries its
-  // column's name (styles.css shows it before the value).
-  function labelCells(table) {
-    const heads = [...table.querySelectorAll("thead th")].map((th) => th.textContent);
-    for (const tr of table.querySelectorAll("tbody tr"))
-      [...tr.children].forEach((td, i) => {
-        td.setAttribute("data-label", heads[i] || "");
-        // An empty cell ("—") adds nothing to a phone card.
-        if (td.textContent.trim() === "—") td.classList.add("empty-cell");
-      });
-    table.classList.add("phone-cards");
-  }
-
+  // On a phone: three columns (task, lead time, waiting), with every
+  // figure behind a disclosure, so the walk's next step stays near.
   function drawStackTable(container, bars) {
     container.innerHTML = "";
+    if (container.clientWidth < 600) {
+      const compact = el("table", "data-table sb-compact");
+      tableHead(compact, [["Task", ""], ["Lead time", "num"], ["Waiting", "num"]]);
+      const cb = document.createElement("tbody");
+      for (const r of bars.map(S.compactRow)) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.appendChild(jobLink(r.job, r.name));
+        tr.appendChild(td);
+        tr.appendChild(el("td", "num", r.lead));
+        tr.appendChild(el("td", "num", r.waiting));
+        cb.appendChild(tr);
+      }
+      compact.appendChild(cb);
+      container.appendChild(compact);
+      const det = el("details", "full-table");
+      const summary = document.createElement("summary");
+      summary.textContent = S.fullTableSummary(bars.length);
+      det.appendChild(summary);
+      drawFullStackTable(det, bars);
+      container.appendChild(det);
+      return;
+    }
+    drawFullStackTable(container, bars);
+  }
+
+  function drawFullStackTable(container, bars) {
     const table = el("table", "data-table sb-table");
     tableHead(table, [["Task", ""], ["Place", ""], ["Lead time", "num"], ["Working", "num"], ["Waiting", "num"], ["Largest wait", ""], ["Note", ""]]);
     const tb = document.createElement("tbody");
@@ -2676,7 +2699,6 @@
       tb.appendChild(tr);
     }
     table.appendChild(tb);
-    labelCells(table);
     const wrap = el("div", "table-wrap");
     wrap.appendChild(table);
     container.appendChild(wrap);
@@ -2717,10 +2739,12 @@
       safely("fe-dots", () => (all.length ? drawFeDots(document.getElementById("fe-dots"), S.feDots(all, taskRows)) : emptyState(document.getElementById("fe-dots"), "Not published yet.")));
     };
     drawRest();
-    safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "Not published yet.")));
+    const drawTable = () => safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "Not published yet.")));
+    drawTable();
     lastStepRender = () => {
       draw();
       drawRest();
+      drawTable();
     };
     lastStepWidth = document.getElementById("stackup").clientWidth;
   }
@@ -2833,6 +2857,10 @@
     frame.appendChild(root);
     row.append(left, frame, right);
     container.appendChild(row);
+    // A fade at the frame's right edge while more bars lie beyond it.
+    const edge = () => frame.classList.toggle("more-right", frame.scrollLeft + frame.clientWidth < frame.scrollWidth - 2);
+    frame.addEventListener("scroll", edge, { passive: true });
+    edge();
     const key = el("p", "chart-caption pareto-key");
     const lineKey = el("span", "pareto-line-key");
     lineKey.setAttribute("aria-hidden", "true");
@@ -2861,7 +2889,6 @@
       tb.appendChild(tr);
     });
     table.appendChild(tb);
-    labelCells(table);
     const wrap = el("div", "table-wrap");
     wrap.appendChild(table);
     container.appendChild(wrap);
@@ -2976,7 +3003,6 @@
       tb.appendChild(tr);
     }
     table.appendChild(tb);
-    labelCells(table);
     const tw = el("div", "table-wrap");
     tw.appendChild(table);
     ts.appendChild(tw);

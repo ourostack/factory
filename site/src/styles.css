@@ -1092,19 +1092,37 @@ table.data-table td, table.data-table th { min-width: 60px; }
 .chart-other:focus-visible .hit { fill: transparent; stroke: var(--focus); stroke-width: 2; }
 .chart-other .hit { fill: transparent; }
 .unlabeled-note a { white-space: normal; }
-p.unlabeled-note:not(.chart-caption) { font-size: 15px; color: var(--text-secondary); margin-top: 0; }
-/* On a phone a wide table reads as one card per row, each value beside its
-   column's name, so no number hides behind a sideways scroll. */
+#act-unlabeled { font-size: 15px; color: var(--text-secondary); margin-top: 14px; }
+/* On a phone the ranking list keeps Rank, Cause, Time and Share; the chart
+   and each cause's page carry the running total and the task count. */
 @media (max-width: 599px) {
-  table.data-table.phone-cards { min-width: 0; }
-  table.data-table.phone-cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  table.data-table.phone-cards, table.data-table.phone-cards tbody, table.data-table.phone-cards tr { display: block; width: 100%; }
-  table.data-table.phone-cards tr { border-bottom: 1px solid var(--border); padding: 8px 0; }
-  table.data-table.phone-cards td { display: flex; align-items: baseline; gap: 6px; border: 0; padding: 3px 0; white-space: normal; text-align: right; max-width: none; min-width: 0; }
-  table.data-table.phone-cards td::before { content: attr(data-label); margin-right: auto; padding-right: 12px; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; text-align: left; flex: none; }
-  table.data-table.phone-cards td:first-child { font-weight: 600; }
-  table.data-table.phone-cards td.empty-cell { display: none; }
+  table.data-table.pareto-table { min-width: 0; }
+  table.data-table.pareto-table th:nth-child(n+5), table.data-table.pareto-table td:nth-child(n+5) { display: none; }
+  table.data-table.pareto-table { font-size: 13px; }
+  table.data-table.pareto-table th, table.data-table.pareto-table td { padding: 8px 5px; white-space: normal; }
+  table.data-table.pareto-table th:first-child, table.data-table.pareto-table td:first-child { padding-left: 0; }
+  table.data-table.pareto-table th:nth-child(4), table.data-table.pareto-table td:nth-child(4) { padding-right: 0; }
+  /* A fade at the Pareto frame's right edge says more bars lie beyond. */
+  .pareto-frame.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
 }
+/* Compare's phone table: three columns that fit the screen. */
+table.data-table.sb-compact { min-width: 0; font-size: 13px; }
+table.data-table.sb-compact th, table.data-table.sb-compact td { padding: 5px 6px; }
+/* The task's name takes the room the two figures leave, cut with an ellipsis. */
+table.data-table.sb-compact td:first-child { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+table.data-table.sb-compact th:first-child, table.data-table.sb-compact td:first-child { padding-left: 0; }
+table.data-table.sb-compact th:last-child, table.data-table.sb-compact td:last-child { padding-right: 0; }
+details.full-table { margin-top: 10px; }
+details.full-table > summary, details.unlabeled-list > summary { cursor: pointer; color: var(--link); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+details.full-table[open] > summary { margin-bottom: 8px; }
+details.full-table > summary::-webkit-details-marker, details.unlabeled-list > summary::-webkit-details-marker { display: none; }
+details.full-table > summary { list-style: none; }
+details.unlabeled-list > summary { list-style: none; }
+details.full-table > summary::before, details.unlabeled-list > summary::before { content: "▸"; display: inline-block; width: 1.1em; }
+details.full-table[open] > summary::before, details.unlabeled-list[open] > summary::before { content: "▾"; }
+.unlabeled-note .unlabeled-words { margin: 0; }
+.unlabeled-note .plain-list { margin: 4px 0 0; }
+.unlabeled-note .plain-list li { margin: 4px 0; }
 .pareto-line-key { display: inline-block; flex: none; width: 22px; height: 0; border-top: 1.6px solid var(--text-primary); position: relative; }
 .pareto-line-key::after { content: ""; position: absolute; left: 7px; top: -5px; width: 6px; height: 6px; border-radius: 50%; border: 1.6px solid var(--text-primary); background: var(--page-plane); }
 .pareto-table td:nth-child(2) { white-space: normal; min-width: 14em; }
@@ -1131,3 +1149,7 @@ p.unlabeled-note:not(.chart-caption) { font-size: 15px; color: var(--text-second
 .next-step a { font-weight: 600; }
 .next-step .step-n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; font-size: 11px; font-weight: 700; margin: 0 5px 0 4px; vertical-align: 1px; }
 .step-label a { color: inherit; }
+/* On a phone the cause column gives way, so Share stays on screen. */
+@media (max-width: 599px) {
+  table.data-table.pareto-table td:nth-child(2) { min-width: 8em; }
+}

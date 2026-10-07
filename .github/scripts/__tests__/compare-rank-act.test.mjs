@@ -94,16 +94,21 @@ test("agent working time mode shows only tasks with labeled working time, at the
   assert.equal(S.workingView([]).text, "")
 })
 
-test("the chart marks the finished task with the most waste, in either mode", () => {
+test("the chart labels the finished task that waited longest (idle time only) in all mode, and the most labeled waste in working mode", () => {
   const { tasks, stackup, jobs } = snap()
   const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => `Task ${j.id.slice(0, 8)}` })
   const all = S.mostWaste(S.stackBars(jobs, stackup, tasks, opts("all")), "all")
   assert.equal(all.job.slice(0, 8), "c9235d85")
-  assert.match(all.label, /^Most waste: \d+h$/)
+  assert.match(all.label, /^Waited longest: \d+h$/)
   const work = S.mostWaste(S.workingView(S.stackBars(jobs, stackup, tasks, opts("working"))).bars, "working")
   assert.equal(work.job.slice(0, 8), "690331dd")
   assert.equal(work.label, "Most labeled waste: 17m")
   assert.equal(S.mostWaste([], "all"), null)
+  // Labeled waste never counts toward waiting: a task with less idle time
+  // but more labeled waste does not win in all mode.
+  const bar = (job, waitMs, wasteMs) => ({ job, group: "finished", state: "ok", segments: [{ key: "defects", ms: wasteMs }, { key: "wait_next_prompt", cause: "next_prompt", ms: waitMs }] })
+  assert.equal(S.mostWaste([bar("a", 2 * H, 10 * H), bar("b", 3 * H, 0)], "all").job, "b")
+  assert.equal(S.mostWaste([bar("a", 2 * H, 10 * H), bar("b", 3 * H, 0)], "working").job, "a")
 })
 
 test("agent working time mode keeps only the working group, so a 20-minute task is not drowned out by waiting", () => {
@@ -336,14 +341,31 @@ test("the lede says when one task holds most of the top cause, and the chart cap
   assert.match(S.paretoCaption(S.paretoModel(causes, "working")), /^Agent working time only: waiting is left out \(\d.* of it\).*It counts 8 of 31 tasks\.$/)
 })
 
+test("on a phone, Compare's table is three columns (task, lead time, waiting), with every figure behind a disclosure that counts its tasks", () => {
+  const { tasks, stackup, jobs } = snap()
+  const bars = S.stackBars(jobs, stackup, tasks, { mode: "all", segments: F.SEGMENTS, nameOf: (j) => `Task ${j.id.slice(0, 8)}` })
+  const rowsC = bars.map(S.compactRow)
+  assert.equal(rowsC.length, 31)
+  const first = rowsC[0]
+  assert.deepEqual(Object.keys(first), ["job", "name", "href", "lead", "waiting"])
+  assert.equal(first.lead, "100h")
+  assert.equal(first.waiting, "100h")
+  assert.ok(rowsC.some((r) => r.lead.startsWith("≥") && /^[≤~≥]?\d/.test(r.waiting)))
+  assert.ok(rowsC.some((r) => r.lead === "no data" && r.waiting === "not known"))
+  assert.equal(S.fullTableSummary(31), "Every figure, as a table (31 tasks)")
+  assert.equal(S.fullTableSummary(1), "Every figure, as a table (1 task)")
+  assert.equal(S.groupWords({ ms: 0 }), "none")
+  assert.equal(S.groupWords({ ms: 2 * H, qualifier: "at least " }), "at least 2 hours")
+})
+
 test("finished tasks with no waste labels are counted and named, for the ranking note and Act", () => {
   const { jobs } = snap()
   const list = S.unlabeledFinished(jobs, (j) => `Task ${j.id.slice(0, 8)}`)
   assert.equal(list.length, 9)
   assert.ok(list.every((x) => /^#\/task\/[0-9a-f]+$/.test(x.href)))
   assert.deepEqual(S.unlabeledFinished([job("a", 1, "labels"), job("b", 2, "facts"), job("c", 3, "facts", "processing")]).map((x) => x.job), ["b"])
-  assert.equal(S.unlabeledWords(9, "causes"), "9 finished tasks are waiting for the evaluator's waste labels; until they are labeled, the ranking leaves them out:")
-  assert.equal(S.unlabeledWords(1, "act"), "1 finished task is waiting for the evaluator's waste labels; until it is labeled, it cannot count toward any check:")
+  assert.equal(S.unlabeledWords(9, "causes"), "9 finished tasks are waiting for the evaluator's waste labels; until they are labeled, the ranking leaves them out.")
+  assert.equal(S.unlabeledWords(1, "act"), "1 finished task is waiting for the evaluator's waste labels; until it is labeled, it cannot count toward any check.")
   assert.equal(S.unlabeledWords(0, "act"), "")
 })
 
@@ -523,18 +545,21 @@ test("llms.txt describes the files behind steps 2 to 4 in the page's words", asy
   assert.match(t, /`#\/causes\/<key>`/)
 })
 
-test("the page wires fix round 1: the working view, the waste label, phone cards, pinned Pareto axes, a reachable Other bar and the unlabeled notes", () => {
+test("the page wires fix round 1: the working view, the waste label, the phone tables, pinned Pareto axes, a reachable Other bar and the unlabeled notes", () => {
   const app = read("site/src/app.js")
   const html = read("site/src/index.html")
   assert.match(app, /S\.workingView\(S\.stackBars\(data\.jobs, stackRows, taskRows, opts\("working"\)\)\)/)
   assert.match(app, /drawStackup\(document\.getElementById\("stackup"\), bars, mode, S\.mostWaste\(bars, mode\)\)/)
   for (const t of ["sb-table", "pareto-table", "cause-tasks"]) assert.ok(app.includes(`"data-table ${t}"`), t)
-  assert.equal((app.match(/labelCells\(table\);/g) || []).length, 3)
+  assert.doesNotMatch(app + read("site/src/styles.css"), /phone-cards|labelCells/)
+  assert.match(app, /summary\.textContent = S\.fullTableSummary\(bars\.length\)/)
   assert.match(app, /svg\("g", \{ class: "chart-other", tabindex: "0"/)
   assert.match(app, /row\.append\(left, frame, right\)/)
   assert.match(app, /unlabeledNote\(document\.getElementById\("act-unlabeled"\), data, "act"\)/)
   assert.match(app, /unlabeledNote\(document\.getElementById\("causes-unlabeled"\), data, "causes"\)/)
   assert.match(app, /history\.replaceState\(null, "", `#\/\$\{which\}\$\{modes\[which\] === "working" \? "\?mode=working" : ""\}`\)/)
   for (const id of ["stackup-left-out", "causes-unlabeled", "act-unlabeled"]) assert.match(html, new RegExp(`id="${id}"`), id)
-  assert.match(read("site/src/styles.css"), /@media \(max-width: 599px\) \{\n  table\.data-table\.phone-cards/)
+  // On Act the note sits below "Problems in hand".
+  assert.ok(html.indexOf('id="act-unlabeled"') > html.indexOf('id="problems"'))
+  assert.ok(html.indexOf('id="act-unlabeled"') < html.indexOf('id="owners-title"'))
 })
