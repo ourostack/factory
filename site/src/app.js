@@ -1563,7 +1563,9 @@
     const fig = (n, kind) => {
       if (!n) return "no data";
       const d = F.describe(n, kind);
-      return d.state === "unavailable" ? "no data" : d.text;
+      if (d.state === "unavailable") return "no data";
+      // A share above zero never reads 0%.
+      return kind === "pct" ? W.pctWords(n.value) : d.text;
     };
     const draw = () => {
       const rows = W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value);
@@ -1703,7 +1705,7 @@
     };
 
     // Each item's column (wide) or row (phone).
-    const cols = model.items.map((it) => (it.type === "box" ? "minmax(112px, 1.5fr)" : "minmax(84px, 1fr)"));
+    const cols = model.items.map((it) => (it.type === "box" ? "minmax(124px, 1.5fr)" : "minmax(84px, 1fr)"));
     if (!phone) root.style.gridTemplateColumns = `${cols.join(" ")} minmax(178px, 1.25fr)`;
     const place = (node, col, row, span) => {
       if (phone) return node;
@@ -2130,6 +2132,10 @@
     const fitB = mk("Fit", "Fit the whole session in the frame");
     const inB = mk("Zoom in", "Zoom in");
     const outB = mk("Zoom out", "Zoom out");
+    // A shared session can run far longer than this task: a button fits the task's own part.
+    const taskPart = leadMs !== null ? [Math.max(t0, origin), Math.min(t1, origin + leadMs)] : null;
+    const partial = taskPart && taskPart[1] > taskPart[0] && taskPart[1] - taskPart[0] < span * 0.6;
+    const taskB = partial ? mk("Fit this task", "Zoom to this task's part of the session") : null;
     const expandB = subs.length ? mk(`Show ${subs.length} subagent lane${subs.length === 1 ? "" : "s"}`, "Show one lane per subagent") : null;
     container.appendChild(controls);
 
@@ -2183,8 +2189,21 @@
         const xx = x(t);
         s.appendChild(svg("line", { x1: xx, x2: xx, y1: AXIS_H - 6, y2: height, class: "lane-grid" }));
         const tl = svg("text", { x: xx + 3, y: AXIS_H - 9, class: "lane-tick" });
-        tl.textContent = W.durationShort(t - origin);
+        tl.textContent = W.clockTick(t - origin);
         s.appendChild(tl);
+      }
+      // Time outside this task's lead window (a shared session runs before
+      // or after it) is shaded, so the task's own part stands out.
+      if (leadMs !== null) {
+        for (const [a, b, words] of [[t0, Math.min(t1, origin), "before this task"], [Math.max(t0, origin + leadMs), t1, "after this task"]]) {
+          if (b <= a) continue;
+          s.appendChild(svg("rect", { x: x(a), y: AXIS_H, width: Math.max(1, x(b) - x(a)), height: height - AXIS_H, class: "lane-outside" }));
+          if (x(b) - x(a) > 110) {
+            const tx = svg("text", { x: x(a) + 6, y: height - 8, class: "lane-outside-label" });
+            tx.textContent = words;
+            s.appendChild(tx);
+          }
+        }
       }
       // Lane rules.
       for (const l of lanesShown) s.appendChild(svg("line", { x1: 0, x2: width, y1: laneY.get(l.worker) + LANE_H, y2: laneY.get(l.worker) + LANE_H, class: "lane-rule" }));
@@ -2259,6 +2278,15 @@
       frame.scrollLeft = Math.max(0, center * frame.scrollWidth - frame.clientWidth / 2);
     };
     fitB.addEventListener("click", () => zoomTo(1));
+    const fitTask = () => {
+      const frameW = Math.max(200, frame.clientWidth - 112);
+      const steps = W.zoomSteps(span, frameW, 32768);
+      const want = span / (taskPart[1] - taskPart[0]);
+      zoom = steps.filter((z) => z <= want).pop() || 1;
+      draw();
+      frame.scrollLeft = Math.max(0, ((taskPart[0] - t0) / span) * frameW * zoom - 8);
+    };
+    if (taskB) taskB.addEventListener("click", fitTask);
     inB.addEventListener("click", () => zoomTo(zoom * 2));
     outB.addEventListener("click", () => zoomTo(zoom / 2));
     if (expandB) {
@@ -2270,7 +2298,8 @@
       });
       expandB.setAttribute("aria-expanded", "false");
     }
-    draw();
+    if (taskB) fitTask();
+    else draw();
 
     // Legend.
     const legend = el("ul", "lane-legend");
@@ -2288,6 +2317,7 @@
     const present = new Set(stretches.map(W.stretchSegment));
     for (const sg of F.SEGMENTS) if (present.has(sg.key) && sg.key !== "waiting") li(swatch(sg.key), sg.label);
     if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), "Waiting (hatched), with what it waited on");
+    if (leadMs !== null && (t0 < origin || t1 > origin + leadMs)) li(keyFor("lane-key-outside"), "Shaded: outside this task's lead time");
     li(keyFor("lane-key-act"), "Agent activity (turns, tool calls, subagents)");
     li(keyFor("lane-key-fail"), "Failed tool call (wider where several share a pixel)");
     container.appendChild(legend);

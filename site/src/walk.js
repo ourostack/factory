@@ -716,7 +716,14 @@
     const o = typeof origin === "number" ? origin : 0;
     const a = startMs - o;
     const b = endMs - o;
-    return `from ${durationShort(a)} to ${durationShort(b)} after the task's start (${durationWords(b - a)})`;
+    const at = (x) => (x < 0 ? `${durationShort(-x)} before` : `${durationShort(x)} after`);
+    if (a >= 0) return `from ${durationShort(a)} to ${durationShort(b)} after the task's start (${durationWords(b - a)})`;
+    return `from ${at(a)} to ${at(b)} the task's start (${durationWords(b - a)})`;
+  }
+
+  // An offset on the task clock for an axis tick: "-6h", "0s", "12h".
+  function clockTick(ms) {
+    return ms < 0 ? `\u2212${durationShort(-ms)}` : durationShort(ms);
   }
 
   // The drawer's content for one thing on the page. `thing` is
@@ -881,6 +888,7 @@
     stretchSegment,
     zoomSteps,
     clockWords,
+    clockTick,
     drawer,
     promptText,
     slimMap,

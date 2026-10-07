@@ -812,8 +812,8 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .vsm-data { margin: 6px 6px 0; padding: 6px 2px 4px; border-top: 1px solid var(--gridline); font-size: 12px; }
 .vsm-data-list { margin: 0; display: grid; gap: 1px; }
 .vsm-data-list > div { display: flex; justify-content: space-between; gap: 6px; line-height: 1.35; }
-.vsm-data-list dt { color: var(--text-muted); }
-.vsm-data-list dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.vsm-data-list dt { color: var(--text-muted); flex: 1 0 auto; white-space: nowrap; }
+.vsm-data-list dd { margin: 0; min-width: 0; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 .vsm-data-toggle { display: none; }
 
 /* The ladder: low is working, high is waiting. Each step is a button. */
@@ -981,6 +981,8 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-rule { stroke: var(--gridline); stroke-width: 1; }
 .lane-tick { fill: var(--text-muted); font-size: 11px; font-family: system-ui, sans-serif; }
 .lane-band { opacity: 0.3; }
+.lane-outside { fill: var(--text-muted); opacity: 0.12; }
+.lane-outside-label { fill: var(--text-muted); font-size: 11px; font-family: system-ui, sans-serif; }
 .lane-act { fill: var(--text-secondary); }
 .lane-fail { fill: var(--c-alarm); }
 .lane-stretch { cursor: pointer; outline: none; }
@@ -991,5 +993,6 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-legend li { display: flex; align-items: center; gap: 6px; }
 .lane-key { display: inline-block; width: 14px; height: 12px; }
 .lane-key-wait { background: repeating-linear-gradient(135deg, var(--c-waste-waiting) 0 2px, transparent 2px 5px); }
+.lane-key-outside { background: var(--text-muted); opacity: 0.25; }
 .lane-key-act { height: 6px; background: var(--text-secondary); }
 .lane-key-fail { width: 3px; height: 14px; background: var(--c-alarm); }
