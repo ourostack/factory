@@ -2567,7 +2567,7 @@
     const colW = Math.max(26, Math.min(48, Math.floor(avail / model.points.length)));
     const plotW = colW * model.points.length + 8;
     const y = (v) => top + H - v * H;
-    const totalH = top + H + 24;
+    const totalH = top + H + 42;
     const row = el("div", "sb-row");
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.25, 0.5, 0.75, 1]) {
@@ -2586,8 +2586,9 @@
       const a = svgLink(p.href, `${p.name}: flow efficiency ${p.words}. Follow this task.`);
       a.appendChild(svg("rect", { x: i * colW + 4, y: 0, width: colW, height: totalH, class: "hit" }));
       a.appendChild(svg("circle", { cx, cy: y(Math.min(1, Math.max(0, p.value))), r: 5.5, class: p.hollow ? "fe-dot fe-hollow" : "fe-dot" }));
-      const t = svg("text", { x: cx, y: top + H + 16, class: "axis-tick", "text-anchor": "middle" });
-      t.textContent = p.short.slice(0, 4);
+      const ty = top + H + 8;
+      const t = svg("text", { x: cx + 4, y: ty, class: "axis-tick", "text-anchor": "end", transform: `rotate(-90 ${cx + 4} ${ty})` });
+      t.textContent = p.short;
       a.appendChild(t);
       markTip(a, p.name, [{ label: "Flow efficiency", value: p.words }, ...(p.hollow ? [{ label: "Partial", value: "a hollow dot; the words say which way the true figure lies" }] : [])]);
       plot.appendChild(a);
@@ -2596,7 +2597,7 @@
     row.appendChild(frame);
     container.appendChild(row);
     const note = el("p", "chart-caption");
-    note.appendChild(document.createTextNode("Filled: measured. Hollow: partial. Each dot is labeled with the first characters of its task's key. "));
+    note.appendChild(document.createTextNode("Filled: measured. Hollow: partial. Each dot is labeled with its task's short key; its tooltip and the table below name it. "));
     if (model.omitted) note.appendChild(document.createTextNode(`${model.omitted} task${model.omitted === 1 ? "" : "s"} not measured: ${model.reasons.map((r) => `${r.count} because ${F.reasonText(r.code)}`).join("; ")}.`));
     container.appendChild(note);
   }
@@ -2813,7 +2814,8 @@
     safely("causes-lede", () => {
       document.getElementById("causes-lede").textContent = S.causesLede(all, working);
     });
-    document.getElementById("pareto-note").textContent = S.paretoNote(all, F.reasonText);
+    // With no causes file the chart says so once; the note adds nothing.
+    document.getElementById("pareto-note").textContent = all.state === "absent" ? "" : S.paretoNote(all, F.reasonText);
     const draw = () => {
       const m = modes.causes === "working" ? working || all : all;
       document.getElementById("pareto-caption").textContent =
