@@ -15,7 +15,7 @@
 //   lower_if_censored a lower bound only when the job is still open
 //   from_reasons      read from the reasons (below)
 //   upper_if_awaiting an upper bound when every reason is a sign-off still
-//                     awaited or unwitnessed, else unknown
+//                     awaited, else unknown
 //
 // `from_reasons`: a shared worker's time and counts are counted for every
 // job that shares it, so `worker_shared` pulls the figure up (upper). Every
@@ -30,7 +30,7 @@
 // session whose start was lost can only make it shorter: an upper bound.
 
 const FROM = "from_reasons";
-const AWAITING = new Set(["awaiting_signoff", "signoff_unverified"]);
+const AWAITING = new Set(["awaiting_signoff"]);
 
 export const DIRECTIONS = Object.freeze({
   // Per-job report measures (jobs table and job page).
@@ -58,14 +58,12 @@ export const DIRECTIONS = Object.freeze({
   tokens_cache_read: FROM,
   tokens_cache_write: FROM,
   sessions_bound: "lower",
-  // Sign-off and rework. A first pass that awaits a witnessed sign-off may
+  // Sign-off and rework. A first pass that awaits a sign-off may
   // still be sent back (upper); with returns lost too, it can go either way.
-  // Returns counted with some lost are at least that many; so is a reason
-  // disagreement counted over unwitnessed refusals.
+  // Returns counted with some lost are at least that many.
   first_pass_job: "upper_if_awaiting",
   first_pass_yield: "upper_if_awaiting",
   returns: FROM,
-  reason_disagree: "lower",
   attention_per_accepted: "lower",
   // A mean over the delivered tasks whose estimate is whole: the tasks left
   // out could cost more or less.

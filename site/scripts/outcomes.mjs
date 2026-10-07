@@ -35,7 +35,7 @@ export function waitWords(wait) {
   return wait.censored === true ? WAITING_WORDS[wait.class] : SIGNED_WORDS[wait.class]
 }
 
-const SIGNOFF_KEYS = ["accepted", "accepted_unverified", "delivered_unsigned", "refused", "refused_unverified", "reopened", "not_recorded", "not_delivered", "no_record", "jobs"]
+const SIGNOFF_KEYS = ["accepted", "delivered_unsigned", "refused", "reopened", "not_recorded", "not_delivered", "no_record", "jobs"]
 const REFUSALS = ["not_what_was_asked", "defect", "changed_ask", "incomplete", "other"]
 const CATCH_POINTS = ["in_task", "at_review", "after_delivery"]
 const RETURN_REASONS = ["agent_error", "changed_ask", "new_information", "external"]
@@ -84,8 +84,8 @@ function oldestUnsigned(raw, published) {
 }
 
 // First-pass yield as the site states it: Desk's value (passed over jobs with
-// a verdict), with n the jobs whose verdict is final (not awaiting or
-// unwitnessed) and N the jobs with a verdict plus jobs whose returns were
+// a verdict), with n the jobs whose verdict is final (not awaiting a
+// sign-off) and N the jobs with a verdict plus jobs whose returns were
 // lost. A verdict that awaits sign-off counts as a pass so far, so the
 // figure is an upper bound.
 function yieldOf(y) {
@@ -94,13 +94,13 @@ function yieldOf(y) {
   const outOfScope = excluded.filter((e) => OUT_OF_SCOPE.has(e.reason)).reduce((s, e) => s + e.jobs, 0)
   const lost = excluded.filter((e) => !OUT_OF_SCOPE.has(e.reason))
   const lostJobs = lost.reduce((s, e) => s + e.jobs, 0)
-  if (!isCount(y.N) || !isCount(y.awaiting_signoff) || !isCount(y.signoff_unverified)) return none(["not_recorded"], DELIVERED)
+  if (!isCount(y.N) || !isCount(y.awaiting_signoff)) return none(["not_recorded"], DELIVERED)
   const N = y.N + lostJobs
   const reasons = [...new Set([...(Array.isArray(y.reasons) ? y.reasons : []), ...lost.map((e) => e.reason)])].sort()
   if (y.state === "unavailable" || y.N === 0 || typeof y.value !== "number") {
     return none(reasons.length ? reasons : ["no_delivered_jobs"], DELIVERED, N, outOfScope)
   }
-  const n = Math.max(0, y.N - y.awaiting_signoff - y.signoff_unverified)
+  const n = Math.max(0, y.N - y.awaiting_signoff)
   const base = { kind: "rollup", n, N, of: DELIVERED, out_of_scope: outOfScope }
   if (n === N && reasons.length === 0) return { ...measured(y.value), ...base }
   return direct({ ...partial(y.value, reasons.length ? reasons : ["unmeasured_members"]), ...base }, "first_pass_yield")
@@ -126,13 +126,10 @@ function reworkOf(r) {
   const check = isObject(r?.reason_check) ? r.reason_check : null
   const checkReasons = check && Array.isArray(check.reasons) && check.reasons.length ? check.reasons : isObject(r) ? ["not_recorded"] : NOT_YET
   let reasonCheck
-  if (!check || check.state === "unavailable" || !isCount(check.compared) || !isCount(check.disagree) || !isCount(check.compared_verified)) {
-    reasonCheck = { compared: unavailable(checkReasons), disagree: unavailable(checkReasons), compared_verified: unavailable(checkReasons) }
+  if (!check || check.state === "unavailable" || !isCount(check.compared) || !isCount(check.disagree)) {
+    reasonCheck = { compared: unavailable(checkReasons), disagree: unavailable(checkReasons) }
   } else {
-    // Unverified refusals are compared too; what the human said there is not
-    // witnessed, so the disagreement is at least this.
-    const disagree = check.compared_verified < check.compared ? direct(partial(check.disagree, ["refusal_unverified"]), "reason_disagree") : measured(check.disagree)
-    reasonCheck = { compared: measured(check.compared), disagree, compared_verified: measured(check.compared_verified) }
+    reasonCheck = { compared: measured(check.compared), disagree: measured(check.disagree) }
   }
   const d = isObject(r?.defects) ? r.defects : null
   const ms = (key) => (d ? deskRollup(d[key], d, "finished jobs, fully labeled", "sum") : none(NOT_YET, "finished jobs, fully labeled"))
@@ -183,12 +180,12 @@ export function outcomesSummary(file, { coverage = null } = {}) {
     first_pass_yield: yieldOf(f?.first_pass_yield),
     // The counts the yield is computed from (passed over counted), so the
     // percentage can be rebuilt; `final` is the site's n, the verdicts that
-    // no longer await a witnessed answer.
+    // no longer await a sign-off.
     first_pass_counts: {
       passed: count(f?.first_pass_yield?.passed, f ? ["not_recorded"] : NOT_YET),
       counted: count(f?.first_pass_yield?.N, f ? ["not_recorded"] : NOT_YET),
-      final: isObject(f?.first_pass_yield) && [f.first_pass_yield.N, f.first_pass_yield.awaiting_signoff, f.first_pass_yield.signoff_unverified].every(isCount)
-        ? measured(Math.max(0, f.first_pass_yield.N - f.first_pass_yield.awaiting_signoff - f.first_pass_yield.signoff_unverified))
+      final: isObject(f?.first_pass_yield) && [f.first_pass_yield.N, f.first_pass_yield.awaiting_signoff].every(isCount)
+        ? measured(Math.max(0, f.first_pass_yield.N - f.first_pass_yield.awaiting_signoff))
         : unavailable(f ? ["not_recorded"] : NOT_YET),
       returned: count(f?.first_pass_yield?.returned, f ? ["not_recorded"] : NOT_YET),
       changed_ask_only: count(f?.first_pass_yield?.changed_ask_only, f ? ["not_recorded"] : NOT_YET),

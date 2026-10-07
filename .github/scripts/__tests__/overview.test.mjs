@@ -215,7 +215,7 @@ test("the trend reads Desk's release groupings oldest first, with several releas
   const outcomes = {
     groupings: {
       plugin_version: {
-        "3.2.0-alpha.10": { signoff: { recorded: true, jobs: 2, accepted: 1, accepted_unverified: 1, refused: 0, delivered_unsigned: 0, not_recorded: 0, not_delivered: 0, no_record: 0 } },
+        "3.2.0-alpha.10": { signoff: { recorded: true, jobs: 2, accepted: 1, refused: 0, delivered_unsigned: 0, not_recorded: 0, not_delivered: 0, no_record: 0 } },
         mixed: { signoff: { recorded: false } },
         "3.2.0-alpha.9": { signoff: { recorded: false } },
       },
@@ -224,7 +224,7 @@ test("the trend reads Desk's release groupings oldest first, with several releas
   const measures = { groupings: { plugin_version: { "3.2.0-alpha.10": { jobs: 2, measures: { flow_efficiency: { N: 2, n: 1, median: 0.4, state: "partial", jobs_excluded: [{ jobs: 1, reason: "open_job" }] } } } } } }
   const t = releaseTrend(outcomes, measures, compareVersions)
   assert.deepEqual(t.map((r) => r.version), ["3.2.0-alpha.9", "3.2.0-alpha.10", "mixed"])
-  // Desk's own accepted count per release, never the site's sum with unverified ones.
+  // Desk's own accepted count per release, never a sum the site makes.
   assert.equal(t[1].accepted.value, 1)
   assert.equal(t[1].flow_efficiency.state, "partial")
   assert.equal(t[1].flow_efficiency.n, 1)

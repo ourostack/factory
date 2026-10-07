@@ -398,8 +398,8 @@ test("an outcomes rollup fills sign-off, yield and the unsigned deliveries slot,
   const w = (o = {}) => ({ lt_1h: 0, lt_1d: 0, lt_7d: 0, ge_7d: 0, ...o })
   write(join(fx.reports, "rollups/outcomes.json"), {
     schema: "desk.factory.rollups/1",
-    signoff: { recorded: true, jobs: 2, accepted: 1, accepted_unverified: 0, delivered_unsigned: 1, refused: 0, refused_unverified: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 1, jobs_without_work_record: 0, refusal_reasons: { not_what_was_asked: 0, defect: 0, changed_ask: 0, incomplete: 0, other: 0 }, waits: { signed: w({ lt_1h: 1 }), unsigned: w({ ge_7d: 1 }) } },
-    first_pass_yield: { state: "partial", value: 1, reasons: ["awaiting_signoff"], n: 2, N: 2, passed: 2, returned: 0, awaiting_signoff: 1, signoff_unverified: 0, changed_ask_only: 0, excluded: [{ reason: "not_recorded", jobs: 1 }] },
+    signoff: { recorded: true, jobs: 2, accepted: 1, delivered_unsigned: 1, refused: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 1, jobs_without_work_record: 0, refusal_reasons: { not_what_was_asked: 0, defect: 0, changed_ask: 0, incomplete: 0, other: 0 }, waits: { signed: w({ lt_1h: 1 }), unsigned: w({ ge_7d: 1 }) } },
+    first_pass_yield: { state: "partial", value: 1, reasons: ["awaiting_signoff"], n: 2, N: 2, passed: 2, returned: 0, awaiting_signoff: 1, changed_ask_only: 0, excluded: [{ reason: "not_recorded", jobs: 1 }] },
     rework: { state: "measured", reasons: [], n: 2, N: 2, returns: { in_task: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 }, at_review: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 }, after_delivery: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 } }, changed_ask: 0, reason_check: { state: "unavailable", reasons: ["no_refusals"] }, defects: { state: "unavailable", reasons: ["no_labels"], n: 0, N: 2 } },
   })
   write(join(fx.reports, "jobs/a.json"), job("a", "done", { signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], verified: true, reason: null, wait: { class: "lt_1h", censored: false } } }))
@@ -421,7 +421,7 @@ test("the attention headline's trust rests on the same capture share as every ot
   commitCapture(fx.main, "eeeeeeeeeeeeeeee.json", captureRecord({ "claude-code": captureHost() }), new Date().toISOString())
   write(join(fx.reports, "rollups/outcomes.json"), {
     schema: "desk.factory.rollups/1",
-    signoff: { recorded: true, jobs: 1, accepted: 1, accepted_unverified: 0, delivered_unsigned: 0, refused: 0, refused_unverified: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 0, jobs_without_work_record: 0, refusal_reasons: {}, waits: { signed: { lt_1h: 1, lt_1d: 0, lt_7d: 0, ge_7d: 0 }, unsigned: { lt_1h: 0, lt_1d: 0, lt_7d: 0, ge_7d: 0 } } },
+    signoff: { recorded: true, jobs: 1, accepted: 1, delivered_unsigned: 0, refused: 0, reopened: 0, not_recorded: 0, not_delivered: 0, no_record: 0, jobs_without_work_record: 0, refusal_reasons: {}, waits: { signed: { lt_1h: 1, lt_1d: 0, lt_7d: 0, ge_7d: 0 }, unsigned: { lt_1h: 0, lt_1d: 0, lt_7d: 0, ge_7d: 0 } } },
     attention: { headline: { state: "measured", value: 60000, reasons: [], n: 1, N: 1 } },
   })
   const r = build(fx)
