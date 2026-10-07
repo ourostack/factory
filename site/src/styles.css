@@ -227,7 +227,7 @@ h2.section-title {
 
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 14px;
 }
 
@@ -318,7 +318,7 @@ h2.section-title {
 }
 
 .chart-grid.cols-2 {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
 }
 
 .chart-card {
@@ -558,7 +558,7 @@ table.data-table code {
 
 .waste-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -1002,7 +1002,7 @@ footer a {
 /* Sign-off and rework */
 .outcome-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -1030,12 +1030,12 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 
 .answer-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 14px;
   margin: 0 0 18px;
 }
 .answer-band { margin: 0 0 8px; }
-.headline-row { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 0 0 10px; }
+.headline-row { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); margin: 0 0 10px; }
 .answer-headline .stat-value { font-size: clamp(26px, 4vw, 36px); margin: 4px 0; }
 .answer-headline .stat-label, .answer-headline .stat-note { margin-top: 4px; margin-bottom: 0; }
 .counts-line { margin: 0; font-size: 15px; }
@@ -1131,7 +1131,7 @@ h3.sub-title { font-size: 17px; margin: 30px 0 12px; }
 .table-notes-head { font-weight: 600; cursor: pointer; }
 .stat-value .num-flag { font-size: 11px; vertical-align: middle; }
 .stat-value .num-reason { font-size: 14px; }
-.task-tiles { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.task-tiles { grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); }
 /* On a task or session page the header shrinks to its title and links. */
 body[data-view="job"] .hero-sub, body[data-view="job"] .limit-text,
 body[data-view="session"] .hero-sub, body[data-view="session"] .limit-text { display: none; }
@@ -1153,3 +1153,11 @@ body[data-view="job"] header.site-header, body[data-view="session"] header.site-
 .fix-item { padding: 12px 16px; }
 #view-overview > section { padding: 32px 0; }
 .task-tiles .stat-value { margin: 6px 0; }
+
+/* No view scrolls the page sideways: a wide table scrolls inside its own box,
+   and that box is the positioning context for the screen-reader text in its
+   cells, which would otherwise widen the page. Between phone and full width,
+   the task table's text cells wrap. */
+#jobs-table, .chart-card:has(> table.data-table) { overflow-x: auto; }
+#jobs-table, .chart-card, .table-wrap { position: relative; }
+@media (min-width: 721px) { table.data-table.task-table td:not(.num) { white-space: normal; } }
