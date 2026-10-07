@@ -167,26 +167,35 @@
     const color = opts.color || "var(--series-1)";
 
     for (const row of rows) {
-      const rowEl = el("div", "bar-row");
-      rowEl.tabIndex = 0;
+      // No tab stop: the row's text is all visible, so the tooltip only repeats it to a mouse.
+      const draw = F.barRow(row.number, row.secondary, scale);
+      const rowEl = el("div", draw.draw === "none" ? "bar-row bar-row-unavailable" : "bar-row");
       const head = el("div", "bar-head");
       const labelEl = el("span", "bar-label", row.label);
       if (row.flag) labelEl.appendChild(el("span", "bar-flag", ` (${row.flag})`));
-      const trackEl = el("div", "bar-track");
-      if (typeof raw(row.secondary) === "number") {
-        const secEl = el("div", "bar-fill secondary");
-        secEl.style.width = `${scale.width(raw(row.secondary))}%`;
-        trackEl.appendChild(secEl);
+      if (draw.draw === "none") {
+        // Not measured: no track, so it can never read as zero. "no data" and its reason stand in the bar's place.
+        head.append(labelEl);
+        const nodata = el("p", "bar-nodata");
+        nodata.appendChild(num(row.number, opts.kind, { nofn: opts.nofn, flag: opts.flag, basis: opts.basis }));
+        rowEl.append(head, nodata);
+      } else {
+        const trackEl = el("div", "bar-track");
+        if (draw.secondaryWidth !== null) {
+          const secEl = el("div", "bar-fill secondary");
+          secEl.style.width = `${draw.secondaryWidth}%`;
+          trackEl.appendChild(secEl);
+        }
+        const fillEl = el("div", "bar-fill");
+        fillEl.style.width = `${draw.width}%`;
+        fillEl.style.background = row.color || color;
+        trackEl.appendChild(fillEl);
+        const valueEl = el("span", "bar-value");
+        valueEl.appendChild(num(row.number, opts.kind, { nofn: opts.nofn, flag: opts.flag, basis: opts.basis }));
+        if (opts.suffix) valueEl.appendChild(document.createTextNode(opts.suffix));
+        head.append(labelEl, valueEl);
+        rowEl.append(head, trackEl);
       }
-      const fillEl = el("div", "bar-fill");
-      fillEl.style.width = `${scale.width(raw(row.number))}%`;
-      fillEl.style.background = row.color || color;
-      trackEl.appendChild(fillEl);
-      const valueEl = el("span", "bar-value");
-      valueEl.appendChild(num(row.number, opts.kind, { nofn: opts.nofn, flag: opts.flag, basis: opts.basis }));
-      if (opts.suffix) valueEl.appendChild(document.createTextNode(opts.suffix));
-      head.append(labelEl, valueEl);
-      rowEl.append(head, trackEl);
 
       const showTT = (evt) => {
         const rect = rowEl.getBoundingClientRect();
@@ -198,8 +207,6 @@
       rowEl.addEventListener("mousemove", showTT);
       rowEl.addEventListener("mouseenter", showTT);
       rowEl.addEventListener("mouseleave", hideTooltip);
-      rowEl.addEventListener("focus", showTT);
-      rowEl.addEventListener("blur", hideTooltip);
       wrap.appendChild(rowEl);
     }
     container.appendChild(wrap);
@@ -551,7 +558,8 @@
         const li = document.createElement("li");
         const left = document.createElement("span");
         const dot = el("span", "status-dot");
-        dot.style.background = issue.issue_state === "open" ? "var(--status-warning)" : "var(--status-good)";
+        // A closed issue is not a checked fix, so it gets a neutral dot, not a "good" one.
+        dot.style.background = issue.issue_state === "open" ? "var(--status-warning)" : "var(--text-muted)";
         left.appendChild(dot);
         // Only an auto-filed title is published; anything else is the number.
         left.appendChild(safeLink(issue.title || `Issue ${issue.ref}`, issue.url));
@@ -563,8 +571,9 @@
         if (issue.issue_state === "closed" && res && res.kind === "countermeasure") {
           const resLine = document.createElement("span");
           resLine.className = "issue-resolution";
-          resLine.appendChild(document.createTextNode(res.merged === true ? "fixed by " : "closed, references "));
+          resLine.appendChild(document.createTextNode(res.merged === true ? "countermeasure: " : "closed, references "));
           resLine.appendChild(safeLink(`pull request ${res.ref}`, res.url));
+          if (res.merged === true) resLine.appendChild(document.createTextNode(" (merged, not yet checked)"));
           if (res.merged === false) resLine.appendChild(document.createTextNode(" (not yet merged)"));
           if (res.merged === "unknown") resLine.appendChild(document.createTextNode(" (merge state not checked)"));
           right.appendChild(resLine);
@@ -852,21 +861,19 @@
       return;
     }
     const table = el("table", "data-table task-table");
-    tableHead(table, [["Finish order", "num"], ["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Agent time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
+    tableHead(table, [["Finish order", "num"], ["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Working time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
     const tbody = document.createElement("tbody");
     const notes = new Map();
     for (const j of byFinishDesc(jobs)) {
       const tr = document.createElement("tr");
-      // Only a labeled task has finished in the store's sense; the rest are listed after it, so their cell says why instead of showing a position.
-      const placed = j.finish_order && j.finish_order.state === "measured";
-      const pos = j.finish_basis === "labels" && placed ? F.ordinal(j.finish_order.value) : !placed ? "no session" : j.status === "done" ? "not labeled" : "open";
+      const pos = F.finishCell(j);
       plainCell(tr, "Finish order", el("span", j.finish_basis === "labels" ? "finish-pos" : "finish-pos muted", pos), "num");
       const name = el("span", "task-name");
       name.appendChild(jobLink(j.id, jobLabel(j)));
       plainCell(tr, "Task", name, "task-cell");
       plainCell(tr, "Status", outcomeNode(j));
       tableCell(tr, notes, "Elapsed", j.lead_time_ms, "duration", "num");
-      tableCell(tr, notes, "Agent time", j.active_time_ms, "duration", "num");
+      tableCell(tr, notes, "Working time", j.active_time_ms, "duration", "num");
       tableCell(tr, notes, "Operator turns", j.human_turns, "count", "num");
       tableCell(tr, notes, "Sent back", j.returns, "count", "num");
       plainCell(tr, "Largest waste", topWasteNode(j));
@@ -973,7 +980,7 @@
     } catch (err) {
       verdict = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
     }
-    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health });
+    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next });
     container.className = `status-line status-${s.state}`;
     const word = el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`);
     container.appendChild(word);
@@ -998,21 +1005,6 @@
     if (safe) more.href = safe;
     more.textContent = "Health details";
     container.appendChild(more);
-  }
-
-  // Several figures that are all no data for one reason say it once.
-  function countsLine(parts) {
-    const p = el("p", "counts-line");
-    const reasons = parts.map(([, n]) => (n.state === "unavailable" ? F.describe(n, "count").reason : null));
-    const shared = reasons.every((r) => r !== null && r === reasons[0]) ? reasons[0] : null;
-    parts.forEach(([label, n], i) => {
-      if (i) p.appendChild(document.createTextNode(" · "));
-      p.appendChild(el("span", "counts-label", `${label} `));
-      p.appendChild(shared || reasons[i] ? el("span", "num num-unavailable", "no data") : cellNum(n, "count"));
-      if (!shared && reasons[i]) p.appendChild(el("span", "muted", ` (${reasons[i]})`));
-    });
-    if (shared) p.appendChild(el("span", "muted", ` — ${shared}.`));
-    return p;
   }
 
   // A headline figure as plain text: its label, the figure, and its notes.
@@ -1064,13 +1056,6 @@
       ]);
     }
     container.appendChild(row);
-    container.appendChild(
-      countsLine([
-        ["Accepted", o.signoff.accepted],
-        ["Deliveries waiting for an answer", o.unsigned],
-        ["Sent back", o.signoff.refused],
-      ]),
-    );
   }
 
   // ------------------------------------------------------------- trend
@@ -1183,11 +1168,7 @@
 
   // Where a task sits in finish order, in words.
   function finishWords(j, jobs) {
-    const labeled = jobs.filter((x) => x.finish_basis === "labels").length;
-    if (!j.finish_order || j.finish_order.state !== "measured") return "It has no place in finish order: no session of it is published.";
-    if (j.finish_basis === "labels") return `It was the ${F.ordinal(j.finish_order.value)} of ${labeled} labeled tasks to finish.`;
-    if (j.status === "done") return "It is done but not labeled for waste yet, so it is listed after the labeled tasks, by its first session.";
-    return "It is still open, so it is listed after the finished tasks, by its first session.";
+    return F.finishWords(j, jobs);
   }
 
   // The walk between tasks: the one that finished before, the one after,
@@ -1197,7 +1178,8 @@
     const ordered = byFinishDesc(jobs);
     const nav = el("nav", "task-walk");
     nav.setAttribute("aria-label", "Other tasks");
-    const placed = ordered.filter((x) => x.finish_order && x.finish_order.state === "measured");
+    // The walk steps through finished (labeled) tasks only; an open task has no place in finish order.
+    const placed = ordered.filter((x) => x.finish_basis === "labels" && x.finish_order && x.finish_order.state === "measured");
     const i = placed.findIndex((x) => x.id === current);
     const step = (j, word) => {
       const span = el("span", "task-walk-step");
@@ -1211,7 +1193,7 @@
     const label = el("label", "task-select-label", "Any task ");
     const select = el("select", "task-select");
     for (const j of ordered) {
-      const pre = j.finish_basis === "labels" && j.finish_order.state === "measured" ? F.ordinal(j.finish_order.value) : j.status === "done" ? "not labeled" : "open";
+      const pre = F.finishCell(j);
       const o = el("option", null, `${pre} \u00b7 ${jobLabel(j)}`);
       o.value = j.id;
       if (j.id === current) o.selected = true;
@@ -1243,7 +1225,9 @@
     const keyLine = tn.kind === "local"
       ? `${where ? `${where} · ` : ""}key ${j.id}`
       : tn.kind === "public"
-        ? `Named after its first public pull request. Task key ${j.id}.`
+        ? tn.partial
+          ? `Named after the earliest-opened of the public pull requests that could be read; some could not be read for this build, so an earlier one may exist. Task key ${j.id}.`
+          : `Named after its earliest-opened public pull request. Task key ${j.id}.`
         : tn.kind === "unnamed"
           ? `Its pull requests' titles could not be read for this build. Task key ${j.id}.`
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
@@ -1264,7 +1248,7 @@
     const tiles = el("dl", "facts-row");
     const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", basis: false, reason: false });
     tile(tiles, "Elapsed", fig(j.lead_time_ms, "duration"), [elapsedCaption(j.lead_time_ms)]);
-    tile(tiles, "Agent time", fig(j.active_time_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
+    tile(tiles, "Working time", fig(j.active_time_ms, "duration"), ["agents busy: turns, tools and subagents, waits excluded"]);
     tile(tiles, "Operator attention", fig(j.attention_ms, "duration"), [words("over ", fig(j.human_turns, "count"), " operator turns")]);
     tile(tiles, "Sent back", fig(j.returns, "count"), [words("first pass: ", fig(j.first_pass, "pass"))]);
     tile(tiles, "Gaps between the operator's prompts", fig(j.human_wait_ms, "duration"), ["inside sessions; not the evaluator's waiting"]);
@@ -1343,7 +1327,7 @@
       ses.appendChild(el("p", "chart-empty", "No session is on this task's timeline."));
     } else {
       const table = el("table", "data-table task-table");
-      tableHead(table, [["Session", ""], ["Length", "num"], ["Agent time", "num"], ["Tool calls", "num"], ["Failed calls", "num"], ["Subagents", "num"]]);
+      tableHead(table, [["Session", ""], ["Length", "num"], ["Working time", "num"], ["Tool calls", "num"], ["Failed calls", "num"], ["Subagents", "num"]]);
       const tbody = document.createElement("tbody");
       const notes = new Map();
       const none = { state: "unavailable", reasons: ["facts_missing"] };
@@ -1356,7 +1340,7 @@
         link.textContent = `${s.host} · ${s.session_id.slice(0, 8)}`;
         plainCell(tr, "Session", link, "task-cell");
         tableCell(tr, notes, "Length", f ? f.duration_ms : none, "duration", "num");
-        tableCell(tr, notes, "Agent time", f ? f.active_ms : none, "duration", "num");
+        tableCell(tr, notes, "Working time", f ? f.active_ms : none, "duration", "num");
         tableCell(tr, notes, "Tool calls", f ? f.tool_calls_total : none, "count", "num");
         tableCell(tr, notes, "Failed calls", f ? f.tool_failures_total : none, "count", "num");
         tableCell(tr, notes, "Subagents", f ? f.subagent_count : none, "count", "num");
@@ -1412,7 +1396,7 @@
     const tiles = el("dl", "facts-row");
     const fig = (n, kind) => num(n, kind, { nofn: false, flag: "short", reason: false });
     tile(tiles, "Length", fig(s.duration_ms, "duration"), ["from the session's first record to its last"]);
-    tile(tiles, "Agent time", fig(s.active_ms, "duration"), ["turns, tools and subagents, waits excluded"]);
+    tile(tiles, "Working time", fig(s.active_ms, "duration"), ["agents busy: turns, tools and subagents, waits excluded"]);
     tile(tiles, "Tool calls", fig(s.tool_calls_total, "count"), [words("failed: ", fig(s.tool_failures_total, "count"))]);
     tile(tiles, "Subagents", fig(s.subagent_count, "count"), [s.models.length ? `models: ${s.models.join(", ")}` : "models: none recorded"]);
     container.appendChild(tiles);
@@ -1441,6 +1425,18 @@
   // #/act, #/why, #/about and #/store. The first site's #job-<key>,
   // #session-<id> and section anchors redirect to their new homes.
 
+  // The skip link moves focus to the content without changing the hash, so
+  // it never leaves a #main behind for the router (or a reload) to read.
+  const skipLink = document.querySelector(".skip-link");
+  if (skipLink) {
+    skipLink.addEventListener("click", (evt) => {
+      const main = document.getElementById("main");
+      if (!main) return;
+      evt.preventDefault();
+      main.focus();
+    });
+  }
+
   const VIEWS = ["task", "session", "compare", "causes", "act", "why", "about", "store", "missing"];
   const VIEW_TITLE = { task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", act: "Act", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
   let routedOnce = false;
@@ -1452,9 +1448,17 @@
     };
     let r = F.parseRoute(window.location.hash, jobOfSession);
     if (r.view === "skip") {
-      const main = document.getElementById("main");
-      if (main) main.focus();
-      return;
+      // The skip link focuses #main without touching the hash (see the click
+      // handler below). A #main that arrives anyway (a reload, a pasted link)
+      // is not a view: on first load the page drops it and opens the default
+      // route; later it only moves focus, leaving the current view as it is.
+      if (routedOnce) {
+        const main = document.getElementById("main");
+        if (main) main.focus();
+        return;
+      }
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+      r = F.parseRoute("", jobOfSession);
     }
     if (r.view === "redirect") {
       history.replaceState(null, "", r.to);
@@ -1822,6 +1826,16 @@
     return res.json();
   }
 
+  // Draws one part of a page; if it throws, that part says so and the rest of the page still draws.
+  function safely(id, fn) {
+    try {
+      fn();
+    } catch (err) {
+      const node = document.getElementById(id);
+      if (node) emptyState(node, `This part could not be drawn (${err && err.message ? err.message : "an error"}).`);
+    }
+  }
+
   async function main() {
     let health = null;
     try {
@@ -1853,10 +1867,15 @@
     wasteActions = data.waste_actions && typeof data.waste_actions === "object" ? data.waste_actions : {};
     wasteNames = data.waste_names && typeof data.waste_names === "object" ? data.waste_names : {};
     renderStatusLine(document.getElementById("status-line"), data, health);
-    renderAnswer(document.getElementById("answer-tiles"), data.outcomes);
-    renderTrend(document.getElementById("trend"), data.trend);
-    renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs);
-    renderLabeledWaste(document.getElementById("labeled-waste"), data.labeled_waste);
+    // Route first: the view the reader asked for never waits on, or fails
+    // with, the store page's charts below. Each of those is drawn on its own,
+    // so one that throws says so in its place and the rest still draw.
+    route(data);
+    window.addEventListener("hashchange", () => route(data));
+    safely("answer-tiles", () => renderAnswer(document.getElementById("answer-tiles"), data.outcomes));
+    safely("trend", () => renderTrend(document.getElementById("trend"), data.trend));
+    safely("fix-list", () => renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs));
+    safely("labeled-waste", () => renderLabeledWaste(document.getElementById("labeled-waste"), data.labeled_waste));
 
     // Build metadata footer: how long ago, never a calendar date.
     const builtMs = Date.parse(data.built_at);
@@ -1875,12 +1894,12 @@
     meta.appendChild(document.createTextNode("."));
 
     // 1. Proof
-    renderFeatured(document.getElementById("featured-grid"), data.featured);
+    safely("featured-grid", () => renderFeatured(document.getElementById("featured-grid"), data.featured));
 
     // 2. Work design — scoped to substantial sessions (active at least 5
     // minutes, or bound to a tracked job), since that is real work rather
     // than a launcher blip or a scripted check.
-    renderKPIs(document.getElementById("kpi-row"), data.headlines);
+    safely("kpi-row", () => renderKPIs(document.getElementById("kpi-row"), data.headlines));
 
     const ENTRYPOINT_NAMES = {
       desktop: "desktop",
@@ -1921,9 +1940,9 @@
       );
     }
 
-    renderCaptureCoverage(document.getElementById("capture-coverage"), data.capture_coverage);
-    renderLoop(document.getElementById("loop-health"), data.loop_health);
-    renderTakeaways(document.getElementById("takeaways"), data.takeaways);
+    safely("capture-coverage", () => renderCaptureCoverage(document.getElementById("capture-coverage"), data.capture_coverage));
+    safely("loop-health", () => renderLoop(document.getElementById("loop-health"), data.loop_health));
+    safely("takeaways", () => renderTakeaways(document.getElementById("takeaways"), data.takeaways));
 
     const timeBreakdownNoteEl = document.getElementById("time-breakdown-note");
     if (timeBreakdownNoteEl && data.flow_efficiency) {
@@ -1946,14 +1965,14 @@
       ],
       trust: r.trust,
     }));
-    renderBarList(document.getElementById("chart-time-breakdown"), timeBreakdownRows, {
+    safely("chart-time-breakdown", () => renderBarList(document.getElementById("chart-time-breakdown"), timeBreakdownRows, {
       title: "Where time goes in a finished task",
       titleTag: "h2",
       color: "var(--series-1)",
       kind: "duration",
       suffix: " median",
       emptyText: "Not enough measured jobs yet.",
-    });
+    }));
     // Beside each row's figure: its trust state, as text.
     document.querySelectorAll("#chart-time-breakdown .bar-row").forEach((rowEl, i) => {
       const t = timeBreakdownRows[i].trust;
@@ -1962,27 +1981,21 @@
       rowEl.after(line);
     });
 
-    renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes);
-    renderKaizen(
-      document.getElementById("kaizen-panel"),
-      data.kaizen_issues,
-      data.andon_issues,
-      data.kaizen.verification,
-      data.andon_verification,
-    );
+    safely("outcomes-panel", () => renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes));
+    safely("kaizen-panel", () => renderKaizen(document.getElementById("kaizen-panel"), data.kaizen_issues, data.andon_issues, data.kaizen.verification, data.andon_verification));
 
     // 3. Detail views
-    renderIntakeChart(document.getElementById("chart-intake"), data.intake_over_time);
+    safely("chart-intake", () => renderIntakeChart(document.getElementById("chart-intake"), data.intake_over_time));
 
     const statusRows = Object.entries(data.job_status_counts)
       .sort((a, b) => b[1].value - a[1].value)
       .map(([status, count]) => ({ label: status, number: count, color: statusColor(status) }));
-    renderBarList(document.getElementById("chart-job-status"), statusRows, {
+    safely("chart-job-status", () => renderBarList(document.getElementById("chart-job-status"), statusRows, {
       title: "Job lifecycle",
       unit: "jobs",
       kind: "count",
       emptyText: "No jobs tracked yet.",
-    });
+    }));
 
     // Every section caption names the population its data counts (format.js).
     for (const section of F.CAPTION_SECTIONS) {
@@ -1998,13 +2011,13 @@
         { label: "Failures", value: F.toText(t.failures, "count") },
       ],
     }));
-    renderBarList(document.getElementById("chart-tool-calls"), toolCallRows, {
+    safely("chart-tool-calls", () => renderBarList(document.getElementById("chart-tool-calls"), toolCallRows, {
       title: "Tool calls by kind",
       unit: "calls",
       color: "var(--series-1)",
       kind: "compact",
       emptyText: "No tool calls recorded yet.",
-    });
+    }));
 
     const failureRows = data.tool_kinds
       .filter((t) => t.calls.state !== "unavailable" && t.calls.value >= 20)
@@ -2019,12 +2032,12 @@
           { label: "Failures", value: F.toText(t.failures, "count") },
         ],
       }));
-    renderBarList(document.getElementById("chart-tool-failures"), failureRows, {
+    safely("chart-tool-failures", () => renderBarList(document.getElementById("chart-tool-failures"), failureRows, {
       title: "Failure rate by tool kind",
       color: "var(--series-2)",
       kind: "pct1",
       emptyText: "No tool kind has 20 or more recorded calls yet.",
-    });
+    }));
 
     const modelRows = data.models.map((m) => ({
       label: m.id,
@@ -2035,33 +2048,31 @@
         { label: "Cache read tokens", value: F.toText(m.cache_read, "compact") },
       ],
     }));
-    renderBarList(document.getElementById("chart-models"), modelRows, {
+    safely("chart-models", () => renderBarList(document.getElementById("chart-models"), modelRows, {
       title: "Model requests",
       unit: "requests",
       color: "var(--series-3)",
       kind: "compact",
       emptyText: "No model usage recorded yet.",
-    });
+    }));
 
-    renderHarnesses(document.getElementById("harnesses"), data.harnesses);
+    safely("harnesses", () => renderHarnesses(document.getElementById("harnesses"), data.harnesses));
 
     const bucketOrder = ["0", "1-2", "3-5", "6+"];
     const subagentRows = bucketOrder.map((k) => ({
       label: `${k} subagents`,
       number: data.subagents.buckets[k],
     }));
-    renderBarList(document.getElementById("chart-subagents"), subagentRows, {
+    safely("chart-subagents", () => renderBarList(document.getElementById("chart-subagents"), subagentRows, {
       title: "Subagent fan-out",
       unit: "sessions",
       color: "var(--series-1)",
       kind: "count",
       suffix: " sessions",
       emptyText: "No session data yet.",
-    });
+    }));
 
-    renderJobsTable(document.getElementById("jobs-table"), data.jobs);
-    route(data);
-    window.addEventListener("hashchange", () => route(data));
+    safely("jobs-table", () => renderJobsTable(document.getElementById("jobs-table"), data.jobs));
   }
 
   main();

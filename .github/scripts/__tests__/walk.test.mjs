@@ -11,9 +11,10 @@ import { dirname, join } from "node:path"
 import { test } from "node:test"
 
 import { finishOrder, firstAdded } from "../../../site/scripts/finish-order.mjs"
-import { cleanTitle, orderByOpened, prOpenedAt, taskNames } from "../../../site/scripts/task-names.mjs"
+import { cleanTitle, openedMs, taskNames } from "../../../site/scripts/task-names.mjs"
 import { READ_WHOLE_BYTES, llmsText, publishData, sizeLine } from "../../../site/scripts/publish-files.mjs"
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
+import { fixNext } from "../../../site/scripts/fix-next.mjs"
 import { measured, unavailable } from "../../../site/scripts/state.mjs"
 
 const F = createRequire(import.meta.url)("../../../site/src/format.js")
@@ -119,32 +120,51 @@ test("tasks first labeled in the same commit share a finish group and are ordere
   assert.deepEqual(checkNumbers({ jobs: [...out.values()] }), [])
 })
 
-test("a task is named after its earliest-opened public pull request, on the job clock, falling back to the report's order", async () => {
+test("a task is named after its earliest-opened public pull request by GitHub's created_at, and the order is published without the time", async () => {
   const pr = (repo, n) => ({ ref: `#${n}`, url: `https://github.com/${repo}/pull/${n}` })
-  const list = [pr("o/desk", 1), pr("o/desk", 2), pr("o/app", 7)]
-  // From facts: session s2 starts later on the job clock, but its reference to app#7 comes first overall.
-  const report = { timeline: { sessions: [{ id: "s1", offset_ms: -5000 }, { id: "s2", offset_ms: 1000 }] } }
-  const prsOfSession = new Map([
-    ["s1", [{ repo: "o/desk", number: 1, at_ms: 9000 }, { repo: "o/desk", number: 2, at_ms: 20000 }, { repo: "o/app", number: 7 }]],
-    ["s2", [{ repo: "o/app", number: 7, at_ms: 100 }, { repo: "o/desk", number: 1, at_ms: 50 }]],
-  ])
-  const at = prOpenedAt(report, prsOfSession)
-  assert.deepEqual([...at].sort(), [["o/app#7", 1100], ["o/desk#1", 1050], ["o/desk#2", 15000]].sort())
-  assert.deepEqual(orderByOpened(list, at).map((p) => p.url.split("/").slice(-3).join("/")), ["desk/pull/1", "app/pull/7", "desk/pull/2"])
-  // The report's own pull request times, when present, win.
-  const withTimes = prOpenedAt({ timeline: { prs: [{ repo: "o/desk", number: 2, at_ms: -3 }], sessions: report.timeline.sessions } }, prsOfSession)
-  assert.deepEqual([...withTimes], [["o/desk#2", -3]])
-  assert.equal(orderByOpened(list, withTimes)[0].url, "https://github.com/o/desk/pull/2")
-  // No time at all: the report's order stands.
-  assert.deepEqual(orderByOpened(list, prOpenedAt({}, new Map())), list)
-  // The name follows the order it is given.
-  const names = await taskNames([{ id: "j", pull_requests: orderByOpened(list, at) }], async (repo, n) => ({ title: `${repo} ${n}`, private: false }))
-  assert.equal(names.get("j").name, "o/desk 1")
-  const names2 = await taskNames([{ id: "j", pull_requests: orderByOpened(list, withTimes) }], async (repo, n) => ({ title: `${repo} ${n}`, private: false }))
-  assert.equal(names2.get("j").name, "o/desk 2")
-  // The build wires it in and publishes no time.
-  const build = read("site/scripts/build-data.mjs")
-  assert.match(build, /j\.pull_requests = orderByOpened\(j\.pull_requests, prOpenedAt\(jobReports\.get\(j\.id\), prsOfSession\)\)/)
+  // Listed (as the report lists them) by repository and number; opened in a different order.
+  const list = [pr("o/app", 1), pr("o/app", 7), pr("o/desk", 2)]
+  const pulls = {
+    "o/app#1": { title: "Referenced first, opened last", private: false, created_at: "2026-03-05T10:00:00Z" },
+    "o/app#7": { title: "Opened first", private: false, created_at: "2026-03-01T09:00:00Z" },
+    "o/desk#2": { title: "Opened second", private: false, created_at: "2026-03-02T09:00:00Z" },
+  }
+  const out = await taskNames([{ id: "j", pull_requests: list }], async (repo, n) => pulls[`${repo}#${n}`] || null)
+  const got = out.get("j")
+  assert.equal(got.name, "Opened first")
+  assert.deepEqual(got.more_prs, measured(2))
+  assert.ok(!("name_basis" in got), "every pull request was read, so the name stands for the whole task")
+  assert.deepEqual(got.order, ["https://github.com/o/app/pull/7", "https://github.com/o/desk/pull/2", "https://github.com/o/app/pull/1"])
+  // No time leaves the function.
+  assert.doesNotMatch(JSON.stringify(got), /2026|created_at|\d{12,}/)
+  // A time that is missing or not a time is no time.
+  assert.equal(openedMs({ created_at: "nope" }), null)
+  assert.equal(openedMs({}), null)
+  assert.equal(openedMs({ created_at: "2026-03-01T09:00:00Z" }), Date.parse("2026-03-01T09:00:00Z"))
+})
+
+test("when a pull request cannot be read, the name comes from what was read and says it is partial; with nothing read, there is no name", async () => {
+  const pr = (repo, n) => ({ ref: `#${n}`, url: `https://github.com/${repo}/pull/${n}` })
+  const pulls = {
+    "o/a#2": { title: "Read, opened later", private: false, created_at: "2026-03-05T10:00:00Z" },
+    "o/a#3": { title: "No time", private: false },
+  }
+  const get = async (repo, n) => pulls[`${repo}#${n}`] || null
+  // o/a#1 could not be read (it may be the earliest): named from o/a#2, marked partial, never silently.
+  const out = await taskNames([{ id: "p", pull_requests: [pr("o/a", 1), pr("o/a", 2), pr("o/a", 3)] }, { id: "none", pull_requests: [pr("o/a", 1)] }], get)
+  assert.equal(out.get("p").name, "Read, opened later")
+  assert.equal(out.get("p").name_basis, "partial")
+  assert.deepEqual(out.get("p").order, ["https://github.com/o/a/pull/2", "https://github.com/o/a/pull/1", "https://github.com/o/a/pull/3"])
+  assert.ok(!("name" in out.get("none")), "nothing read: no name, and the page says the titles were not read")
+  // The page says a partial name is partial, and About states the rule the code follows.
+  const tn = F.taskName({}, { id: "0123456789abcdef", name: "Read, opened later", name_basis: "partial", more_prs: measured(2) })
+  assert.equal(tn.partial, true)
+  const html = read("site/src/index.html")
+  assert.match(html, /A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened \(that time is never published\)/)
+  assert.match(html, /If some of its pull requests could not be read, the name comes from those that could, and the task page says so\./)
+  assert.doesNotMatch(html, /first public pull request its sessions opened/)
+  // The numbers check accepts the basis as a word.
+  assert.deepEqual(checkNumbers({ jobs: [{ id: "p", name: "x", name_basis: "partial", more_prs: measured(2), finish_order: measured(1) }] }), [])
 })
 
 test("the Act lede does not promise a check that does not exist yet", () => {
@@ -161,7 +181,7 @@ test("ordinals read in words a reader expects", () => {
 // -------------------------------------------------------------- task names
 
 test("a task is named after its first public pull request and N more, or is a private task with a short key", () => {
-  assert.deepEqual(F.taskName({}, { id: "0123456789abcdef", name: "Fix the build", more_prs: measured(3), pull_requests: [{}, {}, {}, {}] }), { title: "Fix the build", more: 3, kind: "public", short: "01234567" })
+  assert.deepEqual(F.taskName({}, { id: "0123456789abcdef", name: "Fix the build", more_prs: measured(3), pull_requests: [{}, {}, {}, {}] }), { title: "Fix the build", more: 3, kind: "public", short: "01234567", partial: false })
   assert.equal(F.taskNameText({}, { id: "x", name: "Fix the build", more_prs: measured(3) }), "Fix the build and 3 more")
   assert.equal(F.taskNameText({}, { id: "x", name: "Fix the build", more_prs: measured(0) }), "Fix the build")
   assert.equal(F.taskNameText({}, { id: "0123456789abcdef", pull_requests: [] }), "Private task 01234567")
@@ -171,11 +191,12 @@ test("a task is named after its first public pull request and N more, or is a pr
   assert.equal(F.taskNameText(names, { id: "x", name: "PR title", more_prs: measured(2) }), "Real card title")
 })
 
-test("the build names a task from its first readable public pull request title, and never from a private repository", async () => {
+test("the build reads every pull request of a task, names it from a public repository only, and never from a private one", async () => {
   const pulls = {
-    "o/pub#1": { title: "First  public\ttitle\u0007", private: false },
-    "o/pub#2": { title: "Second", private: false },
-    "o/priv#5": { title: "Secret", private: true },
+    "o/pub#1": { title: "First  public\ttitle\u0007", private: false, created_at: "2026-01-01T00:00:00Z" },
+    "o/pub#2": { title: "Second", private: false, created_at: "2026-01-02T00:00:00Z" },
+    "o/pub#3": { title: "Third", private: false, created_at: "2026-01-03T00:00:00Z" },
+    "o/priv#5": { title: "Secret", private: true, created_at: "2025-01-01T00:00:00Z" },
   }
   const calls = []
   const get = async (repo, n) => {
@@ -185,18 +206,20 @@ test("the build names a task from its first readable public pull request title, 
   const pr = (repo, n) => ({ ref: `#${n}`, url: `https://github.com/${repo}/pull/${n}` })
   const out = await taskNames(
     [
-      { id: "a", pull_requests: [pr("o/pub", 1), pr("o/pub", 2), pr("o/pub", 3)] },
+      { id: "a", pull_requests: [pr("o/pub", 3), pr("o/pub", 1), pr("o/pub", 2)] },
       { id: "b", pull_requests: [pr("o/priv", 5)] },
       { id: "c", pull_requests: [] },
-      { id: "d", pull_requests: [pr("o/gone", 9), pr("o/pub", 2)] },
+      { id: "e", pull_requests: [pr("o/priv", 5), pr("o/pub", 2)] },
     ],
     get,
   )
-  assert.deepEqual(out.get("a"), { name: "First public title", more_prs: measured(2) })
-  assert.deepEqual(out.get("b"), {}, "a private repository never names a task")
-  assert.deepEqual(out.get("c"), {})
-  assert.deepEqual(out.get("d"), { name: "Second", more_prs: measured(1) }, "an unreadable pull request is skipped")
-  assert.ok(!calls.includes("o/pub#3"), "only as many pull requests are read as it takes")
+  const { order, ...a } = out.get("a")
+  assert.deepEqual(a, { name: "First public title", more_prs: measured(2) })
+  assert.equal(order.length, 3)
+  assert.ok(!("name" in out.get("b")), "a private repository never names a task")
+  assert.ok(!("name" in out.get("c")))
+  assert.equal(out.get("e").name, "Second", "an earlier pull request in a private repository is passed over")
+  assert.ok(calls.includes("o/pub#3"), "every pull request is read, so the earliest is found")
   assert.equal(cleanTitle("   "), null)
   assert.equal(cleanTitle("x".repeat(400)).length, 160)
   // A title that is only digits still passes the numbers check as a name.
@@ -342,6 +365,33 @@ test("any alarm is abnormal, names itself, and says who is on it or that no one 
   assert.match(read("site/src/app.js"), /"no one is on this"/)
 })
 
+test("the status line reads abnormal whenever Rank causes raises any alarm, including a labels mismatch", () => {
+  const healthy = { verdict: alive, andon: [], andonVerification: "verified", capture: measuredCapture, loop: healthyLoop }
+  // Every monitor healthy, and one task whose labels name a session outside its timeline.
+  const jobs = [{ id: "j1", waste: { foreign_sessions: measured(2) } }]
+  const items = fixNext({ jobs })
+  assert.ok(items.some((i) => i.id === "labels_mismatch" && i.severity === "alarm"))
+  const s = F.statusLine({ ...healthy, fixNext: items })
+  assert.equal(s.state, "abnormal")
+  assert.equal(s.alarms.length, 1)
+  assert.match(s.alarms[0].text, /^waste labels name sessions that are not on their task's timeline/)
+  assert.equal(s.alarms[0].owner, null)
+  // Without it, the same inputs are normal.
+  assert.equal(F.statusLine({ ...healthy, fixNext: fixNext({ jobs: [] }) }).state, "normal")
+  // Any alarm-severity item fix-next can raise makes the line abnormal, and an alarm already told from its own source is not told twice.
+  const andonOpen = [{ ref: "#9", url: "https://github.com/o/r/issues/9", issue_state: "open" }]
+  const all = fixNext({ jobs, andonIssues: andonOpen, capture: { alarms: [{ host: "codex", code: "coverage_low" }] }, loop: { alarms: [{ code: "steps_stale" }] } })
+  assert.deepEqual(all.filter((i) => i.severity === "alarm").map((i) => i.id).sort(), ["andon", "capture_alarm", "labels_mismatch", "loop_alarm"])
+  const told = F.statusLine({ ...healthy, andon: andonOpen, capture: { ...measuredCapture, alarms: [{ host: "codex", code: "coverage_low" }] }, loop: { verdict: { status: "alarm", missing: [] }, alarms: [{ code: "steps_stale" }] }, fixNext: all })
+  assert.equal(told.alarms.length, 4)
+  // An alarm whose own source the line did not receive still reaches it through fix-next.
+  for (const item of all.filter((i) => i.severity === "alarm")) assert.equal(F.statusLine({ ...healthy, fixNext: [item] }).state, "abnormal", item.id)
+  // Non-alarm items never raise the line.
+  assert.equal(F.statusLine({ ...healthy, fixNext: [{ id: "x", severity: "act", title: "T" }] }).state, "normal")
+  // The page passes fix-next to the line.
+  assert.match(read("site/src/app.js"), /fixNext: data\.fix_next/)
+})
+
 // --------------------------------------------------------------- bar scales
 
 test("bar scales are linear from zero: shares run 0 to 100%, counts and durations to a stated round maximum", () => {
@@ -359,9 +409,15 @@ test("bar scales are linear from zero: shares run 0 to 100%, counts and duration
   assert.equal(counts.width(0), 0)
   assert.equal(counts.width(-5), 0)
   assert.equal(F.barScale([7], { kind: "compact" }).max, 8)
-  const hours = F.barScale([53.7 * 3600000, 600000], { kind: "duration" })
-  assert.equal(hours.max, 60 * 3600000)
-  assert.equal(hours.label, "scale 0 to 60 hours")
+  // The scale is stated in the unit its values are written in: from 48 hours, values read in days, and so does the scale.
+  const days = F.barScale([53.7 * 3600000, 600000], { kind: "duration" })
+  assert.equal(days.max, 2.5 * 86400000)
+  assert.equal(days.label, "scale 0 to 2.5 days")
+  assert.equal(F.toText(measured(53.7 * 3600000), "duration"), "2.2d")
+  const hours = F.barScale([30 * 3600000], { kind: "duration" })
+  assert.equal(hours.label, "scale 0 to 30 hours")
+  assert.equal(F.barScale([45 * 3600000], { kind: "duration" }).label, "scale 0 to 48 hours", "below 48 hours the scale stays in hours")
+  assert.equal(F.barScale([84 * 3600000], { kind: "duration" }).label, "scale 0 to 4 days")
   const minutes = F.barScale([37 * 60000], { kind: "duration" })
   assert.equal(minutes.label, "scale 0 to 40 minutes")
   assert.equal(F.barScale([], { kind: "count" }).max, 1, "an empty list still has a scale, never a division by zero")
@@ -370,17 +426,43 @@ test("bar scales are linear from zero: shares run 0 to 100%, counts and duration
   for (const v of [1, 7, 9.5, 10, 11, 99, 101, 1234567]) assert.ok(F.niceMax(v) >= v && F.niceMax(v) <= v * 2.5, v)
 })
 
+test("a bar that was not measured has no track and says no data; a measured zero draws an empty track", () => {
+  const scale = F.barScale([3600000], { kind: "duration" })
+  assert.deepEqual(F.barRow(unavailable(["no_member_measured"]), null, scale), { draw: "none" })
+  assert.deepEqual(F.barRow(unavailable(["x"]), measured(1800000), scale), { draw: "none" }, "a second figure never draws a bar for an unmeasured first one")
+  assert.deepEqual(F.barRow(measured(0), null, scale), { draw: "bar", width: 0, secondaryWidth: null })
+  const half = F.barRow({ state: "partial", value: 1800000, reasons: ["censored"], bound: "lower" }, measured(3600000), scale)
+  assert.equal(half.draw, "bar")
+  assert.equal(half.width, 50)
+  assert.equal(half.secondaryWidth, 100)
+  // Every bar list goes through one renderer, which draws the no-data row without a track and with the reason, and gives rows no tab stop.
+  const app = read("site/src/app.js")
+  const body = app.slice(app.indexOf("function renderBarList("), app.indexOf("// -------------------------------------------------------- intake chart"))
+  assert.match(body, /F\.barRow\(row\.number, row\.secondary, scale\)/)
+  assert.match(body, /"bar-row bar-row-unavailable"/)
+  assert.doesNotMatch(body, /tabIndex/)
+  const css = read("site/src/styles.css")
+  assert.match(css, /\.bar-nodata \.num-value \{ font-style: italic; \}/)
+  // No other code draws a bar track.
+  assert.equal((app.match(/"bar-track"/g) || []).length, 1)
+})
+
 test("a log scale is never drawn as bars, and every bar list states its scale", () => {
   assert.throws(() => F.barScale([1, 100], { kind: "count", scale: "log" }), /never drawn as bars/)
   assert.throws(() => F.barScale([1], { kind: "text" }), /no bar scale/)
   const app = read("site/src/app.js")
   assert.doesNotMatch(app, /scale: "log"/)
   assert.doesNotMatch(app, /Math\.log1p/)
-  assert.match(app, /const scale = F\.barScale\(values, \{ kind: opts\.kind, scale: opts\.scale \}\)/)
-  assert.match(app, /el\("span", "bars-scale", ` (·|\\u00b7) \$\{scale\.label\}/)
+  // The one bar renderer takes its scale from barScale and writes the scale's words in the list's title.
+  const body = app.slice(app.indexOf("function renderBarList("), app.indexOf("// -------------------------------------------------------- intake chart"))
+  assert.match(body, /F\.barScale\(/)
+  assert.match(body, /"bars-scale"/)
+  assert.match(body, /scale\.label/)
   // The track spans the row and the fill sits inside it, so the track stays visible behind a full bar.
-  const css = read("site/src/styles.css")
-  assert.match(css, /\.bar-fill \{\n  position: absolute;\n  left: 2px;\n  top: 2px;\n  bottom: 2px;\n  max-width: calc\(100% - 4px\);/)
+  const css = read("site/src/styles.css").replace(/\/\*[\s\S]*?\*\//g, "")
+  const fill = /(?:^|\n)\.bar-fill \{([^}]*)\}/.exec(css)[1]
+  assert.match(fill, /position:\s*absolute/)
+  assert.match(fill, /max-width:\s*calc\(100% - 4px\)/)
   assert.doesNotMatch(css, /grid-template-columns: minmax\(72px, 130px\) 1fr auto/)
 })
 
@@ -531,7 +613,50 @@ test("the store page renders each outcome section once, and the headline figure 
   assert.equal((app.match(/renderOutcomes\(document/g) || []).length, 1)
 })
 
-test("the task table shows a finish position only for a labeled task; an open one says open", () => {
+test("the task table shows a finish position only for a labeled task, and the task page tells a batch from a finishing sequence", () => {
+  const lab = (id, pos, group) => ({ id, status: "done", finish_basis: "labels", finish_order: measured(pos), finish_group: measured(group) })
+  const jobs = [lab("a", 1, 1), lab("b", 2, 2), lab("c", 3, 2), lab("d", 4, 2), { id: "o", status: "processing", finish_basis: "facts", finish_order: measured(5) }, { id: "u", status: "done", finish_basis: "facts", finish_order: measured(6) }, { id: "n", status: "processing", finish_basis: "none", finish_order: unavailable(["no_facts"]) }]
+  const by = Object.fromEntries(jobs.map((j) => [j.id, j]))
+  assert.equal(F.finishCell(by.c), "3rd")
+  assert.equal(F.finishCell(by.o), "open")
+  assert.equal(F.finishCell(by.u), "not labeled")
+  assert.equal(F.finishCell(by.n), "no session")
+  // A task alone in its group finished in that order.
+  assert.equal(F.finishWords(by.a, jobs), "It was the 1st of 4 labeled tasks to finish.")
+  // A task labeled in a batch is not said to have finished in a sequence.
+  assert.equal(F.finishWords(by.c, jobs), "It was labeled together with 2 other tasks, the latest batch; within a batch, tasks are ordered by lead time, so it is 3rd of 4 labeled tasks.")
+  assert.match(F.finishWords(by.o, jobs), /still open/)
+  assert.match(F.finishWords(by.u, jobs), /not labeled for waste yet/)
+  assert.match(F.finishWords(by.n, jobs), /no place in finish order/)
+})
+
+test("a reload at #main opens the default view, and the view routes before the store page's charts draw", () => {
+  assert.deepEqual(F.parseRoute("#main"), { view: "skip" })
   const app = read("site/src/app.js")
-  assert.match(app, /const pos = j\.finish_basis === "labels" && placed \? F\.ordinal\(j\.finish_order\.value\) : !placed \? "no session" : j\.status === "done" \? "not labeled" : "open";/)
+  // The skip link itself never changes the hash.
+  assert.match(app, /skipLink\.addEventListener\("click", \(evt\) => \{[\s\S]*?evt\.preventDefault\(\);\n      main\.focus\(\);/)
+  const routeFn = app.slice(app.indexOf("function route(data) {"), app.indexOf("// -------------------------------------------------------------- health"))
+  // On first load a #main is dropped and the default route renders; later it only moves focus.
+  assert.match(routeFn, /if \(r\.view === "skip"\) \{[\s\S]*?if \(routedOnce\) \{[\s\S]*?return;\n      \}\n      history\.replaceState\(null, "", window\.location\.pathname \+ window\.location\.search\);\n      r = F\.parseRoute\("", jobOfSession\);/)
+  const main = app.slice(app.indexOf("async function main() {"))
+  assert.ok(main.indexOf("route(data);") > 0 && main.indexOf("route(data);") < main.indexOf("safely("), "routing comes before every store-page chart")
+  // Each chart after routing draws on its own.
+  assert.doesNotMatch(main.slice(main.indexOf("route(data);")), /\n    render(?!Health|StatusLine)[A-Za-z]+\(/)
+})
+
+test("the Act page does not call a closed issue fixed: its pull request is a countermeasure, merged and not yet checked", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /"countermeasure: "/)
+  assert.match(app, /" \(merged, not yet checked\)"/)
+  assert.doesNotMatch(app, /"fixed by "/)
+  assert.doesNotMatch(app, /: "var\(--status-good\)"\);\n/)
+  assert.match(read("site/src/index.html"), /each with the pull request that answered it, where there is one\./)
+})
+
+test("one term for the time agents were busy: Working time", () => {
+  const app = read("site/src/app.js")
+  assert.doesNotMatch(app, /"Agent time"/)
+  assert.match(app, /"Working time"/)
+  // The task and session views do not re-announce the whole page; focus moves to the heading instead.
+  assert.doesNotMatch(read("site/src/index.html"), /id="(job|session)-detail" aria-live/)
 })

@@ -349,10 +349,12 @@ test("a partial figure in a list keeps its reason in the title and for screen re
   assert.match(n.children.find((c) => c.className === "num-flag").title, /session had not ended/)
 })
 
-test("a no-data count line says the reason once, in words, and the page code does not print it twice", () => {
+test("the sign-off counts appear once, in the Sign-off list, with the no-data reason in words", () => {
   assert.equal(F.reasonText("no_signoff_records"), "no delivered job has a sign-off record yet")
   const app = read("site/src/app.js")
-  assert.match(app, /shared \|\| reasons\[i\] \? el\("span", "num num-unavailable", "no data"\)/)
+  // The counts line that repeated them under the headline is gone.
+  assert.doesNotMatch(app, /countsLine\(/)
+  assert.match(app, /row\(dl, "Delivered, awaiting an answer", waiting\)/)
 })
 
 test("the Elapsed tile says a raised lead time is at least the span of the job's recorded work, and keeps its other captions", () => {

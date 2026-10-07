@@ -1,10 +1,9 @@
 // Task names from public pull request titles.
 //
 // Public work is named publicly: a task's name is the title of its
-// earliest-opened public pull request (the smallest time on the job's clock
-// at which a session first referenced it; without any such time, the
-// report's own order), plus how many more public pull requests it has
-// ("and 3 more"). Only a pull request whose repository GitHub reports as
+// earliest-opened public pull request, by the time GitHub records it was
+// opened (created_at, read from the pulls API and never published), plus
+// how many more public pull requests it has ("and 3 more"). Only a pull request whose repository GitHub reports as
 // public names a task. A task with no public pull request has no name, and
 // the page calls it "Private task" with a short key. If no title could be
 // read (GitHub unreachable), the task has no name either; the page then
@@ -12,8 +11,6 @@
 
 import { measured } from "./state.mjs";
 
-// How many of a task's pull requests are tried for a readable public title.
-export const NAME_TRIES = 3;
 const MAX_TITLE = 160;
 
 // A title as plain text: no control characters, single spaces, cut to a
@@ -25,61 +22,74 @@ export function cleanTitle(t) {
   return s.length > MAX_TITLE ? `${s.slice(0, MAX_TITLE - 1).trimEnd()}…` : s;
 }
 
-const KEY = (repo, number) => `${repo}#${number}`;
+const PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/pull\/(\d+)$/;
 
-// When each pull request was first referenced, on the job's own clock:
-// the report's timeline.prs[] (repo, number, at_ms) when it has them, else
-// each session's facts refs.prs[].at_ms plus the session's offset on the job
-// clock (the report's timeline.sessions[].offset_ms). Returns Map key -> ms.
-export function prOpenedAt(report, prsOfSession) {
-  const out = new Map();
-  const put = (repo, number, at) => {
-    if (typeof repo !== "string" || !Number.isSafeInteger(number) || !(typeof at === "number" && Number.isFinite(at))) return;
-    const k = KEY(repo, number);
-    if (!out.has(k) || at < out.get(k)) out.set(k, at);
+// When GitHub says a pull request was opened (its created_at), as epoch ms,
+// or null when the value is missing or not a time. Used only to order; never
+// published.
+export function openedMs(info) {
+  const t = info && typeof info.created_at === "string" ? Date.parse(info.created_at) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+// Bounded concurrency, so a task with dozens of pull requests reads them a
+// few at a time.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const worker = async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx], idx);
+    }
   };
-  const tl = report && report.timeline;
-  if (tl && Array.isArray(tl.prs)) for (const p of tl.prs) if (p) put(p.repo, p.number, p.at_ms);
-  if (out.size) return out;
-  for (const sess of tl && Array.isArray(tl.sessions) ? tl.sessions : []) {
-    if (!sess || typeof sess.id !== "string" || typeof sess.offset_ms !== "number") continue;
-    for (const p of (prsOfSession && prsOfSession.get(sess.id)) || []) if (p) put(p.repo, p.number, typeof p.at_ms === "number" ? sess.offset_ms + p.at_ms : null);
-  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return out;
 }
 
-// A task's pull requests, earliest-opened first. Those with no known time
-// keep the report's order after the timed ones; with no time at all the
-// report's order stands.
-export function orderByOpened(pullRequests, openedAt) {
-  const at = (p) => {
-    const m = /^https:\/\/github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/pull\/(\d+)$/.exec(p.url || "");
-    return m && openedAt && openedAt.has(KEY(m[1], Number(m[2]))) ? openedAt.get(KEY(m[1], Number(m[2]))) : Infinity;
-  };
-  return (pullRequests || []).map((p, i) => ({ p, i, t: at(p) })).sort((a, b) => a.t - b.t || a.i - b.i).map((x) => x.p);
-}
-
-// jobs: [{ id, pull_requests: [{ ref, url }] }], earliest-opened first.
-// getPull(repo, number) -> { title, private } or null when it cannot be read.
-// Returns Map job id -> { name?, more_prs? }.
-export async function taskNames(jobs, getPull) {
+// jobs: [{ id, pull_requests: [{ ref, url }] }].
+// getPull(repo, number) -> { title, private, created_at } or null when it
+// cannot be read.
+//
+// Every pull request of the task is read. The name is the title of the
+// earliest-opened one (by created_at) whose repository GitHub reports as
+// public. If any pull request could not be read, an earlier one may exist,
+// so the name is marked name_basis "partial" rather than silently standing
+// for the whole task; if none could be read, the task has no name.
+//
+// Returns Map job id -> { name?, more_prs?, name_basis?, order } where
+// order is the task's pull request URLs earliest-opened first (unreadable
+// ones after, in their original order), for the page's list. No time is
+// returned.
+export async function taskNames(jobs, getPull, { concurrency = 8 } = {}) {
   const out = new Map();
   for (const j of jobs) {
-    const prs = (j.pull_requests || [])
-      .map((p) => /^https:\/\/github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/pull\/(\d+)$/.exec(p.url || ""))
-      .filter(Boolean)
-      .map((m) => ({ repo: m[1], number: Number(m[2]) }));
-    if (!prs.length) {
-      out.set(j.id, {});
+    const list = (j.pull_requests || []).filter((p) => PR_URL.test(p.url || ""));
+    if (!list.length) {
+      out.set(j.id, { order: (j.pull_requests || []).map((p) => p.url) });
       continue;
     }
+    const infos = await mapLimit(list, concurrency, (p) => {
+      const m = PR_URL.exec(p.url);
+      return getPull(m[1], Number(m[2]));
+    });
+    const rows = list.map((p, i) => ({ p, i, info: infos[i], at: openedMs(infos[i]) }));
+    const unread = rows.filter((r) => !r.info || r.at === null).length;
+    const timed = rows.filter((r) => r.info && r.at !== null).sort((a, b) => a.at - b.at || a.i - b.i);
+    const order = [...timed, ...rows.filter((r) => !r.info || r.at === null)].map((r) => r.p.url);
     let name = null;
-    for (const pr of prs.slice(0, NAME_TRIES)) {
-      const info = await getPull(pr.repo, pr.number);
-      if (info && info.private === false) name = cleanTitle(info.title);
+    for (const r of timed) {
+      if (r.info.private !== false) continue;
+      name = cleanTitle(r.info.title);
       if (name) break;
     }
-    out.set(j.id, name ? { name, more_prs: measured(prs.length - 1) } : {});
+    const res = { order };
+    if (name) {
+      res.name = name;
+      res.more_prs = measured(list.length - 1);
+      if (unread) res.name_basis = "partial";
+    }
+    out.set(j.id, res);
   }
   return out;
 }

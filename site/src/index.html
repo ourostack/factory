@@ -47,7 +47,7 @@
     <p class="step-label">Step 1 of 4 &middot; Follow a task</p>
     <p class="lede">Lean starts by following one real piece of work from start to finish, before looking at any average. This is one task, end to end: how long it took, how much of that time agents were working, and where the evaluator says the time went. Most of a task's time is usually waiting, not work; that is normal, and it is where Lean looks first.</p>
     <div id="task-picker"></div>
-    <div id="job-detail" aria-live="polite"><p class="chart-empty">Loading&hellip;</p></div>
+    <div id="job-detail"><p class="chart-empty">Loading&hellip;</p></div>
   </div>
 </div>
 
@@ -55,7 +55,7 @@
 <div id="view-session" class="view" hidden>
   <div class="wrap">
     <p class="step-label">Step 1 of 4 &middot; Follow a task &middot; one session</p>
-    <div id="session-detail" aria-live="polite"></div>
+    <div id="session-detail"></div>
   </div>
 </div>
 
@@ -72,7 +72,7 @@
     </section>
     <section class="block" aria-label="Where time goes in a finished task">
       <div id="chart-time-breakdown"></div>
-      <p class="chart-caption">Median duration per task, with the 75th percentile as the hatched bar, over finished tasks whose whole life sits inside capture and whose own figure is fully measured. The "n of N" beside each figure counts the rest. <span id="time-breakdown-note"></span></p>
+      <p class="chart-caption">Median duration per task, with the 75th percentile as the outlined bar behind it, over finished tasks whose whole life sits inside capture and whose own figure is fully measured. The "n of N" beside each figure counts the rest. <span id="time-breakdown-note"></span></p>
     </section>
     <section class="block" aria-labelledby="trend-title">
       <h2 class="block-title" id="trend-title">By Desk release, oldest first</h2>
@@ -102,7 +102,7 @@
   <div class="wrap">
     <p class="step-label">Step 4 of 4</p>
     <h1 class="view-title">Act</h1>
-    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem: the evidence, a countermeasure, and then a check of whether it worked. These are the problems the factory has taken on, each with the pull request that answered it. None has been checked yet: a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet. Andon issues are the stop-the-line signal: a tracked release made a quality measure clearly worse.</p>
+    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem: the evidence, a countermeasure, and then a check of whether it worked. These are the problems the factory has taken on, each with the pull request that answered it, where there is one. None has been checked yet: a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet. Andon issues are the stop-the-line signal: a tracked release made a quality measure clearly worse.</p>
     <section class="block" id="kaizen-panel"></section>
   </div>
 </div>
@@ -184,7 +184,7 @@
       <li><strong>No when.</strong> Facts carry durations and offsets from the session start, never a date, a time of day or an epoch value. The site shows no calendar date for any task.</li>
       <li><strong>No content.</strong> No transcript text, prompt, response, tool argument, file content, file path or task card title ever leaves the contributor's machine.</li>
       <li><strong>Public references only.</strong> References to private repositories are dropped and only counted. Public pull requests and commits are, like any GitHub contribution, already public.</li>
-      <li><strong>Public work is named publicly.</strong> A task's name is the title of the first public pull request its sessions opened, plus how many more it has. A task with no public pull request is shown as "Private task" with a short key.</li>
+      <li><strong>Public work is named publicly.</strong> A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened (that time is never published), plus how many more it has. If some of its pull requests could not be read, the name comes from those that could, and the task page says so. A task with no public pull request is shown as "Private task" with a short key.</li>
       <li><strong>Operator turns appear only as counts.</strong> The site does not place the operator's individual prompts on a task's clock.</li>
     </ul>
 

@@ -337,10 +337,14 @@ h3.bars-title, h3.sub-title { font-size: 16px; margin: 24px 0 8px; }
   max-width: calc(100% - 4px);
   border-radius: 2px;
 }
+/* The 75th percentile is a neutral outline behind the median's fill: no hatch and no warm color, which belong to meanings of their own. */
 .bar-fill.secondary {
-  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--series-2) 70%, transparent) 0 2px, transparent 2px 5px);
-  box-shadow: inset 0 0 0 1px var(--series-2);
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
 }
+/* A figure that was not measured has no track: an italic "no data" and its reason stand in its place, so it never looks like a measured zero. */
+.bar-nodata { margin: 0; font-size: 13px; color: var(--text-secondary); }
+.bar-nodata .num-value { font-style: italic; }
 .bar-flag { color: var(--text-muted); font-size: 12.5px; }
 .bar-trust { margin: -6px 0 4px; }
 

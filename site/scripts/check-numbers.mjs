@@ -91,7 +91,7 @@ const BAD_STRING = {
   },
 };
 // A task name is a pull request title, which may be anything, digits included.
-const FREE_KEYS = new Set(["id", "session_id", "ref", "name"]);
+const FREE_KEYS = new Set(["id", "session_id", "ref", "name", "name_basis"]);
 
 function isStated(node) {
   return node && typeof node === "object" && !Array.isArray(node) && ("state" in node || "reasons" in node);

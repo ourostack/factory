@@ -51,7 +51,7 @@ import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluato
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 import { finishOrder, firstAdded } from "./finish-order.mjs";
-import { orderByOpened, prOpenedAt, taskNames } from "./task-names.mjs";
+import { taskNames } from "./task-names.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -199,14 +199,7 @@ const mudaOverall = mudaRaw.groupings?.overall?.all ?? null;
 const jobsDir = join(reportsDir, "jobs");
 const jobFiles = listJSON(jobsDir);
 
-// Each job's report is kept for the times its pull requests were opened.
-const jobReports = new Map();
-const jobs = jobFiles.map((f) => {
-  const d = readJSON(join(jobsDir, f), {});
-  const j = jobSummary(d, f);
-  jobReports.set(j.id, d);
-  return j;
-});
+const jobs = jobFiles.map((f) => jobSummary(readJSON(join(jobsDir, f), {}), f));
 // Until an outcome is accepted, the band answers per delivered task instead.
 outcomes.attention.per_delivered = attentionPerDelivered(jobs);
 
@@ -294,14 +287,11 @@ const sessions = [];
 const sessionBindings = new Map();
 // Each session's facts file, for the order in which tasks' first facts landed.
 const factsFileOf = new Map();
-// Each job session's pull request references, for when each was opened.
-const prsOfSession = new Map();
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
   if (typeof d.session?.id === "string" && !factsFileOf.has(d.session.id)) factsFileOf.set(d.session.id, f);
   if (jobSessionIds.has(d.session?.id)) sessionBindings.set(d.session.id, d.jobs);
-  if (jobSessionIds.has(d.session?.id) && Array.isArray(d.refs?.prs)) prsOfSession.set(d.session.id, d.refs.prs);
   if (jobSessionIds.has(d.session?.id) && /^[A-Za-z0-9._-]+\.json$/.test(f)) {
     const models = [...(d.models || [])].filter((m) => m && typeof m.id === "string").sort((a, b) => (b.requests ?? -1) - (a.requests ?? -1)).map((m) => m.id);
     sessions.push({
@@ -523,16 +513,24 @@ for (const { d, prs } of featuredCandidates) {
 }
 
 // Task names (task-names.mjs): the title of each task's earliest-opened
-// public pull request, read from the same pulls API, and how many more it
-// has. The list itself is shown earliest-opened first; no time is published.
+// public pull request, by the created_at the pulls API reports (read once per
+// pull request per build, shared with the merge checks above), and how many
+// more it has. The page lists the pull requests earliest-opened first; no
+// time is published.
 {
-  for (const j of jobs) j.pull_requests = orderByOpened(j.pull_requests, prOpenedAt(jobReports.get(j.id), prsOfSession));
   const names = await taskNames(jobs, async (repo, number) => {
     const body = await pullInfo(repo, number);
     if (!body || typeof body.title !== "string") return null;
-    return { title: body.title, private: body.base?.repo?.private === false ? false : true };
+    return { title: body.title, private: body.base?.repo?.private === false ? false : true, created_at: body.created_at };
   });
-  for (const j of jobs) Object.assign(j, names.get(j.id));
+  for (const j of jobs) {
+    const { order, ...name } = names.get(j.id) || {};
+    if (Array.isArray(order) && Array.isArray(j.pull_requests)) {
+      const byUrl = new Map(j.pull_requests.map((p) => [p.url, p]));
+      j.pull_requests = order.map((u) => byUrl.get(u)).filter(Boolean);
+    }
+    Object.assign(j, name);
+  }
 }
 
 // ---------------------------------------------------------------------------

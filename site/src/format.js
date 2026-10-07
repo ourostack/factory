@@ -595,8 +595,43 @@
     return s + ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
   }
 
+  // A task's place in finish order, as the task table and picker show it.
+  // Only a labeled task has finished in the store's sense; the rest are
+  // listed after it, so their cell says why instead of showing a position.
+  function finishCell(j) {
+    const placed = !!(j && j.finish_order && j.finish_order.state === "measured");
+    if (!placed) return "no session";
+    if (j.finish_basis === "labels") return ordinal(j.finish_order.value);
+    return j.status === "done" ? "not labeled" : "open";
+  }
+
+  // The task page's sentence about finish order. Tasks first labeled in the
+  // same commit finished together, as far as the store can tell; their
+  // positions inside that batch are lead-time order, and the sentence says so
+  // rather than claiming a finishing sequence.
+  function finishWords(j, jobs) {
+    const list = Array.isArray(jobs) ? jobs : [];
+    const labeled = list.filter((x) => x && x.finish_basis === "labels");
+    if (!j || !j.finish_order || j.finish_order.state !== "measured") return "It has no place in finish order: no session of it is published.";
+    if (j.finish_basis !== "labels") {
+      if (j.status === "done") return "It is done but not labeled for waste yet, so it is listed after the labeled tasks, by its first session.";
+      return "It is still open, so it is listed after the finished tasks, by its first session.";
+    }
+    const pos = `${ordinal(j.finish_order.value)} of ${labeled.length}`;
+    const g = j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : null;
+    const batch = g === null ? [] : labeled.filter((x) => x.finish_group && x.finish_group.state === "measured" && x.finish_group.value === g);
+    if (batch.length > 1) {
+      const groups = new Set(labeled.map((x) => (x.finish_group && x.finish_group.state === "measured" ? x.finish_group.value : null)).filter((x) => x !== null));
+      const latest = g === Math.max(...groups);
+      const others = batch.length - 1;
+      return `It was labeled together with ${others} other task${others === 1 ? "" : "s"}${latest ? ", the latest batch" : ""}; within a batch, tasks are ordered by lead time, so it is ${pos} labeled tasks.`;
+    }
+    return `It was the ${pos} labeled tasks to finish.`;
+  }
+
   // A task's public name: its local name on the operator's own machine, else
-  // the title of its first public pull request ("and N more"), else
+  // the title of its earliest-opened public pull request ("and N more";
+  // partial when some of its pull requests could not be read), else
   // "Private task" with a short key. A task with public pull requests whose
   // titles could not be fetched says so instead of calling itself private.
   function taskName(names, job) {
@@ -605,7 +640,7 @@
     const local = names && Object.prototype.hasOwnProperty.call(names, id) ? names[id] : null;
     if (local) return { title: local.title, more: 0, kind: "local", short };
     const more = job && job.more_prs && job.more_prs.state === "measured" ? job.more_prs.value : 0;
-    if (job && typeof job.name === "string" && job.name) return { title: job.name, more, kind: "public", short };
+    if (job && typeof job.name === "string" && job.name) return { title: job.name, more, kind: "public", short, partial: job.name_basis === "partial" };
     const prs = job && Array.isArray(job.pull_requests) ? job.pull_requests.length : 0;
     if (prs) return { title: `Task ${short}`, more: 0, kind: "unnamed", short };
     return { title: `Private task ${short}`, more: 0, kind: "private", short };
@@ -652,6 +687,16 @@
       const codes = loop.verdict && Array.isArray(loop.verdict.missing) ? [...new Set(loop.verdict.missing.flatMap((m) => m.codes || []))] : [];
       missing.push(`the improvement loop's health (${codes.length ? codes.map(reasonText).join("; ") : "not recorded"})`);
     }
+    // Every alarm the Rank causes page raises reaches this line too, so the two
+    // never disagree. Alarms already told from their own source above are not
+    // repeated; any other (a labels mismatch, or one whose source this line
+    // did not see) is named here with no one on it.
+    const told = { andon: alarms.some((a) => a.text.startsWith("andon")), capture_alarm: alarms.some((a) => a.text.startsWith("capture coverage")), loop_alarm: alarms.some((a) => a.text.startsWith("improvement loop")) };
+    for (const item of Array.isArray(x.fixNext) ? x.fixNext : []) {
+      if (!item || item.severity !== "alarm" || told[item.id]) continue;
+      const title = String(item.title || "an alarm was raised");
+      alarms.push({ text: title.charAt(0).toLowerCase() + title.slice(1), owner: null });
+    }
     if (alarms.length) return { state: "abnormal", alarms, checked, missing };
     if (missing.length) return { state: "not_monitored", alarms, checked, missing };
     return { state: "normal", alarms, checked, missing };
@@ -669,10 +714,23 @@
     return 10 * p;
   }
   const HOUR = 3600000;
+  const DAY = 24 * HOUR;
+  // The scale uses the unit the values are written in: minutes up to an
+  // hour, hours below 48 hours, days from 48 hours (KINDS.duration).
   function niceDurationMax(v) {
     if (!(typeof v === "number" && Number.isFinite(v) && v > 0)) return HOUR;
     if (v <= HOUR) return Math.max(60000, niceMax(v / 60000) * 60000);
-    return niceMax(v / HOUR) * HOUR;
+    if (v < 48 * HOUR) return Math.min(48 * HOUR, niceMax(v / HOUR) * HOUR);
+    return niceMax(v / DAY) * DAY;
+  }
+  function durationScaleWords(max, largest) {
+    if (largest >= 48 * HOUR) {
+      const d = Math.round((max / DAY) * 100) / 100;
+      return `${d} day${d === 1 ? "" : "s"}`;
+    }
+    if (max >= HOUR) return `${Math.round(max / HOUR).toLocaleString("en-US")} hours`;
+    const m = Math.round(max / 60000);
+    return `${m} minute${m === 1 ? "" : "s"}`;
   }
   function barScale(values, opts) {
     const o = opts || {};
@@ -687,13 +745,25 @@
       label = "scale 0 to 100%";
     } else if (kind === "duration") {
       max = niceDurationMax(largest);
-      label = `scale 0 to ${max >= HOUR ? `${Math.round(max / HOUR).toLocaleString("en-US")} hours` : `${Math.round(max / 60000)} minute${Math.round(max / 60000) === 1 ? "" : "s"}`}`;
+      label = `scale 0 to ${durationScaleWords(max, largest)}`;
     } else if (kind === "count" || kind === "compact") {
       max = Math.max(1, niceMax(largest));
       label = `scale 0 to ${KINDS.count(max)}`;
     } else throw new Error(`FactoryFormat: no bar scale for kind ${kind}`);
     const width = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(100, (v / max) * 100) : 0);
     return { max, label, width };
+  }
+
+  // One bar row's drawing, from its stated number and an optional second
+  // figure (a 75th percentile) on a scale from barScale. A figure that was not
+  // measured is never drawn as a bar: "none" means no track at all, so it can
+  // never look like a measured zero, which draws an empty track.
+  function barRow(number, secondary, scale) {
+    const val = (n) => (n && n.state !== "unavailable" && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
+    const v = val(number);
+    if (v === null) return { draw: "none" };
+    const s = val(secondary);
+    return { draw: "bar", width: scale.width(v), secondaryWidth: s === null ? null : scale.width(s) };
   }
 
   // ------------------------------------------------------- the color system
@@ -718,5 +788,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { LANDING_MIN_WORK_MS, parseRoute, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  return { LANDING_MIN_WORK_MS, parseRoute, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
+    barRow, finishCell, finishWords, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });
