@@ -522,7 +522,7 @@ test("Why Lean? gives the eight wastes as our mapping, the glossary, and its sou
   for (const w of ["Waiting", "Defects", "Extra processing", "Overproduction", "Motion", "Transportation", "Inventory", "Non-utilized talent"]) assert.match(why, new RegExp(`</span>${w}</dt>`), w)
   assert.match(why, /our own mapping/)
   for (const term of ["Lead time", "Working time", "Flow efficiency", "Value-adding", "Necessary", "Waste", "Value stream map", "Timeline ladder", "Inventory triangle", "Yamazumi", "Pareto chart", "A3", "Kaizen", "Andon"]) assert.match(why, new RegExp(`<dt>(<span[^>]*></span>)?${term}`), term)
-  assert.match(why, /counts as the waiting waste, not the inventory waste/)
+  assert.match(why, /its time is waiting, not the inventory waste/)
   assert.match(why, /classic yamazumi stacks each operator's work against takt/)
   assert.ok((why.match(/href="https:/g) || []).length >= 10, "sources are linked inline")
 })

@@ -134,6 +134,7 @@
     some_sessions_not_labeled: "some of the job's sessions are not labeled yet, so this is at least this much",
     // The Lean walk's files (Desk's rollups/tasks.json, stackup.json and the per-session swimlane files).
     labels_from_shared_session: "this task's labels come from a session it shared with other tasks, so how its time splits is only partly known",
+    over_budget_after_binning: "this session's activity is drawn at its coarsest: even with every short run merged, its swimlane file is larger than its size budget",
     agents_working: "agents were working during this stretch, so it is not counted as waiting; the evaluator had labeled it waiting",
     job_share_unknown: "for some of the job's sessions there is no record of which part was this job's, so their labels are left out and this is at least this much",
   };
@@ -530,8 +531,21 @@
 
   // What a hash asks for. `jobOfSession` (session id to job id) lets an old
   // session link land under its task. A redirect carries the new hash.
+  // The item a deep link selects on a task or session view: "?bursts=4-6",
+  // "?gaps=3", "?stretch=17" (1-based numbers in clock order).
+  function parseSelect(q) {
+    const m = /^(bursts|gaps|stretch)=([1-9][0-9]{0,5})(?:-([1-9][0-9]{0,5}))?$/.exec(q);
+    if (!m) return null;
+    const from = Number(m[2]);
+    const to = m[3] ? Number(m[3]) : from;
+    return to >= from ? { kind: m[1], from, to } : null;
+  }
+
   function parseRoute(hash, jobOfSession) {
-    const h = typeof hash === "string" ? hash : "";
+    const full = typeof hash === "string" ? hash : "";
+    const qi = full.startsWith("#/") ? full.indexOf("?") : -1;
+    const h = qi >= 0 ? full.slice(0, qi) : full;
+    const select = qi >= 0 ? parseSelect(full.slice(qi + 1)) : null;
     const lookup = typeof jobOfSession === "function" ? jobOfSession : () => null;
     if (h === "" || h === "#" || h === "#/") return { view: "task", job: null };
     if (h === "#main") return { view: "skip" };
@@ -548,8 +562,8 @@
     if (!h.startsWith("#/")) return { view: "missing" };
     const parts = h.slice(2).replace(/\/+$/, "").split("/");
     if (parts[0] === "task") {
-      if (parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "task", job: parts[1] };
-      if (parts.length === 4 && parts[2] === "session" && ROUTE_ID.test(parts[1]) && ROUTE_ID.test(parts[3])) return { view: "session", job: parts[1], session: parts[3] };
+      if (parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "task", job: parts[1], ...(select && select.kind !== "stretch" ? { select } : {}) };
+      if (parts.length === 4 && parts[2] === "session" && ROUTE_ID.test(parts[1]) && ROUTE_ID.test(parts[3])) return { view: "session", job: parts[1], session: parts[3], ...(select && select.kind === "stretch" ? { select } : {}) };
       return { view: "missing" };
     }
     if (parts[0] === "session" && parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "session", job: null, session: parts[1] };
@@ -680,11 +694,11 @@
       for (const a of andon.filter((i) => i && i.issue_state === "open")) alarms.push({ key: "andon", text: `andon: a tracked release made a quality measure worse (${a.ref})`, owner: { ref: a.ref, url: a.url } });
     }
     const cov = x.capture || {};
-    for (const a of Array.isArray(cov.alarms) ? cov.alarms : []) alarms.push({ key: "capture_alarm", text: `capture coverage on ${a.host}: ${a.code === "coverage_dropped" ? "a machine's capture share fell by 15 points or more" : "less than 80% of capturable sessions were captured"}`, owner: null });
+    for (const a of Array.isArray(cov.alarms) ? cov.alarms : []) alarms.push({ key: `capture:${a.host}`, family: "capture_alarm", text: `capture coverage on ${a.host}: ${a.code === "coverage_dropped" ? "a machine's capture share fell by 15 points or more" : "less than 80% of capturable sessions were captured"}`, owner: null });
     if (cov.share && cov.share.state !== "unavailable") checked.push("capture coverage");
     else missing.push(`capture coverage (${cov.share ? cov.share.reasons.map(reasonText).join("; ") : "not part of this build"})`);
     const loop = x.loop || {};
-    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ key: "loop_alarm", text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : "the loop raised an alarm about itself"}`, owner: null });
+    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ key: `loop:${a.code}`, family: "loop_alarm", text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : "the loop raised an alarm about itself"}`, owner: null });
     if (loop.verdict && loop.verdict.status === "healthy") checked.push("the improvement loop");
     else if (!(Array.isArray(loop.alarms) && loop.alarms.length)) {
       const codes = loop.verdict && Array.isArray(loop.verdict.missing) ? [...new Set(loop.verdict.missing.flatMap((m) => m.codes || []))] : [];
@@ -696,15 +710,32 @@
     // did not see) is named here with no one on it.
     // Each alarm carries a stable key (its fix-next id), so a repeat is
     // found by key, never by matching words.
-    const told = new Set(alarms.map((a) => a.key));
+    const told = new Set(alarms.map((a) => a.family || a.key));
     for (const item of Array.isArray(x.fixNext) ? x.fixNext : []) {
       if (!item || item.severity !== "alarm" || told.has(item.id)) continue;
       const title = String(item.title || "an alarm was raised");
       alarms.push({ key: String(item.id || "alarm"), text: title.charAt(0).toLowerCase() + title.slice(1), owner: null });
     }
+    // An open issue labeled factory-alarm whose title carries an alarm's key
+    // (capture:<host>, loop:<code>) owns that alarm (desk#232).
+    const owners = Array.isArray(x.alarmIssues) ? x.alarmIssues : [];
+    for (const a of alarms) {
+      if (a.owner) continue;
+      const i = owners.find((o) => o && o.issue_state !== "closed" && Array.isArray(o.keys) && o.keys.includes(a.key));
+      if (i) a.owner = { ref: i.ref, url: i.url };
+    }
     if (alarms.length) return { state: "abnormal", alarms, checked, missing };
     if (missing.length) return { state: "not_monitored", alarms, checked, missing };
     return { state: "normal", alarms, checked, missing };
+  }
+
+  // The alarm keys an issue title carries: "capture:claude-code — ..." gives
+  // ["capture:claude-code"]. Only keys are read; the title itself never
+  // reaches the page.
+  function alarmKeys(title) {
+    const out = new Set();
+    for (const m of String(title || "").matchAll(/(?:^|[^A-Za-z0-9_:-])((?:capture|loop):[a-z0-9][a-z0-9_-]{0,60})/g)) out.add(m[1]);
+    return [...out];
   }
 
   // ------------------------------------------------------------ bar scales
@@ -793,6 +824,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { LANDING_MIN_WORK_MS, parseRoute, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { LANDING_MIN_WORK_MS, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

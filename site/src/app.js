@@ -980,7 +980,7 @@
     } catch (err) {
       verdict = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
     }
-    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next });
+    const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues });
     container.className = `status-line status-${s.state}`;
     const word = el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`);
     container.appendChild(word);
@@ -1429,6 +1429,14 @@
     return sw;
   }
 
+  // A waiting cause's swatch: one warm family (styles.css .wait-*), with
+  // "cause not recorded" hatched.
+  function waitSwatch(cause) {
+    const sw = el("span", `swatch swatch-wait wait-${W.WAIT_KEYS.includes(cause) ? cause : "unknown"}`);
+    sw.setAttribute("aria-hidden", "true");
+    return sw;
+  }
+
   // ------------------------------------------------------------- the drawer
 
   const drawerEl = document.getElementById("evidence-drawer");
@@ -1509,7 +1517,7 @@
       drawerBody.appendChild(ul);
     }
     if (x.prompt) {
-      const text = W.promptText({ what: x.prompt.what, name: x.prompt.name, route: absolute(x.prompt.route), dataUrl: absolute(x.prompt.dataPath) });
+      const text = W.promptText({ ...x.prompt, route: absolute(x.prompt.route), dataUrl: absolute(x.prompt.dataPath) });
       const box = el("div", "drawer-prompt");
       const btn = el("button", "copy-prompt", "Copy as a prompt for your agent");
       btn.type = "button";
@@ -1564,8 +1572,11 @@
       if (!n) return "no data";
       const d = F.describe(n, kind);
       if (d.state === "unavailable") return "no data";
-      // A share above zero never reads 0%.
-      return kind === "pct" ? W.pctWords(n.value) : d.text;
+      // A share above zero never reads 0%. A lead time uses the lede's units
+      // (hours up to three days) and says "at least" when it is partial.
+      if (kind !== "pct") return W.statedText(n, "duration");
+      const b = d.state === "partial" ? n.bound : null;
+      return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${W.pctWords(n.value)}`;
     };
     const draw = () => {
       const rows = W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value);
@@ -1601,8 +1612,8 @@
 
   // ------------------------------------------------------------------ lede
 
-  function renderLede(container, row, published, onToken) {
-    const model = W.lede(row, F.reasonText, { published });
+  function renderLede(container, row, published, idle, onToken) {
+    const model = W.lede(row, F.reasonText, { published, idle });
     container.innerHTML = "";
     container.classList.toggle("lede-missing", model.state !== "ok");
     const parts = model.parts.slice();
@@ -1616,7 +1627,7 @@
         b.dataset.hl = p.key;
         b.setAttribute("aria-pressed", "false");
         b.title = "Highlight this on the map";
-        b.addEventListener("click", () => onToken(p.key, b));
+        b.addEventListener("click", () => onToken(p, b));
         // Punctuation right after a number stays on its line.
         const next = parts[k + 1];
         const m = typeof next === "string" ? /^[.,;:]/.exec(next) : null;
@@ -1633,28 +1644,21 @@
 
   // ------------------------------------------------- the value stream map
 
-  // What each lede number lights up on the map.
-  function highlight(root, key, item) {
-    const on = root.dataset.hl === key && (!item || root.dataset.hlItem === String(item));
-    root.dataset.hl = on ? "" : key;
-    root.dataset.hlItem = on || item === undefined ? "" : String(item);
+  // What each lede number lights up on the map (walk.js highlightSelector):
+  // a cause lights only the waits that waited on it.
+  function highlight(root, key, item, cause) {
+    const tag = `${key}|${item === undefined ? "" : item}|${cause || ""}`;
+    const on = root.dataset.hl === tag;
+    root.dataset.hl = on ? "" : tag;
     for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
     if (on) return false;
-    const pick = {
-      lead: ".vsm-box, .vsm-wait, .lad, .sum-lead",
-      working: ".vsm-box, .lad-low, .sum-working",
-      value: ".sum-value",
-      waiting: ".vsm-wait, .lad-high, .sum-waiting",
-      wait_cause: ".vsm-wait.cause-next_prompt, .vsm-wait.cause-mixed, .lad-high",
-      longest: item !== undefined ? `[data-item="${item}"]` : ".vsm-wait",
-      fe: ".sum-fe",
-    }[key];
+    const pick = W.highlightSelector(key, { item, cause });
     if (pick) for (const n of root.querySelectorAll(pick)) n.classList.add("is-hl");
     return true;
   }
 
   function renderMap(container, ctx) {
-    const { j, map, row, tasksPublished } = ctx;
+    const { j, map, row, tasksPublished, idle } = ctx;
     container.innerHTML = "";
     if (!map) {
       emptyState(container, tasksPublished === false ? "The value stream map is not published yet: the walk's data files are not part of this build." : "This task's value stream map is not published yet, so no box or triangle is drawn rather than empty ones.");
@@ -1664,13 +1668,24 @@
     const phone = width < 640;
     // As many boxes as fit at a readable width; the rest of the work is folded.
     const maxBoxes = phone ? 6 : Math.max(2, Math.floor((width - 190 + 84) / 212));
-    const model = W.mapModel(map, { maxBoxes });
+    // Job-level states the bursts' own counts cannot know: operator turns
+    // not recorded, and a task not labeled, read "not recorded" and "not
+    // labeled yet" in every box, never 0.
+    const model = W.mapModel(map, { maxBoxes, jobStates: { operator_turns: j.human_turns || null, labels: row ? row.value_in_working_ms : null } });
     if (!model.items.length) {
       emptyState(container, "No work burst or wait was recorded for this task, so there is nothing to draw.");
       return null;
     }
     const lw = map.lead_window || {};
     const origin = typeof lw.start_ms === "number" ? lw.start_ms : model.items[0].start_ms;
+    // Bursts Desk states as unknown (a session log it could not read) are
+    // not drawn: the gaps between them could be log it could not show.
+    if (map.bursts_state && map.bursts_state.state === "unavailable") {
+      const why = (map.bursts_state.reasons || []).map(F.reasonText).join("; ") || "they were not recorded";
+      const lead = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? ` Its lead time is known: ${W.durationWords(lw.end_ms - lw.start_ms)}.` : "";
+      emptyState(container, `This task's work bursts are not known, because ${why}, so no box or triangle is drawn: a gap could be a stretch the log does not show, not idle time.${lead} The sessions below still list what each one recorded.`);
+      return null;
+    }
     const leadMs = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? lw.end_ms - lw.start_ms : null;
     const name = jobLabel(j);
     const marks = W.statusMarks(map, model);
@@ -1680,26 +1695,25 @@
 
     const root = el("div", `vsm ${phone ? "vsm-phone" : "vsm-wide"}`);
     root.dataset.hl = "";
-    const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText };
+    const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText, fold_ms: model.fold_ms, model };
     const sessionsOf = (it) => {
       if (it.type === "box") return it.sessions;
       return (map.sessions || []).filter((s) => typeof s.offset_ms === "number" && s.offset_ms <= it.end_ms && (typeof s.end_ms !== "number" || s.end_ms >= it.start_ms)).map((s) => s.id);
     };
-    const linksFor = (it) => {
-      const links = sessionsOf(it)
+    // Pull requests are listed once, for the whole task, under the map:
+    // never beside a box or a wait, which would place them on the clock.
+    const linksFor = (it) =>
+      sessionsOf(it)
         .map((sid) => ({ sid, route: F.safeRoute("task", j.id, "session", sid) }))
         .filter((x) => x.route)
         .map((x) => ({ text: `Open session ${x.sid.slice(0, 8)} to scale`, href: x.route }));
-      for (const p of j.pull_requests || []) links.push({ text: `Pull request ${p.ref}`, href: p.url, external: true });
-      return links;
-    };
     const open = (opener, thing) => {
       const it = thing.item;
       const content = W.drawer(thing, ctxDrawer);
       const route = F.safeRoute("task", j.id) || "#/";
       openDrawer(opener, content, {
         links: linksFor(it),
-        prompt: { what: it.type === "box" ? (it.count === 1 ? "this work burst" : `these ${it.count} work bursts`) : thing.seg && thing.seg.folded ? "the short waits inside this work box" : "this wait", name, route, dataPath: mapPath(j.id) },
+        prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: mapPath(j.id) },
         more: (box) => stretchesIn(box, j, map, it, ctxDrawer),
       });
     };
@@ -1741,7 +1755,7 @@
       const lad = el("div", "vsm-lad");
       for (; segIndex < segs.length && segs[segIndex].item === i; segIndex++) {
         const sg = segs[segIndex];
-        const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}`);
+        const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}${(sg.causes || []).map((k) => ` has-${k}`).join("")}`);
         b.type = "button";
         b.dataset.item = String(i);
         b.appendChild(el("span", "lad-label", sg.label));
@@ -1790,7 +1804,7 @@
         });
         data.appendChild(more);
       } else {
-        main = el("button", `vsm-wait cause-${it.waited_on}${longestItem === it ? " is-longest" : ""}`);
+        main = el("button", `vsm-wait cause-${it.waited_on}${it.causes.map((k) => ` has-${k}`).join("")}${longestItem === it ? " is-longest" : ""}`);
         main.type = "button";
         main.dataset.item = String(i);
         const tri = svg("svg", { viewBox: "0 0 40 34", width: 40, height: 34, "aria-hidden": "true", class: "vsm-tri" });
@@ -1833,14 +1847,20 @@
     };
     // The same words as the lede, so the two never disagree.
     const words = new Map();
-    for (const p of W.lede(row, F.reasonText, { published: tasksPublished }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, p.text);
+    for (const p of W.lede(row, F.reasonText, { published: tasksPublished, idle }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, p.text);
+    const leadWords = (words.has("lead") && row && row.lead_time_ms && row.lead_time_ms.state === "partial" ? "at least " : "") + (words.get("lead") || "");
     const fig = (key, n) => {
       if (words.has(key)) return document.createTextNode((key === "lead" && n && n.state === "partial" && !/^at /.test(words.get(key)) ? "at least " : "") + words.get(key));
-      return el("span", "num num-unavailable", n && n.state === "unavailable" ? `no data (${n.reasons.map(F.reasonText).join("; ")})` : "no data");
+      const nd = el("span", "num num-unavailable", "no data");
+      if (!(n && n.state === "unavailable" && n.reasons && n.reasons.length)) return nd;
+      const wrap = el("span");
+      wrap.append(nd, el("span", "sum-reason", `because ${n.reasons.map(F.reasonText).join("; ")}`));
+      return wrap;
     };
     line("sum-lead", "Lead time", fig("lead", row && row.lead_time_ms), "from start to end");
     line("sum-working", "Working time", fig("working", row && row.working_ms), "agents busy");
     line("sum-value", "of which value-adding", fig("value", row && row.value_in_working_ms), "as the evaluator labeled it");
+    line("sum-waiting", "Waiting", idle && idle.state !== "unavailable" && words.has("waiting") ? document.createTextNode(`${idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : ""}${words.get("waiting")}`) : el("span", "num num-unavailable", "no data"), "idle: lead time − working time");
     line("sum-fe", "Flow efficiency", fig("fe", row && row.flow_efficiency), "working time ÷ lead time");
     if (phone) root.appendChild(sum);
     else root.appendChild(place(sum, model.items.length, 3, 2));
@@ -1856,11 +1876,11 @@
       legend.appendChild(p);
     };
     lg("key-box", "A box is a burst of agent work; its data box lists what happened in it.");
-    lg("key-tri", "A triangle is work waiting between steps. Lean calls it inventory, but its time counts as the waiting waste.");
+    lg("key-tri", "A triangle is waiting: idle time between bursts of work, when no agent of this task was working, with what it waited on. Waiting always means idle time here; the evaluator's labels describe working time only.");
     lg("key-ladder", phone ? "The ladder runs down the left: a line on the left is working time, a line on the right is waiting." : "The ladder under the map: the low line is working time, the high line is waiting, each step labeled with its length.");
     lg("key-rework", "A loop arrow marks rework: stretches the evaluator labeled as defects inside that box.");
     container.appendChild(legend);
-    container.appendChild(el("p", "chart-caption", `${W.foldWords(model)} Lead time ${W.durationWords(model.totals.lead_ms)} = working ${W.durationWords(model.totals.working_ms)} + waits inside boxes ${W.durationWords(model.totals.inner_wait_ms)} + waits between boxes ${W.durationWords(model.totals.waiting_ms)}.`));
+    container.appendChild(el("p", "chart-caption", `${W.foldWords(model)} Lead time ${leadWords || W.durationWords(model.totals.lead_ms)} = working ${W.durationWords(model.totals.working_ms)} + waits inside boxes ${W.durationWords(model.totals.inner_wait_ms)} + waits between boxes ${W.durationWords(model.totals.waiting_ms)}.`));
     // A map Desk states as incomplete (unreadable stretches of a log, or
     // bursts with no labels) says so under the drawing.
     for (const [env, what] of [[map.bursts_state, "The bursts and waits are only partly recorded"], [map.bursts_labels, "The bursts' labels are not all recorded, so value-adding and defect figures read no data where there are none"]]) {
@@ -1878,7 +1898,7 @@
       const tr = document.createElement("tr");
       const cells = it.type === "box"
         ? [W.boxTitle(it), W.clockWords(it.start_ms, it.end_ms, origin), W.durationShort(it.working_ms), it.inner_wait_ms ? W.durationShort(it.inner_wait_ms) : "—", W.statedText(it.tool_calls), W.statedText(it.tool_failures), W.statedText(it.operator_turns), W.statedText(it.defect_stretches)]
-        : [`Wait: ${W.waitTitle(it)}`, W.clockWords(it.start_ms, it.end_ms, origin), "—", W.durationShort(it.duration_ms), "—", "—", "—", "—"];
+        : [`Wait: ${W.waitTitle(it)}`, W.waitPlace(model, it), "—", W.durationShort(it.duration_ms), "—", "—", "—", "—"];
       cells.forEach((c, k) => tr.appendChild(el("td", k >= 2 ? "num" : "", c)));
       tb.appendChild(tr);
     }
@@ -1888,10 +1908,21 @@
     det.appendChild(tw);
     container.appendChild(det);
 
+    // A deep link (?bursts=4-6, ?gaps=3) opens the item that holds it.
+    const select = (sel) => {
+      if (!sel) return false;
+      const it = model.items.find((x) => (sel.kind === "bursts" && x.type === "box" && x.burst_range[0] <= sel.from && sel.from <= x.burst_range[1]) || (sel.kind === "gaps" && x.type === "wait" && x.gap_range[0] <= sel.from && sel.from <= x.gap_range[1]));
+      if (!it) return false;
+      const node = root.querySelector(`.vsm-box[data-item="${it.index}"], .vsm-wait[data-item="${it.index}"]`);
+      if (node) node.scrollIntoView({ block: "center" });
+      open(node, { kind: it.type, item: it });
+      return true;
+    };
     return {
       root,
       model,
-      highlight: (key) => highlight(root, key, key === "longest" && longestItem ? longestItem.index : undefined),
+      select,
+      highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause),
     };
   }
 
@@ -1917,85 +1948,126 @@
       let n = 0;
       for (const d of details) {
         const lanesOf = W.lanes(d, map.agents);
-        for (const s of d.stretches || []) {
-          if (s.end_ms <= it.start_ms || s.start_ms >= it.end_ms) continue;
+        const all = d.stretches || [];
+        all.forEach((s, k) => {
+          if (s.end_ms <= it.start_ms || s.start_ms >= it.end_ms) return;
           n += 1;
           const li = document.createElement("li");
           const b = el("button", "stretch-row");
           b.type = "button";
           b.appendChild(swatch(W.stretchSegment(s)));
-          const c = W.drawer({ kind: "stretch", stretch: s, intervals: d.intervals || [], lanes: lanesOf }, ctxDrawer);
-          b.appendChild(document.createTextNode(`${c.title}, ${W.durationShort(s.end_ms - s.start_ms)}${s.waited_on ? ` (${W.waitedOnWords(s.waited_on, "short")})` : ""}`));
-          b.addEventListener("click", () => openStretch(null, j, d, s, lanesOf, ctxDrawer));
+          const c = W.drawer({ kind: "stretch", stretch: s, index: k, total: all.length, intervals: d.intervals || [], lanes: lanesOf }, ctxDrawer);
+          b.appendChild(document.createTextNode(`${c.title} ${k + 1}, ${W.durationShort(s.end_ms - s.start_ms)}${s.waited_on ? ` (${W.waitedOnWords(s.waited_on, "short")})` : ""}`));
+          b.addEventListener("click", () => openStretch(null, j, d, k, lanesOf, ctxDrawer));
           li.appendChild(b);
           list.appendChild(li);
-        }
+        });
       }
       box.appendChild(el("h3", "drawer-sub", n ? `Labeled stretches in this span (${n})` : "No labeled stretch falls in this span"));
       if (n) box.appendChild(list);
     });
   }
 
-  function openStretch(opener, j, detail, s, lanesOf, ctxDrawer) {
-    const content = W.drawer({ kind: "stretch", stretch: s, intervals: detail.intervals || [], lanes: lanesOf }, ctxDrawer);
+  // One stretch's evidence; `k` is its index in the session's stretches.
+  function openStretch(opener, j, detail, k, lanesOf, ctxDrawer) {
+    const stretches = detail.stretches || [];
+    const thing = { kind: "stretch", stretch: stretches[k], index: k, total: stretches.length, session: detail.session, intervals: detail.intervals || [], lanes: lanesOf };
+    const content = W.drawer(thing, ctxDrawer);
     const route = F.safeRoute("task", j.id, "session", detail.session) || F.safeRoute("task", j.id) || "#/";
     const links = [{ text: `Open session ${String(detail.session).slice(0, 8)} to scale`, href: route }];
-    for (const p of j.pull_requests || []) links.push({ text: `Pull request ${p.ref}`, href: p.url, external: true });
     if (detail.labels_from_shared_session) content.rows.push(["Labels", "These labels come from a session this task shared with other tasks"]);
-    openDrawer(opener, content, { links, prompt: { what: "this stretch", name: jobLabel(j), route, dataPath: `jobs/${j.id}/${detail.session}.json` } });
+    openDrawer(opener, content, { links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: `jobs/${j.id}/${detail.session}.json` } });
   }
 
   // ------------------------------------------- where this task's time went
 
   function renderTimeWent(container, ctx) {
-    const { j, row, stackRow, stackPublished } = ctx;
+    const { j, row, stackRow, stackPublished, idle } = ctx;
     container.innerHTML = "";
     if (!stackRow) {
       container.appendChild(el("p", "chart-caption", stackPublished === false ? "The walk's stack-up file is not published yet, so this shows the labeled time the store's own report holds instead." : "This task has no row in the walk's stack-up file, so this shows the labeled time the store's own report holds instead."));
       renderStoreWaste(container, j);
       return;
     }
-    const bar = W.timeBar(stackRow, F.SEGMENTS);
+    const bar = W.timeBar(stackRow, row, idle, F.SEGMENTS);
+    if (bar.state === "lead_only") {
+      // What is known (the lead time) is drawn; what is not (its split) is said.
+      const why = (bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded";
+      const at = bar.lead_state === "partial" ? "at least " : "";
+      container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar: ${at}${W.durationWords(bar.total_ms)}. How it splits into working and waiting is not known, because ${why}.`));
+      const track = el("div", "tw-bar");
+      track.setAttribute("role", "img");
+      track.setAttribute("aria-label", `Lead time ${at}${W.durationWords(bar.total_ms)}; its split into working and waiting is not known.`);
+      const d = el("div", "tw-seg tw-unsplit");
+      d.style.width = "100%";
+      track.appendChild(d);
+      container.appendChild(track);
+      container.appendChild(el("p", "chart-empty", "No working or waiting part is drawn rather than a guessed one."));
+      return;
+    }
     if (bar.state !== "ok") {
       container.appendChild(el("p", "chart-empty", `Not measured for this task, because ${(bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded"}. No bar is drawn rather than an empty one.`));
       return;
     }
-    container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${W.durationWords(bar.total_ms)}. Each part keeps its color on every chart in the walk.`));
+    const atLeast = bar.lead_state === "partial" ? "at least " : "";
+    container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${atLeast}${W.durationWords(bar.total_ms)}. Working time comes first, split by the evaluator's labels; then waiting, idle time, split by what it waited on.`));
     const track = el("div", "tw-bar");
     track.setAttribute("role", "img");
-    track.setAttribute("aria-label", `Lead time ${W.durationWords(bar.total_ms)}: ${bar.segments.map((s) => `${s.label} ${W.durationWords(s.ms)}`).join(", ")}. The list below gives every part.`);
-    for (const s of bar.segments) {
-      const d = el("div", `tw-seg tw-${s.key}`);
-      d.style.width = `${Math.max(0, s.share * 100)}%`;
-      d.style.background = segmentFill(s.key, true);
-      const seg = SEGMENT_BY_KEY.get(s.key);
-      if (seg && seg.fill === "outline") d.style.boxShadow = `inset 0 0 0 1.5px var(${seg.token})`;
-      d.title = `${s.label}: ${W.durationWords(s.ms)} (${W.pctWords(s.share)})`;
-      track.appendChild(d);
+    track.setAttribute("aria-label", `Lead time ${atLeast}${W.durationWords(bar.total_ms)}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.durationWords(g.ms)} (${g.segments.map((s) => `${s.label} ${W.durationWords(s.ms)}`).join(", ") || "nothing"})`).join("; ")}. The list below gives every part.`);
+    for (const g of bar.groups) {
+      const gd = el("div", `tw-group tw-group-${g.key}`);
+      gd.style.width = `${Math.max(0, (g.ms / bar.total_ms) * 100)}%`;
+      for (const s of g.segments) {
+        const d = el("div", `tw-seg tw-${s.key}`);
+        d.style.width = g.ms > 0 ? `${(s.ms / g.ms) * 100}%` : "0";
+        if (s.cause) d.classList.add(`wait-${s.cause}`);
+        else {
+          d.style.background = s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, true);
+          const seg = SEGMENT_BY_KEY.get(s.key);
+          if ((seg && seg.fill === "outline") || s.key === "working_unsplit") d.style.boxShadow = `inset 0 0 0 1.5px var(${seg ? seg.token : "--c-not-labeled"})`;
+        }
+        d.title = `${s.label}: ${W.durationWords(s.ms)} (${W.pctWords(s.share)})`;
+        gd.appendChild(d);
+      }
+      track.appendChild(gd);
     }
     container.appendChild(track);
-    const ul = el("ul", "tw-legend");
-    for (const s of bar.segments) {
-      const li = document.createElement("li");
-      li.appendChild(swatch(s.key));
-      li.appendChild(el("span", "tw-name", s.label));
-      li.appendChild(el("span", "tw-ms", `${W.durationWords(s.ms)} · ${W.pctWords(s.share)}`));
-      ul.appendChild(li);
+    for (const g of bar.groups) {
+      const head = el("p", "tw-group-head");
+      head.appendChild(el("strong", null, g.label));
+      head.appendChild(document.createTextNode(` ${g.qualifier || ""}${W.durationWords(g.ms)} · ${W.pctWords(g.ms / bar.total_ms)}${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
+      container.appendChild(head);
+      const ul = el("ul", "tw-legend");
+      for (const s of g.segments) {
+        const li = document.createElement("li");
+        li.appendChild(s.cause ? waitSwatch(s.cause) : swatch(s.key === "working_unsplit" ? "not_labeled" : s.key));
+        li.appendChild(el("span", "tw-name", s.label));
+        li.appendChild(el("span", "tw-ms", `${W.durationWords(s.ms)} · ${W.pctWords(s.share)}`));
+        ul.appendChild(li);
+      }
+      if (!g.segments.length) ul.appendChild(el("li", "chart-empty", "none"));
+      container.appendChild(ul);
     }
-    container.appendChild(ul);
-    if (bar.partial) container.appendChild(el("p", "chart-caption", `Partial: ${[...new Set([stackRow.lead_time_ms, ...Object.values(stackRow.waste_ms || {}), ...Object.values(stackRow.class_ms || {})].flatMap((n) => (n && n.state === "partial" ? n.reasons : [])))].map(F.reasonText).join("; ")}.`));
+    for (const n of bar.notes) container.appendChild(el("p", "chart-caption", n));
+    if (bar.partial) container.appendChild(el("p", "chart-caption", `Partial: ${[...new Set([stackRow.lead_time_ms, row && row.working_ms, ...Object.values(stackRow.waste_ms || {}), ...Object.values(stackRow.class_ms || {})].flatMap((n) => (n && n.state === "partial" ? n.reasons : [])))].map(F.reasonText).join("; ") || "some parts are partial"}.`));
+    if (idle.source === "map") container.appendChild(el("p", "chart-caption", "The waiting split comes from this task's map: each wait between bursts with what it waited on, and idle moments inside bursts as cause not recorded."));
 
     // Its top causes, by hours.
+    // Waiting causes come from the same idle split as the bar, so the list
+    // and the bar agree; the other causes are the evaluator's labels.
     const tc = row && row.top_causes;
     container.appendChild(el("h3", "bars-title", "Its top causes of waste, by time"));
-    if (!tc || tc.state === "unavailable" || !Array.isArray(tc.value) || !tc.value.length) {
-      container.appendChild(el("p", "chart-empty", tc && tc.state === "unavailable" ? `Not measured: ${tc.reasons.map(F.reasonText).join("; ")}.` : "No cause of waste is labeled for this task."));
+    const labeled = tc && tc.state !== "unavailable" && Array.isArray(tc.value) ? tc.value.filter((c) => !String(c.cause).startsWith("waiting:")) : [];
+    const causes = [...idle.by.map((x) => ({ cause: `waiting:${x.key}`, total_ms: x.ms })), ...labeled].filter((c) => c.total_ms > 0).sort((a, b) => b.total_ms - a.total_ms).slice(0, 5);
+    if (!causes.length) {
+      container.appendChild(el("p", "chart-empty", tc && tc.state === "unavailable" ? `Not measured: ${tc.reasons.map(F.reasonText).join("; ")}.` : "No cause of waste is recorded for this task."));
       return;
     }
     const ol = el("ol", "cause-list");
-    for (const c of tc.value) {
+    for (const c of causes) {
       const li = document.createElement("li");
-      li.appendChild(swatch(W.causeSegment(c.cause)));
+      const wk = String(c.cause).startsWith("waiting:") ? String(c.cause).slice(8) : null;
+      li.appendChild(wk ? waitSwatch(wk) : swatch(W.causeSegment(c.cause)));
       const a = el("a", "cause-link", W.causeWords(c.cause));
       // Each cause's own page (#/causes/<key>) arrives with Rank causes; until then the link opens Rank causes.
       const safe = F.safeRoute("causes");
@@ -2011,7 +2083,7 @@
   // -------------------------------------------------------- the task view
 
   let walkSeq = 0;
-  async function renderTaskWalk(data, id) {
+  async function renderTaskWalk(data, id, select) {
     const seq = ++walkSeq;
     const j = renderTaskHead(document.getElementById("task-head"), data.jobs, id);
     const ledeEl = document.getElementById("task-lede");
@@ -2032,27 +2104,30 @@
     const row = taskRows ? taskRows.find((r) => r.job === j.id) || null : null;
     const stackRow = stack && Array.isArray(stack.jobs) ? stack.jobs.find((r) => r.job === j.id) || null : null;
     safely("task-picker", () => renderPicker(document.getElementById("task-picker"), data.jobs, taskRows, j.id));
+    // One waiting figure for the lede, the map's summary and the bar.
+    const idle = W.idleSplit(row, map);
     let drawn = null;
     const tokens = [];
     safely("vsm", () => {
-      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows });
+      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle });
     });
     safely("task-lede", () => {
-      renderLede(ledeEl, row, !!taskRows, (key, btn) => {
+      renderLede(ledeEl, row, !!taskRows, idle, (tok, btn) => {
         if (!drawn) return;
-        const on = drawn.highlight(key);
+        const on = drawn.highlight(tok);
         for (const b of tokens) b.setAttribute("aria-pressed", String(on && b === btn));
         if (on) drawn.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
       });
       tokens.push(...ledeEl.querySelectorAll(".lede-num"));
     });
-    safely("time-went", () => renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack }));
+    safely("time-went", () => renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle }));
     // Redraw the map when the width crosses between phone and wide or
     // changes how many boxes fit.
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
-      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows });
+      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle });
     });
+    if (select && drawn) safely("vsm", () => drawn.select(select));
   }
 
   let lastMapWidth = 0;
@@ -2075,7 +2150,7 @@
   const LABEL_ROW_H = 30;
   const AXIS_H = 24;
 
-  async function renderSwimlane(container, data, jobId, sessionId) {
+  async function renderSwimlane(container, data, jobId, sessionId, select) {
     const seq = ++walkSeq;
     container.innerHTML = "";
     const j = jobId ? data.jobs.find((x) => x.id === jobId) : null;
@@ -2116,7 +2191,7 @@
     const t1 = typeof detail.end_ms === "number" ? detail.end_ms : Math.max(...intervals.map((i) => i.end_ms));
     const span = Math.max(1, t1 - t0);
 
-    container.appendChild(el("p", "chart-caption", `This session ran ${W.clockWords(t0, t1, origin)}. Drawn to scale: each lane is one agent, gray marks are its activity, colored bands are the evaluator's labeled stretches and red ticks are failed tool calls.${detail.labels_from_shared_session ? "" : ""}`));
+    container.appendChild(el("p", "chart-caption", `This session ran ${W.clockWords(t0, t1, origin)}. Drawn to scale: each lane is one agent, gray marks are its activity, colored bands are the evaluator's labeled stretches and red ticks are failed tool calls.${subs.length ? " Subagent lanes are the subagents seen in this session's evidence, so they can show subagents the session's own count above does not record." : ""}`));
     if (detail.labels_from_shared_session) container.appendChild(el("p", "fix-action", "Labels come from a shared session: this session also worked on other tasks, so its labels were made for the whole session and only partly describe this task."));
     if (detail.intervals_binned) container.appendChild(el("p", "chart-caption", `This session's activity is published binned${typeof detail.resolution_ms === "number" ? ` to ${W.durationWords(detail.resolution_ms)}` : typeof detail.resolution === "number" ? ` to ${W.durationWords(detail.resolution)}` : ""}, so marks closer than that are merged.`));
     if (!detail.labeled) container.appendChild(el("p", "chart-caption", "This session is not labeled yet, so no stretch is drawn."));
@@ -2151,6 +2226,10 @@
 
     let zoom = 1;
     let expanded = false;
+    // The Labels row is one tab stop: arrow keys move between stretches
+    // (a roving tabindex), Enter or Space opens one.
+    let current = 0;
+    const order = stretches.map((st, k) => k).sort((a, b) => stretches[a].start_ms - stretches[b].start_ms || a - b);
 
     const draw = () => {
       const frameW = Math.max(200, frame.clientWidth - 112);
@@ -2161,7 +2240,7 @@
       const width = Math.round(frameW * zoom);
       const msPerPx = span / width;
       const x = (ms) => ((ms - t0) / span) * width;
-      const lanesShown = expanded ? allLanes : [allLanes[0], ...(subs.length ? [{ worker: "subs", depth: 0, label: `Subagents (${subs.length})` }] : [])];
+      const lanesShown = expanded ? allLanes : [allLanes[0], ...(subs.length ? [{ worker: "subs", depth: 0, label: `Subagents seen (${subs.length})` }] : [])];
       const laneY = new Map();
       lanesShown.forEach((l, k) => laneY.set(l.worker, AXIS_H + LABEL_ROW_H + k * LANE_H));
       const laneOf = (w) => (expanded || w === 0 ? w : "subs");
@@ -2223,7 +2302,7 @@
       const actY = (wk) => laneY.get(wk) + LANE_H / 2 - 4;
       if (!expanded && subs.length) {
         for (const c of W.density(intervals, subs.map((l) => l.worker), t0, msPerPx, width)) {
-          s.appendChild(svg("rect", { x: c.x, y: actY("subs"), width: 1, height: 8, class: "lane-act", "fill-opacity": Math.min(1, 0.25 + 0.15 * c.n) }));
+          s.appendChild(svg("rect", { x: c.x, y: actY("subs"), width: c.w || 1, height: 8, class: "lane-act", "fill-opacity": Math.min(1, 0.25 + 0.15 * c.n) }));
         }
       }
       for (const l of expanded ? allLanes : [allLanes[0]]) {
@@ -2242,15 +2321,18 @@
           s.appendChild(r);
         }
       }
-      // The labels row: every stretch, focusable, opening its evidence.
+      // The labels row: every stretch, opening its evidence; one tab stop.
       const ly = AXIS_H + 3;
-      for (const st of stretches) {
+      const row = svg("g", { class: "lane-stretches", role: "group", "aria-label": `${stretches.length} labeled stretches; use the arrow keys to move between them and Enter to open one` });
+      const marks = [];
+      stretches.forEach((st, k) => {
         const seg = W.stretchSegment(st);
         const xa = x(st.start_ms);
         const w = Math.max(2, x(st.end_ms) - xa);
-        const g = svg("g", { class: "lane-stretch", tabindex: 0, role: "button" });
-        const c = W.drawer({ kind: "stretch", stretch: st, intervals, lanes: allLanes }, ctxDrawer);
-        g.setAttribute("aria-label", `${c.title}, ${W.durationWords(st.end_ms - st.start_ms)}${st.waited_on ? `, ${W.waitedOnWords(st.waited_on, "short")}` : ""}. Opens the evidence.`);
+        const g = svg("g", { class: "lane-stretch", tabindex: k === current ? 0 : -1, role: "button" });
+        marks[k] = g;
+        const c = W.drawer({ kind: "stretch", stretch: st, index: k, total: stretches.length, intervals, lanes: allLanes }, ctxDrawer);
+        g.setAttribute("aria-label", `Stretch ${k + 1} of ${stretches.length}: ${c.title}, ${W.durationWords(st.end_ms - st.start_ms)}${st.waited_on ? `, ${W.waitedOnWords(st.waited_on, "short")}` : ""}. Opens the evidence.`);
         const isWait = st.class === "muda" && st.waste === "waiting";
         g.appendChild(svg("rect", { x: xa, y: ly, width: w, height: LABEL_ROW_H - 6, fill: isWait ? "url(#hatch-waiting)" : segmentFill(seg, false), class: `lane-stretch-rect seg-${seg}` }));
         if (isWait && w > 120) {
@@ -2258,18 +2340,43 @@
           t.textContent = W.waitLabel(st.waited_on);
           g.appendChild(t);
         }
-        const go = () => openStretch(g, j, detail, st, allLanes, ctxDrawer);
+        const go = () => {
+          current = k;
+          for (const m of marks) if (m) m.setAttribute("tabindex", "-1");
+          g.setAttribute("tabindex", "0");
+          openStretch(g, j, detail, k, allLanes, ctxDrawer);
+        };
         g.addEventListener("click", go);
         g.addEventListener("keydown", (evt) => {
           if (evt.key === "Enter" || evt.key === " ") {
             evt.preventDefault();
             go();
+            return;
           }
+          const pos = order.indexOf(k);
+          const next = { ArrowRight: pos + 1, ArrowDown: pos + 1, ArrowLeft: pos - 1, ArrowUp: pos - 1, Home: 0, End: order.length - 1 }[evt.key];
+          if (next === undefined) return;
+          evt.preventDefault();
+          const to = order[Math.max(0, Math.min(order.length - 1, next))];
+          focusStretch(to);
         });
-        s.appendChild(g);
-      }
+        row.appendChild(g);
+      });
+      s.appendChild(row);
       plot.appendChild(s);
+      focusStretch = (k) => {
+        const m = marks[k];
+        if (!m) return;
+        for (const q of marks) if (q) q.setAttribute("tabindex", "-1");
+        m.setAttribute("tabindex", "0");
+        current = k;
+        // Keep the focused stretch in view inside the scrolling frame.
+        const xa = x(stretches[k].start_ms);
+        if (xa < frame.scrollLeft || xa > frame.scrollLeft + frame.clientWidth - 130) frame.scrollLeft = Math.max(0, xa - 40);
+        m.focus({ preventScroll: true });
+      };
     };
+    let focusStretch = () => {};
 
     const zoomTo = (z) => {
       const center = (frame.scrollLeft + frame.clientWidth / 2) / Math.max(1, frame.scrollWidth);
@@ -2300,6 +2407,12 @@
     }
     if (taskB) fitTask();
     else draw();
+    // A deep link (?stretch=17) focuses that stretch and opens its evidence.
+    if (select && select.kind === "stretch" && stretches[select.from - 1]) {
+      const k = select.from - 1;
+      focusStretch(k);
+      openStretch(document.activeElement, j, detail, k, allLanes, ctxDrawer);
+    }
 
     // Legend.
     const legend = el("ul", "lane-legend");
@@ -2331,14 +2444,17 @@
     const tb = document.createElement("tbody");
     for (const st of stretches) {
       const tr = document.createElement("tr");
-      const c = W.drawer({ kind: "stretch", stretch: st, intervals, lanes: allLanes }, ctxDrawer);
-      const b = el("button", "link-button", c.title);
+      const k = stretches.indexOf(st);
+      const c = W.drawer({ kind: "stretch", stretch: st, index: k, total: stretches.length, intervals, lanes: allLanes }, ctxDrawer);
+      const b = el("button", "link-button", `${k + 1}. ${c.title}`);
       b.type = "button";
-      b.addEventListener("click", () => openStretch(b, j, detail, st, allLanes, ctxDrawer));
+      b.addEventListener("click", () => openStretch(b, j, detail, k, allLanes, ctxDrawer));
       const td = el("td");
       td.appendChild(b);
       tr.appendChild(td);
-      for (const [v, cl] of [[W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
+      // Idle bands carry no clock time: their length only.
+      const waitSt = st.class === "muda" && st.waste === "waiting";
+      for (const [v, cl] of [[waitSt ? "idle; length only" : W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
       tb.appendChild(tr);
     }
     table.appendChild(tb);
@@ -2404,13 +2520,13 @@
     if (r.view === "task") {
       const fallback = F.defaultTask(data.jobs);
       const id = r.job || (fallback ? fallback.id : null);
-      renderTaskWalk(data, id).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
+      renderTaskWalk(data, id, r.select).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
       const j = data.jobs.find((x) => x.id === id);
       if (j) title = jobLabel(j);
     }
     if (r.view === "session") {
       renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, r.session, r.job);
-      renderSwimlane(document.getElementById("swimlane"), data, r.job, r.session).catch((err) => emptyState(document.getElementById("swimlane"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
+      renderSwimlane(document.getElementById("swimlane"), data, r.job, r.session, r.select).catch((err) => emptyState(document.getElementById("swimlane"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
     }
     document.title = `${title} \u00b7 The factory`;
     window.scrollTo(0, 0);

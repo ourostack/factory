@@ -42,8 +42,12 @@ import {
   unavailable,
 } from "./state.mjs";
 import { direct } from "./bounds.mjs";
+import { createRequire } from "node:module";
 import { SUBSTANTIAL, entrypointOf, featuredNumbers, modelRollups, subagentRollups, toolKindRollups } from "./session-numbers.mjs";
 import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "./health.mjs";
+// The site's own parser for alarm keys in issue titles (format.js), so the
+// build and the page agree on what a key is.
+const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
 import { checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
@@ -649,7 +653,28 @@ async function enrichIssue(issue) {
   };
 }
 
-const [kaizenFetch, andonFetch] = await Promise.all([fetchIssues("kaizen"), fetchIssues("andon")]);
+// Alarm owners (desk#232): an open issue labeled `factory-alarm` in
+// ourostack/desk or this store's repo whose title carries an alarm's key
+// (capture:<host>, loop:<code>) owns that alarm on the status line. Only the
+// keys, the number and the link are kept; the title a person typed is not.
+const ALARM_ISSUE_REPOS = [...new Set(["ourostack/desk", GITHUB_REPO])];
+async function fetchAlarmIssues() {
+  const lists = await Promise.all(
+    ALARM_ISSUE_REPOS.map((repo) => ghGet(`https://api.github.com/repos/${repo}/issues?state=open&labels=factory-alarm&per_page=${ISSUE_PAGE_SIZE}`).then((items) => ({ repo, items }))),
+  );
+  if (lists.some((l) => !Array.isArray(l.items))) return { verification: "unavailable", issues: [] };
+  return {
+    verification: "verified",
+    issues: lists.flatMap(({ repo, items }) =>
+      items
+        .filter((i) => !i.pull_request)
+        .map((i) => ({ ref: `${repo === GITHUB_REPO ? "" : repo}#${i.number}`, url: i.html_url, issue_state: i.state, keys: alarmKeys(i.title) }))
+        .filter((i) => i.keys.length),
+    ),
+  };
+}
+
+const [kaizenFetch, andonFetch, alarmFetch] = await Promise.all([fetchIssues("kaizen"), fetchIssues("andon"), fetchAlarmIssues()]);
 const kaizenIssues = await mapLimit(kaizenFetch.issues, 4, enrichIssue);
 const andonIssues = await mapLimit(andonFetch.issues, 4, enrichIssue);
 
@@ -883,6 +908,8 @@ const data = {
   kaizen_issues: kaizenIssues,
   andon_issues: andonIssues,
   andon_verification: andonFetch.verification,
+  alarm_issues: alarmFetch.issues,
+  alarm_issues_verification: alarmFetch.verification,
   featured,
   takeaways,
   outcomes,

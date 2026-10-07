@@ -51,21 +51,83 @@ function row825(over = {}) {
 
 // ---------------------------------------------------------------- the lede
 
-test("the lede: partial, counted from the first session, with working and value-adding time apart and waiting in system terms", () => {
-  const model = W.lede(row825(), F.reasonText)
+// The idle split of 825084c9 as its map gives it: 36.25 hours waiting for
+// the next prompt and 4 minutes whose cause is not recorded.
+const idle825 = (row) => W.idleSplit(row, {
+  bursts: [{ start_ms: 0, end_ms: 62609950 + 4 * M, working_ms: 62609950 }],
+  gaps: [{ start_ms: 62609950 + 4 * M, end_ms: 193344986, waited_on: "next_prompt" }],
+})
+
+test("the lede: partial, counted from the first session, with working and value-adding time apart and one waiting sentence when one cause covers it", () => {
+  const row = row825()
+  const model = W.lede(row, F.reasonText, { idle: idle825(row) })
   assert.equal(model.state, "ok")
   const text = W.ledeText(model)
   assert.match(text, /^This task took at least 54 hours, counted from its first session because the card was created after work began\./)
   assert.match(text, /Agents were working for 17 hours of it; the evaluator judged under a second of that work value-adding/)
-  assert.match(text, /Most of the 54 hours was waiting, not work: 36 hours in all\./)
-  assert.match(text, /For 36 hours of it, the agent had stopped and was waiting for the operator's next prompt\./)
+  // One cause covers 95% or more: one sentence, one number (I3).
+  assert.match(text, /Most of the 54 hours was waiting, not work: for 36 hours the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.doesNotMatch(text, /in all/)
   assert.match(text, /The longest single wait was 19 hours, also for the next prompt\./)
   // Flow efficiency is defined in place; a lead time that is a lower bound makes it an upper bound.
   assert.match(text, /working time divided by lead time is called flow efficiency; here it is at most 32%\. A low number is normal/)
   assert.doesNotMatch(text, /\byou(r)?\b/i, "public copy says the operator")
   // Every number is a token the page turns into a button.
   const keys = model.parts.filter((x) => typeof x === "object" && !x.term).map((x) => x.key)
-  assert.deepEqual(keys, ["lead", "working", "value", "waiting", "wait_cause", "longest", "fe"])
+  assert.deepEqual(keys, ["lead", "working", "value", "waiting", "longest", "fe"])
+})
+
+test("the lede: waiting with several causes gives the total, then its largest part as its own number, and says what was not recorded", () => {
+  const row = row825({ lead_time_ms: m(10 * H), working_ms: m(2 * H), flow_efficiency: m(0.2), longest_gap: m({ start_ms: 0, end_ms: 4 * H, duration_ms: 4 * H, waited_on: "queue_before_start" }) })
+  const idle = W.idleSplit(row, {
+    bursts: [{ start_ms: 4 * H, end_ms: 6 * H + 30 * M, working_ms: 2 * H }],
+    gaps: [{ start_ms: 0, end_ms: 4 * H, waited_on: "queue_before_start" }, { start_ms: 6 * H + 30 * M, end_ms: 10 * H, waited_on: "next_prompt" }],
+  })
+  assert.deepEqual(idle.by.map((x) => [x.key, x.ms]), [["queue_before_start", 4 * H], ["next_prompt", 3.5 * H], ["unknown", 30 * M]])
+  const model = W.lede(row, F.reasonText, { idle })
+  const t = W.ledeText(model)
+  assert.match(t, /Most of the 10 hours was waiting, not work: 8 hours in all\. The largest part, 4 hours, was while the task was waiting for its first session to start\. What 30 minutes of it waited on was not recorded\./)
+  assert.match(t, /The longest single wait was 4 hours, also before the first session\./)
+  const cause = model.parts.find((x) => x.key === "wait_cause")
+  assert.equal(cause.cause, "queue_before_start", "the cause's number lights only that cause")
+  // Under half the lead time: "Of the N, M was waiting" (M1), and no "a low number is normal" above one half (M2).
+  const busy = row825({ lead_time_ms: m(10 * H), working_ms: m(8 * H), flow_efficiency: m(0.8), longest_gap: u(["no_gaps"]) })
+  const bt = W.ledeText(W.lede(busy, F.reasonText, { idle: W.idleSplit(busy, { bursts: [{ start_ms: 0, end_ms: 8 * H, working_ms: 8 * H }], gaps: [{ start_ms: 8 * H, end_ms: 10 * H, waited_on: "next_prompt" }] }) }))
+  assert.match(bt, /Of the 10 hours, 2 hours was waiting, all of it while the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.doesNotMatch(bt, /A low number is normal/)
+})
+
+test("the lede: a partial working time prints as at least, and the waiting derived from it as at most (I2)", () => {
+  const row = row825({ lead_time_ms: m(10 * H), working_ms: p(4 * H, ["log_truncated"]), flow_efficiency: p(0.4, ["log_truncated"]), value_in_working_ms: u(["log_truncated"]), longest_gap: u(["log_truncated"]) })
+  const idle = W.idleSplit(row, null)
+  assert.equal(idle.bound, "upper")
+  const t = W.ledeText(W.lede(row, F.reasonText, { idle }))
+  assert.match(t, /Agents were working for at least 4 hours of it \(a lower bound: a session's log was cut short\)/)
+  assert.match(t, /Most of the 10 hours was waiting, not work: for at most 6 hours/)
+  assert.match(t, /here it is at least 40%/)
+  // Only the reasons that make it a bound are named there; a shared session's labels are said once, elsewhere.
+  const shared = row825({ lead_time_ms: m(10 * H), working_ms: p(4 * H, ["labels_from_shared_session", "log_truncated"]), labels_from_shared_session: true })
+  assert.match(W.ledeText(W.lede(shared, F.reasonText)), /at least 4 hours of it \(a lower bound: a session's log was cut short\)/)
+  assert.equal(W.reworkWords({ defect_stretches: p(1, ["x"]), defect_ms: p(1000, ["x"]) }), "at least 1 defect stretch, 1 second")
+  // An upper-bound working time makes the waiting a lower bound.
+  const up = row825({ lead_time_ms: m(10 * H), working_ms: { ...p(4 * H, ["log_truncated"]), bound: "upper" } })
+  assert.equal(W.idleSplit(up, null).bound, "lower")
+  // A lead time and a working time both partial in other ways leave the waiting unbounded, and the lede says so.
+  const both = row825({ lead_time_ms: p(10 * H, ["log_truncated"]), working_ms: p(4 * H, ["log_truncated"]), longest_gap: u(["log_truncated"]) })
+  const bi = W.idleSplit(both, null)
+  assert.equal(bi.bound, "unknown")
+  assert.match(W.ledeText(W.lede(both, F.reasonText, { idle: bi })), /about 6 hours .*not bounded/)
+})
+
+test("the lede reads a true zero as none and an unlabeled task without repeating itself", () => {
+  const zero = row825({ lead_time_ms: m(100 * H), working_ms: m(36000), value_in_working_ms: m(0), flow_efficiency: m(0.0001) })
+  assert.match(W.ledeText(W.lede(zero, F.reasonText)), /the evaluator judged none of that work value-adding/)
+  assert.equal(W.durationWords(0), "none")
+  assert.equal(W.durationWords(400), "under a second")
+  const unl = row825({ lead_time_ms: m(10 * H), working_ms: m(2 * H), value_in_working_ms: u(["not_labeled"]), flow_efficiency: m(0.2) })
+  const t = W.ledeText(W.lede(unl, F.reasonText))
+  assert.match(t, /that work is not labeled yet, so how much of it added value is not known\./)
+  assert.doesNotMatch(t, /not labeled yet \(not labeled/)
 })
 
 test("the lede: a measured task, a generic partial, an open task, and labels from a shared session", () => {
@@ -81,8 +143,10 @@ test("the lede: a measured task, a generic partial, an open task, and labels fro
   const t = W.ledeText(W.lede(measured, F.reasonText))
   assert.match(t, /^This task took 6\.5 hours from its card's creation to its end\./)
   assert.match(t, /Those labels come from a session this task shared with other tasks, so that split is partial\./)
-  assert.match(t, /Long tool calls \(five minutes or more\) ran for 5 minutes/)
-  assert.match(t, /The longest single wait was 2\.3 hours, when nothing was running for this task, and what it waited on was not recorded\./)
+  // The labeled waiting stretches (5 minutes of long tool calls) are not the answer to where 5.6 hours of idle time went (C1).
+  assert.doesNotMatch(t, /Long tool calls/)
+  assert.match(t, /Most of the 6\.5 hours was waiting, not work: for 5\.6 hours nothing was running for this task, and what it waited on was not recorded\./)
+  assert.match(t, /The longest single wait was 2\.3 hours, also with its cause not recorded\./)
   assert.match(t, /here it is 15%\./)
 
   const generic = W.ledeText(W.lede(row825({ lead_time_ms: p(4 * H, ["log_truncated"]), flow_efficiency: p(0.5, ["log_truncated"]), working_ms: m(2 * H) }), F.reasonText))
@@ -199,7 +263,8 @@ test("the data box keeps the design's order, the rework loop counts defect stret
   const map = synthetic(3, 5)
   const model = W.mapModel(map, { maxBoxes: 10 })
   const box = model.items.find((x) => x.type === "box" && x.defect_stretches)
-  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests", "Session"])
+  // No pull request count per box: it would place a pull request on the task clock (I6).
+  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Session"])
   assert.equal(W.reworkWords({ defect_stretches: 12, defect_ms: 3 * M }), "12 defect stretches, 3 minutes")
   assert.equal(W.reworkWords({ defect_stretches: 0, defect_ms: 0 }), null)
   assert.equal(W.reworkWords({ defect_stretches: u(["not_labeled"]), defect_ms: u(["not_labeled"]) }), null, "an unlabeled box draws no loop")
@@ -245,11 +310,11 @@ test("burst fields stated as envelopes never read as zero: a box sums them and s
   assert.equal(box.value_ms.state, "unavailable")
   const rows = Object.fromEntries(W.dataBox(box, 1).map((r) => [r.label, r.text]))
   assert.equal(rows["Operator turns"], "at least 1")
-  assert.equal(rows["Pull requests"], "0", "a measured zero is still a zero")
+  assert.equal(rows["Pull requests"], undefined, "no pull request count per box")
   assert.equal(rows["Working time"], "at least 19m")
   const d = Object.fromEntries(W.drawer({ kind: "box", item: box }, { origin_ms: 0, lead_ms: 21 * M, reasonText: F.reasonText }).rows)
-  assert.equal(d["Value-adding, as labeled"], "not labeled (not labeled for waste yet)")
-  assert.equal(d["Defects, as labeled"], "not labeled (not labeled for waste yet)")
+  assert.equal(d["Value-adding, as labeled"], "not labeled yet")
+  assert.equal(d["Defects, as labeled"], "not labeled yet")
   // Totals still hold: a burst with no stated working time counts its span.
   assert.equal(model.totals.lead_ms, 21 * M)
   // An enveloped bursts list reads too.
@@ -260,23 +325,71 @@ test("burst fields stated as envelopes never read as zero: a box sums them and s
 
 // ------------------------------------------- where this task's time went
 
-test("the task's stacked bar keeps the shared stacking order, starts at zero and sums to its lead time", () => {
+test("the task's bar has two groups that sum to its lead time: working by label, then waiting by cause", () => {
   const r = ["card_dates_shorter_than_work"]
-  const row = {
-    lead_time_ms: p(193344986, r),
-    class_ms: { value: p(532, r), support: p(48391810, r) },
-    waste_ms: { waiting: p(130484670, r), defects: p(164857, r), extra_processing: p(0, r), unknown: p(0, r) },
-    agents_working_unlabeled_ms: p(12721842, r),
-    not_labeled_ms: p(1581275, r),
+  // Today's stack-up row: labels may also cover idle time, and "not labeled yet" covers both.
+  const stack = {
+    lead_time_ms: p(10 * H, r),
+    class_ms: { value: p(1 * H, r), support: p(2 * H, r) },
+    waste_ms: { waiting: p(5 * H, r), defects: p(0.5 * H, r), extra_processing: p(0, r), unknown: p(0, r) },
+    agents_working_unlabeled_ms: p(0.25 * H, r),
+    not_labeled_ms: p(1.25 * H, r),
     no_session_ms: p(0, r),
   }
-  const bar = W.timeBar(row, F.SEGMENTS)
+  const row = { lead_time_ms: p(10 * H, r), working_ms: p(4 * H, r) }
+  const idle = W.idleSplit(row, { bursts: [{ start_ms: 0, end_ms: 4.5 * H, working_ms: 4 * H }], gaps: [{ start_ms: 4.5 * H, end_ms: 10 * H, waited_on: "next_prompt" }] })
+  const bar = W.timeBar(stack, row, idle, F.SEGMENTS)
   assert.equal(bar.state, "ok")
-  assert.deepEqual(bar.segments.map((s) => s.key), ["value", "support", "waiting", "defects", "agents_working_unlabeled", "not_labeled"])
+  assert.deepEqual(bar.groups.map((g) => g.key), ["working", "waiting"])
+  assert.deepEqual(bar.groups[0].segments.map((s) => s.key), ["value", "support", "defects", "agents_working_unlabeled", "not_labeled"])
+  assert.equal(bar.groups[0].segments.find((s) => s.key === "not_labeled").ms, 0.25 * H, "not labeled yet is the working time no label covers")
+  assert.deepEqual(bar.groups[1].segments.map((s) => [s.cause, s.ms]), [["next_prompt", 5.5 * H], ["unknown", 0.5 * H]])
+  assert.equal(bar.groups[0].ms, 4 * H)
+  assert.equal(bar.groups[1].ms, 6 * H)
   assert.equal(bar.segments.reduce((a, s) => a + s.ms, 0), bar.total_ms)
+  assert.ok(!bar.segments.some((s) => s.key === "waiting" || s.key === "no_session"), "labeled waiting is not drawn as working")
   assert.equal(bar.partial, true)
-  assert.equal(W.timeBar(null, F.SEGMENTS).state, "absent")
-  assert.equal(W.timeBar({ lead_time_ms: u(["cancelled"]) }, F.SEGMENTS).state, "unavailable")
+  // Labels that cover more than the working time are not drawn as a split.
+  const over = W.timeBar({ ...stack, class_ms: { value: p(5 * H, r), support: p(0, r) } }, row, idle, F.SEGMENTS)
+  assert.deepEqual(over.groups[0].segments.map((s) => s.key), ["working_unsplit"])
+  assert.match(over.notes[0], /labels also cover idle time/)
+  // Desk's split rows (idle_ms): labels are working time only and read as they are.
+  const split = W.timeBar({ ...stack, idle_ms: p(6 * H, r), not_labeled_ms: p(0.25 * H, r) }, row, idle, F.SEGMENTS)
+  assert.deepEqual(split.groups[0].segments.map((s) => [s.key, s.ms]), [["value", H], ["support", 2 * H], ["defects", 0.5 * H], ["agents_working_unlabeled", 0.25 * H], ["not_labeled", 0.25 * H]])
+  assert.equal(W.timeBar(null, null, idle, F.SEGMENTS).state, "absent")
+  assert.equal(W.timeBar({ lead_time_ms: u(["cancelled"]) }, null, idle, F.SEGMENTS).state, "unavailable")
+})
+
+test("Desk's split stack-up rows (working and idle parts) read as they are, and a task with no working time draws its lead time alone", () => {
+  const r = ["labels_from_shared_session"]
+  const stack = {
+    lead_time_ms: m(10 * H),
+    working_ms: p(4 * H, r),
+    idle_ms: p(6 * H, r),
+    working: { class_ms: { value: p(H, r), support: p(2 * H, r) }, waste_ms: { defects: p(0.5 * H, r) }, agents_working_unlabeled_ms: p(0.25 * H, r), not_labeled_ms: p(0.25 * H, r) },
+    idle: { next_prompt: p(5 * H, r), long_tool_call: p(0.5 * H, r), unknown: p(0.5 * H, r) },
+  }
+  const row = { lead_time_ms: m(10 * H), working_ms: p(4 * H, r), idle_ms: p(6 * H, r), waiting_by_waited_on_ms: stack.idle }
+  const bar = W.timeBar(stack, row, W.idleSplit(row, null), F.SEGMENTS)
+  assert.deepEqual(bar.groups[0].segments.map((x) => [x.key, x.ms]), [["value", H], ["support", 2 * H], ["defects", 0.5 * H], ["agents_working_unlabeled", 0.25 * H], ["not_labeled", 0.25 * H]])
+  assert.deepEqual(bar.groups[1].segments.map((x) => [x.cause, x.ms]), [["next_prompt", 5 * H], ["long_tool_call", 0.5 * H], ["unknown", 0.5 * H]])
+  // With no task row, the stack-up row's own idle split is used.
+  assert.equal(W.timeBar(stack, null, null, F.SEGMENTS).groups[1].ms, 6 * H)
+  const gone = W.timeBar({ lead_time_ms: m(10 * H), working_ms: u(["source_unreadable"]), idle_ms: u(["source_unreadable"]) }, { lead_time_ms: m(10 * H), working_ms: u(["source_unreadable"]), idle_ms: u(["source_unreadable"]) }, W.idleSplit({ lead_time_ms: m(10 * H), working_ms: u(["source_unreadable"]), idle_ms: u(["source_unreadable"]) }, null), F.SEGMENTS)
+  assert.equal(gone.state, "lead_only")
+  assert.equal(gone.total_ms, 10 * H)
+  assert.deepEqual(gone.reasons, ["source_unreadable"])
+  assert.match(read("site/src/app.js"), /How it splits into working and waiting is not known, because/)
+  assert.match(read("site/src/app.js"), /work bursts are not known, because/)
+})
+
+test("Desk's own idle split (idle_ms with waiting_by_waited_on_ms over idle time) is read as it is, and any rest is cause not recorded", () => {
+  const row = { lead_time_ms: m(10 * H), working_ms: m(4 * H), idle_ms: m(6 * H), waiting_by_waited_on_ms: { next_prompt: m(3 * H), long_tool_call: m(H), tool_failure: m(0), unknown: m(H) } }
+  const idle = W.idleSplit(row, { bursts: [], gaps: [{ start_ms: 0, end_ms: 10 * H, waited_on: "unknown" }] })
+  assert.equal(idle.source, "rollup")
+  assert.deepEqual(idle.by.map((x) => [x.key, x.ms]), [["next_prompt", 3 * H], ["long_tool_call", H], ["unknown", 2 * H]].sort((a, b) => b[1] - a[1] || 0))
+  assert.equal(idle.value, 6 * H)
+  assert.equal(W.idleSplit({ ...row, idle_ms: u(["source_unreadable"]) }, null).state, "unavailable")
 })
 
 test("causes read in the page's words and link to Rank causes", () => {
@@ -338,40 +451,88 @@ const detail = {
 }
 const agents = [{ session: "s1", n: 0, parent: null }, { session: "s1", n: 2, parent: 0 }, { session: "s1", n: 3, parent: 2 }, { session: "other", n: 9, parent: 0 }]
 
-test("the drawer says what a stretch is, where it sits on the task clock, its share of lead time and the evidence it rests on", () => {
+test("the drawer says what a stretch is, which one, its share of lead time and the evidence it rests on; a waiting stretch gets its length, never its clock times", () => {
   const lanes = W.lanes(detail, agents)
-  const c = W.drawer({ kind: "stretch", stretch: detail.stretches[1], intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: 10 * H })
+  const c = W.drawer({ kind: "stretch", stretch: detail.stretches[1], index: 1, total: 2, intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: 10 * H })
   assert.equal(c.title, "Waiting stretch")
   const rows = Object.fromEntries(c.rows)
+  assert.equal(rows.Which, "Stretch 2 of 2 in this session")
   assert.equal(rows["What it is"], "Waste: Waiting")
   assert.equal(rows.Confidence, "medium")
   assert.equal(rows["Evaluator version"], "3.2.0-alpha.202")
   assert.equal(rows["Waited on"], "the agent had stopped and was waiting for the operator's next prompt")
-  assert.equal(rows["On the task clock"], "from 3h to 5h after the task's start (2 hours)")
+  // I6: an idle band's start and end are never labeled with a clock time.
+  assert.equal(rows["On the task clock"], undefined)
+  assert.equal(rows.Length, "2 hours")
   assert.equal(rows.Share, "20% of the lead time")
+  // A working stretch keeps its place on the clock.
+  assert.match(Object.fromEntries(W.drawer({ kind: "stretch", stretch: detail.stretches[0], intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: 10 * H }).rows)["On the task clock"], /^from /)
   assert.deepEqual(c.evidence, [{ kind: "waiting for the operator", tool: "", outcome: "", lane: "Main agent", duration: "2h" }])
   const d = W.drawer({ kind: "stretch", stretch: detail.stretches[0], intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: null })
   assert.deepEqual(d.evidence.map((e) => [e.kind, e.tool, e.outcome, e.lane]), [["tool call", "shell", "error", "Main agent"], ["tool call", "shell", "ok", "Subagent 2"]])
   assert.equal(Object.fromEntries(d.rows).Share, "share of lead time not known (no lead time)")
 })
 
-test("the drawer for a box and a wait names what it is, its time and its share", () => {
+test("the drawer for a box and a wait names which one it is, its time and its share; a wait gets its place among the boxes, never clock times", () => {
   const model = W.mapModel(synthetic(3, 4), { maxBoxes: 10 })
   const box = model.items.find((x) => x.type === "box")
   const wait = model.items.find((x) => x.type === "wait" && x.waited_on === "queue_before_start")
-  const cb = Object.fromEntries(W.drawer({ kind: "box", item: box }, { origin_ms: 0, lead_ms: model.totals.lead_ms }).rows)
+  const cb = Object.fromEntries(W.drawer({ kind: "box", item: box }, { origin_ms: 0, lead_ms: model.totals.lead_ms, model }).rows)
+  assert.equal(cb.Which, "Work box 1 of 3: burst 1")
   assert.match(cb["What it is"], /^One work burst/)
   assert.match(cb["Working time"], /of the lead time\)$/)
-  const cw = W.drawer({ kind: "wait", item: wait }, { origin_ms: 0, lead_ms: model.totals.lead_ms })
+  assert.match(cb["On the task clock"], /^from /)
+  const cw = W.drawer({ kind: "wait", item: wait }, { origin_ms: 0, lead_ms: model.totals.lead_ms, model })
   assert.equal(cw.title, "Wait: queued before the first session")
-  assert.equal(Object.fromEntries(cw.rows)["Waited on"], "the task was waiting for its first session to start")
+  const rw = Object.fromEntries(cw.rows)
+  assert.equal(rw["Waited on"], "the task was waiting for its first session to start")
+  assert.equal(rw.Which, "Gap 1, before the first work box")
+  assert.equal(rw["On the task clock"], undefined, "a wait carries no clock time")
+  // A folded box says how it was folded (M4).
+  const folded = W.mapModel(synthetic(40, 9), { maxBoxes: 3 })
+  const fb = folded.items.find((x) => x.type === "box" && x.count > 1)
+  assert.match(Object.fromEntries(W.drawer({ kind: "box", item: fb }, { model: folded, fold_ms: folded.fold_ms }).rows)["What it is"], /folded into one box with the waits shorter than .+ between them/)
+  // The folded-ladder step names its box and causes, with no clock time.
+  const inner = folded.items.find((x) => x.type === "box" && x.inner_wait_ms > 0)
+  const fr = Object.fromEntries(W.drawer({ kind: "ladder", seg: { folded: true }, item: inner }, { model: folded }).rows)
+  assert.match(fr.Which, /^Inside work box \d+ of \d+$/)
+  assert.ok(fr["Waited on"].length > 0)
+  assert.equal(fr["On the task clock"], undefined)
 })
 
-test("the prompt for an agent carries the page route and the data file, and nothing else about the operator", () => {
-  assert.equal(
-    W.promptText({ what: "this stretch", name: "Private task 825084c9", route: "https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb", dataUrl: "https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json" }),
-    "Walk me through this stretch of factory task Private task 825084c9 (https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb, data: https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json). Explain what happened and what we could change.",
-  )
+test("the prompt names the exact item, its place, a link that opens it, and where it is in the data file (I5)", () => {
+  const model = W.mapModel(synthetic(13, 7), { maxBoxes: 6 })
+  const boxes = model.items.filter((x) => x.type === "box")
+  const ctx = { origin_ms: 0, model }
+  const a = W.promptItem({ kind: "box", item: boxes[0] }, ctx)
+  const b = W.promptItem({ kind: "box", item: boxes[1] }, ctx)
+  assert.notEqual(a.what, b.what)
+  assert.match(a.what, /^work box 1 of \d+ \(bursts? 1(–\d+)? of 13\)$/)
+  assert.match(a.where, /^It ran from minute \d+ to minute \d+ after the task's start/)
+  assert.match(a.locator, /^bursts\[0\]/)
+  assert.match(a.select, /^bursts=1(-\d+)?$/)
+  const w = W.promptItem({ kind: "wait", item: model.items.find((x) => x.type === "wait") }, ctx)
+  assert.match(w.what, /^the wait (before the first work box|between work boxes \d+ and \d+|after the last work box) \(gaps? [\d–]+ of \d+; waited on: .+\)$/)
+  assert.match(w.where, /^It lasted /)
+  assert.doesNotMatch(w.where, /minute/, "a wait gives its length, not its clock times")
+  const lanes = W.lanes(detail, agents)
+  const s0 = W.promptItem({ kind: "stretch", stretch: detail.stretches[0], index: 0, total: 2, session: "s1abcdef99", intervals: detail.intervals, lanes }, { origin_ms: 0 })
+  const s1 = W.promptItem({ kind: "stretch", stretch: detail.stretches[1], index: 1, total: 2, session: "s1abcdef99", intervals: detail.intervals, lanes }, { origin_ms: 0 })
+  assert.notEqual(W.promptText({ ...s0, taskName: "x", route: "r", dataUrl: "d" }), W.promptText({ ...s1, taskName: "x", route: "r", dataUrl: "d" }), "two stretches give two prompts")
+  assert.equal(s1.select, "stretch=2")
+  assert.equal(W.promptItem({ kind: "stretch", stretch: { class: "value", start_ms: 135 * M, end_ms: 135 * M + 1000 }, index: 4, total: 9, session: "abc" }, { origin_ms: 0 }).where, "It ran for 1 second, starting at minute 135 after the task's start")
+  assert.equal(s1.locator, "stretches[1]")
+  // The name reads naturally: no "factory task Private task".
+  assert.equal(W.promptName({ title: "Private task 825084c9", kind: "private", short: "825084c9" }), "factory task 825084c9 (private)")
+  assert.equal(W.promptName({ title: "Revocable sessions", kind: "public", short: "fc8b915a" }), 'factory task "Revocable sessions" (fc8b915a)')
+  const text = W.promptText({ ...s1, taskName: "factory task 825084c9 (private)", route: "https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb", dataUrl: "https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json" })
+  assert.equal(text, "Walk me through waiting stretch 2 of 2 in session s1abcdef (waited on: waiting for the next prompt) of factory task 825084c9 (private). It lasted 2 hours. It is open at https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2, and its data is stretches[1] in https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json. Explain what happened and what we could change.")
+  assert.doesNotMatch(text, /factory task Private task/)
+  // The link's query opens the item again.
+  assert.deepEqual(F.parseRoute("#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2"), { view: "session", job: "825084c9676f1da79f49e868ff950abb", session: "5f4879fb", select: { kind: "stretch", from: 2, to: 2 } })
+  assert.deepEqual(F.parseRoute("#/task/abc?bursts=4-6").select, { kind: "bursts", from: 4, to: 6 })
+  assert.equal(F.parseRoute("#/task/abc?bursts=6-4").select, undefined)
+  assert.equal(F.parseRoute("#/task/abc?x=<script>").view, "task")
 })
 
 // --------------------------------------------------------- the swimlane
@@ -424,6 +585,7 @@ test("the slim map keeps what the landing view draws and drops intervals, per-tu
   assert.doesNotMatch(text, /"intervals"|"human_turns"|"at_ms"|"basis"/)
   assert.deepEqual(slim.prs, [{ repo: "o/r", number: 7 }])
   assert.equal(slim.bursts.length, 1)
+  assert.equal("prs" in slim.bursts[0], false, "no pull request count per burst: it would place a pull request on the task clock (I6)")
   assert.deepEqual(slim.gaps, [{ start_ms: 10, end_ms: 20, waited_on: "next_prompt" }])
   assert.deepEqual(slim.detail_files, ["jobs/j1/s1.json"])
   assert.equal(slim.job, "j1")
@@ -479,8 +641,17 @@ test("the page loads walk.js, opens evidence in a real dialog, and never draws p
   assert.match(app, /not published yet/)
 })
 
+test("Desk's own bound on flow efficiency wins: bound upper reads at most, bound lower at least", () => {
+  const r = ["truncated"]
+  const base = row825({ lead_time_ms: m(193344986), working_ms: p(62609950, r) })
+  const upper = W.ledeText(W.lede({ ...base, flow_efficiency: { ...p(0.3238, r), bound: "upper" } }, F.reasonText, {}))
+  assert.match(upper, /here it is at most 32%\./)
+  const lower = W.ledeText(W.lede({ ...base, flow_efficiency: { ...p(0.3238, r), bound: "lower" } }, F.reasonText, {}))
+  assert.match(lower, /here it is at least 32%\./)
+})
+
 test("the reason text table covers the walk's new reasons", () => {
-  for (const r of ["labels_from_shared_session", "agents_working", "card_dates_shorter_than_work", "censored", "open_job", "cancelled", "job_offsets_unavailable"]) {
+  for (const r of ["labels_from_shared_session", "over_budget_after_binning", "agents_working", "card_dates_shorter_than_work", "censored", "open_job", "cancelled", "job_offsets_unavailable"]) {
     assert.equal(F.hasReasonText(r), true, r)
     assert.doesNotMatch(F.reasonText(r), /_/)
   }
@@ -495,5 +666,133 @@ test("the status line finds a repeated alarm by its key, not by its words", () =
     fixNext: [{ id: "capture_alarm", severity: "alarm", title: "Capture coverage needs a look" }, { id: "labels_mismatch", severity: "alarm", title: "Capture coverage labels mismatch" }],
   })
   assert.equal(s.state, "abnormal")
-  assert.deepEqual(s.alarms.map((a) => a.key), ["capture_alarm", "labels_mismatch"], "a fix-next alarm whose title starts like another's words is still told")
+  assert.deepEqual(s.alarms.map((a) => a.key), ["capture:claude-code", "labels_mismatch"], "a fix-next alarm whose title starts like another's words is still told, and the capture alarm is not told twice")
+})
+
+test("an open factory-alarm issue whose title carries the alarm's key owns that alarm; one without reads no one is on this (desk#232)", () => {
+  assert.deepEqual(F.alarmKeys("capture:claude-code — a capture record sent during a quarantine release"), ["capture:claude-code"])
+  assert.deepEqual(F.alarmKeys("loop:steps_stale and capture:copilot-cli"), ["loop:steps_stale", "capture:copilot-cli"])
+  assert.deepEqual(F.alarmKeys("Recapture:x is not a key; nor is xcapture:y"), [])
+  const input = {
+    verdict: { status: "alive", reason: "ok" },
+    andon: [],
+    andonVerification: "verified",
+    capture: { share: m(0.9), alarms: [{ host: "claude-code", code: "coverage_low" }, { host: "codex", code: "coverage_low" }] },
+    loop: { verdict: { status: "alarm" }, alarms: [{ code: "steps_stale" }] },
+    alarmIssues: [
+      { ref: "ourostack/desk#230", url: "https://github.com/ourostack/desk/issues/230", issue_state: "open", keys: ["capture:claude-code"] },
+      { ref: "#9", url: "https://github.com/ourostack/factory/issues/9", issue_state: "closed", keys: ["loop:steps_stale"] },
+    ],
+  }
+  const s = F.statusLine(input)
+  const by = Object.fromEntries(s.alarms.map((a) => [a.key, a.owner]))
+  assert.deepEqual(by["capture:claude-code"], { ref: "ourostack/desk#230", url: "https://github.com/ourostack/desk/issues/230" })
+  assert.equal(by["capture:codex"], null, "no issue: no one is on this")
+  assert.equal(by["loop:steps_stale"], null, "a closed issue owns nothing")
+  // The build reads the factory-alarm issues of ourostack/desk and this store, and keeps keys, number and link only.
+  const build = read("site/scripts/build-data.mjs")
+  assert.match(build, /labels=factory-alarm/)
+  assert.match(build, /"ourostack\/desk", GITHUB_REPO/)
+  assert.match(build, /keys: alarmKeys\(i\.title\)/)
+  assert.match(read("site/src/app.js"), /alarmIssues: data\.alarm_issues/)
+})
+
+// --------------------------------------- one waiting figure, on real tasks
+
+// The snapshot of the real walk (.github/fixtures/walk/snapshot.json), or a
+// fresh build's dist directory in FACTORY_WALK_DIST.
+function realWalk() {
+  const dir = process.env.FACTORY_WALK_DIST
+  if (!dir) return JSON.parse(read(".github/fixtures/walk/snapshot.json"))
+  const tasks = JSON.parse(readFileSync(join(dir, "rollups/tasks.json"), "utf8")).jobs
+  const stackup = JSON.parse(readFileSync(join(dir, "rollups/stackup.json"), "utf8")).jobs
+  const maps = {}
+  for (const f of readdirSync(join(dir, "map"))) {
+    const mp = JSON.parse(readFileSync(join(dir, "map", f), "utf8"))
+    maps[mp.job] = mp
+  }
+  return { tasks, stackup, maps }
+}
+
+test("for every real task, the lede's waiting = the map's triangles plus short waits inside boxes = the bar's waiting group = lead time minus working time (C1)", () => {
+  const { tasks, stackup, maps } = realWalk()
+  let checked = 0
+  let unknown = 0
+  for (const row of tasks) {
+    const map = maps[row.job]
+    const lead = row.lead_time_ms.state === "unavailable" ? null : row.lead_time_ms.value
+    const working = row.working_ms.state === "unavailable" ? null : row.working_ms.value
+    if (!map || lead === null) continue
+    if (working === null) {
+      // A task whose working time is not known (an unreadable session log):
+      // the lede says so, prints no waiting figure, and the bar draws the
+      // lead time alone.
+      const t = W.ledeText(W.lede(row, F.reasonText, { idle: W.idleSplit(row, map) }))
+      assert.match(t, /How long agents were working is not measured, because /, row.job)
+      assert.doesNotMatch(t, /was waiting/, row.job)
+      const sr = stackup.find((x) => x.job === row.job)
+      if (sr) assert.equal(W.timeBar(sr, row, W.idleSplit(row, map), F.SEGMENTS).state, "lead_only", row.job)
+      unknown += 1
+      continue
+    }
+    checked += 1
+    const idle = W.idleSplit(row, map)
+    const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1000, `${row.job.slice(0, 8)}: ${what}: ${a} vs ${b}`)
+    near(idle.value, lead - working, "waiting = lead - working")
+    near(idle.by.reduce((a, x) => a + x.ms, 0), idle.value, "the causes sum to the waiting")
+    for (const maxBoxes of [3, 6]) {
+      const model = W.mapModel(map, { maxBoxes })
+      near(model.totals.waiting_ms + model.totals.inner_wait_ms, idle.value, `triangles + inner waits at ${maxBoxes} boxes`)
+      const segs = W.ladder(model)
+      near(segs.filter((x) => x.level === "high").reduce((a, x) => a + x.ms, 0), idle.value, "the ladder's high steps")
+      near(segs.filter((x) => x.level === "low").reduce((a, x) => a + x.ms, 0), working, "the ladder's low steps")
+    }
+    const model = W.lede(row, F.reasonText, { idle })
+    const tok = model.parts.find((x) => x && x.key === "waiting")
+    if (idle.value > 0) assert.equal(tok && tok.text, W.durationWords(idle.value), `${row.job.slice(0, 8)}: the lede states the same waiting`)
+    const stackRow = stackup.find((x) => x.job === row.job)
+    if (!stackRow) continue
+    const bar = W.timeBar(stackRow, row, idle, F.SEGMENTS)
+    assert.equal(bar.state, "ok", row.job)
+    near(bar.groups[1].ms, idle.value, "the bar's waiting group")
+    near(bar.groups[1].segments.reduce((a, x) => a + x.ms, 0), idle.value, "the bar's waiting parts")
+    near(bar.groups[0].segments.reduce((a, x) => a + x.ms, 0), working, "the bar's working parts")
+    near(bar.groups[0].ms + bar.groups[1].ms, lead, "the bar sums to the lead time")
+  }
+  assert.ok(checked >= 15, `checked ${checked} real tasks`)
+  assert.ok(checked + unknown >= 25, `${checked + unknown} real tasks`)
+})
+
+test("a box reads job-level states: operator turns not recorded and an unlabeled task never read as 0 (I1)", () => {
+  const map = synthetic(3, 5)
+  const model = W.mapModel(map, { maxBoxes: 10, jobStates: { operator_turns: u(["not_recorded"]), labels: u(["not_labeled"]) } })
+  const box = model.items.find((x) => x.type === "box")
+  const rows = Object.fromEntries(W.dataBox(box, model.session_count).map((r) => [r.label, r.text]))
+  assert.equal(rows["Operator turns"], "not recorded")
+  const d = Object.fromEntries(W.drawer({ kind: "box", item: box }, { model, reasonText: F.reasonText }).rows)
+  assert.equal(d["Value-adding, as labeled"], "not labeled yet")
+  assert.equal(d["Defects, as labeled"], "not labeled yet")
+  assert.equal(W.reworkWords(box), null)
+  const partial = W.mapModel(map, { maxBoxes: 10, jobStates: { operator_turns: p(3, ["host_records_partly"]) } })
+  assert.match(W.dataBox(partial.items.find((x) => x.type === "box"), 3).find((r) => r.key === "operator_turns").text, /^at least \d+$/)
+  // A labeled zero reads "none", never "under a second".
+  const zero = W.mapModel({ bursts: [{ start_ms: 0, end_ms: M, working_ms: M, value_ms: 0, defect_ms: 0, defect_stretches: 0 }], gaps: [] }, {})
+  const dz = Object.fromEntries(W.drawer({ kind: "box", item: zero.items[0] }, { model: zero }).rows)
+  assert.equal(dz["Value-adding, as labeled"], "none")
+  assert.equal(dz["Defects, as labeled"], "none")
+})
+
+test("each lede number lights its own part of the map; a cause lights only the waits that waited on it", () => {
+  assert.equal(W.highlightSelector("wait_cause", { cause: "queue_before_start" }), ".vsm-wait.has-queue_before_start, .lad-high.has-queue_before_start")
+  assert.equal(W.highlightSelector("wait_cause", { cause: "<x>" }), ".vsm-wait, .lad-high, .sum-waiting")
+  assert.equal(W.highlightSelector("waiting"), ".vsm-wait, .lad-high, .sum-waiting")
+  assert.equal(W.highlightSelector("longest", { item: 4 }), '[data-item="4"]')
+  assert.equal(W.highlightSelector("nonsense"), null)
+  const app = read("site/src/app.js")
+  assert.match(app, /has-\$\{k\}/, "waits and ladder steps carry their causes as classes")
+  assert.match(app, /W\.highlightSelector\(key, \{ item, cause \}\)/)
+  // The swimlane's labels row is one tab stop with arrow keys inside (I4).
+  assert.match(app, /tabindex: k === current \? 0 : -1/)
+  assert.match(app, /ArrowRight: pos \+ 1/)
+  assert.doesNotMatch(app, /class: "lane-stretch", tabindex: 0/)
 })

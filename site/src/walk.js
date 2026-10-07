@@ -32,6 +32,8 @@
   // "12 minutes", "4.3 hours", "54 hours" (hours up to three days), "4.5 days".
   function durationWords(ms) {
     const x = Math.max(0, Number(ms) || 0);
+    // A true zero is "none"; only a positive time under a second is "under a second".
+    if (x === 0) return "none";
     if (x < SECOND) return "under a second";
     if (x < MINUTE) {
       const s = Math.round(x / SECOND);
@@ -142,7 +144,10 @@
     if (x && typeof x === "object" && (x.state === "measured" || x.state === "partial" || x.state === "unavailable")) {
       const v = typeof x.value === "number" && Number.isFinite(x.value) ? x.value : null;
       if (x.state !== "unavailable" && v === null) return { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : ["not_recorded"] };
-      return x.state === "unavailable" ? { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : [] } : { state: x.state, value: v, reasons: Array.isArray(x.reasons) ? x.reasons : [] };
+      if (x.state === "unavailable") return { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : [] };
+      const out = { state: x.state, value: v, reasons: Array.isArray(x.reasons) ? x.reasons : [] };
+      if (x.state === "partial" && (x.bound === "lower" || x.bound === "upper")) out.bound = x.bound;
+      return out;
     }
     return { state: "unavailable", reasons: ["not_recorded"] };
   }
@@ -168,17 +173,37 @@
     return { ...s, value: xs.map(stated).filter((x) => x.state !== "unavailable").reduce((a, x) => Math.max(a, x.value), 0) };
   }
 
-  // A stated count or duration in a few words: "12", "at least 12", "no data".
-  function statedText(n, kind) {
+  // "at least " or "at most " for a partial figure, following its bound; a
+  // partial figure with no bound stated is a lower bound (a sum with parts
+  // missing).
+  const boundWords = (x) => (x.state !== "partial" ? "" : x.bound === "upper" ? "at most " : "at least ");
+
+  // A stated count or duration in a few words: "12", "at least 12", "not
+  // recorded" (or `none` for an unavailable figure, when given).
+  function statedText(n, kind, none) {
     const x = stated(n);
-    if (x.state === "unavailable") return "no data";
+    if (x.state === "unavailable") return none || "no data";
     const t = kind === "duration" ? durationShort(x.value) : x.value.toLocaleString("en-US");
-    return x.state === "partial" ? `at least ${t}` : t;
+    return `${boundWords(x)}${t}`;
   }
   function statedWords(n) {
     const x = stated(n);
     if (x.state === "unavailable") return null;
-    return `${x.state === "partial" ? "at least " : ""}${durationWords(x.value)}`;
+    return `${boundWords(x)}${durationWords(x.value)}`;
+  }
+
+  // Reasons that only say the task's window is open or starts at its first
+  // session: within that window the figure is exact.
+  const WINDOW_REASONS = new Set(["censored", "card_dates_shorter_than_work", "open_job", "labels_from_shared_session"]);
+
+  // Which way a partial figure may be off: "lower" (the true value is at
+  // least this), "upper" (at most this), "window" (exact within the task's
+  // counted window), or null for a measured figure.
+  function boundOf(n) {
+    if (!n || n.state !== "partial") return null;
+    if (n.bound === "lower" || n.bound === "upper") return n.bound;
+    const rs = Array.isArray(n.reasons) ? n.reasons : [];
+    return rs.length && rs.every((r) => WINDOW_REASONS.has(r)) ? "window" : "lower";
   }
 
   // --------------------------------------------------------------- the lede
@@ -186,11 +211,93 @@
   const val = (n) => (n && n.state !== "unavailable" && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
   const has = (n, code) => !!(n && Array.isArray(n.reasons) && n.reasons.includes(code));
 
+  // ------------------------------------------------- waiting (idle time)
+
+  // "Waiting" has one meaning everywhere on the page: idle time, the lead
+  // time minus the working time, split by what it waited on. The evaluator's
+  // labels (value-adding, necessary, each waste) describe working time only.
+  // The causes, in the order the bar stacks them.
+  const WAIT_KEYS = ["next_prompt", "api_retry", "tool_failure", "long_tool_call", "queue_before_start", "no_session", "unknown"];
+
+  // Which way the waiting figure may be off, from its lead and working
+  // times: waiting = lead - working, so a working time that is a lower bound
+  // makes the waiting an upper bound, and a lead time that is one makes it a
+  // lower bound. Both at once leave no bound ("unknown").
+  function idleBound(leadN, workN) {
+    const flip = { lower: "upper", upper: "lower" };
+    const lb = boundOf(leadN) === "window" ? null : boundOf(leadN);
+    const wb = boundOf(workN) === "window" ? null : boundOf(workN);
+    if (!lb && !wb) return null;
+    if (!lb) return flip[wb];
+    if (!wb) return lb;
+    return lb === flip[wb] ? lb : "unknown";
+  }
+
+  // One task's waiting, split by cause. From Desk's task row when it states
+  // `idle_ms` (Desk after the fix round of #229, with
+  // `waiting_by_waited_on_ms` split over idle time); otherwise derived from
+  // the task's map file: each gap by what it waited on, and the idle moments
+  // inside bursts (a burst's span less its working time) as "cause not
+  // recorded". Bursts and gaps tile the lead window, so the split sums to
+  // lead - working. Returns { state, value, bound, reasons, by: [{ key, ms }],
+  // source } with `by` largest first.
+  function idleSplit(row, map) {
+    const leadN = row && row.lead_time_ms;
+    const workN = row && row.working_ms;
+    const bound = idleBound(leadN, workN);
+    const reasons = [...new Set([...((leadN && leadN.reasons) || []), ...((workN && workN.reasons) || [])])];
+    const out = (value, by, source, st) => {
+      const list = Object.entries(by)
+        .map(([key, ms]) => ({ key, ms }))
+        .filter((x) => x.ms > 0)
+        .sort((a, b) => b.ms - a.ms || WAIT_KEYS.indexOf(a.key) - WAIT_KEYS.indexOf(b.key));
+      const state = st || (bound || (leadN && leadN.state === "partial") || (workN && workN.state === "partial") ? "partial" : "measured");
+      return { state, value, bound: state === "partial" ? bound : null, reasons: state === "measured" ? [] : reasons, by: list, source };
+    };
+    if (row && row.idle_ms) {
+      const n = stated(row.idle_ms);
+      if (n.state === "unavailable") return { state: "unavailable", reasons: n.reasons, by: [], source: "rollup" };
+      const by = {};
+      for (const [k, x] of Object.entries(row.waiting_by_waited_on_ms || {})) {
+        const v = val(x);
+        if (v !== null) by[k] = (by[k] || 0) + v;
+      }
+      const named = Object.values(by).reduce((a, x) => a + x, 0);
+      if (n.value - named > SECOND) by.unknown = (by.unknown || 0) + (n.value - named);
+      const r = out(n.value, by, "rollup", n.state);
+      if (n.state === "partial") {
+        r.bound = n.bound || bound || "lower";
+        r.reasons = n.reasons;
+      }
+      return r;
+    }
+    const lead = val(leadN);
+    const work = val(workN);
+    if (lead === null || work === null) return { state: "unavailable", reasons: lead === null ? (leadN && leadN.reasons) || [] : (workN && workN.reasons) || [], by: [], source: "none" };
+    const listOf = (x) => (Array.isArray(x) ? x : x && Array.isArray(x.items) ? x.items : []);
+    const bursts = listOf(map && map.bursts);
+    const gaps = listOf(map && map.gaps);
+    if (!map || (!bursts.length && !gaps.length)) return out(Math.max(0, lead - work), { unknown: Math.max(0, lead - work) }, "rollup_total");
+    const by = {};
+    for (const g of gaps) {
+      const k = WAIT_KEYS.includes(g.waited_on) ? g.waited_on : "unknown";
+      by[k] = (by[k] || 0) + Math.max(0, g.end_ms - g.start_ms);
+    }
+    for (const b of bursts) {
+      const w = stated(b.working_ms);
+      if (w.state !== "unavailable") by.unknown = (by.unknown || 0) + Math.max(0, b.end_ms - b.start_ms - w.value);
+    }
+    const total = Object.values(by).reduce((a, x) => a + x, 0);
+    return out(total, by, "map");
+  }
+
   // The lede for one task (design section 4): one paragraph, built from the
   // task's row in rollups/tasks.json, with one template per number state.
   // Returns { state, parts }: `parts` is a list of strings and number tokens
   // { key, text }; the page turns each token into a button that highlights
   // its part of the map. `reasonText` turns a reason code into words.
+  // `opts.idle` is the task's waiting split (idleSplit), so the lede, the
+  // map and the bar state one waiting figure.
   //   state "absent"  the walk's data is not published at all
   //   state "no_row"  it is published, but this task has no row in it
   //   state "ok"      the paragraph
@@ -206,7 +313,7 @@
     }
     const parts = [];
     const add = (...xs) => parts.push(...xs);
-    const tok = (key, text) => ({ key, text });
+    const tok = (key, text, extra) => ({ key, text, ...(extra || {}) });
 
     const lead = val(row.lead_time_ms);
     const leadW = lead === null ? null : durationWords(lead);
@@ -226,48 +333,63 @@
       add("This task took ", tok("lead", leadW), `, a partial figure: ${reasons(row.lead_time_ms)}.`);
     }
 
-    // 2. Working time, and how much of it the evaluator judged value-adding.
+    // 2. Working time, with its own state, and how much of it the evaluator
+    // judged value-adding.
     const working = val(row.working_ms);
     const value = val(row.value_in_working_ms);
+    const wb = boundOf(row.working_ms);
     if (working === null) {
       add(` How long agents were working is not measured, because ${reasons(row.working_ms)}.`);
     } else {
-      add(` Agents were working for ${open ? "at least " : ""}`, tok("working", durationWords(working)), lead === null ? "" : " of it");
+      const q = wb === "lower" ? "at least " : wb === "upper" ? "at most " : open ? "at least " : "";
+      add(` Agents were working for ${q}`, tok("working", durationWords(working)), lead === null ? "" : " of it");
+      // Only the reasons that make it a bound are given here; a shared
+      // session's labels are said once, below.
+      if (wb === "lower" || wb === "upper") {
+        const why = (row.working_ms.reasons || []).filter((r) => !WINDOW_REASONS.has(r));
+        add(` (${wb === "lower" ? "a lower bound" : "an upper bound"}: ${why.length ? why.map(words).join("; ") : reasons(row.working_ms)})`);
+      }
       if (value === null) {
-        add(`; that work is not labeled yet (${reasons(row.value_in_working_ms)}), so how much of it added value is not known.`);
+        const why = reasons(row.value_in_working_ms);
+        // "not labeled yet (not labeled)" says nothing twice.
+        add(/not labeled/i.test(why) ? "; that work is not labeled yet, so how much of it added value is not known." : `; that work is not labeled yet (${why}), so how much of it added value is not known.`);
+      } else if (value === 0) {
+        add("; the evaluator judged ", tok("value", "none"), " of that work value-adding: all of it was necessary steps, rework, or work not labeled.");
+        if (row.labels_from_shared_session) add(" Those labels come from a session this task shared with other tasks, so that split is partial.");
       } else {
         add("; the evaluator judged ", tok("value", durationWords(value)), " of that work value-adding, and the rest necessary steps, rework, or work not labeled.");
         if (row.labels_from_shared_session) add(" Those labels come from a session this task shared with other tasks, so that split is partial.");
       }
     }
 
-    // 3. Waiting, in system terms: the largest labeled cause, then the
-    // longest single wait and what it waited on.
-    if (lead !== null && working !== null && lead > 0) {
-      const waiting = Math.max(0, lead - working);
-      const share = waiting / lead;
-      const buckets = Object.entries(row.waiting_by_waited_on_ms || {})
-        .map(([k, n]) => [k, val(n)])
-        .filter(([, v]) => v !== null && v > 0)
-        .sort((a, b) => b[1] - a[1]);
-      if (share >= 0.5) add(` Most of the ${leadW} was waiting, not work: `, tok("waiting", durationWords(waiting)), " in all.");
-      else add(" Of that time, ", tok("waiting", durationWords(waiting)), " was waiting.");
-      if (buckets.length) {
-        const [k, v] = buckets[0];
-        const d = durationWords(v);
-        const sentence = {
-          next_prompt: ["For ", " of it, the agent had stopped and was waiting for the operator's next prompt."],
-          api_retry: ["The agent waited on retries of failed model requests for ", "."],
-          tool_failure: ["The agent waited after failed tool calls for ", "."],
-          long_tool_call: ["Long tool calls (five minutes or more) ran for ", " while nothing else moved."],
-          unknown: ["For ", " the evaluator labeled waiting with no recorded cause."],
-        }[k] || ["For ", " the evaluator labeled waiting with no recorded cause."];
-        add(` ${sentence[0]}`, tok("wait_cause", d), sentence[1]);
+    // 3. Waiting: idle time, in system terms. One sentence when one cause
+    // covers (nearly) all of it; otherwise the total, then its largest part.
+    const idle = o.idle || idleSplit(row, null);
+    if (lead !== null && lead > 0 && working !== null && idle.state !== "unavailable") {
+      const waiting = idle.value;
+      const q = idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : "";
+      const tail = idle.bound === "unknown" ? " (both the lead time and the working time are partial, so this is not bounded)" : "";
+      const by = idle.by.filter((x) => x.ms > 0);
+      const top = by[0];
+      const most = waiting / lead >= 0.5;
+      if (waiting <= 0) add(" None of it was waiting: agents were working from start to end.");
+      else if (top && top.ms >= 0.95 * waiting) {
+        const why = waitedOnWords(top.key, "long");
+        if (most) add(` Most of the ${leadW} was waiting, not work: for ${q}`, tok("waiting", durationWords(waiting)), ` ${why}${tail}.`);
+        else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting)), ` was waiting, all of it while ${why}${tail}.`);
+      } else {
+        if (most) add(` Most of the ${leadW} was waiting, not work: ${q}`, tok("waiting", durationWords(waiting)), ` in all${tail}.`);
+        else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting)), ` was waiting${tail}.`);
+        if (top) {
+          add(" The largest part, ", tok("wait_cause", durationWords(top.ms), { cause: top.key }), `, was while ${waitedOnWords(top.key, "long")}.`);
+          const unknown = by.find((x) => x.key === "unknown");
+          if (unknown && top.key !== "unknown") add(` What ${durationWords(unknown.ms)} of it waited on was not recorded.`);
+        }
       }
       const gap = row.longest_gap && row.longest_gap.state !== "unavailable" ? row.longest_gap.value : null;
-      if (gap && typeof gap.duration_ms === "number" && gap.duration_ms > 0) {
-        const same = buckets.length && buckets[0][0] === gap.waited_on && gap.waited_on === "next_prompt";
-        add(" The longest single wait was ", tok("longest", durationWords(gap.duration_ms)), same ? ", also for the next prompt." : `, when ${waitedOnWords(gap.waited_on, "long")}.`);
+      if (waiting > 0 && gap && typeof gap.duration_ms === "number" && gap.duration_ms > 0) {
+        const same = top && top.key === gap.waited_on;
+        add(" The longest single wait was ", tok("longest", durationWords(gap.duration_ms)), same ? `, also ${ALSO[gap.waited_on] || "with its cause not recorded"}.` : `, when ${waitedOnWords(gap.waited_on, "long")}.`);
       }
     }
 
@@ -278,14 +400,32 @@
     } else {
       let feText = pctWords(fe);
       if (row.flow_efficiency.state === "partial") {
-        if (open) feText = `${feText} so far`;
-        else if (fromFirst) feText = `at most ${feText}`;
+        // Desk's own bound comes first: an upper bound (the lead time is a
+        // lower bound) reads "at most", a lower bound "at least".
+        if (row.flow_efficiency.bound === "upper") feText = `at most ${feText}`;
+        else if (row.flow_efficiency.bound === "lower") feText = `at least ${feText}`;
+        else if (open) feText = `${feText} so far`;
+        else if (fromFirst && wb !== "lower") feText = `at most ${feText}`;
+        else if (wb === "lower" && row.lead_time_ms.state === "measured") feText = `at least ${feText}`;
         else feText = `${feText} (partial)`;
       }
-      add(" In Lean, working time divided by lead time is called ", { key: "fe_term", text: "flow efficiency", term: true }, "; here it is ", tok("fe", feText), ". A low number is normal: most of any process's lead time is waiting, not work. That is why Lean starts here.");
+      add(" In Lean, working time divided by lead time is called ", { key: "fe_term", text: "flow efficiency", term: true }, "; here it is ", tok("fe", feText), ".");
+      // Said only where it helps: below one half.
+      if (fe < 0.5) add(" A low number is normal: most of any process's lead time is waiting, not work. That is why Lean starts here.");
     }
     return { state: "ok", parts };
   }
+
+  // The longest wait "also" shares the largest cause.
+  const ALSO = {
+    next_prompt: "for the next prompt",
+    api_retry: "on API retries",
+    tool_failure: "after a failed tool call",
+    long_tool_call: "during a long tool call",
+    queue_before_start: "before the first session",
+    no_session: "with no session running",
+    unknown: "with its cause not recorded",
+  };
 
   // The lede as one string (for tests, titles and screen readers).
   function ledeText(model) {
@@ -303,7 +443,11 @@
   // first burst, the box after it); bursts with only folded gaps between
   // them share one box. Every other gap is a wait (an inventory triangle);
   // gaps with no burst between them share one wait.
-  function buildItems(bursts, gaps, fold) {
+  function buildItems(burstsIn, gapsIn, fold) {
+    // Each burst and gap keeps its 1-based number in clock order, so an item
+    // can be named the same way at any fold ("bursts 4-6", "gap 3").
+    const bursts = [...burstsIn].sort((a, b) => a.start_ms - b.start_ms).map((b, i) => ({ ...b, n: i + 1 }));
+    const gaps = [...gapsIn].sort((a, b) => a.start_ms - b.start_ms).map((g, i) => ({ ...g, n: i + 1 }));
     const seq = [...bursts.map((b) => ({ kind: "burst", b })), ...gaps.map((g) => ({ kind: "gap", g }))].sort((x, y) => {
       const a = x.kind === "burst" ? x.b.start_ms : x.g.start_ms;
       const b = y.kind === "burst" ? y.b.start_ms : y.g.start_ms;
@@ -360,6 +504,7 @@
         duration_ms: duration,
         waited_on: causes.length === 1 ? causes[0] : "mixed",
         causes,
+        gap_range: [gaps[0].n, gaps[gaps.length - 1].n],
         longest_ms: longest ? longest.end_ms - longest.start_ms : 0,
       };
     }
@@ -389,14 +534,17 @@
       // Idle time inside the box: folded gaps, and idle moments inside a
       // burst (a burst's span can exceed its working time).
       inner_wait_ms: foldedMs + (span - working),
+      // What the idle time inside the box waited on: its folded gaps, and the
+      // idle moments inside bursts, whose cause is not recorded.
+      inner_causes: [...new Set([...folded.map((g) => g.waited_on || "unknown"), ...(span - working > 0 ? ["unknown"] : [])])],
       folded_count: folded.length,
+      burst_range: [bs[0].n, bs[bs.length - 1].n],
       // Counts and labeled times as stated numbers: a part with no source
       // stays "no data", never 0.
       agents: maxStated(bs.map((b) => b.agents)),
       tool_calls: sum("tool_calls"),
       tool_failures: sum("tool_failures"),
       operator_turns: sum("operator_turns"),
-      prs: sum("prs"),
       value_ms: sum("value_ms"),
       defect_ms: sum("defect_ms"),
       defect_stretches: sum("defect_stretches"),
@@ -409,6 +557,11 @@
   // short bursts and gaps under a stated threshold"). The fold never loses
   // time: working + inner waits + waits equals the lead window, which the
   // tests check. Returns { fold_ms, items, totals }.
+  //
+  // `opts.jobStates` carries the job-level states the bursts' own counts
+  // cannot know: { operator_turns, labels }, each a stated number or null.
+  // An unavailable job-level figure makes every box's figure unavailable
+  // (never a 0); a partial one makes a box's count a lower bound.
   function mapModel(map, opts) {
     const o = opts || {};
     const maxBoxes = Math.max(1, o.maxBoxes || 7);
@@ -433,10 +586,24 @@
       b.session_numbers = b.sessions.map((id) => sessionOrder.indexOf(id) + 1).filter((n) => n > 0).sort((x, y) => x - y);
     }
     items.forEach((it, i) => (it.index = i));
+    boxes.forEach((b, i) => (b.box_no = i + 1));
+    waits.forEach((w, i) => (w.wait_no = i + 1));
+    const js = o.jobStates || {};
+    const cap = (x, env) => {
+      if (!env || env.state === "measured") return x;
+      if (env.state === "unavailable") return { state: "unavailable", reasons: env.reasons || [] };
+      return x.state === "unavailable" ? x : { state: "partial", value: x.value, bound: "lower", reasons: [...new Set([...(x.reasons || []), ...(env.reasons || [])])] };
+    };
+    for (const b of boxes) {
+      b.operator_turns = cap(b.operator_turns, js.operator_turns && stated(js.operator_turns));
+      const lab = js.labels && stated(js.labels);
+      if (lab && lab.state === "unavailable") for (const k of ["value_ms", "defect_ms", "defect_stretches"]) b[k] = { state: "unavailable", reasons: lab.reasons };
+    }
     return {
       fold_ms: chosen ? chosen.fold_ms : 0,
       items,
       session_count: sessionOrder.length,
+      box_count: boxes.length,
       totals: { working_ms: working, inner_wait_ms: inner, waiting_ms: waiting, lead_ms: working + inner + waiting, bursts: bursts.length, gaps: gaps.length },
     };
   }
@@ -457,8 +624,7 @@
       { key: "agents", label: "Agents", text: statedText(box.agents) },
       { key: "tool_calls", label: "Tool calls", text: statedText(box.tool_calls) },
       { key: "tool_failures", label: "Failed tool calls", text: statedText(box.tool_failures) },
-      { key: "operator_turns", label: "Operator turns", text: statedText(box.operator_turns) },
-      { key: "prs", label: "Pull requests", text: statedText(box.prs) },
+      { key: "operator_turns", label: "Operator turns", text: statedText(box.operator_turns, null, "not recorded") },
       { key: "session", label: "Session", text: sessionWords(box.session_numbers, sessionCount) },
     ];
   }
@@ -468,7 +634,9 @@
   function reworkWords(box) {
     const n = stated(box.defect_stretches);
     if (n.state === "unavailable" || !n.value) return null;
-    const d = statedWords(box.defect_ms);
+    // "at least" is said once, on the count.
+    const dm = stated(box.defect_ms);
+    const d = dm.state === "unavailable" ? null : durationWords(dm.value);
     return `${n.state === "partial" ? "at least " : ""}${n.value} defect stretch${n.value === 1 ? "" : "es"}${d ? `, ${d}` : ""}`;
   }
 
@@ -497,8 +665,8 @@
     for (const it of model.items) {
       if (it.type === "box") {
         segs.push({ level: "low", ms: it.working_ms, item: it.index, label: durationShort(it.working_ms) });
-        if (it.inner_wait_ms > 0) segs.push({ level: "high", ms: it.inner_wait_ms, item: it.index, folded: true, label: `+${durationShort(it.inner_wait_ms)}` });
-      } else segs.push({ level: "high", ms: it.duration_ms, item: it.index, label: durationShort(it.duration_ms) });
+        if (it.inner_wait_ms > 0) segs.push({ level: "high", ms: it.inner_wait_ms, item: it.index, folded: true, causes: it.inner_causes, label: `+${durationShort(it.inner_wait_ms)}` });
+      } else segs.push({ level: "high", ms: it.duration_ms, item: it.index, causes: it.causes, label: durationShort(it.duration_ms) });
     }
     return segs;
   }
@@ -528,33 +696,100 @@
 
   // --------------------------------------------- where this task's time went
 
-  // One task's stacked bar from its rollups/stackup.json row, in the shared
-  // stacking order (format.js SEGMENTS). Returns { state, total_ms, segments,
-  // partial }: segments that are zero are left out of the drawing but not of
-  // the total; an unavailable lead time draws nothing.
-  function timeBar(row, segments) {
-    if (!row) return { state: "absent", segments: [] };
-    const lead = val(row.lead_time_ms);
-    if (lead === null) return { state: "unavailable", segments: [], reasons: (row.lead_time_ms && row.lead_time_ms.reasons) || [] };
-    const pick = (key) => {
+  // One task's stacked bar in two groups that sum to its lead time:
+  //   Working, split by the evaluator's labels (format.js SEGMENTS, without
+  //     waiting and no session running, which are idle time), with the rest
+  //     of the working time "not labeled yet";
+  //   Waiting, split by what it waited on (idleSplit), in WAIT_KEYS order.
+  // `stackRow` is the task's rollups/stackup.json row, `taskRow` its
+  // rollups/tasks.json row. Returns { state, total_ms, groups, segments,
+  // partial, notes }; zero parts are left out of the drawing.
+  function timeBar(stackRow, taskRow, idle, segments) {
+    if (!stackRow && !taskRow) return { state: "absent", groups: [], segments: [] };
+    const leadN = (taskRow && taskRow.lead_time_ms) || (stackRow && stackRow.lead_time_ms);
+    const lead = val(leadN);
+    if (lead === null) return { state: "unavailable", groups: [], segments: [], reasons: (leadN && leadN.reasons) || [] };
+    const workN = (taskRow && taskRow.working_ms) || (stackRow && stackRow.working_ms);
+    const working = val(workN);
+    // Desk's stack-up rows with working and idle parts (after #229's second
+    // fix round) carry their own idle split; it stands in when the task row
+    // gives none.
+    if ((!idle || idle.state === "unavailable") && stackRow && stackRow.idle_ms && working !== null) {
+      idle = idleSplit({ lead_time_ms: leadN, working_ms: workN, idle_ms: stackRow.idle_ms, waiting_by_waited_on_ms: stackRow.idle || {} }, null);
+    }
+    // The lead time is known but not how it splits: the bar says so and
+    // draws the lead time alone.
+    if (working === null || !idle || idle.state === "unavailable") return { state: "lead_only", total_ms: lead, lead_state: leadN.state, groups: [], segments: [], reasons: [...new Set([...((workN && workN.reasons) || []), ...((idle && idle.reasons) || [])])] };
+    let partial = leadN.state === "partial" || workN.state === "partial";
+    const notes = [];
+    // Labels sit under `working` in Desk's split rows, at the top before it.
+    const labels = stackRow && stackRow.working && typeof stackRow.working === "object" ? stackRow.working : stackRow;
+    const pick = (row, key) => {
+      row = labels;
+      if (!row) return null;
       if (key === "value" || key === "support") return row.class_ms && row.class_ms[key];
       if (key === "agents_working_unlabeled") return row.agents_working_unlabeled_ms;
       if (key === "not_labeled") return row.not_labeled_ms;
-      if (key === "no_session") return row.no_session_ms;
       return row.waste_ms && row.waste_ms[key];
     };
-    const out = [];
-    let partial = row.lead_time_ms.state === "partial";
-    for (const s of segments) {
-      const n = pick(s.key);
+    // Desk after the fix round of #229 splits each row into working and idle
+    // time (`idle_ms`); before it, labels may also cover idle time and "not
+    // labeled yet" covers both, so not labeled yet is the working time left.
+    const split = !!(stackRow && (stackRow.idle_ms || (stackRow.working && typeof stackRow.working === "object")));
+    const work = [];
+    let labeled = 0;
+    for (const sg of segments) {
+      if (sg.key === "waiting" || sg.key === "no_session" || (sg.key === "not_labeled" && !split)) continue;
+      const n = pick(stackRow, sg.key);
       const v = val(n);
       if (n && n.state === "partial") partial = true;
       if (v === null || v <= 0) continue;
-      out.push({ key: s.key, label: s.label, ms: v, share: v / lead, state: n.state });
+      labeled += v;
+      work.push({ key: sg.key, label: sg.label, ms: v, state: n.state });
     }
-    // The queue before the first session is part of "no session running" in
-    // Desk's stack-up; it is not drawn twice.
-    return { state: "ok", total_ms: lead, segments: out, partial };
+    let workSegs = work;
+    if (labeled > working + SECOND) {
+      // The labels cover more than the working time, so some of them fall in
+      // idle time: no split by label is drawn rather than one that is wrong.
+      workSegs = [{ key: "working_unsplit", label: "Working, not split by label", ms: working, state: workN.state }];
+      notes.push("This task's labels also cover idle time, so its working time is not split by label here.");
+    } else if (working - labeled > SECOND) {
+      workSegs = [...work, { key: "not_labeled", label: "Not labeled yet", ms: working - labeled, state: "measured" }];
+    }
+    if (idle.state === "partial") partial = true;
+    const waitSegs = idle.by.map((x) => ({ key: `wait_${x.key}`, cause: x.key, label: waitCauseLabel(x.key), ms: x.ms, state: idle.state }));
+    const share = (x) => ({ ...x, share: x.ms / lead });
+    const groups = [
+      { key: "working", label: "Working", ms: working, segments: workSegs.map(share) },
+      { key: "waiting", label: "Waiting", ms: idle.value, segments: waitSegs.sort((a, b) => WAIT_KEYS.indexOf(a.cause) - WAIT_KEYS.indexOf(b.cause)).map(share) },
+    ];
+    // Each group's figure says "at least" or "at most" as the lede does.
+    const wb = boundOf(workN);
+    groups[0].qualifier = wb === "lower" ? "at least " : wb === "upper" ? "at most " : "";
+    groups[1].qualifier = idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : "";
+    return { state: "ok", total_ms: lead, groups, segments: [...groups[0].segments, ...groups[1].segments], partial, notes, lead_state: leadN.state };
+  }
+
+  // A waiting cause as a legend label: "Waiting for the next prompt".
+  function waitCauseLabel(key) {
+    const w = waitedOnWords(key, "short");
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }
+
+  // What a lede number lights up on the map, as a CSS selector over the
+  // map's own classes. A cause lights only the waits (and the idle steps of
+  // the ladder) that waited on it.
+  function highlightSelector(key, opts) {
+    const o = opts || {};
+    if (key === "wait_cause") return WAIT_KEYS.includes(o.cause) ? `.vsm-wait.has-${o.cause}, .lad-high.has-${o.cause}` : ".vsm-wait, .lad-high, .sum-waiting";
+    if (key === "longest") return Number.isInteger(o.item) ? `[data-item="${o.item}"]` : ".vsm-wait";
+    return {
+      lead: ".vsm-box, .vsm-wait, .lad, .sum-lead",
+      working: ".vsm-box, .lad-low, .sum-working",
+      value: ".sum-value",
+      waiting: ".vsm-wait, .lad-high, .sum-waiting",
+      fe: ".sum-fe",
+    }[key] || null;
   }
 
   // ------------------------------------------------------------ the picker
@@ -638,7 +873,7 @@
   }
 
   // How many subagents were active in each pixel column, for the collapsed
-  // subagent lane. Returns [{ x, n }] for columns with activity.
+  // subagent lane. Returns runs [{ x, w, n }] of columns with activity.
   function density(intervals, workers, t0, msPerPx, columns) {
     const set = new Set(workers);
     const cols = new Map();
@@ -651,10 +886,16 @@
         cols.get(x).add(i.worker);
       }
     }
-    return [...cols.entries()].sort((a, b) => a[0] - b[0]).map(([x, s]) => ({ x, n: s.size }));
+    // Neighboring columns with the same count merge into one run { x, w, n },
+    // so a deep zoom draws a few rectangles, not one per pixel.
+    const out = [];
+    for (const [x, set2] of [...cols.entries()].sort((a, b) => a[0] - b[0])) {
+      const prev = out[out.length - 1];
+      if (prev && prev.x + prev.w === x && prev.n === set2.size) prev.w += 1;
+      else out.push({ x, w: 1, n: set2.size });
+    }
+    return out;
   }
-
-  let reasonList = (n) => stated(n).reasons.join("; ") || "not recorded";
 
   const FAILED = new Set(["error", "timeout"]);
   function isFailure(i) {
@@ -726,33 +967,60 @@
     return ms < 0 ? `\u2212${durationShort(-ms)}` : durationShort(ms);
   }
 
+  // Where a wait sits among the map's boxes, in words: waits carry no clock
+  // time on the page (an idle band's start and end are never labeled).
+  function waitPlace(model, item) {
+    const before = model.items.slice(0, item.index).filter((x) => x.type === "box").pop();
+    const after = model.items.slice(item.index + 1).find((x) => x.type === "box");
+    if (before && after) return `between work boxes ${before.box_no} and ${after.box_no}`;
+    if (after) return "before the first work box";
+    if (before) return "after the last work box";
+    return "with no work box beside it";
+  }
+
+  // A labeled figure in words: "not labeled yet" when no label covers it,
+  // "none" for a true zero.
+  function labeledWords(n, words, kind) {
+    const x = stated(n);
+    if (x.state === "unavailable") {
+      const why = x.reasons.map(words).join("; ");
+      return !why || /not labeled/i.test(why) ? "not labeled yet" : `not labeled yet (${why})`;
+    }
+    if (x.value === 0) return "none";
+    return kind === "count" ? `${boundWords(x)}${x.value}` : statedWords(x);
+  }
+
+  function isWaitStretch(s) {
+    return !!(s && s.class === "muda" && s.waste === "waiting");
+  }
+
   // The drawer's content for one thing on the page. `thing` is
   //   { kind: "box", item }  { kind: "wait", item }  { kind: "ladder", seg, item }
-  //   { kind: "stretch", stretch, intervals, lanes }
-  // and `ctx` is { origin_ms, lead_ms }. Returns { title, rows, evidence }:
-  // rows are [label, text] pairs; evidence lists the intervals behind a
-  // stretch (kind, tool kind, outcome, lane).
+  //   { kind: "stretch", stretch, index, total, intervals, lanes }
+  // and `ctx` is { origin_ms, lead_ms, fold_ms, model, reasonText }. Returns
+  // { title, rows, evidence }: rows are [label, text] pairs; evidence lists
+  // the intervals behind a stretch (kind, tool kind, outcome, lane). Idle
+  // time (a wait, the short waits inside a box, a waiting stretch) is given
+  // its length and place, never its start and end on the clock.
   function drawer(thing, ctx) {
     const c = ctx || {};
     const words = typeof c.reasonText === "function" ? c.reasonText : (r) => String(r).replace(/_/g, " ");
-    reasonList = (n) => stated(n).reasons.map(words).join("; ") || "not recorded";
     const share = (ms) => (typeof c.lead_ms === "number" && c.lead_ms > 0 ? `${pctWords(ms / c.lead_ms)} of the lead time` : "share of lead time not known (no lead time)");
     if (thing.kind === "stretch") {
       const s = thing.stretch;
       const seg = stretchSegment(s);
       const cls = s.class === "muda" ? `Waste: ${WASTE_WORDS[s.waste] || "could not classify"}` : CLASS_WORDS[s.class] || "Not labeled";
-      const rows = [
-        ["What it is", cls],
-        ["Confidence", typeof s.confidence === "string" ? s.confidence : "not recorded"],
-        ["Evaluator version", typeof s.evaluator_version === "string" ? s.evaluator_version : "not recorded"],
-      ];
+      const rows = [];
+      if (Number.isInteger(thing.index)) rows.push(["Which", `Stretch ${thing.index + 1}${Number.isInteger(thing.total) ? ` of ${thing.total}` : ""} in this session`]);
+      rows.push(["What it is", cls], ["Confidence", typeof s.confidence === "string" ? s.confidence : "not recorded"], ["Evaluator version", typeof s.evaluator_version === "string" ? s.evaluator_version : "not recorded"]);
       if (s.waited_on) rows.push(["Waited on", waitedOnWords(s.waited_on, "long")]);
       if (s.reason) rows.push(["Note", s.reason]);
-      rows.push(["On the task clock", clockWords(s.start_ms, s.end_ms, c.origin_ms)]);
+      if (isWaitStretch(s)) rows.push(["Length", durationWords(s.end_ms - s.start_ms)]);
+      else rows.push(["On the task clock", clockWords(s.start_ms, s.end_ms, c.origin_ms)]);
       rows.push(["Share", share(s.end_ms - s.start_ms)]);
       const laneName = new Map((thing.lanes || []).map((l) => [l.worker, l.label]));
       const evidence = (Array.isArray(s.evidence) ? s.evidence : [])
-        .map((k) => thing.intervals[k])
+        .map((k) => (thing.intervals || [])[k])
         .filter(Boolean)
         .map((i) => ({
           kind: KIND_WORDS[i.kind] || String(i.kind).replace(/_/g, " "),
@@ -764,13 +1032,17 @@
       return { title: s.class === "muda" ? `${WASTE_WORDS[s.waste] || "Waste"} stretch` : `${CLASS_WORDS[s.class] || "Unlabeled"} stretch`, segment: seg, rows, evidence };
     }
     const it = thing.item;
+    const nOf = c.model && c.model.box_count ? ` of ${c.model.box_count}` : "";
+    const range = (r, one, many) => (r ? (r[0] === r[1] ? `${one} ${r[0]}` : `${many} ${r[0]}–${r[1]}`) : "");
     if (thing.kind === "box" || (thing.kind === "ladder" && it.type === "box" && !(thing.seg && thing.seg.folded))) {
+      const fold = typeof c.fold_ms === "number" && c.fold_ms > 0 && c.fold_ms !== Infinity ? `the waits shorter than ${durationWords(c.fold_ms)} between them` : "the waits between them";
       const rows = [
-        ["What it is", it.count === 1 ? "One work burst: a run of agent activity with no idle stretch of 15 minutes or more and no operator turn inside it" : `${it.count} work bursts, folded into one box with the short waits between them`],
+        ["Which", `Work box ${it.box_no}${nOf}: ${range(it.burst_range, "burst", "bursts")}`],
+        ["What it is", it.count === 1 ? "One work burst: a run of agent activity with no idle stretch of 15 minutes or more and no operator turn inside it" : `${it.count} work bursts, folded into one box with ${fold}`],
         ["On the task clock", clockWords(it.start_ms, it.end_ms, c.origin_ms)],
         ["Working time", `${durationWords(it.working_ms)} (${share(it.working_ms)})`],
-        ["Value-adding, as labeled", statedWords(it.value_ms) || `not labeled (${reasonList(it.value_ms)})`],
-        ["Defects, as labeled", stated(it.defect_stretches).state === "unavailable" ? `not labeled (${reasonList(it.defect_stretches)})` : reworkWords(it) || "none labeled"],
+        ["Value-adding, as labeled", labeledWords(it.value_ms, words)],
+        ["Defects, as labeled", stated(it.defect_stretches).state === "unavailable" ? labeledWords(it.defect_stretches, words) : reworkWords(it) || "none"],
       ];
       if (it.inner_wait_ms > 0) rows.push(["Short waits inside", `${durationWords(it.inner_wait_ms)}${it.folded_count ? `, including ${it.folded_count} folded wait${it.folded_count === 1 ? "" : "s"}` : ""}`]);
       return { title: boxTitle(it), segment: "support", rows, evidence: [] };
@@ -781,28 +1053,94 @@
         title: "Short waits inside a box",
         segment: "waiting",
         rows: [
+          ["Which", `Inside work box ${it.box_no}${nOf}`],
           ["What it is", "Idle time inside a work box: waits shorter than the map's fold threshold, and idle moments inside bursts"],
-          ["On the task clock", clockWords(it.start_ms, it.end_ms, c.origin_ms)],
-          ["Duration", `${durationWords(ms)} (${share(ms)})`],
+          ["Waited on", (it.inner_causes || ["unknown"]).map((k) => waitedOnWords(k, "short")).join("; ")],
+          ["Length", `${durationWords(ms)} (${share(ms)})`],
         ],
         evidence: [],
       };
     }
     const rows = [
+      ["Which", `${range(it.gap_range, "Gap", "Gaps")}${c.model ? `, ${waitPlace(c.model, it)}` : ""}`],
       ["What it is", it.count === 1 ? "A wait: no agent of this task was working" : `${it.count} waits in a row, with no work between them`],
       ["Waited on", it.waited_on === "mixed" ? it.causes.map((k) => waitedOnWords(k, "short")).join("; ") : waitedOnWords(it.waited_on, "long")],
-      ["On the task clock", clockWords(it.start_ms, it.end_ms, c.origin_ms)],
-      ["Duration", `${durationWords(ms)} (${share(ms)})`],
+      ["Length", `${durationWords(ms)} (${share(ms)})`],
     ];
     if (it.count > 1) rows.push(["Longest of them", durationWords(it.longest_ms)]);
     return { title: `Wait: ${waitTitle(it)}`, segment: "waiting", rows, evidence: [] };
   }
 
-  // The prompt "Copy as a prompt for your agent" puts on the clipboard: what
-  // to look at, a stable link to the page and one to the data file.
+  // The task's name as a prompt says it: "factory task 825084c9 (private)",
+  // or "factory task "Revocable sessions" (fc8b915a)". `n` is
+  // format.js taskName's { title, kind, short }.
+  function promptName(n) {
+    if (!n || n.kind === "private" || !n.title) return `factory task ${n && n.short ? n.short : "(unknown)"} (private)`;
+    if (n.kind === "unnamed") return `factory task ${n.short}`;
+    return `factory task "${n.title}" (${n.short})`;
+  }
+
+  // Minutes on the task clock, for a prompt: "minute 6 to minute 10".
+  function minuteSpan(startMs, endMs, origin) {
+    const o = typeof origin === "number" ? origin : 0;
+    const mins = (x) => Math.round((x - o) / MINUTE);
+    // A span shorter than two minutes reads as its length and starting minute.
+    if (endMs - startMs < 2 * MINUTE) return `for ${durationWords(endMs - startMs)}, starting at minute ${mins(startMs)} after the task's start`;
+    return `from minute ${mins(startMs)} to minute ${mins(endMs)} after the task's start`;
+  }
+
+  // What a prompt says about the item it was copied from: `what` names it
+  // the way the page does, `where` places it, `locator` finds it in the data
+  // file, and `select` is the query that opens it again on the page.
+  // `item` is { kind: "box"|"wait"|"inner"|"stretch", ... } as the drawer's.
+  function promptItem(thing, ctx) {
+    const c = ctx || {};
+    const it = thing.item;
+    const r = (x) => (x[0] === x[1] ? String(x[0]) : `${x[0]}-${x[1]}`);
+    const idx = (name, x) => (x[0] === x[1] ? `${name}[${x[0] - 1}]` : `${name}[${x[0] - 1}] to ${name}[${x[1] - 1}]`);
+    const total = c.model ? c.model.totals : null;
+    if (thing.kind === "stretch") {
+      const s = thing.stretch;
+      const k = thing.index;
+      const cls = s.class === "muda" ? `${(WASTE_WORDS[s.waste] || "waste").toLowerCase()} stretch` : `${(CLASS_WORDS[s.class] || "unlabeled").toLowerCase()} stretch`;
+      return {
+        what: `${cls} ${k + 1}${Number.isInteger(thing.total) ? ` of ${thing.total}` : ""} in session ${String(thing.session || "").slice(0, 8)}${s.waited_on ? ` (waited on: ${waitedOnWords(s.waited_on, "short")})` : ""}`,
+        where: isWaitStretch(s) ? `It lasted ${durationWords(s.end_ms - s.start_ms)}` : `It ran ${minuteSpan(s.start_ms, s.end_ms, c.origin_ms)}`,
+        locator: `stretches[${k}]`,
+        select: `stretch=${k + 1}`,
+      };
+    }
+    if (thing.kind === "box" || (thing.kind === "ladder" && it.type === "box" && !(thing.seg && thing.seg.folded))) {
+      return {
+        what: `work box ${it.box_no}${c.model ? ` of ${c.model.box_count}` : ""} (burst${it.burst_range[0] === it.burst_range[1] ? "" : "s"} ${r(it.burst_range).replace("-", "–")}${total ? ` of ${total.bursts}` : ""})`,
+        where: `It ran ${minuteSpan(it.start_ms, it.end_ms, c.origin_ms)}, with ${durationWords(it.working_ms)} of working time`,
+        locator: idx("bursts", it.burst_range),
+        select: `bursts=${r(it.burst_range)}`,
+      };
+    }
+    if (thing.kind === "ladder" && thing.seg && thing.seg.folded) {
+      return {
+        what: `the short waits inside work box ${it.box_no}${c.model ? ` of ${c.model.box_count}` : ""}`,
+        where: `They add up to ${durationWords(it.inner_wait_ms)}`,
+        locator: idx("bursts", it.burst_range),
+        select: `bursts=${r(it.burst_range)}`,
+      };
+    }
+    return {
+      what: `the wait ${c.model ? waitPlace(c.model, it) : ""} (gap${it.gap_range[0] === it.gap_range[1] ? "" : "s"} ${r(it.gap_range).replace("-", "–")}${total ? ` of ${total.gaps}` : ""}; waited on: ${it.waited_on === "mixed" ? "several causes" : waitedOnWords(it.waited_on, "short")})`.replace("wait  (", "wait ("),
+      where: `It lasted ${durationWords(it.duration_ms)}`,
+      locator: idx("gaps", it.gap_range),
+      select: `gaps=${r(it.gap_range)}`,
+    };
+  }
+
+  // The prompt "Copy as a prompt for your agent" puts on the clipboard: which
+  // item, where it sits, a link that opens it again, and where it is in the
+  // data file.
   function promptText(p) {
-    const what = p.what || "this stretch";
-    return `Walk me through ${what} of factory task ${p.name} (${p.route}, data: ${p.dataUrl}). Explain what happened and what we could change.`;
+    const what = p.what || "this item";
+    const link = p.select ? `${p.route}?${p.select}` : p.route;
+    return `Walk me through ${what} of ${p.taskName || `factory task ${p.name}`}. ${p.where ? `${p.where}. ` : ""}It is open at ${link}, and its data is ${p.locator ? `${p.locator} in ` : ""}${p.dataUrl}. Explain what happened and what we could change.`;
   }
 
   // ------------------------------------------------- the map file (build time)
@@ -810,7 +1148,8 @@
   // The slim map file for one task (map/<job>.json), from its full report
   // jobs/<job>.json. It keeps what the landing view draws and drops the
   // intervals (up to megabytes) and every per-turn time: pull requests keep
-  // their repository and number only, with no time.
+  // their repository and number only, at task level, with no time and no
+  // burst (a burst's pull request count would place it on the clock).
   function slimMap(report) {
     const t = (report && report.timeline) || {};
     const arr = (x) => (Array.isArray(x) ? x : []);
@@ -832,12 +1171,12 @@
         start_ms: b.start_ms,
         end_ms: b.end_ms,
         working_ms: b.working_ms,
+        idle_ms: b.idle_ms,
         sessions: arr(b.sessions),
         agents: b.agents,
         tool_calls: b.tool_calls,
         tool_failures: b.tool_failures,
         operator_turns: b.operator_turns,
-        prs: b.prs,
         value_ms: b.value_ms,
         defect_ms: b.defect_ms,
         defect_stretches: b.defect_stretches,
@@ -858,6 +1197,14 @@
     durationShort,
     pctWords,
     stated,
+    boundOf,
+    WAIT_KEYS,
+    idleSplit,
+    waitCauseLabel,
+    highlightSelector,
+    waitPlace,
+    promptName,
+    promptItem,
     sumStated,
     statedText,
     waitedOnWords,
