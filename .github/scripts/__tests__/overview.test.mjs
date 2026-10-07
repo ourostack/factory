@@ -326,7 +326,7 @@ test("the private-names overlay names tasks as text, and a missing or malformed 
   assert.doesNotMatch(app, /innerHTML = [^"']/)
   // The public build never produces or names the file.
   for (const p of [".github/workflows/pages.yml", "site/scripts/build-data.mjs"]) assert.doesNotMatch(read(p), /local-names/, p)
-  assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/app\.js site\/dist\//)
+  assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/app\.js site\/dist\//)
 })
 
 test("the page is the four-step walk, with Why Lean?, About and the store's numbers, and a guide on how to read it", () => {
@@ -357,15 +357,15 @@ test("the sign-off counts appear once, in the Sign-off list, with the no-data re
   assert.match(app, /row\(dl, "Delivered, awaiting an answer", waiting\)/)
 })
 
-test("the Elapsed tile says a raised lead time is at least the span of the job's recorded work, and keeps its other captions", () => {
-  const source = read("site/src/app.js")
-  const body = source.match(/function elapsedCaption\(n\) \{[\s\S]*?\n  \}\n/)[0]
-  const elapsedCaption = new Function(`${body}; return elapsedCaption;`)()
-  assert.equal(elapsedCaption({ state: "partial", value: 9000, reasons: ["card_dates_shorter_than_work"] }), "at least the span of its recorded work")
-  assert.equal(elapsedCaption({ state: "partial", value: 9000, reasons: ["card_dates_shorter_than_work", "censored"] }), "at least the span of its recorded work")
-  assert.equal(elapsedCaption({ state: "measured", value: 5, basis: "declared", reasons: [] }), "from the task card's dates")
-  assert.equal(elapsedCaption({ state: "measured", value: 5, reasons: [] }), "from the task card to its last session")
-  assert.match(source, /elapsedCaption\(j\.lead_time_ms\)/u)
+test("a lead time raised to the span of the job's recorded work says so: the lede counts it from the first session, as at least", () => {
+  // The Elapsed tile became the lede (Follow a task, S2); the rule it carried is kept there.
+  const W = createRequire(import.meta.url)("../../../site/src/walk.js")
+  const raised = { state: "partial", value: 9 * 3600000, reasons: ["card_dates_shorter_than_work"] }
+  const row = { lead_time_ms: raised, working_ms: { state: "partial", value: 3600000, reasons: [] }, value_in_working_ms: { state: "unavailable", reasons: ["not_labeled"] }, flow_efficiency: { state: "unavailable", reasons: ["card_dates_shorter_than_work"] } }
+  assert.match(W.ledeText(W.lede(row, F.reasonText)), /^This task took at least 9 hours, counted from its first session because the card was created after work began\./)
+  const open = { ...row, lead_time_ms: { ...raised, reasons: ["card_dates_shorter_than_work", "censored"] } }
+  assert.match(W.ledeText(W.lede(open, F.reasonText)), /^This task is still open\. So far it has taken at least 9 hours, counted from its first session because the card was created after work began\./)
+  assert.match(W.ledeText(W.lede({ ...row, lead_time_ms: { state: "measured", value: 5 * 3600000, reasons: [] } }, F.reasonText)), /^This task took 5 hours from its card's creation to its end\./)
 })
 
 test("an unavailable flow efficiency carrying the lead-time floor reason passes the numbers check and has words", () => {

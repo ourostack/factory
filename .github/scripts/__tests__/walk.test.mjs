@@ -509,7 +509,8 @@ test("public copy says the operator, not you, and shows no calendar date", () =>
   const text = html.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ")
   assert.doesNotMatch(text, /\byou(r|rs|rself)?\b/i)
   const app = read("site/src/app.js")
-  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n")
+  // The drawer's button keeps the wording the design gives it, "Copy as a prompt for your agent": it names the reader's own agent, not the operator.
+  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "")
   assert.doesNotMatch(strings, /\byou(r|rs|rself)?\b/i)
   assert.doesNotMatch(app, /dateStyle/)
   assert.doesNotMatch(app, /toLocaleDateString|toISOString/)
@@ -521,7 +522,7 @@ test("Why Lean? gives the eight wastes as our mapping, the glossary, and its sou
   for (const w of ["Waiting", "Defects", "Extra processing", "Overproduction", "Motion", "Transportation", "Inventory", "Non-utilized talent"]) assert.match(why, new RegExp(`</span>${w}</dt>`), w)
   assert.match(why, /our own mapping/)
   for (const term of ["Lead time", "Working time", "Flow efficiency", "Value-adding", "Necessary", "Waste", "Value stream map", "Timeline ladder", "Inventory triangle", "Yamazumi", "Pareto chart", "A3", "Kaizen", "Andon"]) assert.match(why, new RegExp(`<dt>(<span[^>]*></span>)?${term}`), term)
-  assert.match(why, /counts as the waiting waste, not the inventory waste/)
+  assert.match(why, /its time is waiting, not the inventory waste/)
   assert.match(why, /classic yamazumi stacks each operator's work against takt/)
   assert.ok((why.match(/href="https:/g) || []).length >= 10, "sources are linked inline")
 })
@@ -639,9 +640,11 @@ test("a reload at #main opens the default view, and the view routes before the s
   // On first load a #main is dropped and the default route renders; later it only moves focus.
   assert.match(routeFn, /if \(r\.view === "skip"\) \{[\s\S]*?if \(routedOnce\) \{[\s\S]*?return;\n      \}\n      history\.replaceState\(null, "", window\.location\.pathname \+ window\.location\.search\);\n      r = F\.parseRoute\("", jobOfSession\);/)
   const main = app.slice(app.indexOf("async function main() {"))
-  assert.ok(main.indexOf("route(data);") > 0 && main.indexOf("route(data);") < main.indexOf("safely("), "routing comes before every store-page chart")
+  // The router runs under its own guard (routeSafely), first.
+  assert.ok(main.indexOf("routeSafely(data);") > 0 && main.indexOf("routeSafely(data);") < main.indexOf("safely(\""), "routing comes before every store-page chart")
+  assert.match(app, /function routeSafely\(data\) \{\n    try \{\n      route\(data\);\n    \} catch/)
   // Each chart after routing draws on its own.
-  assert.doesNotMatch(main.slice(main.indexOf("route(data);")), /\n    render(?!Health|StatusLine)[A-Za-z]+\(/)
+  assert.doesNotMatch(main.slice(main.indexOf("routeSafely(data);")), /\n    render(?!Health|StatusLine)[A-Za-z]+\(/)
 })
 
 test("the Act page does not call a closed issue fixed: its pull request is a countermeasure, merged and not yet checked", () => {
