@@ -12,7 +12,9 @@
 //   lower             always a lower bound
 //   upper             always an upper bound
 //   unknown           no direction
-//   lower_if_censored a lower bound only when the job is still open
+//   lower_if_censored a lower bound only when every reason is the job still being
+//                     open or the task card's dates being shorter than the work
+//                     its sessions recorded (Desk raises the lead time to that span)
 //   from_reasons      read from the reasons (below)
 //   upper_if_awaiting an upper bound when every reason is a sign-off still
 //                     awaited, else unknown
@@ -30,6 +32,7 @@
 // session whose start was lost can only make it shorter: an upper bound.
 
 const FROM = "from_reasons";
+const LEAD_FLOORS = new Set(["censored", "card_dates_shorter_than_work"]);
 const AWAITING = new Set(["awaiting_signoff"]);
 
 export const DIRECTIONS = Object.freeze({
@@ -109,7 +112,7 @@ export function directionOf(measure, reasons) {
   const rule = DIRECTIONS[measure];
   if (rule === FROM) return fromReasons(reasons);
   if (rule === "upper_if_awaiting") return reasons.length > 0 && reasons.every((r) => AWAITING.has(r)) ? "upper" : "unknown";
-  if (rule === "lower_if_censored") return reasons.length > 0 && reasons.every((r) => r === "censored") ? "lower" : "unknown";
+  if (rule === "lower_if_censored") return reasons.length > 0 && reasons.every((r) => LEAD_FLOORS.has(r)) ? "lower" : "unknown";
   return rule;
 }
 

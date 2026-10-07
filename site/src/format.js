@@ -94,6 +94,7 @@
     status_unavailable: "the job's status could not be read",
     wait_fields_unavailable: "the waits could not be measured",
     zero_lead_time: "the lead time was zero, so no share can be taken",
+    card_dates_shorter_than_work: "the task card's dates are shorter than the work its sessions recorded, so the elapsed time is at least the span of that work",
     no_wait_intervals: "no wait was recorded",
     no_active_intervals: "no active time was recorded",
     not_reported_to_store: "not reported to the store",
