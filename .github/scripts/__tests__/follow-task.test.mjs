@@ -422,11 +422,11 @@ test("a box's inner waits name the causes Desk states per burst, the same as the
   assert.deepEqual(box.inner_by, { next_prompt: 10 * M, tool_failure: 17 * M, api_retry: 3 * M, unknown: 10 * M })
   assert.deepEqual(box.inner_causes, ["tool_failure", "next_prompt", "unknown", "api_retry"])
   const d = Object.fromEntries(W.drawer({ kind: "ladder", seg: { folded: true }, item: box }, { lead_ms: 80 * M, model }).rows)
-  assert.equal(d["Waited on"], "after a failed tool call, 17 minutes; waiting for the next prompt, 10 minutes; cause not recorded, 10 minutes; API retry, 3 minutes")
+  assert.equal(d["Waited on"], "after a failed tool call, 17 minutes; next prompt (the agent had stopped), 10 minutes; cause not recorded, 10 minutes; API retry, 3 minutes")
 })
 
 test("causes read in the page's words and link to Rank causes", () => {
-  assert.equal(W.causeWords("waiting:next_prompt"), "Waiting for the next prompt (the agent had stopped)")
+  assert.equal(W.causeWords("waiting:next_prompt"), "Waiting · next prompt (the agent had stopped)")
   assert.equal(W.causeWords("waiting:long_tool_call"), "Waiting · long tool call")
   assert.equal(W.causeWords("defects:shell"), "Defects · failed shell calls")
   assert.equal(W.causeWords("extra_processing:all"), "Extra processing")
@@ -581,7 +581,7 @@ test("the prompt names the exact item, its place, a link that opens it, and wher
   assert.equal(W.promptName({ title: "Private task 825084c9", kind: "private", short: "825084c9" }), "factory task 825084c9 (private)")
   assert.equal(W.promptName({ title: "Revocable sessions", kind: "public", short: "fc8b915a" }), 'factory task "Revocable sessions" (fc8b915a)')
   const text = W.promptText({ ...s1, taskName: "factory task 825084c9 (private)", route: "https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb", dataUrl: "https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json" })
-  assert.equal(text, "Walk me through labeled wait stretch 2 of 2 in session s1abcdef (waited on: waiting for the next prompt) of factory task 825084c9 (private). It lasted 2 hours. It is open at https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2, and its data is stretches[1] in https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json. Explain what happened and what we could change.")
+  assert.equal(text, "Walk me through labeled wait stretch 2 of 2 in session s1abcdef (waited on: next prompt (the agent had stopped)) of factory task 825084c9 (private). It lasted 2 hours. It is open at https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2, and its data is stretches[1] in https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json. Explain what happened and what we could change.")
   assert.doesNotMatch(text, /factory task Private task/)
   // The link's query opens the item again.
   assert.deepEqual(F.parseRoute("#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2"), { view: "session", job: "825084c9676f1da79f49e868ff950abb", session: "5f4879fb", select: { kind: "stretch", from: 2, to: 2 } })
@@ -607,7 +607,7 @@ test("failed tool calls are binned to pixel columns, activity merges below a pix
   assert.deepEqual(W.stretchWorkers(detail.stretches[0], detail.intervals), [0, 2])
   assert.equal(W.stretchSegment({ class: "unlabeled", reason: "agents_working" }), "agents_working_unlabeled")
   assert.equal(W.stretchSegment({ class: "muda", waste: "waiting" }), "waiting")
-  assert.equal(W.waitLabel("next_prompt"), "labeled wait: the next prompt")
+  assert.equal(W.waitLabel("next_prompt"), "labeled wait: next prompt")
   assert.equal(W.waitLabel("api_retry"), "labeled wait: API retry")
   const steps = W.zoomSteps(10 * H, 1000, 32768)
   assert.equal(steps[0], 1)
@@ -671,7 +671,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
   assert.deepEqual(readdirSync(join(emptyRoot, "dist")), [])
   // The workflow prints the map files' size line and publishes walk.js.
   const wf = read(".github/workflows/pages.yml")
-  assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/app\.js site\/dist\//)
+  assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
   assert.match(read("site/scripts/publish-files.mjs"), /Task map files \(new\)/)
 })
 
@@ -679,7 +679,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
 
 test("the page loads walk.js, opens evidence in a real dialog, and never draws per-turn operator markers or pull request times", () => {
   const html = read("site/src/index.html")
-  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="app\.js"><\/script>/)
+  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="app\.js"><\/script>/)
   assert.match(html, /<dialog id="evidence-drawer" class="drawer" aria-labelledby="drawer-title">/)
   for (const id of ["task-picker", "task-head", "task-lede", "vsm", "time-went", "job-detail", "swimlane"]) assert.match(html, new RegExp(`id="${id}"`))
   const app = read("site/src/app.js")

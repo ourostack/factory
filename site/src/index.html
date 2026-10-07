@@ -27,6 +27,10 @@
     <pattern id="hatch-no-session" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-no-session)" stroke-width="2" />
     </pattern>
+    <!-- A lead time whose split into working and waiting is not known. -->
+    <pattern id="hatch-unsplit" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="7" style="stroke: var(--baseline)" stroke-width="2" />
+    </pattern>
   </defs>
 </svg>
 
@@ -65,6 +69,7 @@
       <div id="time-went"></div>
     </section>
     <div id="job-detail"><p class="chart-empty">Loading&hellip;</p></div>
+    <p class="next-step"><a href="#/compare">Next: <span class="step-n" aria-hidden="true">2</span>Compare tasks</a>, to put this task beside every other.</p>
   </div>
 </div>
 
@@ -83,48 +88,86 @@
 <!-- ============ STEP 2: COMPARE TASKS ============ -->
 <div id="view-compare" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 2 of 4</p>
+    <p class="step-label">Step 2 of 4 &middot; Compare tasks</p>
     <h1 class="view-title">Compare tasks</h1>
-    <p class="lede">One task is a story; many tasks show the pattern. Each row below is one task, the last to finish at the top. Open any task to follow it end to end.</p>
-    <section class="block" aria-labelledby="tasks-title">
-      <h2 class="block-title" id="tasks-title">Every task</h2>
-      <p class="chart-caption" id="tasks-sub">Finish order is a position, never a date: the order in which each task's waste labels first landed in the store. Open tasks follow, in the order their first session was published.</p>
-      <div id="jobs-table"></div>
+    <p class="lede">Each bar is one task, stacked by where its time went. In Lean this is a <dfn>yamazumi</dfn> (stack-up) chart, from the Japanese for &ldquo;pile&rdquo;. The classic yamazumi stacks each operator's work against takt time to balance a production line; this one stacks each task's elapsed time instead: working time first, split by the evaluator's labels, then waiting, split by what it waited on. Every bar uses the same colors and order, so the waste in every task compares at a glance.</p>
+    <p id="compare-lede" class="lede compare-lede">Loading&hellip;</p>
+    <section class="block" aria-labelledby="stackup-title">
+      <h2 class="block-title" id="stackup-title">Where each task's time went</h2>
+      <div class="mode-toggle" role="group" aria-label="What the bars count">
+        <button type="button" class="mode-btn" data-mode="all" aria-pressed="true">All elapsed time</button>
+        <button type="button" class="mode-btn" data-mode="working" aria-pressed="false">Agent working time</button>
+      </div>
+      <p class="chart-caption" id="stackup-caption"></p>
+      <div id="stackup"></div>
+      <p class="chart-caption" id="stackup-left-out" hidden></p>
     </section>
-    <section class="block" aria-label="Where time goes in a finished task">
-      <div id="chart-time-breakdown"></div>
-      <p class="chart-caption">Median duration per task, with the 75th percentile as the outlined bar behind it, over finished tasks whose whole life sits inside capture and whose own figure is fully measured. The "n of N" beside each figure counts the rest. <span id="time-breakdown-note"></span></p>
+    <section class="block" aria-labelledby="fe-title">
+      <h2 class="block-title" id="fe-title">Flow efficiency, task by task</h2>
+      <p class="chart-caption">Flow efficiency is working time divided by lead time. One dot per task, in the same order as the bars above; a hollow dot is a partial figure, and its tooltip says which way the true figure lies. A task whose flow efficiency is not measured has no dot.</p>
+      <div id="fe-dots"></div>
     </section>
-    <section class="block" aria-labelledby="trend-title">
-      <h2 class="block-title" id="trend-title">By Desk release, oldest first</h2>
-      <p class="chart-caption">The release is the clock: published facts carry no clock time. A task worked under several releases counts under "several releases".</p>
-      <div id="trend"></div>
+    <section class="block" aria-labelledby="stackup-table-title">
+      <h2 class="block-title" id="stackup-table-title">The same, as a table</h2>
+      <div id="stackup-table"></div>
     </section>
+    <p class="next-step"><a href="#/causes">Next: <span class="step-n" aria-hidden="true">3</span>Rank causes</a>, to see which causes cost the most time across these tasks.</p>
   </div>
 </div>
 
 <!-- ============ STEP 3: RANK CAUSES ============ -->
 <div id="view-causes" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 3 of 4</p>
+    <p class="step-label">Step 3 of 4 &middot; Rank causes</p>
     <h1 class="view-title">Rank causes</h1>
-    <p class="lede">Not all waste is equal. Lean ranks causes by the time they cost, so the few that matter most stand out from the many that do not. First the labeled waste across every task, largest first; then what to fix next, alarms first.</p>
-    <section class="block" id="labeled-waste"></section>
-    <section class="block" aria-labelledby="fix-title">
-      <h2 class="block-title" id="fix-title">What to fix next</h2>
-      <p class="chart-caption">Alarms first, then what keeps the store's headline from being measured, then waste, then open improvement cards. "Signal" items are inferred from session records, not classified by the waste evaluator.</p>
-      <div id="fix-list"></div>
+    <p class="lede">Not all waste is equal. Lean ranks the causes of waste by the time they cost, in a <dfn>Pareto chart</dfn>: bars from the largest to the smallest, with a line that adds them up as it goes. The few causes on the left that carry most of the time are the <em>vital few</em>; they are where fixing pays. A cause is a waste plus what caused it, read from the evidence.</p>
+    <p id="causes-lede" class="lede causes-lede">Loading&hellip;</p>
+    <section class="block" aria-labelledby="pareto-title">
+      <h2 class="block-title" id="pareto-title">Causes of waste, by time</h2>
+      <div class="mode-toggle" role="group" aria-label="What the bars count">
+        <button type="button" class="mode-btn" data-mode="all" aria-pressed="true">All elapsed time</button>
+        <button type="button" class="mode-btn" data-mode="working" aria-pressed="false">Agent working time</button>
+      </div>
+      <p class="chart-caption" id="pareto-caption"></p>
+      <div id="pareto"></div>
+      <p class="chart-caption" id="pareto-note"></p>
+      <div class="chart-caption unlabeled-note" id="causes-unlabeled" hidden></div>
     </section>
+    <section class="block" aria-labelledby="pareto-table-title">
+      <h2 class="block-title" id="pareto-table-title">The ranking, as a list</h2>
+      <div id="pareto-table"></div>
+    </section>
+    <p class="next-step"><a href="#/act">Next: <span class="step-n" aria-hidden="true">4</span>Act</a>, to see the problems taken on so far.</p>
+  </div>
+</div>
+
+<!-- ============ STEP 3: ONE CAUSE ============ -->
+<div id="view-cause" class="view" hidden>
+  <div class="wrap">
+    <p class="step-label">Step 3 of 4 &middot; <a href="#/causes">Rank causes</a> &middot; one cause</p>
+    <div id="cause-detail"><p class="chart-empty">Loading&hellip;</p></div>
+    <p class="next-step"><a href="#/causes">Back to every cause</a> &middot; <a href="#/act">Next: <span class="step-n" aria-hidden="true">4</span>Act</a></p>
   </div>
 </div>
 
 <!-- ============ STEP 4: ACT ============ -->
 <div id="view-act" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 4 of 4</p>
+    <p class="step-label">Step 4 of 4 &middot; Act</p>
     <h1 class="view-title">Act</h1>
-    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem: the evidence, a countermeasure, and then a check of whether it worked. These are the problems the factory has taken on, each with the pull request that answered it, where there is one. None has been checked yet: a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet. Andon issues are the stop-the-line signal: a tracked release made a quality measure clearly worse.</p>
-    <section class="block" id="kaizen-panel"></section>
+    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem and writes it up on one page, an <dfn>A3</dfn>, named for the sheet of paper it fits on: the evidence, the cause, a countermeasure, and then a check of whether it worked. A check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet, so none has been checked. To start one, open a cause on <a href="#/causes">Rank causes</a> and copy its A3 prompt.</p>
+    <section class="block" aria-labelledby="problems-title">
+      <h2 class="block-title" id="problems-title">Problems in hand</h2>
+      <p class="chart-caption">One row per kaizen issue, each with the pull request that answered it, where there is one. A row names the cause it works on only where the site's mapping table links it to one, and gives its check.</p>
+      <div id="problems"></div>
+      <div class="unlabeled-note" id="act-unlabeled" hidden></div>
+    </section>
+    <section class="block" aria-labelledby="owners-title">
+      <h2 class="block-title" id="owners-title">Alarms with an owner</h2>
+      <p class="chart-caption">Open issues labeled <code>factory-alarm</code>: each owns the alarms in the status line that its title names.</p>
+      <div id="alarm-owners"></div>
+    </section>
+    <p class="next-step"><a href="#/">Back to <span class="step-n" aria-hidden="true">1</span>Follow a task</a>, to walk again with the next task, or read <a href="#/why">why Lean</a>.</p>
   </div>
 </div>
 
@@ -305,6 +348,21 @@
       </section>
     </div>
 
+    <section class="block" aria-labelledby="tasks-title">
+      <h2 class="block-title" id="tasks-title">Every task</h2>
+      <p class="chart-caption" id="tasks-sub">Finish order is a position, never a date: the order in which each task's waste labels first landed in the store. Open tasks follow, in the order their first session was published.</p>
+      <div id="jobs-table"></div>
+    </section>
+    <section class="block" aria-label="Where time goes in a finished task">
+      <div id="chart-time-breakdown"></div>
+      <p class="chart-caption">Median duration per task, with the 75th percentile as the outlined bar behind it, over finished tasks whose whole life sits inside capture and whose own figure is fully measured. The "n of N" beside each figure counts the rest. <span id="time-breakdown-note"></span></p>
+    </section>
+    <section class="block" aria-labelledby="trend-title">
+      <h2 class="block-title" id="trend-title">By Desk release, oldest first</h2>
+      <p class="chart-caption">The release is the clock: published facts carry no clock time. A task worked under several releases counts under "several releases".</p>
+      <div id="trend"></div>
+    </section>
+
     <section class="block" aria-labelledby="harnesses-title">
       <h2 class="block-title" id="harnesses-title">Harnesses</h2>
       <p class="chart-caption" id="caption-harnesses"></p>
@@ -350,6 +408,7 @@
 </dialog>
 <script src="format.js"></script>
 <script src="walk.js"></script>
+<script src="steps.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

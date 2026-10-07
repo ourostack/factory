@@ -507,97 +507,6 @@
     return seg ? `var(${seg.token})` : "var(--c-waste-unknown)";
   }
 
-  // The waste overview: each kind's labeled time summed over the tasks, from
-  // the same per-task labels the task pages show (data.labeled_waste).
-  function renderLabeledWaste(container, lw) {
-    container.innerHTML = "";
-    if (!lw || !lw.rows.length) {
-      container.appendChild(el("h2", "block-title", "Waste across every labeled task"));
-      container.appendChild(el("p", "chart-empty", "No task's own sessions are labeled for waste yet, so waste is no data, not zero. Each task's page shows its labels as they arrive."));
-      return;
-    }
-    const cap = el("p", "chart-caption");
-    cap.appendChild(document.createTextNode("Labeled time per kind of waste, summed over the "));
-    cap.appendChild(num(lw.jobs_with_labels, "count"));
-    cap.appendChild(document.createTextNode(" tasks with labels, out of "));
-    cap.appendChild(num(lw.jobs_finished, "count"));
-    cap.appendChild(document.createTextNode(" finished tasks, largest first. It is the same data the task pages show. Where two tasks share a stretch of a session, it counts once here."));
-    const bars = el("div");
-    renderBarList(bars, lw.rows.map((r) => ({ label: wasteName(r.key), number: r.total_ms, color: segmentColor(r.key) })), { kind: "duration", flag: "short", title: "Waste across every labeled task", titleTag: "h2" });
-    bars.insertBefore(cap, bars.children[1] || null);
-    container.appendChild(bars);
-  }
-
-  // ------------------------------------------------------------- kaizen
-
-  function renderKaizen(container, kaizenIssues, andonIssues, kaizenVerification, andonVerification) {
-    container.innerHTML = "";
-    const kaizenOk = kaizenVerification !== "unavailable";
-    const andonOk = andonVerification !== "unavailable";
-    if (!kaizenIssues.length && !andonIssues.length && !kaizenOk && !andonOk) {
-      emptyState(
-        container,
-        "Kaizen and andon issues couldn't be checked for this build (the GitHub request didn't succeed). This says nothing about how many actually exist — check back on the next build.",
-      );
-      return;
-    }
-    if (!kaizenIssues.length && !andonIssues.length) {
-      emptyState(container, "No kaizen or andon issues opened yet.");
-      return;
-    }
-    function list(title, issues, emptyNote) {
-      const wrap = document.createElement("div");
-      wrap.style.marginBottom = "14px";
-      wrap.appendChild(el("h2", "block-title", title));
-      if (!issues.length) {
-        wrap.appendChild(el("p", "chart-empty", emptyNote));
-        return wrap;
-      }
-      const ul = el("ul", "issue-list");
-      for (const issue of issues.slice(0, 12)) {
-        const li = document.createElement("li");
-        const left = document.createElement("span");
-        const dot = el("span", "status-dot");
-        // A closed issue is not a checked fix, so it gets a neutral dot, not a "good" one.
-        dot.style.background = issue.issue_state === "open" ? "var(--status-warning)" : "var(--text-muted)";
-        left.appendChild(dot);
-        // Only an auto-filed title is published; anything else is the number.
-        left.appendChild(safeLink(issue.title || `Issue ${issue.ref}`, issue.url));
-        li.appendChild(left);
-
-        const right = el("span", "issue-right");
-        right.appendChild(el("span", "issue-num", `${issue.ref} · ${issue.issue_state}`));
-        const res = issue.resolution;
-        if (issue.issue_state === "closed" && res && res.kind === "countermeasure") {
-          const resLine = document.createElement("span");
-          resLine.className = "issue-resolution";
-          resLine.appendChild(document.createTextNode(res.merged === true ? "countermeasure: " : "closed, references "));
-          resLine.appendChild(safeLink(`pull request ${res.ref}`, res.url));
-          if (res.merged === true) resLine.appendChild(document.createTextNode(" (merged, not yet checked)"));
-          if (res.merged === false) resLine.appendChild(document.createTextNode(" (not yet merged)"));
-          if (res.merged === "unknown") resLine.appendChild(document.createTextNode(" (merge state not checked)"));
-          right.appendChild(resLine);
-        } else if (issue.issue_state === "closed") {
-          right.appendChild(el("span", "issue-resolution", "closed"));
-        }
-        li.appendChild(right);
-        ul.appendChild(li);
-      }
-      wrap.appendChild(ul);
-      return wrap;
-    }
-    container.appendChild(
-      list("Kaizen — improvement issues", kaizenIssues, kaizenOk ? "No kaizen issues opened yet." : "Kaizen issues couldn't be checked for this build."),
-    );
-    container.appendChild(
-      list(
-        "Andon — stop-the-line signals",
-        andonIssues,
-        andonOk ? "No andon issues — no tracked plugin release has been flagged." : "Andon issues couldn't be checked for this build.",
-      ),
-    );
-  }
-
   // ------------------------------------------------------------ outcomes
   // Sign-off, first-pass yield, rework and attention, each a stated number
   // from the reports. An acceptance is the operator's word, as the agent recorded it.
@@ -883,71 +792,6 @@
     table.appendChild(tbody);
     container.appendChild(table);
     tableNotes(container, notes, "task");
-  }
-
-  // ----------------------------------------------------------- fix next
-
-  const SEVERITY_WORD = { alarm: "Alarm", act: "Act", improve: "Improve", signal: "Signal" };
-  const FIX_SHOWN = 5;
-
-  function fixItem(item, byId) {
-    const li = el("li", `fix-item fix-${item.severity}`);
-    const head = el("p", "fix-head");
-    head.appendChild(el("span", `fix-tag fix-tag-${item.severity}`, SEVERITY_WORD[item.severity] || "Note"));
-    head.appendChild(el("strong", "fix-title", item.title));
-    if (item.count && Array.isArray(item.noun)) {
-      const c = el("span", "fix-count");
-      c.appendChild(document.createTextNode(" · "));
-      c.appendChild(cellNum(item.count, "count"));
-      c.appendChild(document.createTextNode(` ${item.count.value === 1 ? item.noun[0] : item.noun[1]}`));
-      head.appendChild(c);
-    }
-    li.appendChild(head);
-    const act = el("p", "fix-action");
-    act.appendChild(el("span", "fix-do", "Do: "));
-    act.appendChild(document.createTextNode(item.action));
-    li.appendChild(act);
-    const list = el("ul", "fix-examples");
-    for (const e of item.examples) {
-      const j = byId.get(e.job);
-      const ex = document.createElement("li");
-      ex.appendChild(jobLink(e.job, j ? jobLabel(j) : F.jobLabel(localNames, e.job)));
-      if (e.figure) {
-        ex.appendChild(document.createTextNode(" — "));
-        ex.appendChild(cellNum(e.figure, e.kind));
-      }
-      list.appendChild(ex);
-    }
-    for (const l of item.links) {
-      const ex = document.createElement("li");
-      ex.appendChild(safeLink(l.title || `Issue ${l.ref}`, l.url));
-      ex.appendChild(document.createTextNode(" — open "));
-      ex.appendChild(cellNum(l.age_days, "count"));
-      ex.appendChild(document.createTextNode(" days"));
-      list.appendChild(ex);
-    }
-    if (list.children.length) li.appendChild(list);
-    return li;
-  }
-
-  function renderFixNext(container, items, jobs) {
-    container.innerHTML = "";
-    const ol = el("ol", "fix-list");
-    container.appendChild(ol);
-    if (!items || !items.length) {
-      ol.appendChild(el("li", "chart-empty", "Nothing to fix: no alarm, nothing waiting, no labeled waste and no open card."));
-      return;
-    }
-    const byId = new Map(jobs.map((j) => [j.id, j]));
-    items.slice(0, FIX_SHOWN).forEach((item) => ol.appendChild(fixItem(item, byId)));
-    if (items.length > FIX_SHOWN) {
-      const more = el("details", "more-details");
-      more.appendChild(el("summary", null, `More to fix (${items.length - FIX_SHOWN})`));
-      const ol2 = el("ol", "fix-list");
-      items.slice(FIX_SHOWN).forEach((item) => ol2.appendChild(fixItem(item, byId)));
-      more.appendChild(ol2);
-      container.appendChild(more);
-    }
   }
 
   // ------------------------------------------------------------ the band
@@ -1422,6 +1266,12 @@
   }
 
   function swatch(key) {
+    // The evaluator's labeled wait: the swimlane's cross-hatch, not the solid waiting color.
+    if (key === "labeled_wait") {
+      const k = el("span", "swatch lane-key lane-key-wait");
+      k.setAttribute("aria-hidden", "true");
+      return k;
+    }
     const seg = SEGMENT_BY_KEY.get(key);
     const sw = el("span", `swatch${seg && seg.fill === "hatch" ? " swatch-hatch" : ""}${seg && seg.fill === "outline" ? " swatch-outline" : ""}`);
     sw.setAttribute("aria-hidden", "true");
@@ -1584,7 +1434,7 @@
       for (const r of rows) {
         if (r.group !== group) {
           group = r.group;
-          list.appendChild(el("li", "picker-group", group === "finished" ? "Finished, the latest first" : "Still open or not labeled yet"));
+          list.appendChild(el("li", "picker-group", group === "finished" ? "Finished, the latest first" : "Still open or not labeled yet, the latest to start first"));
         }
         const li = document.createElement("li");
         const a = el("a", "picker-row");
@@ -1958,8 +1808,8 @@
           const li = document.createElement("li");
           const b = el("button", "stretch-row");
           b.type = "button";
-          b.appendChild(swatch(W.stretchSegment(s)));
           const c = W.drawer({ kind: "stretch", stretch: s, index: k, total: all.length, intervals: d.intervals || [], lanes: lanesOf }, ctxDrawer);
+          b.appendChild(swatch(c.segment));
           b.appendChild(document.createTextNode(`${c.title} ${k + 1}, ${W.durationShort(s.end_ms - s.start_ms)}${s.waited_on ? ` (${W.waitedOnWords(s.waited_on, "short")})` : ""}`));
           b.addEventListener("click", () => openStretch(null, j, d, k, lanesOf, ctxDrawer));
           li.appendChild(b);
@@ -2055,32 +1905,33 @@
     if (bar.partial) container.appendChild(el("p", "chart-caption", W.barPartialNote([...new Set([stackRow.lead_time_ms, row && row.working_ms, ...Object.values(stackRow.waste_ms || {}), ...Object.values(stackRow.class_ms || {})].flatMap((n) => (n && n.state === "partial" ? n.reasons : [])))].map(F.reasonText), bar.groups)));
     if (idle.source === "map") container.appendChild(el("p", "chart-caption", idle.burst_causes ? "The waiting split comes from this task's map: each wait between bursts and the idle moments inside bursts, each with what it waited on." : "The waiting split comes from this task's map: each wait between bursts with what it waited on, and idle moments inside bursts as cause not recorded."));
 
-    // Its top causes, by hours.
-    // Waiting causes come from the same idle split as the bar, so the list
-    // and the bar agree; the other causes are the evaluator's labels.
-    const tc = row && row.top_causes;
+    // Its top causes, in Rank causes' keys and names, in two groups that
+    // never mix: waiting (from the same idle split as the bar, so the list
+    // and the bar agree) and working time labeled as waste.
+    const tc = window.FactorySteps.taskCauses(row, idle);
     container.appendChild(el("h3", "bars-title", "Its top causes of waste, by time"));
-    const labeled = tc && tc.state !== "unavailable" && Array.isArray(tc.value) ? tc.value.filter((c) => !String(c.cause).startsWith("waiting:")) : [];
-    const causes = [...idle.by.map((x) => ({ cause: `waiting:${x.key}`, total_ms: x.ms })), ...labeled].filter((c) => c.total_ms > 0).sort((a, b) => b.total_ms - a.total_ms).slice(0, 5);
-    if (!causes.length) {
-      container.appendChild(el("p", "chart-empty", tc && tc.state === "unavailable" ? `Not measured: ${tc.reasons.map(F.reasonText).join("; ")}.` : "No cause of waste is recorded for this task."));
-      return;
-    }
-    const ol = el("ol", "cause-list");
-    for (const c of causes) {
-      const li = document.createElement("li");
-      const wk = String(c.cause).startsWith("waiting:") ? String(c.cause).slice(8) : null;
-      li.appendChild(wk ? waitSwatch(wk) : swatch(W.causeSegment(c.cause)));
-      const a = el("a", "cause-link", W.causeWords(c.cause));
-      // Each cause's own page (#/causes/<key>) arrives with Rank causes; until then the link opens Rank causes.
-      const safe = F.safeRoute("causes");
-      if (safe) a.href = safe;
-      li.appendChild(a);
-      li.appendChild(el("span", "cause-ms", W.durationWords(c.total_ms)));
-      ol.appendChild(li);
-    }
-    container.appendChild(ol);
-    container.appendChild(el("p", "chart-caption", "Each cause opens Rank causes, which ranks it against every task. That is step 3; step 2 compares this task's bar with every other task's."));
+    const causeGroup = (title, list, empty) => {
+      container.appendChild(el("p", "cause-group", title));
+      if (!list.length) {
+        container.appendChild(el("p", "chart-empty", empty));
+        return;
+      }
+      const ol = el("ol", "cause-list");
+      for (const c of list) {
+        const li = document.createElement("li");
+        li.appendChild(c.key.startsWith("waiting:") ? waitSwatch(c.key.slice(8)) : swatch(W.causeSegment(c.key)));
+        const a = el("a", "cause-link", W.causeWords(c.key));
+        const safe = window.FactorySteps.isCauseKey(c.key) ? c.href : null;
+        if (safe) a.href = safe;
+        li.appendChild(a);
+        li.appendChild(el("span", "cause-ms", W.durationWords(c.ms)));
+        ol.appendChild(li);
+      }
+      container.appendChild(ol);
+    };
+    causeGroup("Waiting, by what it waited on", tc.waiting, "No waiting is recorded for this task.");
+    causeGroup("Working time labeled as waste", tc.working, tc.working_state === "unavailable" ? `Not measured: ${tc.working_reasons.map(F.reasonText).join("; ") || "not recorded"}.` : "No labeled waste in this task's working time.");
+    container.appendChild(el("p", "chart-caption", "Each cause opens its page on Rank causes, which ranks it against every task. That is step 3; step 2 compares this task's bar with every other task's."));
   }
 
   // -------------------------------------------------------- the task view
@@ -2484,8 +2335,803 @@
     });
   }
 
-  const VIEWS = ["task", "session", "compare", "causes", "act", "why", "about", "store", "missing"];
-  const VIEW_TITLE = { task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", act: "Act", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
+  // ======================================================= steps 2 to 4
+  // Compare tasks, Rank causes (with each cause's own page) and Act. Every
+  // rule lives in steps.js; this only draws what it returns.
+
+  const S = window.FactorySteps;
+  let stepSeq = 0;
+  const modes = { compare: "all", causes: "all" };
+  let lastStepRender = null;
+  let lastStepWidth = 0;
+
+  // A cause's fill: a waiting cause in its warm family ("cause not recorded"
+  // hatched), any other cause in its waste's color, "Other" in neutral.
+  function causeFill(bar) {
+    if (bar.wait) return bar.wait === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${W.WAIT_KEYS.includes(bar.wait) ? bar.wait : "unknown"})`;
+    if (bar.segment === "other") return "var(--baseline)";
+    return segmentFill(bar.segment, false);
+  }
+  function causeSwatch(key) {
+    const k = String(key);
+    if (k.startsWith("waiting:")) return waitSwatch(k.slice(8));
+    if (k === "other") {
+      const sw = el("span", "swatch");
+      sw.setAttribute("aria-hidden", "true");
+      sw.style.setProperty("--sw", "var(--baseline)");
+      return sw;
+    }
+    return swatch(W.causeSegment(k));
+  }
+  // A cause link: only a key steps.js accepts becomes a route.
+  function causeLink(key, text) {
+    const a = el("a", "cause-link", text || W.causeWords(key));
+    const safe = S.isCauseKey(key) ? S.causeRoute(key) : null;
+    if (safe) a.href = safe;
+    return a;
+  }
+
+  // The two buttons that switch a chart between all elapsed time and agent
+  // working time.
+  function wireModes(viewId, which, redraw) {
+    for (const b of document.querySelectorAll(`#${viewId} .mode-btn`)) {
+      b.setAttribute("aria-pressed", String(b.dataset.mode === modes[which]));
+      b.onclick = () => {
+        modes[which] = b.dataset.mode === "working" ? "working" : "all";
+        for (const x of document.querySelectorAll(`#${viewId} .mode-btn`)) x.setAttribute("aria-pressed", String(x.dataset.mode === modes[which]));
+        // The mode goes in the URL, so a link or a reload opens this view.
+        try {
+          history.replaceState(null, "", `#/${which}${modes[which] === "working" ? "?mode=working" : ""}`);
+        } catch (err) {
+          /* a sandboxed frame may refuse; the mode still applies */
+        }
+        redraw();
+      };
+    }
+  }
+
+  // A hover and focus tooltip on an SVG mark.
+  function markTip(node, title, rows) {
+    const show = (evt) => {
+      const r = node.getBoundingClientRect();
+      const x = evt && typeof evt.clientX === "number" && evt.clientX ? evt.clientX : r.left + r.width / 2;
+      const y = evt && typeof evt.clientY === "number" && evt.clientY ? evt.clientY : r.top;
+      showTooltipAt(x, y, title, rows);
+    };
+    node.addEventListener("mousemove", show);
+    node.addEventListener("focus", () => show(null));
+    node.addEventListener("mouseleave", hideTooltip);
+    node.addEventListener("blur", hideTooltip);
+  }
+
+  // An SVG link to an in-page route (a task or a cause), with its label.
+  function svgLink(href, label) {
+    const a = svg("a", { class: "chart-link" });
+    if (typeof href === "string" && /^#\/[0-9A-Za-z_\/:.-]+$/.test(href)) a.setAttribute("href", href);
+    a.setAttribute("aria-label", label);
+    return a;
+  }
+
+  // A bar group's time with its bound; a true zero is "none", never "at least none".
+  const groupWords = S.groupWords;
+
+  // Text cut to fit a label: "Revocable sessions: sign…".
+  const clip = (t, n) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
+
+  // A sentence with the count, then the tasks it counts behind a
+  // disclosure, by full name (finished tasks with no waste labels, on Rank
+  // causes and on Act).
+  function unlabeledNote(node, data, where) {
+    if (!node) return;
+    node.innerHTML = "";
+    const list = S.unlabeledFinished(data && data.jobs, (j) => jobLabel(j));
+    const words = S.unlabeledWords(list.length, where);
+    node.hidden = !words;
+    if (!words) return;
+    node.appendChild(el("p", "unlabeled-words", words));
+    const det = el("details", "unlabeled-list");
+    det.appendChild(el("summary", null, `Show the ${list.length === 1 ? "task" : `${list.length} tasks`}`));
+    const ul = el("ul", "plain-list");
+    for (const t of list) {
+      const li = document.createElement("li");
+      li.appendChild(jobLink(t.job, t.name));
+      ul.appendChild(li);
+    }
+    det.appendChild(ul);
+    node.appendChild(det);
+  }
+
+  // ------------------------------------------------- step 2: the stack-up
+
+  const SB = { axisW: 46, top: 40, labelH: 118 };
+
+  function drawStackup(container, bars, mode, marked) {
+    container.innerHTML = "";
+    if (!bars.length) {
+      emptyState(container, "No task is published yet, so there is nothing to compare.");
+      return;
+    }
+    const phone = container.clientWidth < 600;
+    const H = phone ? 220 : 280;
+    const avail = Math.max(200, container.clientWidth - SB.axisW - 4);
+    // A few bars (agent working time mode) get wider columns.
+    const colW = Math.max(phone ? 28 : 26, Math.min(bars.length <= 12 ? 64 : 40, Math.floor(avail / bars.length)));
+    const plotW = colW * bars.length + 8;
+    const drawn = bars.filter((b) => b.state !== "no_data" && typeof b.total_ms === "number");
+    // Headroom above the tallest bar for its value label.
+    const scale = S.timeScale(Math.max(0, ...drawn.map((b) => b.total_ms)) * 1.15);
+    const y = (ms) => SB.top + H - (ms / scale.max_ms) * H;
+    const totalH = SB.top + H + SB.labelH;
+
+    const row = el("div", "sb-row");
+    // The axis stays put while the bars scroll inside their frame.
+    const axis = svg("svg", { class: "sb-axis", width: SB.axisW, height: totalH, "aria-hidden": "true" });
+    axis.appendChild(svg("text", { x: 12, y: SB.top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${SB.top + H / 2})`, "text-anchor": "middle" })).textContent = `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
+    for (const t of scale.ticks) {
+      const ty = y(t);
+      const tx = svg("text", { x: SB.axisW - 6, y: ty + 4, class: "axis-tick", "text-anchor": "end" });
+      tx.textContent = S.tickWords(t, scale);
+      axis.appendChild(tx);
+    }
+    row.appendChild(axis);
+
+    const frame = el("div", "sb-frame chart-frame");
+    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": `Stack-up of ${bars.length} tasks, ${mode === "working" ? "agent working time" : "all elapsed time"}, in ${scale.unit}, linear from zero. Each bar is a link to its task.` });
+    for (const t of scale.ticks) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
+    // The two groups, named above the bars.
+    const firstOpen = bars.findIndex((b) => b.group === "open");
+    const groupLabel = (x, text) => {
+      const t = svg("text", { x, y: 14, class: "sb-group" });
+      t.textContent = text;
+      plot.appendChild(t);
+    };
+    if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, in finish order →");
+    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: SB.top + H, class: "sb-divider" }));
+    if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Not finished →" : "Still open or not labeled yet, by when work began →");
+
+    const barW = colW - 8;
+    bars.forEach((b, i) => {
+      const x0 = i * colW + 4 + 4;
+      const label = `${b.name}: ${b.state === "no_data" ? "no data" : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
+      const a = svgLink(b.href, `${label}. Follow this task.`);
+      a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
+      a.appendChild(svg("rect", { x: i * colW + 4, y: SB.top - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
+      if (b.state === "no_data") {
+        a.appendChild(svg("rect", { x: x0, y: SB.top + H - 18, width: barW, height: 18, class: "sb-nodata" }));
+        const q = svg("text", { x: x0 + barW / 2, y: SB.top + H - 5, class: "sb-nodata-q", "text-anchor": "middle" });
+        q.textContent = "?";
+        a.appendChild(q);
+      } else {
+        let base = 0;
+        for (const s of b.segments) {
+          const h = (s.ms / scale.max_ms) * H;
+          const top = y(base + s.ms);
+          const fill = s.key === "unsplit" ? "url(#hatch-unsplit)" : s.cause ? (s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${s.cause})`) : s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, false);
+          const r = svg("rect", { x: x0, y: top, width: barW, height: Math.max(0, h), class: `sb-seg seg-${s.cause ? `wait-${s.cause}` : s.key}` });
+          r.style.fill = fill;
+          const seg = SEGMENT_BY_KEY.get(s.key);
+          if ((seg && seg.fill === "outline") || s.key === "working_unsplit" || s.key === "unsplit") {
+            r.style.stroke = s.key === "unsplit" ? "var(--baseline)" : `var(${seg ? seg.token : "--c-not-labeled"})`;
+            r.style.strokeWidth = "1.2";
+          }
+          a.appendChild(r);
+          base += s.ms;
+        }
+        if (b.open) {
+          const top = Math.min(y(b.total_ms), SB.top + H - 3);
+          a.appendChild(svg("rect", { x: x0 - 2.5, y: top - 2.5, width: barW + 5, height: SB.top + H - top + 2.5, class: "sb-open" }));
+        }
+      }
+      // Value and name read upward, so neighbors never overlap.
+      const vy = b.state === "no_data" ? SB.top + H - 22 : Math.min(y(b.total_ms), SB.top + H) - 4;
+      const vx = x0 + barW / 2 + 4;
+      const v = svg("text", { x: vx, y: vy, class: "sb-value", transform: `rotate(-90 ${vx} ${vy})` });
+      v.textContent = b.state === "no_data" ? "" : `${b.label}${b.shared ? "*" : ""}`;
+      a.appendChild(v);
+      const lx = x0 + barW / 2 + 4;
+      const ly = SB.top + H + 8;
+      const name = svg("text", { x: lx, y: ly, class: "sb-name", "text-anchor": "end", transform: `rotate(-90 ${lx} ${ly})` });
+      name.textContent = clip(b.name, 18);
+      a.appendChild(name);
+      const tipRows = [];
+      if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
+      else {
+        tipRows.push({ label: mode === "working" ? "Agent working time" : "Lead time", value: b.words });
+        for (const g of b.groups) tipRows.push({ label: g.label, value: groupWords(g) });
+        if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
+      }
+      if (b.open) tipRows.push({ label: "State", value: "still open, figures so far" });
+      if (b.shared) tipRows.push({ label: "Partial", value: "its labels come from a session it shared with other tasks" });
+      markTip(a, b.name, tipRows);
+      plot.appendChild(a);
+    });
+    // A direct label on the finished task with the most waste, so the chart
+    // itself names it: above its value, with a short leader down to the bar.
+    if (marked && bars[marked.index] && bars[marked.index].job === marked.job) {
+      const b = bars[marked.index];
+      const cx = marked.index * colW + 8 + barW / 2;
+      const valueTop = Math.min(y(b.total_ms), SB.top + H) - 4 - (b.label.length + (b.shared ? 1 : 0)) * 6.4 - 4;
+      const ty = 30;
+      const right = cx + 150 > plotW;
+      const t = svg("text", { x: right ? cx + 4 : cx - 4, y: ty, class: "sb-callout", "text-anchor": right ? "end" : "start" });
+      t.textContent = marked.label;
+      plot.appendChild(t);
+      if (valueTop > ty + 6) plot.appendChild(svg("line", { x1: cx, x2: cx, y1: ty + 4, y2: valueTop, class: "sb-callout-line" }));
+    }
+    frame.appendChild(plot);
+    row.appendChild(frame);
+    container.appendChild(row);
+
+    // The legend: the parts that appear, in stacking order, then the marks.
+    const present = new Set(bars.flatMap((b) => b.segments.map((s) => (s.cause ? `wait_${s.cause}` : s.key))));
+    const legend = el("div", "sb-legend");
+    const group = (title, items) => {
+      if (!items.length) return;
+      const g = el("div", "sb-legend-group");
+      g.appendChild(el("p", "sb-legend-title", title));
+      const ul = el("ul", "tw-legend");
+      for (const [sw, text] of items) {
+        const li = document.createElement("li");
+        li.appendChild(sw);
+        li.appendChild(el("span", "tw-name", text));
+        ul.appendChild(li);
+      }
+      g.appendChild(ul);
+      legend.appendChild(g);
+    };
+    group("Working, by the evaluator's labels (from the base up)", [...F.SEGMENTS.filter((s) => present.has(s.key)).map((s) => [swatch(s.key), s.label]), ...(present.has("working_unsplit") ? [[swatch("not_labeled"), "Working, not split by label"]] : [])]);
+    if (mode !== "working") group("Then waiting, by what it waited on", W.WAIT_KEYS.filter((k) => present.has(`wait_${k}`)).map((k) => [waitSwatch(k), W.waitCauseLabel(k)]));
+    const marks = [];
+    const keyFor = (cls) => {
+      const k = el("span", `sb-key ${cls}`);
+      k.setAttribute("aria-hidden", "true");
+      return k;
+    };
+    if (present.has("unsplit")) marks.push([keyFor("sb-key-unsplit"), "Split not known: the lead time alone, because a session's log could not be read"]);
+    if (bars.some((b) => b.open)) marks.push([keyFor("sb-key-open"), "Dashed outline: still open, so its figures are so far"]);
+    if (bars.some((b) => b.shared)) marks.push([keyFor("sb-key-star"), "Partial: its labels come from a session it shared with other tasks"]);
+    if (bars.some((b) => b.state === "no_data")) marks.push([Object.assign(keyFor("sb-key-nodata"), { textContent: "?" }), mode === "working" ? "Not measured: no working time is known for it, so no bar is drawn rather than a zero" : "Not measured: no lead time is known for it, so no bar is drawn rather than a zero"]);
+    group("Marks", marks);
+    container.appendChild(legend);
+  }
+
+  // The flow efficiency dot plot.
+  function drawFeDots(container, model) {
+    container.innerHTML = "";
+    if (!model.points.length) {
+      emptyState(container, "No task's flow efficiency is measured yet.");
+      return;
+    }
+    const phone = container.clientWidth < 600;
+    const H = phone ? 150 : 170;
+    const top = 12;
+    const axisW = SB.axisW;
+    const avail = Math.max(200, container.clientWidth - axisW - 4);
+    const colW = Math.max(26, Math.min(48, Math.floor(avail / model.points.length)));
+    const plotW = colW * model.points.length + 8;
+    const y = (v) => top + H - v * H;
+    const totalH = top + H + SB.labelH;
+    const row = el("div", "sb-row");
+    const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const tx = svg("text", { x: axisW - 6, y: y(t) + 4, class: "axis-tick", "text-anchor": "end" });
+      tx.textContent = `${Math.round(t * 100)}%`;
+      axis.appendChild(tx);
+    }
+    row.appendChild(axis);
+    const frame = el("div", "sb-frame chart-frame");
+    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": `Flow efficiency of ${model.points.length} tasks, 0 to 100%, in the order of the bars above. Each dot is a link to its task.` });
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
+    const firstOpen = model.points.findIndex((p) => p.group === "open");
+    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 4, x2: firstOpen * colW + 4, y1: top, y2: top + H, class: "sb-divider" }));
+    model.points.forEach((p, i) => {
+      const cx = i * colW + 4 + colW / 2;
+      const a = svgLink(p.href, `${p.name}: flow efficiency ${p.words}. Follow this task.`);
+      a.appendChild(svg("rect", { x: i * colW + 4, y: 0, width: colW, height: totalH, class: "hit" }));
+      a.appendChild(svg("circle", { cx, cy: y(Math.min(1, Math.max(0, p.value))), r: 5.5, class: p.hollow ? "fe-dot fe-hollow" : "fe-dot" }));
+      const ty = top + H + 8;
+      const t = svg("text", { x: cx + 4, y: ty, class: "axis-tick", "text-anchor": "end", transform: `rotate(-90 ${cx + 4} ${ty})` });
+      t.textContent = clip(p.name, 18);
+      a.appendChild(t);
+      markTip(a, p.name, [{ label: "Flow efficiency", value: p.words }, ...(p.hollow ? [{ label: "Partial", value: "a hollow dot; the words say which way the true figure lies" }] : [])]);
+      plot.appendChild(a);
+    });
+    frame.appendChild(plot);
+    row.appendChild(frame);
+    container.appendChild(row);
+    const note = el("p", "chart-caption");
+    note.appendChild(document.createTextNode("Filled: measured. Hollow: partial. Each dot is labeled with its task's name, as its bar is above. "));
+    if (model.omitted) note.appendChild(document.createTextNode(`${model.omitted} task${model.omitted === 1 ? "" : "s"} not measured: ${model.reasons.map((r) => `${r.count} because ${F.reasonText(r.code)}`).join("; ")}.`));
+    container.appendChild(note);
+  }
+
+  // The stack-up as a table: every figure in words.
+  // On a phone: three columns (task, lead time, waiting), with every
+  // figure behind a disclosure, so the walk's next step stays near.
+  function drawStackTable(container, bars) {
+    container.innerHTML = "";
+    if (container.clientWidth < 600) {
+      const compact = el("table", "data-table sb-compact");
+      tableHead(compact, [["Task", ""], ["Lead time", "num"], ["Waiting", "num"]]);
+      const cb = document.createElement("tbody");
+      for (const r of bars.map(S.compactRow)) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.appendChild(jobLink(r.job, r.name));
+        tr.appendChild(td);
+        tr.appendChild(el("td", "num", r.lead));
+        tr.appendChild(el("td", "num", r.waiting));
+        cb.appendChild(tr);
+      }
+      compact.appendChild(cb);
+      container.appendChild(compact);
+      const det = el("details", "full-table");
+      const summary = document.createElement("summary");
+      summary.textContent = S.fullTableSummary(bars.length);
+      det.appendChild(summary);
+      drawFullStackTable(det, bars);
+      container.appendChild(det);
+      return;
+    }
+    drawFullStackTable(container, bars);
+  }
+
+  function drawFullStackTable(container, bars) {
+    const table = el("table", "data-table sb-table");
+    tableHead(table, [["Task", ""], ["Place", ""], ["Lead time", "num"], ["Working", "num"], ["Waiting", "num"], ["Largest wait", ""], ["Note", ""]]);
+    const tb = document.createElement("tbody");
+    for (const b of bars) {
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      name.appendChild(jobLink(b.job, b.name));
+      tr.appendChild(name);
+      tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish` : b.open ? "open" : b.status === "done" ? "done, not labeled" : b.status || "no data"));
+      tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
+      const g = (k) => b.groups.find((x) => x.key === k);
+      tr.appendChild(el("td", "num", g("working") ? groupWords(g("working")) : "not known"));
+      tr.appendChild(el("td", "num", g("waiting") ? groupWords(g("waiting")) : "not known"));
+      const w = g("waiting") ? g("waiting").segments.slice().sort((p, q) => q.ms - p.ms)[0] : null;
+      tr.appendChild(el("td", null, w ? `${w.label}, ${S.hoursWords(w.ms)}` : "—"));
+      const notes = [];
+      if (b.state === "unsplit" || b.state === "no_data") notes.push((b.reasons || []).map(F.reasonText).join("; ") || "not recorded");
+      if (b.shared) notes.push("labels from a shared session");
+      tr.appendChild(el("td", "sb-note", notes.join("; ") || "—"));
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    const wrap = el("div", "table-wrap");
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+  }
+
+  async function renderCompare(data) {
+    const seq = ++stepSeq;
+    const ledeEl = document.getElementById("compare-lede");
+    const [tasks, stack] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
+    if (seq !== stepSeq) return;
+    const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
+    const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs : null;
+    const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => jobLabel(j) });
+    const all = !taskRows && !stackRows ? [] : S.stackBars(data.jobs, stackRows, taskRows, opts("all"));
+    safely("compare-lede", () => {
+      ledeEl.textContent = S.compareLede(all, taskRows, F.reasonText).text;
+    });
+    const draw = () => {
+      const mode = modes.compare;
+      document.getElementById("stackup-caption").textContent =
+        mode === "working"
+          ? "Agent working time only, for the tasks whose working time the evaluator has labeled, in finish order, linear from zero at their own scale. Waiting is left out, so defects, rework and necessary steps, where agent-side fixes live, show. Select a bar to follow its task."
+          : "The whole lead time of each task, linear from zero. Left to right: finished tasks in finish order, the latest on the right; then tasks still open or not labeled yet, by when work began. Select a bar to follow its task.";
+      const view = !all.length || mode === "all" ? null : S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working")));
+      const bars = !all.length ? [] : view ? view.bars : all;
+      const leftOut = document.getElementById("stackup-left-out");
+      leftOut.textContent = view ? view.text : "";
+      leftOut.hidden = !(view && view.text);
+      safely("stackup", () => {
+        if (!all.length) emptyState(document.getElementById("stackup"), "The walk's stack-up and task files are not published yet, so no bar is drawn rather than a zero.");
+        else if (view && !bars.length) emptyState(document.getElementById("stackup"), "No task's working time is labeled yet, so there is nothing to compare in agent working time.");
+        else drawStackup(document.getElementById("stackup"), bars, mode, S.mostWaste(bars, mode));
+      });
+    };
+    wireModes("view-compare", "compare", draw);
+    draw();
+    const drawRest = () => {
+      safely("fe-dots", () => (all.length ? drawFeDots(document.getElementById("fe-dots"), S.feDots(all, taskRows)) : emptyState(document.getElementById("fe-dots"), "Not published yet.")));
+    };
+    drawRest();
+    const drawTable = () => safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "Not published yet.")));
+    drawTable();
+    lastStepRender = () => {
+      draw();
+      drawRest();
+      drawTable();
+    };
+    lastStepWidth = document.getElementById("stackup").clientWidth;
+  }
+
+  // ---------------------------------------------- step 3: the Pareto chart
+
+  function wrapWords(text, perLine, maxLines) {
+    const lines = [];
+    let cur = "";
+    for (const w of String(text).split(/\s+/)) {
+      if (!cur) cur = w;
+      else if ((cur + " " + w).length <= perLine) cur += ` ${w}`;
+      else {
+        lines.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) lines.push(cur);
+    if (lines.length > maxLines) {
+      const kept = lines.slice(0, maxLines);
+      kept[maxLines - 1] = clip(`${kept[maxLines - 1]} ${lines.slice(maxLines).join(" ")}`, perLine);
+      return kept;
+    }
+    return lines;
+  }
+
+  function drawPareto(container, model) {
+    container.innerHTML = "";
+    if (model.state === "absent") {
+      emptyState(container, "The causes file is not published yet, so no cause can be ranked. No bar is drawn rather than a zero.");
+      return;
+    }
+    if (!model.bars.length) {
+      emptyState(container, model.mode === "working" ? "No labeled waste in agents' working time is recorded yet, so there is nothing to rank once waiting is left out." : "No cause of waste is recorded yet.");
+      return;
+    }
+    const n = model.bars.length;
+    const leftW = 50;
+    const rightW = 46;
+    const phone = container.clientWidth < 600;
+    const width = Math.max(300, container.clientWidth);
+    const colW = Math.min(120, Math.max(phone ? 70 : 78, Math.floor((width - leftW - rightW) / Math.max(n, 3))));
+    const plotW = colW * n;
+    const H = phone ? 220 : 260;
+    const top = 26;
+    const labelH = 62;
+    const totalH = top + H + labelH;
+    const scale = S.timeScale(model.bars[0].ms);
+    const y = (ms) => top + H - (ms / scale.max_ms) * H;
+    const yc = (share) => top + H - share * H;
+    // Both axes stay put while the bars scroll inside their frame, so the
+    // hours and the running total are always readable on a phone.
+    const row = el("div", "sb-row pareto-row");
+    const left = svg("svg", { class: "sb-axis", width: leftW, height: totalH, "aria-hidden": "true" });
+    for (const t of scale.ticks) {
+      const tx = svg("text", { x: leftW - 6, y: y(t) + 4, class: "axis-tick", "text-anchor": "end" });
+      tx.textContent = S.tickWords(t, scale);
+      left.appendChild(tx);
+    }
+    const lt = svg("text", { x: 12, y: top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${top + H / 2})`, "text-anchor": "middle" });
+    lt.textContent = `${scale.unit === "hours" ? "Hours" : "Minutes"} (per task)`;
+    left.appendChild(lt);
+    const right = svg("svg", { class: "sb-axis", width: rightW, height: totalH, "aria-hidden": "true" });
+    for (const t of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      const tx = svg("text", { x: 4, y: yc(t) + 4, class: "axis-tick" });
+      tx.textContent = `${Math.round(t * 100)}%`;
+      right.appendChild(tx);
+    }
+    const rx = rightW - 8;
+    const rt = svg("text", { x: rx, y: top + H / 2, class: "axis-title", transform: `rotate(90 ${rx} ${top + H / 2})`, "text-anchor": "middle" });
+    rt.textContent = "Running total, % of time";
+    right.appendChild(rt);
+    const frame = el("div", "chart-frame pareto-frame");
+    const root = svg("svg", { class: "pareto", width: plotW, height: totalH, role: "group", "aria-label": `Pareto chart of ${n} causes, ${model.mode === "working" ? "agent working time" : "all elapsed time"}: bars in ${scale.unit} from zero, largest first, with the running total as a line on a 0 to 100% axis. Each bar is a link to its cause.` });
+    for (const t of scale.ticks) root.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
+    const barW = Math.min(64, colW * 0.62);
+    const pts = [];
+    model.bars.forEach((b, i) => {
+      const cx = i * colW + colW / 2;
+      const words = `${b.label}: ${S.hoursWords(b.ms)}, ${W.pctWords(b.share)} of the time; running total ${S.cumWords(b.cum)}`;
+      const a = b.href ? svgLink(b.href, `${words}. Open this cause.`) : svg("g", { class: "chart-other", tabindex: "0", role: "img", "aria-label": `${words}. Folded in: ${b.members.map((k) => W.causeWords(k)).join("; ")}.` });
+      a.appendChild(svg("rect", { x: i * colW, y: 0, width: colW, height: totalH, class: "hit" }));
+      const r = svg("rect", { x: cx - barW / 2, y: y(b.ms), width: barW, height: Math.max(0, top + H - y(b.ms)), class: "pareto-bar" });
+      r.style.fill = causeFill(b);
+      if (b.wait === "unknown") {
+        r.style.stroke = "var(--c-wait-unknown)";
+        r.style.strokeWidth = "1";
+      }
+      a.appendChild(r);
+      const v = svg("text", { x: cx, y: y(b.ms) - 6, class: "sb-value", "text-anchor": "middle" });
+      v.textContent = S.hoursShort(b.ms);
+      a.appendChild(v);
+      wrapWords(b.label, Math.max(9, Math.floor(colW / 6.6)), 4).forEach((line, k) => {
+        const t = svg("text", { x: cx, y: top + H + 15 + k * 13, class: "pareto-name", "text-anchor": "middle" });
+        t.textContent = line;
+        a.appendChild(t);
+      });
+      markTip(a, b.label, [
+        { label: "Time", value: `${S.hoursWords(b.ms)}, counted per task` },
+        { label: "Share", value: W.pctWords(b.share) },
+        { label: "Running total", value: S.cumWords(b.cum) },
+        { label: "Tasks", value: String(b.jobs) },
+        ...(b.members ? [{ label: "Folded in", value: b.members.map((k) => W.causeWords(k)).join("; ") }] : []),
+      ]);
+      root.appendChild(a);
+      pts.push([cx, yc(b.cum)]);
+    });
+    root.appendChild(svg("polyline", { points: pts.map((p) => p.join(",")).join(" "), class: "pareto-line" }));
+    for (const [px, py] of pts) root.appendChild(svg("circle", { cx: px, cy: py, r: 3.5, class: "pareto-dot" }));
+    frame.appendChild(root);
+    row.append(left, frame, right);
+    container.appendChild(row);
+    // A fade at the frame's right edge while more bars lie beyond it.
+    const edge = () => frame.classList.toggle("more-right", frame.scrollLeft + frame.clientWidth < frame.scrollWidth - 2);
+    frame.addEventListener("scroll", edge, { passive: true });
+    edge();
+    const key = el("p", "chart-caption pareto-key");
+    const lineKey = el("span", "pareto-line-key");
+    lineKey.setAttribute("aria-hidden", "true");
+    key.append(lineKey, document.createTextNode("The line is the running total: the share of all the time ranked that the causes up to that bar carry, on the right-hand axis."));
+    container.appendChild(key);
+  }
+
+  function drawParetoTable(container, model) {
+    container.innerHTML = "";
+    if (!model.bars.length) return;
+    const table = el("table", "data-table pareto-table");
+    tableHead(table, [["Rank", "num"], ["Cause", ""], ["Time", "num"], ["Share", "num"], ["Running total", "num"], ["Tasks", "num"]]);
+    const tb = document.createElement("tbody");
+    model.bars.forEach((b, i) => {
+      const tr = document.createElement("tr");
+      tr.appendChild(el("td", "num", b.key === "other" ? "—" : String(i + 1)));
+      const td = document.createElement("td");
+      td.appendChild(causeSwatch(b.key));
+      if (b.href) td.appendChild(causeLink(b.key, b.label));
+      else td.appendChild(document.createTextNode(`${b.label}: ${b.members.map((k) => W.causeWords(k)).join("; ")}`));
+      tr.appendChild(td);
+      tr.appendChild(el("td", "num", S.hoursWords(b.ms)));
+      tr.appendChild(el("td", "num", W.pctWords(b.share)));
+      tr.appendChild(el("td", "num", S.cumWords(b.cum)));
+      tr.appendChild(el("td", "num", String(b.jobs)));
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    const wrap = el("div", "table-wrap");
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+  }
+
+  async function renderCauses(data) {
+    const seq = ++stepSeq;
+    const [doc, tasks, stack] = await Promise.all([walkFile("rollups/causes.json"), walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
+    if (seq !== stepSeq) return;
+    const all = S.paretoModel(doc, "all");
+    const working = doc ? S.paretoModel(doc, "working") : null;
+    const byId = new Map(data.jobs.map((j) => [j.id, j]));
+    const nameOf = (job) => (byId.has(job) ? jobLabel(byId.get(job)) : F.jobLabel(localNames, job));
+    safely("causes-lede", () => {
+      document.getElementById("causes-lede").textContent = S.causesLede(all, working, { doc, taskRows: tasks && tasks.jobs, stackRows: stack && stack.jobs, nameOf });
+    });
+    // With no causes file the chart says so once; the notes add nothing.
+    document.getElementById("pareto-note").textContent = all.state === "absent" ? "" : S.paretoNote(all, F.reasonText);
+    if (all.state === "absent") document.getElementById("causes-unlabeled").hidden = true;
+    else unlabeledNote(document.getElementById("causes-unlabeled"), data, "causes");
+    const draw = () => {
+      const m = modes.causes === "working" ? working || all : all;
+      document.getElementById("pareto-caption").textContent = all.state === "absent" ? "" : S.paretoCaption(m);
+      safely("pareto", () => drawPareto(document.getElementById("pareto"), m));
+      safely("pareto-table", () => drawParetoTable(document.getElementById("pareto-table"), m));
+    };
+    wireModes("view-causes", "causes", draw);
+    draw();
+    lastStepRender = draw;
+    lastStepWidth = document.getElementById("pareto").clientWidth;
+  }
+
+  // ------------------------------------------------- step 3: one cause
+
+  async function renderCause(data, key) {
+    const seq = ++stepSeq;
+    const box = document.getElementById("cause-detail");
+    box.innerHTML = "";
+    box.appendChild(el("p", "chart-empty", "Loading…"));
+    const [doc, tasks, stack] = await Promise.all([walkFile("rollups/causes.json"), walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
+    if (seq !== stepSeq) return;
+    const byId = new Map(data.jobs.map((j) => [j.id, j]));
+    const nameOf = (job) => (byId.has(job) ? jobLabel(byId.get(job)) : F.jobLabel(localNames, job));
+    const promptNameOf = (job) => W.promptName(F.taskName(localNames, byId.get(job) || { id: job }));
+    const d = S.causeDetail(doc, key, { taskRows: tasks && tasks.jobs, stackRows: stack && stack.jobs, nameOf, promptNameOf });
+    box.innerHTML = "";
+    const h1 = el("h1", "view-title cause-title");
+    h1.appendChild(causeSwatch(key));
+    h1.appendChild(document.createTextNode(d.label));
+    box.appendChild(h1);
+    document.title = `${d.label} · The factory`;
+    if (d.state === "absent") {
+      box.appendChild(el("p", "lede", "The causes file is not published yet, so this cause cannot be shown. No figure is shown rather than a zero."));
+      return;
+    }
+    if (d.state === "not_ranked") {
+      box.appendChild(el("p", "lede", `${S.causeMeaning(key)} It is not in the ranking: none of the ${d.n} tasks the ranking counts (of ${d.N}) has it. A task page can still name it, from its own figures.`));
+      return;
+    }
+    const lede = el("p", "lede");
+    const rankWords = `${F.ordinal(d.all.rank)} of ${d.all.of} causes`;
+    lede.textContent = `${S.causeMeaning(key)} Across the ${d.n} tasks the ranking counts, it cost ${S.hoursWords(d.ms)} (counted per task), ${W.pctWords(d.all.share)} of all the time ranked: ${rankWords}${d.working ? `, and ${F.ordinal(d.working.rank)} of ${d.working.of} once waiting is left out` : ""}. ${d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`}`;
+    box.appendChild(lede);
+
+    // Start an A3: S2's copy-as-prompt, naming the cause, its time, its top tasks and its data.
+    const a3 = el("section", "block a3-block");
+    a3.setAttribute("aria-labelledby", "a3-title");
+    const a3h = el("h2", "block-title", "Start an A3");
+    a3h.id = "a3-title";
+    a3.appendChild(a3h);
+    a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt hands the agent this cause, its time, its largest tasks and its data, and asks it to draft one. When a countermeasure is agreed, file it as a kaizen issue; it appears on Act on the next build."));
+    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(key)), dataUrl: absolute("rollups/causes.json") });
+    const pbox = el("div", "drawer-prompt");
+    const btn = el("button", "copy-prompt", "Start an A3 with your agent");
+    btn.type = "button";
+    const status = el("span", "copy-status");
+    status.setAttribute("role", "status");
+    const pre = el("p", "prompt-text", text);
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        status.textContent = "Copied. Paste it to the agent.";
+      } catch (err) {
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        status.textContent = "The prompt is selected; copy it with the keyboard.";
+      }
+    });
+    pbox.append(btn, status, pre);
+    a3.appendChild(pbox);
+    box.appendChild(a3);
+
+    // Its tasks.
+    const ts = el("section", "block");
+    ts.setAttribute("aria-labelledby", "cause-tasks-title");
+    const tsh = el("h2", "block-title", "Its tasks, largest first");
+    tsh.id = "cause-tasks-title";
+    ts.appendChild(tsh);
+    const table = el("table", "data-table cause-tasks");
+    tableHead(table, [["Task", ""], ["Time on this cause", "num"], ["Share of this cause", "num"]]);
+    const tb = document.createElement("tbody");
+    for (const t of d.tasks) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.appendChild(jobLink(t.job, t.name));
+      tr.appendChild(td);
+      tr.appendChild(el("td", "num", t.ms === null ? "not stated" : `${t.bound === "lower" ? "at least " : ""}${S.hoursWords(t.ms)}`));
+      tr.appendChild(el("td", "num", t.ms === null || !(d.ms > 0) ? "—" : W.pctWords(t.ms / d.ms)));
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    const tw = el("div", "table-wrap");
+    tw.appendChild(table);
+    ts.appendChild(tw);
+    if (d.tasks.some((t) => t.source === "spans")) ts.appendChild(el("p", "chart-caption", "Where a task's time on a failed tool kind is not in its own figures, it is the sum of the stretches listed below, so it can be less than the whole."));
+    box.appendChild(ts);
+
+    // Its stretches, each opening the task's map at the item that holds it.
+    const ss = el("section", "block");
+    ss.setAttribute("aria-labelledby", "cause-spans-title");
+    const ssh = el("h2", "block-title", "Its stretches, longest first");
+    ssh.id = "cause-spans-title";
+    ss.appendChild(ssh);
+    ss.appendChild(el("p", "chart-caption", `The stretches of time behind this cause${d.spans_cut ? `, the first ${d.spans.length} Desk lists` : ""}. Each opens its task's value stream map at the box or wait that holds it, with that item's evidence. A stretch is given by its length only: placing idle time on the task's clock is not shown on this site.`));
+    const ol = el("ol", "cause-spans");
+    const links = [];
+    for (const s of d.spans) {
+      const li = document.createElement("li");
+      li.appendChild(el("span", "cause-span-name", s.name));
+      li.appendChild(document.createTextNode(` · ${S.hoursWords(s.ms)} · `));
+      const a = el("a", null, "open it on the map");
+      const safe = F.safeRoute("task", s.job);
+      if (safe) a.href = safe;
+      li.appendChild(a);
+      links.push({ a, s });
+      ol.appendChild(li);
+    }
+    if (!d.spans.length) ss.appendChild(el("p", "chart-empty", "Desk lists no stretch for this cause."));
+    else ss.appendChild(ol);
+    box.appendChild(ss);
+    // Each task's map file says which of its items holds the stretch.
+    const jobs = [...new Set(d.spans.map((s) => s.job))];
+    const maps = await Promise.all(jobs.map((j) => walkFile(mapPath(j))));
+    if (seq !== stepSeq) return;
+    const mapOf = new Map(jobs.map((j, i) => [j, maps[i]]));
+    for (const { a, s } of links) {
+      const it = S.spanItem(mapOf.get(s.job), s);
+      const route = F.safeRoute("task", s.job);
+      if (it && route) {
+        const safe = `${route}?${it.kind}=${it.n}`;
+        a.href = safe;
+        a.textContent = it.kind === "gaps" ? `open wait ${it.n} on the map` : `open burst ${it.n} on the map`;
+      }
+    }
+  }
+
+  // ----------------------------------------------------------- step 4: act
+
+  async function renderAct(data) {
+    const seq = ++stepSeq;
+    const box = document.getElementById("problems");
+    const causes = await walkFile("rollups/causes.json");
+    if (seq !== stepSeq) return;
+    box.innerHTML = "";
+    unlabeledNote(document.getElementById("act-unlabeled"), data, "act");
+    const verified = !(data.kaizen && data.kaizen.verification === "unavailable");
+    const rows = S.actRows(data.kaizen_issues, causes);
+    if (!rows.length) {
+      emptyState(box, verified ? "No kaizen issue has been opened yet." : "Kaizen issues could not be checked for this build (GitHub could not be reached). This says nothing about how many exist.");
+    } else {
+      if (!verified) box.appendChild(el("p", "chart-caption", "GitHub could not be reached for this build, so this list may be missing issues."));
+      const ul = el("ul", "act-list");
+      for (const r of rows) {
+        const li = el("li", "act-row");
+        const head = el("p", "act-head");
+        head.appendChild(safeLink(r.title || `Issue ${r.short}`, r.url));
+        head.appendChild(el("span", "act-ref", ` ${r.ref} · ${r.state}`));
+        li.appendChild(head);
+        const dl = el("dl", "act-facts");
+        const fact = (label, node) => {
+          const d = el("div");
+          d.appendChild(el("dt", null, label));
+          const dd = el("dd");
+          dd.appendChild(typeof node === "string" ? document.createTextNode(node) : node);
+          d.appendChild(dd);
+          dl.appendChild(d);
+        };
+        if (r.countermeasure) {
+          const span = el("span");
+          span.appendChild(safeLink(r.countermeasure.ref, r.countermeasure.url));
+          span.appendChild(document.createTextNode(r.countermeasure.merged ? " (merged, not yet checked)" : " (not yet merged)"));
+          fact("Countermeasure", span);
+        } else fact("Countermeasure", "none yet");
+        if (r.cause) {
+          const span = el("span");
+          span.appendChild(causeSwatch(r.cause.key));
+          span.appendChild(causeLink(r.cause.key, r.cause.label));
+          if (!r.cause.ranked) span.appendChild(document.createTextNode(" (no time on it in the current ranking)"));
+          fact("Cause", span);
+        } else fact("Cause", "not mapped to a cause");
+        fact("Check", r.check);
+        li.appendChild(dl);
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+    }
+    const owners = document.getElementById("alarm-owners");
+    owners.innerHTML = "";
+    const alarms = S.alarmRows(data.alarm_issues);
+    if (data.alarm_issues_verification === "unavailable") emptyState(owners, "GitHub could not be reached for this build, so the alarm owners were not checked.");
+    else if (!Array.isArray(data.alarm_issues)) emptyState(owners, "This build did not look for alarm owners.");
+    else if (!alarms.length) emptyState(owners, "No open issue owns an alarm.");
+    else {
+      const ul = el("ul", "plain-list owner-list");
+      for (const a of alarms) {
+        const li = document.createElement("li");
+        li.appendChild(safeLink(a.ref, a.url));
+        li.appendChild(document.createTextNode(a.owns.length ? ` owns ${a.owns.join(" and ")}.` : " owns no alarm the status line names."));
+        ul.appendChild(li);
+      }
+      owners.appendChild(ul);
+    }
+  }
+
+  // Redraw the charts of steps 2 and 3 when the width changes enough.
+  let stepResizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(stepResizeTimer);
+    stepResizeTimer = setTimeout(() => {
+      const view = document.body.dataset.view;
+      if (!lastStepRender || (view !== "compare" && view !== "causes")) return;
+      const node = document.getElementById(view === "compare" ? "stackup" : "pareto");
+      if (!node || Math.abs(node.clientWidth - lastStepWidth) < 40) return;
+      lastStepWidth = node.clientWidth;
+      lastStepRender();
+    }, 150);
+  });
+
+  const VIEWS = ["task", "session", "compare", "causes", "cause", "act", "why", "about", "store", "missing"];
+  const VIEW_TITLE = { task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", cause: "Rank causes", act: "Act", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
   let routedOnce = false;
 
   function route(data) {
@@ -2531,7 +3177,14 @@
       renderSessionDetail(document.getElementById("session-detail"), data.sessions, data.jobs, r.session, r.job);
       renderSwimlane(document.getElementById("swimlane"), data, r.job, r.session, r.select).catch((err) => emptyState(document.getElementById("swimlane"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
     }
+    const failed = (id) => (err) => emptyState(document.getElementById(id), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`);
+    // The chart mode comes from the URL (#/compare?mode=working).
+    if (r.view === "compare" || r.view === "causes") modes[r.view] = r.mode === "working" ? "working" : "all";
+    if (r.view === "compare") renderCompare(data).catch(failed("stackup"));
+    if (r.view === "causes") renderCauses(data).catch(failed("pareto"));
+    if (r.view === "act") renderAct(data).catch(failed("problems"));
     document.title = `${title} \u00b7 The factory`;
+    if (r.view === "cause") renderCause(data, r.cause).catch(failed("cause-detail"));
     window.scrollTo(0, 0);
     // After the first page load, move focus to the new view's heading, so a
     // keyboard or screen reader user lands where the content changed.
@@ -2916,7 +3569,7 @@
       const line = document.getElementById("status-line");
       line.className = "status-line status-abnormal";
       line.textContent = `\u25a0 Abnormal: the store's data could not be loaded (${err.message}), no one is on this.`;
-      for (const id of ["job-detail", "jobs-table", "fix-list", "kaizen-panel", "featured-grid", "answer-tiles"]) {
+      for (const id of ["job-detail", "jobs-table", "stackup", "pareto", "problems", "featured-grid", "answer-tiles"]) {
         const node = document.getElementById(id);
         if (node) emptyState(node, msg);
       }
@@ -2937,8 +3590,6 @@
     window.addEventListener("hashchange", () => routeSafely(data));
     safely("answer-tiles", () => renderAnswer(document.getElementById("answer-tiles"), data.outcomes));
     safely("trend", () => renderTrend(document.getElementById("trend"), data.trend));
-    safely("fix-list", () => renderFixNext(document.getElementById("fix-list"), data.fix_next, data.jobs));
-    safely("labeled-waste", () => renderLabeledWaste(document.getElementById("labeled-waste"), data.labeled_waste));
 
     // Build metadata footer: how long ago, never a calendar date.
     const builtMs = Date.parse(data.built_at);
@@ -3045,7 +3696,6 @@
     });
 
     safely("outcomes-panel", () => renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes));
-    safely("kaizen-panel", () => renderKaizen(document.getElementById("kaizen-panel"), data.kaizen_issues, data.andon_issues, data.kaizen.verification, data.andon_verification));
 
     // 3. Detail views
     safely("chart-intake", () => renderIntakeChart(document.getElementById("chart-intake"), data.intake_over_time));

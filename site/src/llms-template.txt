@@ -10,9 +10,9 @@ Source and raw data: https://github.com/ourostack/factory (the `reports` branch 
 The site walks the four steps Lean uses to see waste, in this order. Read the data in the same order.
 
 1. Follow a task (`#/task/<job>`): one real task end to end, and where its time went. `#/` opens a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name.
-2. Compare tasks (`#/compare`): every task side by side on one scale.
-3. Rank causes (`#/causes`): causes of waste ranked by the time they cost.
-4. Act (`#/act`): the problems taken on, each with its countermeasure.
+2. Compare tasks (`#/compare`): every task side by side on one scale, as a stack-up of working time by label and waiting by cause, in all elapsed time or agent working time only, with each task's flow efficiency.
+3. Rank causes (`#/causes`): causes of waste ranked by the time they cost, in a Pareto chart; each cause has its own page (`#/causes/<key>`, for example `#/causes/waiting:next_prompt`) with its tasks, its stretches and a prompt that starts an A3.
+4. Act (`#/act`): the problems taken on (kaizen issues), each with its countermeasure, its cause where the site maps one, and its check, and the issues that own the status line's alarms.
 
 Reference pages: `#/why` (why Lean, the eight wastes and a glossary), `#/about` (how the data gets here and the privacy rules), `#/store` (everything else the store measures).
 

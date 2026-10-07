@@ -85,7 +85,7 @@ jobs:
           set -euo pipefail
           mkdir -p site/dist
           node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json
-          cp site/src/index.html site/src/styles.css site/src/format.js site/src/walk.js site/src/app.js site/dist/
+          cp site/src/index.html site/src/styles.css site/src/format.js site/src/walk.js site/src/steps.js site/src/app.js site/dist/
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The task, session and rollup files the views load on demand, each

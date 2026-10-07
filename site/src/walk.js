@@ -80,7 +80,7 @@
   // WAITED_ON). Waiting is a property of the system, so each says what the
   // system was doing, never who was slow.
   const WAITED_ON = {
-    next_prompt: { short: "waiting for the next prompt", long: "the agent had stopped and was waiting for the operator's next prompt" },
+    next_prompt: { short: "next prompt (the agent had stopped)", long: "the agent had stopped and was waiting for the operator's next prompt" },
     api_retry: { short: "API retry", long: "the agent was waiting on retries of a failed model request" },
     tool_failure: { short: "after a failed tool call", long: "the agent was waiting after a tool call failed" },
     long_tool_call: { short: "long tool call", long: "a tool call of five minutes or more was running" },
@@ -102,7 +102,7 @@
   // evaluator's label is a different thing, so it has its own name.
   function waitLabel(key) {
     const w = waitedOnWords(key || "unknown", "short");
-    return `labeled wait: ${w.replace(/^waiting for /, "")}`;
+    return `labeled wait: ${w.replace(/ \(the agent had stopped\)$/, "")}`;
   }
   // The name of a stretch's label in the swimlane and its drawer.
   function stretchWasteWords(waste) {
@@ -127,7 +127,6 @@
   function causeWords(key) {
     const [waste, what] = String(key).split(":");
     if (waste === "waiting") {
-      if (what === "next_prompt") return "Waiting for the next prompt (the agent had stopped)";
       return `Waiting · ${waitedOnWords(what, "short")}`;
     }
     if (waste === "defects" && what && what !== "all") return `Defects · failed ${what} calls`;
@@ -239,14 +238,6 @@
     return lb === flip[wb] ? lb : "unknown";
   }
 
-  // One task's waiting, split by cause. From Desk's task row when it states
-  // `idle_ms` (Desk after the fix round of #229, with
-  // `waiting_by_waited_on_ms` split over idle time); otherwise derived from
-  // the task's map file: each gap by what it waited on, and the idle moments
-  // inside bursts (a burst's span less its working time) as "cause not
-  // recorded". Bursts and gaps tile the lead window, so the split sums to
-  // lead - working. Returns { state, value, bound, reasons, by: [{ key, ms }],
-  // source } with `by` largest first.
   // The idle time inside one burst (its span less its working time), by
   // what it waited on. Desk states it per burst as `idle_by_waited_on_ms`
   // (bare numbers or stated numbers); any rest, or all of it when Desk does
@@ -283,6 +274,14 @@
     return out;
   }
 
+  // One task's waiting, split by cause. From Desk's task row when it states
+  // `idle_ms` (Desk after the fix round of #229, with
+  // `waiting_by_waited_on_ms` split over idle time); otherwise derived from
+  // the task's map file: each gap by what it waited on, and the idle moments
+  // inside bursts (a burst's span less its working time) as "cause not
+  // recorded". Bursts and gaps tile the lead window, so the split sums to
+  // lead - working. Returns { state, value, bound, reasons, by: [{ key, ms }],
+  // source } with `by` largest first.
   function idleSplit(row, map) {
     const leadN = row && row.lead_time_ms;
     const workN = row && row.working_ms;
@@ -844,7 +843,7 @@
     return { state: "ok", total_ms: lead, groups, segments: [...groups[0].segments, ...groups[1].segments], partial, notes, lead_state: leadN.state };
   }
 
-  // A waiting cause as a legend label: "Waiting for the next prompt".
+  // A waiting cause as a legend label: "Next prompt (the agent had stopped)".
   function waitCauseLabel(key) {
     const w = waitedOnWords(key, "short");
     return w.charAt(0).toUpperCase() + w.slice(1);
@@ -1109,7 +1108,8 @@
           lane: laneName.get(i.worker) || (i.worker === 0 ? "Main agent" : `Subagent ${i.worker}`),
           duration: durationShort(i.end_ms - i.start_ms),
         }));
-      return { title: s.class === "muda" ? `${stretchWasteWords(s.waste)} stretch` : `${CLASS_WORDS[s.class] || "Unlabeled"} stretch`, segment: seg, rows, evidence };
+      // A labeled wait keeps the cross-hatch the swimlane and its legend give it.
+      return { title: s.class === "muda" ? `${stretchWasteWords(s.waste)} stretch` : `${CLASS_WORDS[s.class] || "Unlabeled"} stretch`, segment: isWaitStretch(s) ? "labeled_wait" : seg, rows, evidence };
     }
     const it = thing.item;
     const nOf = c.model && c.model.box_count ? ` of ${c.model.box_count}` : "";
