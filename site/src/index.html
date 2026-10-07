@@ -4,325 +4,312 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>The factory</title>
-<meta name="description" content="How Desk measures agentic work the way Lean measures a factory floor: no who, no when, just how the work flowed." />
+<meta name="description" content="Where the time went on real agentic work, walked the way Lean walks a factory floor: follow one task, compare tasks, rank the causes, act. No who, no when." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232a78d6'/%3E%3Cpath d='M7 22V10l6 5 6-5v12M25 22V13' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="alternate" type="text/plain" href="llms.txt" title="Index of the data files, for agents" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
+<!-- Hatch patterns for SVG charts, drawn from the same color tokens as the CSS hatches. -->
+<svg class="pattern-defs" width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+  <defs>
+    <pattern id="hatch-agents-working" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-agents-working)" stroke-width="2" />
+    </pattern>
+    <pattern id="hatch-no-session" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="6" style="stroke: var(--c-no-session)" stroke-width="2" />
+    </pattern>
+  </defs>
+</svg>
 
-<header class="site-header">
-  <div class="wrap">
-    <p class="eyebrow">Desk factory &middot; public measurement store</p>
-    <h1 class="hero-title">How much operator attention does an accepted outcome cost, and where does the rest go?</h1>
-    <p class="hero-sub">Every number is read live from the public store; "no data" is never zero.</p>
-    <p class="limit-text"><strong>Designed for many desks; proven on one so far.</strong></p>
-    <nav class="header-links" aria-label="On this page">
-      <a href="#answer">The answer</a>
-      <a href="#fix">What to fix next</a>
-      <a href="#tasks">Every task</a>
-      <a href="#rest">Where the rest goes</a>
-      <a href="#guide">How to read this</a>
-      <a href="#more">More from the store</a>
+<header class="topbar">
+  <div class="wrap topbar-row">
+    <a class="site-name" href="#/">The factory</a>
+    <nav class="steps" aria-label="The four steps of the walk">
+      <a class="step" data-step="task" href="#/"><span class="step-n" aria-hidden="true">1</span>Follow a task</a>
+      <a class="step" data-step="compare" href="#/compare"><span class="step-n" aria-hidden="true">2</span>Compare tasks</a>
+      <a class="step" data-step="causes" href="#/causes"><span class="step-n" aria-hidden="true">3</span>Rank causes</a>
+      <a class="step" data-step="act" href="#/act"><span class="step-n" aria-hidden="true">4</span>Act</a>
     </nav>
+    <a class="why-link" data-step="why" href="#/why">Why Lean?</a>
+  </div>
+  <div class="wrap">
+    <p id="status-line" class="status-line" aria-live="polite">Loading the store&hellip;</p>
   </div>
 </header>
 
-<main id="main">
-<div id="view-overview">
+<main id="main" tabindex="-1">
 
-  <!-- ============ THE ANSWER, AND THE FACTORY'S HEALTH ============ -->
-  <section id="answer" aria-labelledby="answer-title">
-    <div class="wrap">
-      <h2 class="section-title" id="answer-title">What an accepted outcome costs</h2>
-      <div id="status-line"><p class="chart-empty">Loading&hellip;</p></div>
-      <div id="answer-tiles" class="answer-band"></div>
-      <details class="more-details">
-        <summary>Health details</summary>
-        <div id="health-panel" class="health-panel"></div>
-        <div class="chart-card" style="margin-top:20px;">
-          <h3>How much of the work the store sees</h3>
-          <p class="chart-caption">For each host, the root sessions still on disk on the machines that contribute, and what became of each: captured into facts, held on purpose (no consent, no store), frozen (facts that cannot be sent now), pending, never seen (no marker and no facts, in a desk's folder), or outside any desk. Counts are summed over the machines' own records and say how many records they rest on; no machine is shown on its own.</p>
-          <div id="capture-coverage"></div>
-        </div>
-        <div class="chart-card" style="margin-top:20px;">
-          <h3>Is the improvement loop closing?</h3>
-          <p class="chart-caption">Problems the factory finds become improvement items that agents take and fix by themselves; a fix closes only when the data confirms it, and reopens when it does not. Each figure is the largest any one machine reports, because machines can work the same desk; it says how many machines' records it rests on.</p>
-          <div id="loop-health"></div>
-        </div>
-      </details>
-    </div>
-  </section>
-
-  <!-- ============ WHAT TO FIX NEXT ============ -->
-  <section id="fix" aria-labelledby="fix-title">
-    <div class="wrap">
-      <h2 class="section-title" id="fix-title">What to fix next</h2>
-      <p class="section-sub">Alarms first, then what keeps the headline from being measured, then waste, then open improvement cards. "Signal" items are inferred from session records, not classified by the waste evaluator.</p>
-      <div id="fix-list"></div>
-    </div>
-  </section>
-
-  <!-- ============ EVERY TASK ============ -->
-  <section id="tasks" aria-labelledby="tasks-title">
-    <div class="wrap">
-      <h2 class="section-title" id="tasks-title">Every task</h2>
-      <p class="section-sub" id="tasks-sub">One row per task the store tracks, longest first. Open a task for its sign-off, waste, pull requests and sessions.</p>
-      <div id="jobs-table"></div>
-    </div>
-  </section>
-
-  <!-- ============ WHERE THE REST GOES ============ -->
-  <section id="rest" aria-labelledby="rest-title">
-    <div class="wrap">
-      <h2 class="section-title" id="rest-title">Where the rest goes, and the trend</h2>
-      <div class="chart-grid cols-2">
-        <div class="chart-card">
-          <h3>Where time goes</h3>
-          <p class="chart-caption">Median and 75th-percentile duration per job, over finished jobs whose whole life sits inside capture and whose own figure is fully measured; the "n of N" beside each figure counts the rest. Bars are log-scaled; the label shows the real duration.</p>
-          <p class="chart-caption" id="time-breakdown-note"></p>
-          <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:var(--series-1);"></span>Median</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:repeating-linear-gradient(45deg, var(--series-2), var(--series-2) 2px, transparent 2px, transparent 4px);border:1px dashed var(--series-2);"></span>75th percentile</span>
-          </div>
-          <div id="chart-time-breakdown"></div>
-        </div>
-        <div class="chart-card">
-          <h3>Waste, by Lean type</h3>
-          <div id="labeled-waste"></div>
-        </div>
-      </div>
-      <div class="chart-card" style="margin-top:20px;">
-        <h3>By Desk release, oldest first</h3>
-        <p class="chart-caption">The release is the clock: published facts carry no clock time. A job worked under several releases counts under "several releases".</p>
-        <div id="trend"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ HOW TO READ THIS ============ -->
-  <section id="guide" aria-labelledby="guide-title">
-    <div class="wrap">
-      <h2 class="section-title" id="guide-title">How to read this</h2>
-      <p class="section-sub">This store is for anyone deciding how to get more accepted outcomes for less human attention: an operator, a team lead, or an agent improving its own system. The value it cares about is an outcome a human accepted, and everything here serves one question: how much human attention does an accepted outcome cost, and where does the rest go? Agent time, tokens and tool calls are inputs; they matter only because they help explain that ratio.</p>
-      <ul class="guide-list">
-        <li><strong>Start at the top.</strong> The status line says whether you can trust the page today, the headline is the answer the factory exists to give, and "What to fix next" is what to do about it.</li>
-        <li><strong>A plain figure was measured.</strong> A figure marked <span class="num num-partial"><span class="num-value">at least 12</span><span class="num-flag">partial</span></span> was only partly measured; "at least" or "at most" says which way the true figure lies. The reason is on hover, in text for screen readers, and in the note under each table.</li>
-        <li><strong>"No data" is never zero.</strong> A figure shown as <span class="num num-unavailable"><span class="num-value">no data</span></span> was not measured, and its reason is given beside it or once under its table. A zero appears only when zero was measured.</li>
-        <li><strong>Every total says what it rests on</strong>, for example "12 of 31 jobs", and a sentence beside a headline says whether its sample is thin or partial.</li>
-        <li><strong>"Declared" means taken from the task card,</strong> such as a task's start date written on its card, rather than measured from a session record. A task's "Every measure" table says which figures are declared.</li>
-        <li><strong>Two kinds of waiting.</strong> "Deliveries waiting for an answer" counts finished work the operator has not yet accepted or sent back. "Gaps between the operator's prompts" is idle time inside sessions. The evaluator's "Waiting (any kind)" is all labeled waiting, on CI, tools or the operator.</li>
-        <li><strong>Tasks are anonymous.</strong> The store publishes a one-way key per task, never its name. On the operator's own machine, a private <code>local-names.json</code> next to the page shows the real names instead.</li>
-        <li><strong>Accepted means the operator's word,</strong> recorded by the agent through Desk's sign-off tool.</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- ============ MORE ============ -->
-  <section id="more" aria-labelledby="more-title">
-    <div class="wrap">
-      <h2 class="section-title" id="more-title">More from the store</h2>
-      <p class="section-sub">Everything else the store measures: the longest sessions, the headline counts, the sign-off and rework detail, the kaizen loop, the tool and model charts, and how the data gets here.</p>
-      <details class="more-details" id="more-details">
-        <summary>Open every chart</summary>
-  <section id="intake" aria-labelledby="intake-title">
-    <div class="wrap">
-      <h2 class="section-title" id="intake-title">Sessions published, cumulative</h2>
-      <p class="section-sub">How much work the store has captured so far: the day each facts file first landed on <code>main</code>, never finer than a day, as a running total. The first day was a one-time flush of sessions already on contributing machines, not a burst of work.</p>
-      <div class="chart-card"><div id="chart-intake"></div></div>
-    </div>
-  </section>
-
-  <!-- ============ 1. THE PROOF ============ -->
-  <section id="proof" aria-labelledby="proof-title">
-    <div class="wrap">
-      <h2 class="section-title" id="proof-title">Long-horizon work, proven</h2>
-      <p class="section-sub">
-        Most people have not yet figured out how to hand an agent a task and walk away for hours. These are the three longest single
-        agent sessions currently in the store, chosen automatically by length among sessions that reference at least one pull request &mdash;
-        then checked live against GitHub to confirm those pull requests actually merged. This is what "done" looks like: reviewed,
-        passed CI, merged.
-      </p>
-      <div id="featured-grid" class="chart-grid cols-2" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
-        <p class="chart-empty">Loading&hellip;</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ 2. WORK DESIGN ============ -->
-  <section id="work-design" aria-labelledby="work-design-title">
-    <div class="wrap">
-      <h2 class="section-title" id="work-design-title">So what are they doing the rest of the time?</h2>
-      <p class="section-sub">
-        A long session is not automatically a well-run one. Once an agent can work for hours or days at a stretch, the next question is
-        an industrial-engineering question: where does the time actually go &mdash; value-adding work, necessary support, or waste &mdash;
-        and can the system around the agent be redesigned to move more of it toward value? This studies the work, not the worker. There
-        are no leaderboards here and nothing about any one person or agent.
-      </p>
-
-      <div id="kpi-row" class="kpi-row" style="margin-bottom: 14px;"></div>
-      <p id="scope-context" class="chart-caption" style="margin: 0 0 30px;"></p>
-
-      <h3 style="font-size:16px;margin:0 0 12px;">What the data shows so far</h3>
-      <div id="takeaways" class="takeaways" style="margin-bottom: 34px;"></div>
-
-      <div class="chart-card" style="margin-top:20px;">
-        <h3>Do humans accept what agents deliver?</h3>
-        <p class="chart-caption">Value is an outcome a human accepted. When an agent delivers, the operator accepts it or sends it back with a reason, and the agent records that answer on the operator's word. First-pass yield is the share of delivered jobs accepted with nothing sent back. Jobs whose card predates sign-off are out of scope and counted beside each figure. Nothing here says who signed or when.</p>
-        <div id="outcomes-panel"></div>
-      </div>
-
-      <div class="chart-card" style="margin-top:20px;">
-        <h3>The kaizen loop</h3>
-        <p class="chart-caption">Friction the evidence surfaces becomes an issue here, naming the measure it should move and the countermeasure's pull request. Andon issues are a stop-the-line signal: a tracked plugin's release made a quality measure clearly worse.</p>
-        <div id="kaizen-panel"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ 3. DETAIL VIEWS ============ -->
-  <section id="details" aria-labelledby="details-title">
-    <div class="wrap">
-      <h2 class="section-title" id="details-title">Explore the store</h2>
-      <p class="section-sub">
-        Every chart below reads the current build of the store. Numbers will shift as more sessions publish and more jobs finish.
-      </p>
-
-      <div class="chart-card">
-        <h3>Job lifecycle</h3>
-        <p class="chart-caption">Status of every job the store currently tracks.</p>
-        <div id="chart-job-status"></div>
-      </div>
-
-      <div class="chart-grid cols-2" style="margin-top:20px;">
-        <div class="chart-card">
-          <h3>Tool calls by kind</h3>
-          <p class="chart-caption" id="caption-tool_calls"></p>
-          <div id="chart-tool-calls"></div>
-        </div>
-        <div class="chart-card">
-          <h3>Failure rate by tool kind</h3>
-          <p class="chart-caption" id="caption-tool_failures"></p>
-          <div id="chart-tool-failures"></div>
-        </div>
-      </div>
-
-      <div class="chart-grid cols-2" style="margin-top:20px;">
-        <div class="chart-card">
-          <h3>Model requests</h3>
-          <p class="chart-caption" id="caption-models"></p>
-          <div id="chart-models"></div>
-        </div>
-        <div class="chart-card">
-          <h3>Subagent fan-out</h3>
-          <p class="chart-caption" id="caption-subagents"></p>
-          <div id="chart-subagents"></div>
-        </div>
-      </div>
-
-      <div class="chart-card" style="margin-top:20px;">
-        <h3>Harnesses</h3>
-        <p class="chart-caption" id="caption-harnesses"></p>
-        <div id="harnesses"></div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- ============ 4. HOW IT WORKS ============ -->
-  <section id="how-it-works" aria-labelledby="how-it-works-title">
-    <div class="wrap">
-      <h2 class="section-title" id="how-it-works-title">How this data gets here</h2>
-      <p class="section-sub">Desk is a plugin that gives coding agents (Claude Code, Copilot CLI, Codex) a durable "desk" of tracks and tasks. The factory is how that work gets measured.</p>
-
-      <div class="pipeline">
-        <div class="pipeline-step">
-          <p class="step-index">1</p>
-          <p class="step-title">A session ends</p>
-          <p class="step-body">The host publishes an anonymous facts file: tool calls, failures, retries, models, tokens, subagents, time intervals, which job it touched.</p>
-        </div>
-        <div class="pipeline-step">
-          <p class="step-index">2</p>
-          <p class="step-title">CI validates &amp; merges</p>
-          <p class="step-body">Every field is checked against the published schema. No transcript text, prompt, file content or identity is ever accepted.</p>
-        </div>
-        <div class="pipeline-step">
-          <p class="step-index">3</p>
-          <p class="step-title">CI builds reports</p>
-          <p class="step-body">A job's timeline is rebuilt and its report published: what happened, what mattered, what was waste, what we could not see.</p>
-        </div>
-        <div class="pipeline-step">
-          <p class="step-index">4</p>
-          <p class="step-title">An evaluator labels waste</p>
-          <p class="step-body">An independent agent classifies finished stretches as value, necessary support, or one of the eight Lean wastes &mdash; citing evidence, never grading itself.</p>
-        </div>
-        <div class="pipeline-step">
-          <p class="step-index">5</p>
-          <p class="step-title">Kaizen closes the loop</p>
-          <p class="step-body">Evidence becomes an improvement issue naming the measure, the countermeasure and, once it ships, whether the data confirms it helped.</p>
-        </div>
-      </div>
-
-      <h3 style="font-size:16px;margin:32px 0 10px;">No who, no when, just how</h3>
-      <div class="chart-grid cols-2">
-        <div class="chart-card">
-          <h3>No who</h3>
-          <p class="chart-caption" style="font-size:13.5px;">No contributor, operator, account, machine, host name, desk path or branch appears in any facts file. A job is identified only by a one-way hash.</p>
-        </div>
-        <div class="chart-card">
-          <h3>No when</h3>
-          <p class="chart-caption" style="font-size:13.5px;">Facts carry durations and offsets from the session start, never a date, a time of day or an epoch value.</p>
-        </div>
-        <div class="chart-card">
-          <h3>No content</h3>
-          <p class="chart-caption" style="font-size:13.5px;">No transcript text, prompt, response, tool argument, file content, file path or task title ever leaves the contributor's machine.</p>
-        </div>
-        <div class="chart-card">
-          <h3>Public references only</h3>
-          <p class="chart-caption" style="font-size:13.5px;">References to private repositories are dropped and only counted. Public pull requests and commits &mdash; the evidence on this page &mdash; are, like any GitHub contribution, already public.</p>
-        </div>
-      </div>
-      <p style="font-size:13px;color:var(--text-muted);margin-top:16px;">
-        Contribution is opt-in, asked once per machine. The measurement rubric is public and open to review:
-        <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/docs/agentic-engineering-v2-rfc.md#4-the-factory-measuring-and-designing-the-work" target="_blank" rel="noopener">RFC section 4</a>
-        and the <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/skills/factory-evaluator/SKILL.md" target="_blank" rel="noopener">evaluator's rubric</a>.
-      </p>
-    </div>
-  </section>
-      </details>
-    </div>
-  </section>
-
-</div>
-
-<!-- ============ ONE TASK ============ -->
-<div id="view-job" hidden>
-  <section aria-label="One task">
-    <div class="wrap">
-      <p class="back-link"><a href="#tasks">&larr; Every task</a></p>
-      <div id="job-detail" aria-live="polite"></div>
-    </div>
-  </section>
+<!-- ============ STEP 1: FOLLOW A TASK ============ -->
+<div id="view-task" class="view">
+  <div class="wrap">
+    <p class="step-label">Step 1 of 4 &middot; Follow a task</p>
+    <p class="lede">Lean starts by following one real piece of work from start to finish, before looking at any average. This is one task, end to end: how long it took, how much of that time agents were working, and where the evaluator says the time went. Most of a task's time is usually waiting, not work; that is normal, and it is where Lean looks first.</p>
+    <div id="task-picker"></div>
+    <div id="job-detail"><p class="chart-empty">Loading&hellip;</p></div>
+  </div>
 </div>
 
 <!-- ============ ONE SESSION ============ -->
-<div id="view-session" hidden>
-  <section aria-label="One session">
-    <div class="wrap">
-      <p class="back-link"><a href="#tasks">&larr; Every task</a></p>
-      <div id="session-detail" aria-live="polite"></div>
-    </div>
-  </section>
+<div id="view-session" class="view" hidden>
+  <div class="wrap">
+    <p class="step-label">Step 1 of 4 &middot; Follow a task &middot; one session</p>
+    <div id="session-detail"></div>
+  </div>
 </div>
+
+<!-- ============ STEP 2: COMPARE TASKS ============ -->
+<div id="view-compare" class="view" hidden>
+  <div class="wrap">
+    <p class="step-label">Step 2 of 4</p>
+    <h1 class="view-title">Compare tasks</h1>
+    <p class="lede">One task is a story; many tasks show the pattern. Each row below is one task, the last to finish at the top. Open any task to follow it end to end.</p>
+    <section class="block" aria-labelledby="tasks-title">
+      <h2 class="block-title" id="tasks-title">Every task</h2>
+      <p class="chart-caption" id="tasks-sub">Finish order is a position, never a date: the order in which each task's waste labels first landed in the store. Open tasks follow, in the order their first session was published.</p>
+      <div id="jobs-table"></div>
+    </section>
+    <section class="block" aria-label="Where time goes in a finished task">
+      <div id="chart-time-breakdown"></div>
+      <p class="chart-caption">Median duration per task, with the 75th percentile as the outlined bar behind it, over finished tasks whose whole life sits inside capture and whose own figure is fully measured. The "n of N" beside each figure counts the rest. <span id="time-breakdown-note"></span></p>
+    </section>
+    <section class="block" aria-labelledby="trend-title">
+      <h2 class="block-title" id="trend-title">By Desk release, oldest first</h2>
+      <p class="chart-caption">The release is the clock: published facts carry no clock time. A task worked under several releases counts under "several releases".</p>
+      <div id="trend"></div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ STEP 3: RANK CAUSES ============ -->
+<div id="view-causes" class="view" hidden>
+  <div class="wrap">
+    <p class="step-label">Step 3 of 4</p>
+    <h1 class="view-title">Rank causes</h1>
+    <p class="lede">Not all waste is equal. Lean ranks causes by the time they cost, so the few that matter most stand out from the many that do not. First the labeled waste across every task, largest first; then what to fix next, alarms first.</p>
+    <section class="block" id="labeled-waste"></section>
+    <section class="block" aria-labelledby="fix-title">
+      <h2 class="block-title" id="fix-title">What to fix next</h2>
+      <p class="chart-caption">Alarms first, then what keeps the store's headline from being measured, then waste, then open improvement cards. "Signal" items are inferred from session records, not classified by the waste evaluator.</p>
+      <div id="fix-list"></div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ STEP 4: ACT ============ -->
+<div id="view-act" class="view" hidden>
+  <div class="wrap">
+    <p class="step-label">Step 4 of 4</p>
+    <h1 class="view-title">Act</h1>
+    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem: the evidence, a countermeasure, and then a check of whether it worked. These are the problems the factory has taken on, each with the pull request that answered it, where there is one. None has been checked yet: a check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet. Andon issues are the stop-the-line signal: a tracked release made a quality measure clearly worse.</p>
+    <section class="block" id="kaizen-panel"></section>
+  </div>
+</div>
+
+<!-- ============ WHY LEAN? ============ -->
+<div id="view-why" class="view prose" hidden>
+  <div class="wrap">
+    <h1 class="view-title">Why Lean?</h1>
+    <p class="lede">When something takes three weeks, almost none of those weeks is anyone working on it. In most processes less than a tenth of the elapsed time adds value; the rest is waiting and moving. So making the work itself 50% faster shortens the whole by only about 5% (<a href="https://www.lean.org/the-lean-post/articles/why-lean-is-a-time-based-strategy/" target="_blank" rel="noopener">Fiume, Lean Enterprise Institute</a>).</p>
+    <p>Toyota's Taiichi Ohno summed up his whole system as watching the timeline from order to cash and shrinking it "by removing the non-value-added wastes" (Ohno, <i>Toyota Production System</i>, 1988, <a href="https://www.goodreads.com/quotes/7427458-all-we-are-doing-is-looking-at-the-time-line" target="_blank" rel="noopener">as quoted by Liker and others</a>). Lean is not about working people harder. Toyota's way rests on two pillars, "respect for people and continuous improvement" (<a href="https://en.wikipedia.org/wiki/The_Toyota_Way" target="_blank" rel="noopener">The Toyota Way</a>), and Toyota says its system is "based on the premise of making work easier for workers" (<a href="https://global.toyota/en/company/vision-and-philosophy/production-system/" target="_blank" rel="noopener">Toyota</a>).</p>
+    <p>Its method is to make problems impossible to miss (any worker can stop the line, and the andon lights up) and then to go and see the real cause before changing anything (<a href="https://www.lean.org/lexicon-terms/genchi-genbutsu/" target="_blank" rel="noopener">genchi genbutsu, LEI</a>).</p>
+
+    <h2 class="block-title">Why it matters more with AI agents</h2>
+    <p>AI "amplifies what's already there" (<a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" target="_blank" rel="noopener">DORA 2025</a>). An agent that writes code in minutes can still leave a task waiting days for review, rework or a human answer. Speed can even be an illusion: in one study, experienced developers took 19% longer with early-2025 AI tools while believing they had been sped up by about 20% (<a href="https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/" target="_blank" rel="noopener">METR</a>). Measuring where the time actually goes, task by task, is how the factory tells real improvement from the feeling of it. The operator's attention is the scarce resource the factory protects.</p>
+
+    <h2 class="block-title">The four steps, and why in this order</h2>
+    <ol class="plain-list">
+      <li><a href="#/">Follow a task.</a> Go and see one real piece of work end to end, before any average.</li>
+      <li><a href="#/compare">Compare tasks.</a> Put many tasks side by side so the pattern shows instead of the anecdote.</li>
+      <li><a href="#/causes">Rank causes.</a> Order the causes of waste by the time they cost, so the few that matter most stand out.</li>
+      <li><a href="#/act">Act.</a> Take one problem on, with a countermeasure and a check that it worked.</li>
+    </ol>
+
+    <h2 class="block-title">The eight wastes, in agent work</h2>
+    <p>Lean names eight kinds of waste: Ohno's original seven, plus non-utilized talent, a later addition (<a href="https://www.lean.org/lexicon-terms/seven-wastes/" target="_blank" rel="noopener">LEI: 7 wastes</a>). The translations into agent work are our own mapping, borrowing the words of <a href="https://www.informit.com/store/implementing-lean-software-development-from-concept-9780321437389" target="_blank" rel="noopener">Poppendieck's wastes of software</a> where they fit and the definitions the factory's <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/skills/factory-evaluator/SKILL.md" target="_blank" rel="noopener">waste evaluator</a> uses. Each waste keeps its color on every chart.</p>
+    <dl class="waste-list">
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-waiting)"></span>Waiting</dt><dd>Work stopped on something: the agent stopped and waited for the next prompt, a permission, CI or an API retry.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-defects)"></span>Defects</dt><dd>Failures and their rework: a failed command, a broken build, a change undone, a delivery sent back.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-extra-processing)"></span>Extra processing</dt><dd>More work than the outcome needs: repeating a check that already passed, polishing past the requirement.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-overproduction)"></span>Overproduction</dt><dd>Work nobody asked for or used: an unrequested feature, a report no one reads.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-motion)"></span>Motion</dt><dd>Searching and navigating: rereading the same file, hunting for a path or a command, relearning a codebase.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-transportation)"></span>Transportation</dt><dd>Moving work without changing it: copying context between sessions, handing work from agent to agent.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-inventory)"></span>Inventory</dt><dd>Work started and left: open branches, stale drafts, half-done tasks.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-talent)"></span>Non-utilized talent</dt><dd>Capability left unused: doing by hand what a tool or skill does, not running in parallel what could.</dd></div>
+    </dl>
+
+    <h2 class="block-title">Glossary</h2>
+    <dl class="glossary">
+      <dt>Lead time</dt><dd>The time from a task's card being created to the task being done. Some cards were created after work began; there the lead time is counted from the first session and says so.</dd>
+      <dt>Working time</dt><dd>The time any agent on the task was busy: turns, tool calls and subagents. It includes rework and necessary steps, not only value-adding work.</dd>
+      <dt>Flow efficiency</dt><dd>Working time divided by lead time, as the <a href="https://kanbanguides.org/english/" target="_blank" rel="noopener">Kanban Guide</a> uses it. A low figure is normal: most lead time in any process is waiting.</dd>
+      <dt><span class="swatch" style="--sw: var(--c-value)"></span>Value-adding</dt><dd>Work that directly changes the outcome the task exists for: writing the change, running the test that proves it, answering the question asked.</dd>
+      <dt><span class="swatch" style="--sw: var(--c-necessary)"></span>Necessary</dt><dd>Work the outcome needs but that does not change it by itself: reading code to understand it, setting up a workspace, a required review.</dd>
+      <dt>Waste</dt><dd>Time that adds no value and that the outcome does not need: one of the eight wastes above. Lean's word is <i>muda</i>. Waste is a property of the system, never a person's or an agent's fault.</dd>
+      <dt><span class="swatch swatch-hatch" style="--sw: var(--c-agents-working)"></span>Agents working, not labeled</dt><dd>Time when an agent was busy but the evaluator's labels do not say what the work was.</dd>
+      <dt><span class="swatch swatch-outline" style="--sw: var(--c-not-labeled)"></span>Not labeled yet</dt><dd>Time the waste evaluator has not classified yet. It is shown as its own part, never as zero.</dd>
+      <dt><span class="swatch swatch-hatch" style="--sw: var(--c-no-session)"></span>No session running</dt><dd>Lead time in which no agent session was open at all, for example before the first session.</dd>
+      <dt>Value stream map</dt><dd>Lean's picture of one item's journey: each step as a box, the waits between steps as triangles, and a timeline underneath (<a href="https://www.lean.org/the-lean-post/articles/understanding-the-fundamentals-of-value-stream-mapping" target="_blank" rel="noopener">LEI</a>). On this site a step is a burst of agent work.</dd>
+      <dt>Timeline ladder</dt><dd>The square wave under a value stream map: one level for waiting, one for working, each segment labeled with its duration, so it is plain how much of the lead time was waiting.</dd>
+      <dt>Inventory triangle</dt><dd>On a value stream map, the triangle between two steps marks work waiting between them. On this map its time counts as the waiting waste, not the inventory waste.</dd>
+      <dt>Yamazumi (stack-up)</dt><dd>A stacked bar per item. The classic yamazumi stacks each operator's work against takt time to balance a production line (<a href="https://www.lean.org/lexicon-terms/operator-balance-chart/" target="_blank" rel="noopener">LEI</a>); the yamazumi-style chart here stacks each task's time by where it went, so every task's waste is comparable at a glance.</dd>
+      <dt>Pareto chart</dt><dd>Causes as bars in descending order of the time they cost, with a running total, so the vital few stand out (<a href="https://en.wikipedia.org/wiki/Pareto_chart" target="_blank" rel="noopener">Pareto chart</a>).</dd>
+      <dt>A3</dt><dd>One page that tells a problem's story from evidence to countermeasure to check, named for the sheet of paper it fits on (<a href="https://www.lean.org/Search/Documents/229.pdf" target="_blank" rel="noopener">Shook, <i>Managing to Learn</i></a>).</dd>
+      <dt>Kaizen</dt><dd>Continuous improvement: many small changes, each checked against the evidence. Here, an improvement issue with its countermeasure.</dd>
+      <dt>Andon</dt><dd>The signal that stops the line when something is abnormal (<a href="https://www.lean.org/lexicon-terms/andon/" target="_blank" rel="noopener">LEI</a>). Here, an issue raised when a release makes a quality measure clearly worse.</dd>
+    </dl>
+  </div>
+</div>
+
+<!-- ============ ABOUT ============ -->
+<div id="view-about" class="view prose" hidden>
+  <div class="wrap">
+    <h1 class="view-title">About the factory</h1>
+    <p class="lede">Desk is a plugin that gives coding agents (Claude Code, Copilot CLI, Codex) a durable desk of tracks and tasks. The factory measures that work. The question it exists to answer: how much human attention does an accepted outcome cost, and where does the rest go? The value it cares about is an outcome a human accepted; agent time, tokens and tool calls matter only because they help explain that cost.</p>
+    <p class="limit-text"><strong>Designed for many desks; proven on one so far.</strong></p>
+
+    <h2 class="block-title">How this data gets here</h2>
+    <ol class="plain-list">
+      <li><strong>A session ends.</strong> The host publishes an anonymous facts file: tool calls, failures, retries, models, tokens, subagents, time intervals, and which task it touched.</li>
+      <li><strong>CI validates and merges it.</strong> Every field is checked against the published schema. No transcript text, prompt, file content or identity is ever accepted.</li>
+      <li><strong>CI builds the reports.</strong> Each task's timeline is rebuilt and its report published: what happened, what mattered, what was waste, and what could not be seen.</li>
+      <li><strong>An evaluator labels the waste.</strong> When a task is done, an independent agent classifies each stretch of its sessions as value-adding, necessary, or one of the eight Lean wastes, citing evidence and never grading itself.</li>
+      <li><strong>Kaizen closes the loop.</strong> Evidence becomes an improvement issue naming the measure, the countermeasure and, once it ships, whether the data confirms it helped.</li>
+    </ol>
+
+    <h2 class="block-title">No who, no when, just how</h2>
+    <ul class="plain-list">
+      <li><strong>No who.</strong> No contributor, operator, account, machine, host name, desk path or branch appears in any facts file. A task is identified only by a one-way key.</li>
+      <li><strong>No when.</strong> Facts carry durations and offsets from the session start, never a date, a time of day or an epoch value. The site shows no calendar date for any task.</li>
+      <li><strong>No content.</strong> No transcript text, prompt, response, tool argument, file content, file path or task card title ever leaves the contributor's machine.</li>
+      <li><strong>Public references only.</strong> References to private repositories are dropped and only counted. Public pull requests and commits are, like any GitHub contribution, already public.</li>
+      <li><strong>Public work is named publicly.</strong> A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened (that time is never published), plus how many more it has. If some of its pull requests could not be read, the name comes from those that could, and the task page says so. A task with no public pull request is shown as "Private task" with a short key.</li>
+      <li><strong>Operator turns appear only as counts.</strong> The site does not place the operator's individual prompts on a task's clock.</li>
+    </ul>
+
+    <h2 class="block-title">Finish order</h2>
+    <p>Tasks are ordered without dates. A task's waste labels are written when it reaches done, so the order in which each task's first label file landed in the store is the order in which tasks finished. Only the position (1st, 2nd, 3rd) is published, never the date. Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name.</p>
+
+    <h2 class="block-title">How to read the numbers</h2>
+    <ul class="plain-list" id="guide">
+      <li><strong>A plain figure was measured.</strong> A figure marked <span class="num num-partial"><span class="num-value">at least 12</span><span class="num-flag">partial</span></span> was only partly measured; "at least" or "at most" says which way the true figure lies. The reason is on hover, in text for screen readers, and in the note under each table.</li>
+      <li><strong>"No data" is never zero.</strong> A figure shown as <span class="num num-unavailable"><span class="num-value">no data</span></span> was not measured, and its reason is given beside it or once under its table. A zero appears only when zero was measured.</li>
+      <li><strong>Every total says what it rests on,</strong> for example "12 of 31 jobs", and a sentence beside a headline says whether its sample is thin or partial.</li>
+      <li><strong>"Declared" means taken from the task card,</strong> such as a task's start date written on its card, rather than measured from a session record. A task's "Every measure" table says which figures are declared.</li>
+      <li><strong>Two kinds of waiting.</strong> "Deliveries waiting for an answer" counts finished work the operator has not yet accepted or sent back. "Gaps between the operator's prompts" is idle time inside sessions. The evaluator's "Waiting (any kind)" is all labeled waiting, on CI, tools or the operator.</li>
+      <li><strong>Accepted means the operator's word,</strong> recorded by the agent through Desk's sign-off tool.</li>
+      <li><strong>Bars start at zero on a stated scale.</strong> A share runs from 0 to 100%; any other bar list states its scale in its title.</li>
+      <li><strong>The status line under the steps has three states.</strong> Abnormal names each alarm and who is on it, or says no one is. Normal names what was checked. Not monitored says what is not recorded, so missing data never reads as normal.</li>
+    </ul>
+
+    <h2 class="block-title">For agents</h2>
+    <p>Every view has a machine-readable twin. <a href="llms.txt">llms.txt</a> lists every data file with its size, in the order of the walk, and marks which are small enough to read whole.</p>
+
+    <h2 class="block-title">The rubric</h2>
+    <p>Contribution is opt-in, asked once per machine. The measurement rubric is public and open to review: <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/docs/agentic-engineering-v2-rfc.md#4-the-factory-measuring-and-designing-the-work" target="_blank" rel="noopener">RFC section 4</a> and the <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/skills/factory-evaluator/SKILL.md" target="_blank" rel="noopener">evaluator's rubric</a>.</p>
+  </div>
+</div>
+
+<!-- ============ THE STORE'S NUMBERS ============ -->
+<div id="view-store" class="view" hidden>
+  <div class="wrap">
+    <h1 class="view-title">The store's numbers</h1>
+    <p class="lede">Everything else the store measures, across every task: the cost of an accepted outcome, whether humans accept what agents deliver, the store's own health, and the sessions, tools and models behind the work. Every number is read live from the public store; "no data" is never zero.</p>
+
+    <section class="block" id="answer" aria-labelledby="answer-title">
+      <h2 class="block-title" id="answer-title">What an accepted outcome costs</h2>
+      <div id="answer-tiles"></div>
+    </section>
+
+    <section class="block" aria-labelledby="outcomes-title">
+      <h2 class="block-title" id="outcomes-title">Do humans accept what agents deliver?</h2>
+      <p class="chart-caption">Value is an outcome a human accepted. When an agent delivers, the operator accepts it or sends it back with a reason, and the agent records that answer on the operator's word. First-pass yield is the share of delivered jobs accepted with nothing sent back. Jobs whose card predates sign-off are out of scope and counted beside each figure. Nothing here says who signed or when.</p>
+      <div id="outcomes-panel"></div>
+    </section>
+
+    <section class="block" id="health" aria-labelledby="health-title">
+      <h2 class="block-title" id="health-title">The store's own health</h2>
+      <div id="health-panel" class="health-panel"></div>
+      <h3 class="sub-title">How much of the work the store sees</h3>
+      <p class="chart-caption">For each host, the root sessions still on disk on the machines that contribute, and what became of each: captured into facts, held on purpose (no consent, no store), frozen (facts that cannot be sent now), pending, never seen (no marker and no facts, in a desk's folder), or outside any desk. Counts are summed over the machines' own records and say how many records they rest on; no machine is shown on its own.</p>
+      <div id="capture-coverage"></div>
+      <h3 class="sub-title">Is the improvement loop closing?</h3>
+      <p class="chart-caption">Problems the factory finds become improvement items that agents take and fix by themselves; a fix closes only when the data confirms it, and reopens when it does not. Each figure is the largest any one machine reports, because machines can work the same desk; it says how many machines' records it rests on.</p>
+      <div id="loop-health"></div>
+    </section>
+
+    <section class="block" aria-labelledby="intake-title">
+      <h2 class="block-title" id="intake-title">Sessions published, cumulative</h2>
+      <p class="chart-caption">How much work the store has captured so far: the day each facts file first landed in the store, counted from the first intake and never finer than a day, as a running total. Day 1 was a one-time flush of sessions already on contributing machines, not a burst of work.</p>
+      <div id="chart-intake"></div>
+    </section>
+
+    <section class="block" aria-labelledby="proof-title">
+      <h2 class="block-title" id="proof-title">The longest sessions</h2>
+      <p class="chart-caption">The three longest single agent sessions in the store, chosen automatically by length among sessions that reference at least one pull request, then checked live against GitHub to confirm those pull requests merged.</p>
+      <div id="featured-grid"><p class="chart-empty">Loading&hellip;</p></div>
+    </section>
+
+    <section class="block" aria-labelledby="counts-title">
+      <h2 class="block-title" id="counts-title">Counts</h2>
+      <div id="kpi-row"></div>
+      <p id="scope-context" class="chart-caption"></p>
+      <h3 class="sub-title">What the data shows so far</h3>
+      <div id="takeaways"></div>
+    </section>
+
+    <section class="block" aria-label="Job lifecycle">
+      <div id="chart-job-status"></div>
+      <p class="chart-caption">Status of every job the store currently tracks.</p>
+    </section>
+
+    <div class="block-grid">
+      <section class="block" aria-label="Tool calls by kind">
+        <div id="chart-tool-calls"></div>
+        <p class="chart-caption" id="caption-tool_calls"></p>
+      </section>
+      <section class="block" aria-label="Failure rate by tool kind">
+        <div id="chart-tool-failures"></div>
+        <p class="chart-caption" id="caption-tool_failures"></p>
+      </section>
+      <section class="block" aria-label="Model requests">
+        <div id="chart-models"></div>
+        <p class="chart-caption" id="caption-models"></p>
+      </section>
+      <section class="block" aria-label="Subagent fan-out">
+        <div id="chart-subagents"></div>
+        <p class="chart-caption" id="caption-subagents"></p>
+      </section>
+    </div>
+
+    <section class="block" aria-labelledby="harnesses-title">
+      <h2 class="block-title" id="harnesses-title">Harnesses</h2>
+      <p class="chart-caption" id="caption-harnesses"></p>
+      <div id="harnesses"></div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ NOT FOUND ============ -->
+<div id="view-missing" class="view" hidden>
+  <div class="wrap">
+    <h1 class="view-title">Page not found</h1>
+    <p class="lede">This address is not part of the site. Start the walk at <a href="#/">Follow a task</a>, or read <a href="#/why">why Lean</a>.</p>
+  </div>
+</div>
+
 </main>
 
 <footer>
   <div class="wrap">
     <div class="footer-links">
+      <a href="#/about">About</a>
+      <a href="#/store">The store's numbers</a>
+      <a href="llms.txt">llms.txt</a>
       <a href="https://github.com/ourostack/factory" target="_blank" rel="noopener">ourostack/factory</a>
       <a href="https://github.com/ourostack/desk" target="_blank" rel="noopener">ourostack/desk</a>
       <a href="https://github.com/ourostack/factory/tree/reports" target="_blank" rel="noopener">reports branch</a>
-      <a href="https://github.com/ourostack/factory/issues" target="_blank" rel="noopener">issues</a>
     </div>
     <p id="build-meta">Built from the store's current data.</p>
     <p>This measures the work, never the people who did it.</p>

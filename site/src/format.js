@@ -496,5 +496,298 @@
     return n ? n.title : `Task ${String(id).slice(0, 10)}`;
   }
 
-  return { parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  // ------------------------------------------------------------- routes
+  // The site is one page with hash routes, in the walk's order:
+  //   #/                          the most recently finished task
+  //   #/task/<job>                one task
+  //   #/task/<job>/session/<id>   one session of that task
+  //   #/session/<id>              one session whose task is not known
+  //   #/compare  #/causes  #/act  the walk's other three steps
+  //   #/why  #/about  #/store     reference pages
+  // Old links keep working: #job-<id> and #session-<id> (the first site's
+  // task and session pages) and its section anchors redirect.
+  const ROUTE_ID = /^[0-9A-Za-z_-]{1,64}$/;
+  const PAGES = ["compare", "causes", "act", "why", "about", "store"];
+  // The first site's in-page sections, and where each one lives now.
+  const OLD_ANCHORS = {
+    answer: "#/store",
+    "status-line": "#/store",
+    fix: "#/causes",
+    tasks: "#/compare",
+    rest: "#/compare",
+    "labeled-waste": "#/causes",
+    guide: "#/about",
+    more: "#/store",
+    intake: "#/store",
+    proof: "#/store",
+    "work-design": "#/store",
+    details: "#/store",
+    "how-it-works": "#/about",
+  };
+
+  // What a hash asks for. `jobOfSession` (session id to job id) lets an old
+  // session link land under its task. A redirect carries the new hash.
+  function parseRoute(hash, jobOfSession) {
+    const h = typeof hash === "string" ? hash : "";
+    const lookup = typeof jobOfSession === "function" ? jobOfSession : () => null;
+    if (h === "" || h === "#" || h === "#/") return { view: "task", job: null };
+    if (h === "#main") return { view: "skip" };
+    let m = /^#job-(.+)$/.exec(h);
+    if (m) return ROUTE_ID.test(m[1]) ? { view: "redirect", to: `#/task/${m[1]}` } : { view: "missing" };
+    m = /^#session-(.+)$/.exec(h);
+    if (m) {
+      if (!ROUTE_ID.test(m[1])) return { view: "missing" };
+      const job = lookup(m[1]);
+      return { view: "redirect", to: typeof job === "string" && ROUTE_ID.test(job) ? `#/task/${job}/session/${m[1]}` : `#/session/${m[1]}` };
+    }
+    m = /^#([A-Za-z][A-Za-z0-9_-]{0,40})$/.exec(h);
+    if (m) return Object.prototype.hasOwnProperty.call(OLD_ANCHORS, m[1]) ? { view: "redirect", to: OLD_ANCHORS[m[1]] } : { view: "missing" };
+    if (!h.startsWith("#/")) return { view: "missing" };
+    const parts = h.slice(2).replace(/\/+$/, "").split("/");
+    if (parts[0] === "task") {
+      if (parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "task", job: parts[1] };
+      if (parts.length === 4 && parts[2] === "session" && ROUTE_ID.test(parts[1]) && ROUTE_ID.test(parts[3])) return { view: "session", job: parts[1], session: parts[3] };
+      return { view: "missing" };
+    }
+    if (parts[0] === "session" && parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "session", job: null, session: parts[1] };
+    if (parts.length === 1 && PAGES.includes(parts[0])) return { view: parts[0] };
+    return { view: "missing" };
+  }
+
+  // Which of the four steps a view belongs to, for the tab that shows as current.
+  function stepOf(view) {
+    if (view === "task" || view === "session") return "task";
+    return ["compare", "causes", "act"].includes(view) ? view : null;
+  }
+
+  // A route link built from data: "#/" and plain path segments only, so data
+  // can never become a script or a remote link.
+  function safeRoute(...parts) {
+    if (!parts.every((p) => typeof p === "string" && /^[0-9A-Za-z_-]{1,64}$/.test(p))) return null;
+    return `#/${parts.join("/")}`;
+  }
+
+  // The task #/ opens: a done, labeled task with at least ten minutes of
+  // working time, from the latest finish group (the tasks first labeled in
+  // the same commit), preferring a task with a public name within that
+  // group, then the latest finish position. Without such a task: the done
+  // task that finished last, then any task with a position, then the first.
+  const LANDING_MIN_WORK_MS = 10 * 60000;
+  function defaultTask(jobs) {
+    const list = Array.isArray(jobs) ? jobs : [];
+    const pos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
+    const group = (j) => (j && j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : -1);
+    const work = (j) => (j && j.active_time_ms && j.active_time_ms.state !== "unavailable" && typeof j.active_time_ms.value === "number" ? j.active_time_ms.value : -1);
+    const named = (j) => (typeof j.name === "string" && j.name ? 1 : 0);
+    const best = (xs) => xs.reduce((a, j) => (a === null || pos(j) > pos(a) ? j : a), null);
+    const done = list.filter((j) => j.status === "done" && pos(j) > 0);
+    const landing = done
+      .filter((j) => j.finish_basis === "labels" && work(j) >= LANDING_MIN_WORK_MS)
+      .sort((a, b) => group(b) - group(a) || named(b) - named(a) || pos(b) - pos(a))[0];
+    return landing || best(done.filter((j) => j.finish_basis === "labels")) || best(done) || best(list.filter((j) => pos(j) > 0)) || list[0] || null;
+  }
+
+  // An English ordinal for a finish position: 1st, 2nd, 3rd, 11th, 22nd.
+  function ordinal(n) {
+    const s = String(n);
+    const tens = n % 100;
+    if (tens >= 11 && tens <= 13) return `${s}th`;
+    return s + ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+  }
+
+  // A task's place in finish order, as the task table and picker show it.
+  // Only a labeled task has finished in the store's sense; the rest are
+  // listed after it, so their cell says why instead of showing a position.
+  function finishCell(j) {
+    const placed = !!(j && j.finish_order && j.finish_order.state === "measured");
+    if (!placed) return "no session";
+    if (j.finish_basis === "labels") return ordinal(j.finish_order.value);
+    return j.status === "done" ? "not labeled" : "open";
+  }
+
+  // The task page's sentence about finish order. Tasks first labeled in the
+  // same commit finished together, as far as the store can tell; their
+  // positions inside that batch are lead-time order, and the sentence says so
+  // rather than claiming a finishing sequence.
+  function finishWords(j, jobs) {
+    const list = Array.isArray(jobs) ? jobs : [];
+    const labeled = list.filter((x) => x && x.finish_basis === "labels");
+    if (!j || !j.finish_order || j.finish_order.state !== "measured") return "It has no place in finish order: no session of it is published.";
+    if (j.finish_basis !== "labels") {
+      if (j.status === "done") return "It is done but not labeled for waste yet, so it is listed after the labeled tasks, by its first session.";
+      return "It is still open, so it is listed after the finished tasks, by its first session.";
+    }
+    const pos = `${ordinal(j.finish_order.value)} of ${labeled.length}`;
+    const g = j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : null;
+    const batch = g === null ? [] : labeled.filter((x) => x.finish_group && x.finish_group.state === "measured" && x.finish_group.value === g);
+    if (batch.length > 1) {
+      const groups = new Set(labeled.map((x) => (x.finish_group && x.finish_group.state === "measured" ? x.finish_group.value : null)).filter((x) => x !== null));
+      const latest = g === Math.max(...groups);
+      const others = batch.length - 1;
+      return `It was labeled together with ${others} other task${others === 1 ? "" : "s"}${latest ? ", the latest batch" : ""}; within a batch, tasks are ordered by lead time, so it is ${pos} labeled tasks.`;
+    }
+    return `It was the ${pos} labeled tasks to finish.`;
+  }
+
+  // A task's public name: its local name on the operator's own machine, else
+  // the title of its earliest-opened public pull request ("and N more";
+  // partial when some of its pull requests could not be read), else
+  // "Private task" with a short key. A task with public pull requests whose
+  // titles could not be fetched says so instead of calling itself private.
+  function taskName(names, job) {
+    const id = String(job && job.id);
+    const short = id.slice(0, 8);
+    const local = names && Object.prototype.hasOwnProperty.call(names, id) ? names[id] : null;
+    if (local) return { title: local.title, more: 0, kind: "local", short };
+    const more = job && job.more_prs && job.more_prs.state === "measured" ? job.more_prs.value : 0;
+    if (job && typeof job.name === "string" && job.name) return { title: job.name, more, kind: "public", short, partial: job.name_basis === "partial" };
+    const prs = job && Array.isArray(job.pull_requests) ? job.pull_requests.length : 0;
+    if (prs) return { title: `Task ${short}`, more: 0, kind: "unnamed", short };
+    return { title: `Private task ${short}`, more: 0, kind: "private", short };
+  }
+
+  // The name as one line of text.
+  function taskNameText(names, job) {
+    const n = taskName(names, job);
+    return n.more ? `${n.title} and ${n.more} more` : n.title;
+  }
+
+  // ------------------------------------------------------- the status line
+  // Three states (design section 4, review I6). Abnormal names each alarm and
+  // who is on it, or says no one is. Normal names what was checked. Not
+  // monitored names what is not recorded and why. No data never reads as
+  // normal: an empty alarm list with nothing monitoring it is "not monitored".
+  function statusLine(input) {
+    const x = input || {};
+    const verdict = x.verdict || { status: "unknown", reason: "the health record could not be read" };
+    const alarms = [];
+    const checked = [];
+    const missing = [];
+    if (verdict.status === "broken" || verdict.status === "stale") {
+      alarms.push({ text: `the site data is ${verdict.status === "stale" ? "out of date" : "broken"}: ${verdict.reason}`, owner: null });
+    } else if (verdict.status === "alive") {
+      checked.push("the site's own build");
+    } else {
+      missing.push(`the site's own build (${verdict.reason})`);
+    }
+    const andon = Array.isArray(x.andon) ? x.andon : [];
+    if (x.andonVerification === "unavailable") missing.push("andon issues (GitHub could not be reached for this build)");
+    else {
+      checked.push("andon issues");
+      for (const a of andon.filter((i) => i && i.issue_state === "open")) alarms.push({ text: `andon: a tracked release made a quality measure worse (${a.ref})`, owner: { ref: a.ref, url: a.url } });
+    }
+    const cov = x.capture || {};
+    for (const a of Array.isArray(cov.alarms) ? cov.alarms : []) alarms.push({ text: `capture coverage on ${a.host}: ${a.code === "coverage_dropped" ? "a machine's capture share fell by 15 points or more" : "less than 80% of capturable sessions were captured"}`, owner: null });
+    if (cov.share && cov.share.state !== "unavailable") checked.push("capture coverage");
+    else missing.push(`capture coverage (${cov.share ? cov.share.reasons.map(reasonText).join("; ") : "not part of this build"})`);
+    const loop = x.loop || {};
+    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : "the loop raised an alarm about itself"}`, owner: null });
+    if (loop.verdict && loop.verdict.status === "healthy") checked.push("the improvement loop");
+    else if (!(Array.isArray(loop.alarms) && loop.alarms.length)) {
+      const codes = loop.verdict && Array.isArray(loop.verdict.missing) ? [...new Set(loop.verdict.missing.flatMap((m) => m.codes || []))] : [];
+      missing.push(`the improvement loop's health (${codes.length ? codes.map(reasonText).join("; ") : "not recorded"})`);
+    }
+    // Every alarm the Rank causes page raises reaches this line too, so the two
+    // never disagree. Alarms already told from their own source above are not
+    // repeated; any other (a labels mismatch, or one whose source this line
+    // did not see) is named here with no one on it.
+    const told = { andon: alarms.some((a) => a.text.startsWith("andon")), capture_alarm: alarms.some((a) => a.text.startsWith("capture coverage")), loop_alarm: alarms.some((a) => a.text.startsWith("improvement loop")) };
+    for (const item of Array.isArray(x.fixNext) ? x.fixNext : []) {
+      if (!item || item.severity !== "alarm" || told[item.id]) continue;
+      const title = String(item.title || "an alarm was raised");
+      alarms.push({ text: title.charAt(0).toLowerCase() + title.slice(1), owner: null });
+    }
+    if (alarms.length) return { state: "abnormal", alarms, checked, missing };
+    if (missing.length) return { state: "not_monitored", alarms, checked, missing };
+    return { state: "normal", alarms, checked, missing };
+  }
+
+  // ------------------------------------------------------------ bar scales
+  // Every bar list is linear from zero on a stated scale. A share runs 0 to
+  // 100%; a count or a duration runs 0 to a round number at or above the
+  // largest value, and the chart's title states it. A log scale is never
+  // drawn as bars, so asking for one throws.
+  function niceMax(v) {
+    if (!(typeof v === "number" && Number.isFinite(v) && v > 0)) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v - 1e-9) return m * p;
+    return 10 * p;
+  }
+  const HOUR = 3600000;
+  const DAY = 24 * HOUR;
+  // The scale uses the unit the values are written in: minutes up to an
+  // hour, hours below 48 hours, days from 48 hours (KINDS.duration).
+  function niceDurationMax(v) {
+    if (!(typeof v === "number" && Number.isFinite(v) && v > 0)) return HOUR;
+    if (v <= HOUR) return Math.max(60000, niceMax(v / 60000) * 60000);
+    if (v < 48 * HOUR) return Math.min(48 * HOUR, niceMax(v / HOUR) * HOUR);
+    return niceMax(v / DAY) * DAY;
+  }
+  function durationScaleWords(max, largest) {
+    if (largest >= 48 * HOUR) {
+      const d = Math.round((max / DAY) * 100) / 100;
+      return `${d} day${d === 1 ? "" : "s"}`;
+    }
+    if (max >= HOUR) return `${Math.round(max / HOUR).toLocaleString("en-US")} hours`;
+    const m = Math.round(max / 60000);
+    return `${m} minute${m === 1 ? "" : "s"}`;
+  }
+  function barScale(values, opts) {
+    const o = opts || {};
+    if (o.scale === "log") throw new Error("FactoryFormat: a log scale is never drawn as bars; use a dot plot");
+    const kind = o.kind;
+    const vals = (Array.isArray(values) ? values : []).filter((v) => typeof v === "number" && Number.isFinite(v) && v > 0);
+    const largest = vals.length ? Math.max(...vals) : 0;
+    let max;
+    let label;
+    if (kind === "pct" || kind === "pct1") {
+      max = 1;
+      label = "scale 0 to 100%";
+    } else if (kind === "duration") {
+      max = niceDurationMax(largest);
+      label = `scale 0 to ${durationScaleWords(max, largest)}`;
+    } else if (kind === "count" || kind === "compact") {
+      max = Math.max(1, niceMax(largest));
+      label = `scale 0 to ${KINDS.count(max)}`;
+    } else throw new Error(`FactoryFormat: no bar scale for kind ${kind}`);
+    const width = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(100, (v / max) * 100) : 0);
+    return { max, label, width };
+  }
+
+  // One bar row's drawing, from its stated number and an optional second
+  // figure (a 75th percentile) on a scale from barScale. A figure that was not
+  // measured is never drawn as a bar: "none" means no track at all, so it can
+  // never look like a measured zero, which draws an empty track.
+  function barRow(number, secondary, scale) {
+    const val = (n) => (n && n.state !== "unavailable" && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
+    const v = val(number);
+    if (v === null) return { draw: "none" };
+    const s = val(secondary);
+    return { draw: "bar", width: scale.width(v), secondaryWidth: s === null ? null : scale.width(s) };
+  }
+
+  // ------------------------------------------------------- the color system
+  // One meaning, one color, everywhere (design section 5). Each segment's
+  // CSS token, its fill (a hatch where the meaning is "not measured work")
+  // and its fixed stacking position, bottom to top. Views read these names;
+  // styles.css defines the colors for light and dark.
+  const SEGMENTS = [
+    { key: "value", label: "Value-adding", token: "--c-value", fill: "solid" },
+    { key: "support", label: "Necessary", token: "--c-necessary", fill: "solid" },
+    { key: "waiting", label: "Waiting", token: "--c-waste-waiting", fill: "solid" },
+    { key: "defects", label: "Defects", token: "--c-waste-defects", fill: "solid" },
+    { key: "extra_processing", label: "Extra processing", token: "--c-waste-extra-processing", fill: "solid" },
+    { key: "overproduction", label: "Overproduction", token: "--c-waste-overproduction", fill: "solid" },
+    { key: "motion", label: "Motion", token: "--c-waste-motion", fill: "solid" },
+    { key: "transportation", label: "Transportation", token: "--c-waste-transportation", fill: "solid" },
+    { key: "inventory", label: "Inventory", token: "--c-waste-inventory", fill: "solid" },
+    { key: "non_utilized_talent", label: "Non-utilized talent", token: "--c-waste-talent", fill: "solid" },
+    { key: "unknown", label: "Could not classify", token: "--c-waste-unknown", fill: "solid" },
+    { key: "agents_working_unlabeled", label: "Agents working, not labeled", token: "--c-agents-working", fill: "hatch" },
+    { key: "not_labeled", label: "Not labeled yet", token: "--c-not-labeled", fill: "outline" },
+    { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
+  ];
+
+  return { LANDING_MIN_WORK_MS, parseRoute, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
+    barRow, finishCell, finishWords, niceMax, SEGMENTS, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

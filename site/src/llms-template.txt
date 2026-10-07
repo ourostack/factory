@@ -1,0 +1,27 @@
+# The factory
+
+> The factory is the public measurement store for Desk, a plugin that gives coding agents a durable desk of tracks and tasks. It measures agentic work the way Lean measures a factory floor: where each task's time went, which part added value, and which part was waste. It names no person, no machine and no date. This file indexes the data behind every view, for agents.
+
+Site: https://ourostack.github.io/factory/
+Source and raw data: https://github.com/ourostack/factory (the `reports` branch holds the built reports)
+
+## How to walk it
+
+The site walks the four steps Lean uses to see waste, in this order. Read the data in the same order.
+
+1. Follow a task (`#/task/<job>`): one real task end to end, and where its time went. `#/` opens a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name.
+2. Compare tasks (`#/compare`): every task side by side on one scale.
+3. Rank causes (`#/causes`): causes of waste ranked by the time they cost.
+4. Act (`#/act`): the problems taken on, each with its countermeasure.
+
+Reference pages: `#/why` (why Lean, the eight wastes and a glossary), `#/about` (how the data gets here and the privacy rules), `#/store` (everything else the store measures).
+
+## Reading the numbers
+
+Every number is an object `{ state, value?, reasons }`. `measured` is the whole figure. `partial` is part of it, and `bound` says whether the true figure is higher (`lower`) or lower (`upper`) or not known. `unavailable` means not measured: its value is absent or null, and it is never zero. A rollup also carries `n` of `N` and what it counts. Tasks are ordered by `finish_order`, a position, never a date: the order in which each task's first waste labels landed in the store, then open tasks by their first facts file. Tasks whose labels landed in the same commit share a `finish_group` and are ordered within it by lead time, so the longest of them takes the latest position. A task's `name` is the title of its earliest-opened public pull request; `name_basis: "partial"` means some of its pull requests could not be read, so an earlier one may exist.
+
+## Data files
+
+Paths are relative to the site. A file up to {{READ_WHOLE}} is marked small enough to read whole.
+
+{{FILES}}

@@ -267,8 +267,8 @@ test("what to fix next lists alarms first, then sign-off, then waste with its ta
   const blocked = items.find((i) => i.id === "headline_blocked")
   assert.match(blocked.action, /task_signoff/)
   assert.match(blocked.action, /operator's turns/)
-  // It says why the band above can read no data while these tasks exist.
-  assert.match(blocked.action, /count only deliveries that have a sign-off record/)
+  // It says why the store page's headline can read no data while these tasks exist.
+  assert.match(blocked.action, /counts only deliveries that have a sign-off record/)
   assert.deepEqual(blocked.examples, [{ job: "b" }, { job: "w" }])
   // An example carries a figure only when it supports the action.
   assert.deepEqual(items.find((i) => i.id === "unlabeled").examples.map((e) => Object.keys(e)), [["job"], ["job"]])
@@ -329,15 +329,15 @@ test("the private-names overlay names tasks as text, and a missing or malformed 
   assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/app\.js site\/dist\//)
 })
 
-test("the page has the overview's parts and a guide on how to read it", () => {
+test("the page is the four-step walk, with Why Lean?, About and the store's numbers, and a guide on how to read it", () => {
   const html = read("site/src/index.html")
-  for (const id of ["answer", "status-line", "fix", "tasks", "rest", "labeled-waste", "guide", "more", "view-job", "view-session"]) assert.match(html, new RegExp(`id="${id}"`), id)
+  for (const id of ["status-line", "view-task", "view-session", "view-compare", "view-causes", "view-act", "view-why", "view-about", "view-store", "jobs-table", "labeled-waste", "fix-list", "kaizen-panel", "guide"]) assert.match(html, new RegExp(`id="${id}"`), id)
   assert.match(html, /recorded by the agent through Desk's sign-off tool|on the operator's word/)
   assert.doesNotMatch(html, /witnessed/)
-  // The order the operator reads: the answer, what to fix, every task, then the rest.
-  const at = (id) => html.indexOf(`id="${id}"`)
-  assert.ok(at("answer") < at("fix") && at("fix") < at("tasks") && at("tasks") < at("rest") && at("rest") < at("guide"))
-  // "Declared" is explained in the guide.
+  // The tabs, in the walk's order, then the Why Lean? link.
+  const at = (t) => html.indexOf(t)
+  assert.ok(at(">Follow a task<") < at(">Compare tasks<") && at(">Compare tasks<") < at(">Rank causes<") && at(">Rank causes<") < at(">Act<") && at(">Act<") < at(">Why Lean?<"))
+  // "Declared" is explained in the guide, now on the About page.
   assert.match(html, /"Declared" means taken from the task card/)
 })
 
@@ -349,10 +349,12 @@ test("a partial figure in a list keeps its reason in the title and for screen re
   assert.match(n.children.find((c) => c.className === "num-flag").title, /session had not ended/)
 })
 
-test("a no-data count line says the reason once, in words, and the page code does not print it twice", () => {
+test("the sign-off counts appear once, in the Sign-off list, with the no-data reason in words", () => {
   assert.equal(F.reasonText("no_signoff_records"), "no delivered job has a sign-off record yet")
   const app = read("site/src/app.js")
-  assert.match(app, /shared \|\| reasons\[i\] \? el\("span", "num num-unavailable", "no data"\)/)
+  // The counts line that repeated them under the headline is gone.
+  assert.doesNotMatch(app, /countsLine\(/)
+  assert.match(app, /row\(dl, "Delivered, awaiting an answer", waiting\)/)
 })
 
 test("the Elapsed tile says a raised lead time is at least the span of the job's recorded work, and keeps its other captions", () => {
@@ -384,10 +386,10 @@ test("no view scrolls the page sideways: grids never ask for more than their col
   const css = read("site/src/styles.css")
   assert.doesNotMatch(css, /minmax\(\d+px, 1fr\)\)/)
   assert.match(css, /minmax\(min\(320px, 100%\), 1fr\)/)
-  assert.match(css, /#jobs-table, \.chart-card:has\(> table\.data-table\) \{ overflow-x: auto; \}/)
-  assert.match(css, /#jobs-table, \.chart-card, \.table-wrap \{ position: relative; \}/)
+  assert.match(css, /#jobs-table, \.block:has\(> table\.data-table\) \{ overflow-x: auto; \}/)
+  assert.match(css, /#jobs-table, \.block, \.table-wrap \{ position: relative; \}/)
   assert.match(css, /table\.data-table\.task-table td:not\(\.num\) \{ white-space: normal; \}/)
   // Task names wrap between words only, so a key never splits mid-word and a long name never pushes the other columns away.
-  assert.match(css, /table\.data-table\.task-table td\.task-cell \{ min-width: 14ch; max-width: 30ch; \}/)
+  assert.match(css, /table\.data-table\.task-table td\.task-cell \{ min-width: 18ch; max-width: 30ch; \}/)
   assert.match(css, /table\.data-table\.task-table td\.task-cell a \{ overflow-wrap: normal; word-break: normal; \}/)
 })
