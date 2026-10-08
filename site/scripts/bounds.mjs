@@ -21,9 +21,11 @@
 //   finish_date       a finish day (finish-date.mjs): an upper bound when its
 //                     source is a later record (the card's last update, the
 //                     labels' landing, the last recorded work), a lower bound
-//                     when the clock anchor is unconfirmed, no direction when
-//                     the anchor disagrees with itself, the lead window may
-//                     move its end, or the two pull in opposite ways
+//                     when the clock anchor is unconfirmed (also when its
+//                     timed pull requests disagree: every one of them is at or
+//                     before the true start), no direction when pull requests
+//                     the session opened disagree, the lead window may move
+//                     its end, or the two pull in opposite ways
 //   from_members      a sum over members (sumDirection below), read from the
 //                     members' own directions, never from reasons
 //
@@ -47,7 +49,13 @@ const AWAITING = new Set(["awaiting_signoff"]);
 const FINISH_LATER_RECORD = new Set(["finish_from_card_update", "finish_from_labels_landing", "finish_from_last_work"]);
 // The anchor rests on a pull request nothing confirms: it may predate the task, so the true finish is at or after the day shown.
 const FINISH_EARLIER_RECORD = new Set(["anchor_unconfirmed"]);
-const FINISH_NO_DIRECTION = new Set(["anchor_spread", "lead_window_partial", "anchor_after_labels"]);
+const FINISH_NO_DIRECTION = new Set(["lead_window_partial", "anchor_after_labels"]);
+// Disagreeing pull requests have no direction of their own unless the anchor
+// is also unconfirmed (a timed anchor, whose samples are all at or before
+// the true start): then the day is at least the one shown.
+const FINISH_SPREAD = "anchor_spread";
+
+export { FINISH_LATER_RECORD, FINISH_EARLIER_RECORD };
 
 export const DIRECTIONS = Object.freeze({
   // Per-job report measures (jobs table and job page).
@@ -133,6 +141,7 @@ export function directionOf(measure, reasons) {
   if (rule === "upper_if_awaiting") return reasons.length > 0 && reasons.every((r) => AWAITING.has(r)) ? "upper" : "unknown";
   if (rule === "finish_date") {
     if (reasons.some((r) => FINISH_NO_DIRECTION.has(r))) return "unknown";
+    if (reasons.includes(FINISH_SPREAD) && !reasons.some((r) => FINISH_EARLIER_RECORD.has(r))) return "unknown";
     const up = reasons.some((r) => FINISH_LATER_RECORD.has(r));
     const down = reasons.some((r) => FINISH_EARLIER_RECORD.has(r));
     return up && down ? "unknown" : up ? "upper" : down ? "lower" : "unknown";
