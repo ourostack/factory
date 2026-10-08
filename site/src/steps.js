@@ -409,135 +409,332 @@
 
   // Compare → Over time, from the store's rollups/by_week.json
   // (factory.site.by_week/1). Each task counts in the ISO week (UTC, Monday
-  // first) it finished. Returns:
-  //   weeks    every week from the first finished task's to the last; a week
-  //            with no finished task is `empty` (a slot, never a zero bar),
-  //            and one with fewer than 3 tasks is `thin`
-  //   causes   small multiples: the top 5 causes by hours over the weeks,
-  //            plus "Other", each with one cell per week, on one linear
-  //            scale from zero (`scale`, `scaleWords`)
-  //   points   each finished task with a finish day, as a dated point of its
-  //            flow efficiency; `feOmitted` the dated tasks whose flow
-  //            efficiency is not measured (named, not drawn)
-  //   medians  each week's median flow efficiency over measured tasks only,
-  //            with n of N
-  //   unplaced the finished tasks with no finish day, with their reason:
-  //            they are listed, never placed on a guessed date
-  // `opts`: { jobs (data.json jobs), taskRows (rollups/tasks.json rows),
-  // nameOf(job), year }.
-  const TOP_CAUSES = 5;
+  // first) of its finish day. The view answers two questions over months:
+  // "is this cause shrinking?" and "is flow efficiency improving?". So every
+  // figure names its base, a week whose days are bounds says it may hold
+  // tasks that finished in other weeks, and no change between weeks is
+  // claimed that bound days could explain.
+  //
+  // overTime(doc, opts) returns the weeks (every week from the first to the
+  // last; an empty week is a slot, never a zero bar; fewer than 3 tasks is
+  // thin), the base sentence, the day-certainty sentence, the trend
+  // sentence, the flow-efficiency marks by week with each week's median, and
+  // the finished tasks with no day. weekBars, causeTable and weekAxis turn it
+  // into what the page draws. `opts`: { jobs (data.json jobs), taskRows
+  // (rollups/tasks.json rows), nameOf(job), year }.
   const THIN_WEEK = 3;
+  const listWords = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
   const isWeek = (w) => w && typeof w.week === "string" && typeof w.starts_on === "string" && Number.isInteger(w.n);
-  function cellOf(n, empty) {
-    if (empty) return { empty: true, ms: null, state: null, bound: null, short: "", words: "no task finished this week" };
+  const BOUND_SIGN = { lower: "≥", upper: "≤", unknown: "~" };
+  const BOUND_WORD = { lower: "at least ", upper: "at most ", unknown: "about " };
+  const boundKey = (n) => (n && n.state === "partial" ? (n.bound === "lower" || n.bound === "upper" ? n.bound : n.bound === null && n.bound_reason === "bound_not_moved" ? null : "unknown") : null);
+
+  // One figure as a cell: a short label with ≥, ≤ or ~ and the words.
+  // `kind` is "hours" or "share". An empty week has no figure at all.
+  function cellOf(n, empty, kind) {
+    if (empty) return { empty: true, value: null, state: null, bound: null, short: "", words: "no task finished this week" };
     const v = val(n);
-    if (v === null) return { empty: false, ms: null, state: "unavailable", bound: null, short: "no data", words: `not measured: ${arr(n && n.reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded")}` };
-    if (n.state !== "partial") return { empty: false, ms: v, state: "measured", bound: null, short: v === 0 ? "none" : hoursShort(v), words: v === 0 ? "none" : hoursWords(v) };
-    const bound = n.bound === "lower" || n.bound === "upper" ? n.bound : "unknown";
-    if (v === 0 && bound === "lower") return { empty: false, ms: 0, state: "partial", bound, short: "none recorded", words: "none recorded (partial)" };
-    const sign = { lower: "≥", upper: "≤", unknown: "~" }[bound];
-    const word = { lower: "at least ", upper: "at most ", unknown: "about " }[bound];
-    return { empty: false, ms: v, state: "partial", bound, short: `${sign}${hoursShort(v)}`, words: `${word}${hoursWords(v)}${bound === "unknown" ? " (direction not known)" : ""}` };
+    const fmt = kind === "share" ? (x) => W.pctWords(x).replace(/^under /, "<") : hoursShort;
+    const words = kind === "share" ? (x) => `${W.pctWords(x)} of the week's lead time` : hoursWords;
+    if (v === null) return { empty: false, value: null, state: "unavailable", bound: null, short: "no data", words: `not measured: ${arr(n && n.reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded")}` };
+    const bound = boundKey(n);
+    if (!bound) return { empty: false, value: v, state: n.state === "partial" ? "partial" : "measured", bound: null, short: v === 0 ? "0" : fmt(v), words: v === 0 ? "none" : words(v) };
+    if (v === 0 && bound === "lower") return { empty: false, value: 0, state: "partial", bound, short: "≥0", words: "none recorded, but some time may not be recorded" };
+    return { empty: false, value: v, state: "partial", bound, short: `${BOUND_SIGN[bound]}${fmt(v)}`, words: `${BOUND_WORD[bound]}${words(v)}${bound === "unknown" ? " (direction not known)" : ""}` };
   }
-  // The sum of several cells of one week, as one stated number.
-  function sumCells(ns) {
-    const have = ns.filter((n) => val(n) !== null);
-    if (!have.length) return { state: "unavailable", reasons: ["no_measured_members"] };
-    const value = have.reduce((a, n) => a + n.value, 0);
-    const partial = have.length < ns.length || have.some((n) => n.state === "partial");
-    if (!partial) return { state: "measured", value, reasons: [] };
-    const dirs = new Set(ns.map((n) => (val(n) === null ? "lower" : n.state === "partial" ? (n.bound === "lower" || n.bound === "upper" ? n.bound : "none") : null)).filter(Boolean));
-    return { state: "partial", value, reasons: ["unmeasured_members"], bound: dirs.size === 1 && !dirs.has("none") ? [...dirs][0] : null };
+
+  // The direction of a ratio from its parts' directions (null is exact):
+  // a lower numerator or an upper denominator makes it at least; the
+  // opposite at most; both pulling the same way leave no direction.
+  function ratioBound(nb, db) {
+    if (nb === "unknown" || db === "unknown") return "unknown";
+    const up = nb === "upper" || db === "lower";
+    const down = nb === "lower" || db === "upper";
+    return up && down ? "unknown" : up ? "upper" : down ? "lower" : null;
   }
+  function shareOf(n, lead) {
+    const v = val(n);
+    const l = val(lead);
+    if (v === null || l === null || !(l > 0)) return { state: "unavailable", reasons: arr(n && n.reasons).length ? n.reasons : ["no_measured_members"] };
+    // An exact zero is zero of any lead time; a zero that is at least
+    // zero stays "at least" whatever the base.
+    if (v === 0 && !boundKey(n) && !(n && n.state === "partial")) return { state: "measured", value: 0, reasons: [] };
+    const b = v === 0 && boundKey(n) === "lower" ? "lower" : ratioBound(boundKey(n), boundKey(lead));
+    const partial = b || (n && n.state === "partial") || (lead && lead.state === "partial");
+    if (!partial) return { state: "measured", value: v / l, reasons: [] };
+    return { state: "partial", value: v / l, reasons: [...new Set([...arr(n && n.reasons), ...arr(lead && lead.reasons)])], bound: b || null, ...(b ? {} : { bound_reason: "bound_not_moved" }) };
+  }
+
+  // How a week's tasks' days lean, in words (B1).
+  function weekDays(w, tasksOfWeek) {
+    const has = typeof w.n_day_measured === "number";
+    const c = has
+      ? { exact: w.n_day_measured, before: w.n_day_on_or_before || 0, after: w.n_day_on_or_after || 0, about: w.n_day_about || 0 }
+      : tasksOfWeek.reduce((a, t) => {
+          const k = F.finishDay(t.finish_date).kind;
+          a[k === "on" ? "exact" : k === "on_or_before" ? "before" : k === "on_or_after" ? "after" : "about"] += 1;
+          return a;
+        }, { exact: 0, before: 0, after: 0, about: 0 });
+    const earlier = c.before + c.about > 0;
+    const later = c.after + c.about > 0;
+    const parts = [];
+    if (c.exact) parts.push(`${c.exact} exact`);
+    if (c.before) parts.push(`${c.before} on or before`);
+    if (c.after) parts.push(`${c.after} on or after`);
+    if (c.about) parts.push(`${c.about} with no direction`);
+    const n = c.exact + c.before + c.after + c.about;
+    const all = (k) => n > 0 && c[k] === n;
+    const lean = all("exact") ? "all exact days" : all("before") ? "all \"on or before\" days" : all("after") ? "all \"on or after\" days" : `days: ${parts.join(", ")}`;
+    const may = earlier && later ? "may include tasks that finished earlier or later" : earlier ? "may include tasks that finished earlier" : later ? "may include tasks that finished later" : "";
+    return { counts: c, earlier, later, bracket: earlier && later ? "both" : earlier ? "left" : later ? "right" : null, words: n ? `${lean}${may ? `: ${may}` : ""}` : "" };
+  }
+
   function overTime(doc, opts) {
     const o = opts || {};
-    const year = Number.isInteger(o.year) ? o.year : undefined;
-    const fdOpts = year ? { year } : undefined;
+    const fdOpts = Number.isInteger(o.year) ? { year: o.year } : undefined;
     if (!doc || typeof doc !== "object" || doc.schema !== "factory.site.by_week/1" || !Array.isArray(doc.weeks)) return { state: "absent" };
     const jobById = new Map(arr(o.jobs).filter((j) => j && typeof j.id === "string").map((j) => [j.id, j]));
     const nameOf = (id) => (jobById.has(id) && typeof o.nameOf === "function" ? o.nameOf(jobById.get(id)) : `Task ${String(id).slice(0, 8)}`);
     const rows = byJob(o.taskRows);
+    const tasks = arr(doc.tasks).filter((t) => t && typeof t.job === "string");
+    const taskOf = new Map(tasks.map((t) => [t.job, t]));
     const weeks = doc.weeks.filter(isWeek).map((w) => {
       const label = F.finishDay({ state: "measured", value: w.starts_on, reasons: [] }, fdOpts).day || w.starts_on;
-      const parts = Number.isInteger(w.n_partial) && w.n_partial > 0 ? `, ${w.n_partial} partial` : "";
-      return { week: w.week, starts_on: w.starts_on, label, n: w.n, n_partial: w.n_partial || 0, empty: w.n === 0, thin: w.n > 0 && w.n < THIN_WEEK, count: w.n === 0 ? "no task finished" : `${plural(w.n, "task")}${parts}`, jobs: arr(w.jobs), raw: w };
+      const days = weekDays(w, arr(w.jobs).map((j) => taskOf.get(j)).filter(Boolean));
+      return {
+        week: w.week,
+        short: `W${w.week.slice(-2)}`,
+        starts_on: w.starts_on,
+        label,
+        n: w.n,
+        n_partial: Number.isInteger(w.n_partial) ? w.n_partial : 0,
+        empty: w.n === 0,
+        thin: w.n > 0 && w.n < THIN_WEEK,
+        count: w.n === 0 ? "no task finished" : `${plural(w.n, "task")}${w.n_partial > 0 ? `, ${w.n_partial} partial` : ""}`,
+        days,
+        jobs: arr(w.jobs),
+        raw: w,
+      };
     });
-    const unplacedIds = arr(doc.unplaced && doc.unplaced.jobs);
     const open = arr(o.jobs).filter((j) => j && F.finishDay(j.finish_date, fdOpts).kind === "open").length;
-    if (!weeks.length) return { state: "empty", weeks: [], causes: { rows: [] }, points: [], feOmitted: [], medians: [], unplaced: unplacedIds.map((id) => ({ job: id, name: nameOf(id), href: `#/task/${id}`, words: F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : { state: "unavailable", reasons: arr(doc.unplaced.reasons) }, fdOpts).words })), open };
 
-    // The causes: waits by what they waited on, and wastes by label.
-    const keys = [];
-    for (const k of arr(doc.idle_waited_on).length ? doc.idle_waited_on : W.WAIT_KEYS) keys.push({ key: `waiting:${k}`, pick: (w) => w.idle_by_waited_on_ms && w.idle_by_waited_on_ms[k] });
-    for (const k of arr(doc.wastes)) keys.push({ key: `${k}:all`, pick: (w) => w.by_waste_ms && w.by_waste_ms[k] });
-    // Older files without the key lists: read the keys from the weeks.
-    if (!arr(doc.wastes).length) {
-      const seen = new Set();
-      for (const w of weeks) for (const k of Object.keys((w.raw && w.raw.by_waste_ms) || {})) seen.add(k);
-      for (const k of [...seen].sort()) keys.push({ key: `${k}:all`, pick: (w) => w.by_waste_ms && w.by_waste_ms[k] });
-    }
-    const series = keys.map(({ key, pick }) => {
-      const ns = weeks.map((w) => (w.empty ? null : pick(w.raw)));
-      return { key, ns, total: ns.reduce((a, n) => a + (val(n) || 0), 0) };
-    });
-    const ranked = series.filter((x) => x.total > 0).sort((a, b) => b.total - a.total || (a.key < b.key ? -1 : 1));
-    const top = ranked.slice(0, TOP_CAUSES);
-    const rest = ranked.slice(TOP_CAUSES);
-    const causeRows = top.map((x) => ({ key: x.key, label: W.causeWords(x.key), segment: W.causeSegment(x.key), wait: x.key.startsWith("waiting:") ? x.key.slice(8) : null, total_ms: x.total, href: causeRoute(x.key), cells: x.ns.map((n, i) => ({ week: weeks[i].week, ...cellOf(n, weeks[i].empty) })) }));
-    if (rest.length) {
-      causeRows.push({
-        key: "other",
-        label: `Other (${plural(rest.length, "cause")})`,
-        members: rest.map((x) => x.key),
-        segment: "other",
-        wait: null,
-        total_ms: rest.reduce((a, x) => a + x.total, 0),
-        href: null,
-        cells: weeks.map((w, i) => ({ week: w.week, ...cellOf(w.empty ? null : sumCells(rest.map((x) => x.ns[i])), w.empty) })),
-      });
-    }
-    const maxCell = Math.max(0, ...causeRows.flatMap((r) => r.cells.map((c) => c.ms || 0)));
-    const scale = timeScale(maxCell);
-    const scaleWords = `0 to ${tickWords(scale.max_ms, scale)} ${scale.unit} per week, the same linear scale in every row`;
-    const unl = sumCells(weeks.filter((w) => !w.empty).map((w) => sumCells([w.raw.agents_working_unlabeled_ms, w.raw.not_labeled_ms])));
-    const unlCell = cellOf(unl, false);
-    const unlabeledWords = val(unl) === null ? "Agents' working time not split by cause could not be measured for these weeks." : `Agents' working time not split by cause (not labeled yet, or agents working with no label) is in no row: ${unlCell.words} over the ${plural(weeks.filter((w) => !w.empty).length, "week")} with finished tasks.`;
-
-    // Each finished task with a day, as a dated point.
-    const points = [];
-    const feOmitted = [];
-    const dated = [];
-    for (const t of arr(doc.tasks)) {
-      if (!t || typeof t.job !== "string") continue;
-      const finish = F.finishDay(t.finish_date, fdOpts);
-      if (!finish.day) continue;
-      dated.push(finish.key);
-      const row = rows.get(t.job) || { job: t.job, flow_efficiency: t.flow_efficiency };
-      const fe = row.flow_efficiency;
-      const v = val(fe);
-      const base = { job: t.job, name: nameOf(t.job), href: `#/task/${t.job}`, finish };
-      if (v === null) {
-        feOmitted.push({ ...base, words: `flow efficiency not measured: ${arr(fe && fe.reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded")}` });
-        continue;
+    // The tasks with no day, summed once (I7).
+    const unplacedIds = arr(doc.unplaced && doc.unplaced.jobs);
+    const leadOf = (id) => {
+      const r = rows.get(id);
+      return (r && r.lead_time_ms) || (taskOf.get(id) && taskOf.get(id).lead_time_ms) || null;
+    };
+    const sumLead = (ids) => {
+      let ms = 0;
+      let partial = false;
+      for (const id of ids) {
+        const n = leadOf(id);
+        const v = val(n);
+        if (v === null) partial = true;
+        else {
+          ms += v;
+          if (n.state === "partial") partial = true;
+        }
       }
-      const hollow = fe.state === "partial";
-      points.push({ ...base, value: v, hollow, feBound: hollow ? (fe.bound === "lower" || fe.bound === "upper" ? fe.bound : "unknown") : null, feWords: W.feWords(row) || W.pctWords(v) });
+      return { ms, partial };
+    };
+    const groups = new Map();
+    for (const id of unplacedIds) {
+      const words = F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : { state: "unavailable", reasons: arr(doc.unplaced.reasons) }, fdOpts).words;
+      groups.set(words, [...(groups.get(words) || []), { job: id, name: nameOf(id), href: `#/task/${id}` }]);
     }
-    const byDay = (a, b) => (a.finish.key < b.finish.key ? -1 : a.finish.key > b.finish.key ? 1 : a.job < b.job ? -1 : 1);
-    points.sort(byDay);
-    feOmitted.sort(byDay);
-    dated.sort();
-    const medians = weeks.map((w) => {
-      if (w.empty) return { week: w.week, starts_on: w.starts_on, empty: true, value: null, words: "no task finished" };
+    const placedIds = tasks.map((t) => t.job);
+    const placedLead = sumLead(placedIds);
+    const unplacedLead = sumLead(unplacedIds);
+    const allLead = { ms: placedLead.ms + unplacedLead.ms, partial: placedLead.partial || unplacedLead.partial };
+    const nFinished = placedIds.length + unplacedIds.length;
+    const hrs = (x) => hoursWords(x.ms).replace(/ hours?$/, "");
+    const unplaced = {
+      n: unplacedIds.length,
+      groups: [...groups.entries()].map(([words, items]) => ({ words, items })),
+      words: unplacedIds.length ? `${plural(unplacedIds.length, "finished task")} ${unplacedIds.length === 1 ? "has" : "have"} no finish day yet, so ${unplacedIds.length === 1 ? "it is" : "they are"} on no chart here: ${hrs(unplacedLead)} of the ${hrs(allLead)} lead-time hours of all finished tasks${allLead.partial ? " (both at least, as some lead times are partial)" : ""}.` : "",
+    };
+    const base = {
+      n: placedIds.length,
+      N: nFinished,
+      words: nFinished ? `These weeks hold ${placedIds.length} of the ${nFinished} finished tasks: ${hrs(placedLead)} of their ${hrs(allLead)} lead-time hours${allLead.partial ? " (both at least, as some lead times are partial)" : ""}. ${unplacedIds.length ? `The other ${unplacedIds.length} ${unplacedIds.length === 1 ? "is" : "are"} not dated yet.` : "Every finished task is dated."}` : "No task has finished yet.",
+    };
+    if (!weeks.length) return { state: "empty", weeks: [], base, days: { words: "" }, trend: { words: "" }, fe: { weeks: [], omitted: [], n: 0 }, unplaced, open, doc };
+
+    // How sure the days are, over every placed task (B1).
+    const tot = weeks.reduce((a, w) => ({ exact: a.exact + w.days.counts.exact, before: a.before + w.days.counts.before, after: a.after + w.days.counts.after, about: a.about + w.days.counts.about }), { exact: 0, before: 0, after: 0, about: 0 });
+    const nPlaced = tot.exact + tot.before + tot.after + tot.about;
+    const restShort = [tot.before ? `${tot.before} "on or before"` : "", tot.after ? `${tot.after} "on or after"` : "", tot.about ? `${tot.about} with no direction` : ""].filter(Boolean);
+    const coarse = tot.exact * 2 < nPlaced;
+    const days = {
+      exact: tot.exact,
+      n: nPlaced,
+      coarse,
+      words: `Finish days of the ${plural(nPlaced, "dated task")}: ${listWords([`${tot.exact} exact`, ...restShort])}.${coarse ? " So a week may hold tasks that finished in an earlier or later week, and the weeks show roughly when the work was recorded as finished, not exactly when it finished. Until Desk records the day each task finished, read a change between weeks as possibly coming from that alone." : ""}`,
+    };
+
+    // The trend sentence claims a change only between two weeks whose days
+    // are all exact (B1).
+    const thinNote = (ws) => {
+      const thin = ws.filter((w) => w.thin);
+      if (!thin.length) return "";
+      return thin.length === 2 ? ` Both weeks are thin (fewer than ${THIN_WEEK} tasks), so read this as a hint, not a trend.` : ` The week of ${thin[0].label} is thin (fewer than ${THIN_WEEK} tasks), so read this as a hint, not a trend.`;
+    };
+    const sure = weeks.filter((w) => !w.empty && w.days.counts.exact === w.n);
+    let trend;
+    if (sure.length >= 2) {
+      const a = sure[0];
+      const b = sure[sure.length - 1];
+      const fa = cellOf(shareOf(a.raw.working_ms, a.raw.lead_ms), false, "share");
+      const fb = cellOf(shareOf(b.raw.working_ms, b.raw.lead_ms), false, "share");
+      trend = { words: `In the weeks whose tasks all have exact days, agents' working time went from ${fa.words} (week of ${a.label}, ${a.count}) to ${fb.words} (week of ${b.label}, ${b.count}).${thinNote([a, b])}` };
+    } else trend = { words: `No change from week to week is claimed: ${sure.length ? "only one week" : "no week"} has exact finish days for all of its tasks.` };
+
+    // Flow efficiency by week: each task's value as the range the true value
+    // lies in (I5), and the week's median (I4).
+    const omitted = [];
+    const feWeeks = weeks.map((w) => {
+      const marks = [];
+      for (const job of w.jobs) {
+        const t = taskOf.get(job) || { job };
+        const finish = F.finishDay(t.finish_date, fdOpts);
+        const row = rows.get(job) || { job, flow_efficiency: t.flow_efficiency };
+        const fe = row.flow_efficiency || t.flow_efficiency;
+        const v = val(fe);
+        const base = { job, name: nameOf(job), href: `#/task/${job}`, finish };
+        if (v === null) {
+          omitted.push({ ...base, week: w.week, words: `flow efficiency not measured: ${arr(fe && fe.reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded")}` });
+          continue;
+        }
+        const b = boundKey(fe);
+        const kind = !b ? "exact" : b === "lower" ? "at_least" : b === "upper" ? "at_most" : "unknown";
+        const lo = kind === "at_most" || kind === "unknown" ? 0 : v;
+        const hi = kind === "at_least" || kind === "unknown" ? 1 : v;
+        marks.push({ ...base, value: Math.min(1, Math.max(0, v)), kind, lo, hi, words: kind === "exact" ? W.pctWords(v) : kind === "unknown" ? `about ${W.pctWords(v)} (direction not known)` : `${kind === "at_least" ? "at least" : "at most"} ${W.pctWords(v)}` });
+      }
       const f = w.raw.flow_efficiency || {};
-      const v = val(f.median);
+      const m = f.median;
+      const mv = val(m);
       const n = Number.isInteger(f.n) ? f.n : 0;
       const N = Number.isInteger(f.N) ? f.N : w.n;
-      if (v === null || n === 0) return { week: w.week, starts_on: w.starts_on, empty: false, value: null, n, N, words: `no median: 0 of ${plural(N, "task")} measured` };
-      return { week: w.week, starts_on: w.starts_on, empty: false, value: v, n, N, words: `median ${W.pctWords(v)}, ${n} of ${plural(N, "task")} measured` };
+      let median;
+      if (w.empty) median = { value: null, words: "no task finished" };
+      else if (mv === null) median = { value: null, words: `no median: ${arr(m && m.reasons).map(F.reasonText).join("; ") || "not recorded"}` };
+      else {
+        const b = boundKey(m);
+        const lead = b === "lower" ? "at least " : b === "upper" ? "at most " : b === "unknown" ? "about " : "";
+        const note = b === "unknown" ? ", measured tasks only, direction not known" : "";
+        median = { value: mv, bound: b, short: `${b ? BOUND_SIGN[b] : ""}${W.pctWords(mv)}`, words: `median ${lead}${W.pctWords(mv)}, ${n} of ${plural(N, "task")}${note}` };
+      }
+      return { week: w.week, label: w.label, empty: w.empty, marks: marks.sort((a, b) => a.value - b.value), median };
     });
-    const unplaced = unplacedIds.map((id) => ({ job: id, name: nameOf(id), href: `#/task/${id}`, words: F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : { state: "unavailable", reasons: arr(doc.unplaced.reasons) }, fdOpts).words }));
-    return { state: "ok", weeks, causes: { rows: causeRows, scale, scaleWords, unlabeledWords }, points, feOmitted, medians, unplaced, open, range: { first: dated[0] || null, last: dated[dated.length - 1] || null } };
+    const nMarks = feWeeks.reduce((a, w) => a + w.marks.length, 0);
+    return { state: "ok", weeks, base, days, trend, fe: { weeks: feWeeks, omitted, n: nMarks }, unplaced, open, doc };
+  }
+
+  // The By week stacked bars (B3): one bar per finish week in the stack-up's
+  // colors and order. `mode` is "share" (each part as a share of the week's
+  // lead time, so a week of 5 tasks and a week of 1 compare), "all" (hours of
+  // all elapsed time) or "working" (hours of agent working time). The part of
+  // the lead time with no split (a task whose log could not be read) is its
+  // own hatched part.
+  function weekBars(ot, mode) {
+    const m = mode === "all" || mode === "working" ? mode : "share";
+    const doc = ot.doc || {};
+    const classes = arr(doc.classes).length ? doc.classes : ["value", "support"];
+    const wastes = arr(doc.wastes).length ? doc.wastes : [...new Set(ot.weeks.flatMap((w) => Object.keys((w.raw && w.raw.by_waste_ms) || {})))];
+    const waits = arr(doc.idle_waited_on).length ? doc.idle_waited_on : W.WAIT_KEYS;
+    return ot.weeks.map((w) => {
+      if (w.empty) return { ...w, segments: [], total: null, label: "" };
+      const r = w.raw;
+      const segs = [];
+      const add = (key, label, n, cause) => {
+        const v = val(n);
+        if (v === null || v <= 0) return;
+        segs.push({ key, label, cause: cause || null, ms: v, state: n.state, bound: boundKey(n) });
+      };
+      const segLabel = (k) => (F.SEGMENTS.find((s) => s.key === k) || { label: k }).label;
+      const order = F.SEGMENTS.map((s) => s.key);
+      const work = [...classes.map((k) => [k, r.by_class_ms && r.by_class_ms[k]]), ...wastes.map((k) => [k, r.by_waste_ms && r.by_waste_ms[k]]), ["agents_working_unlabeled", r.agents_working_unlabeled_ms], ["not_labeled", r.not_labeled_ms]].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
+      for (const [k, n] of work) add(k, segLabel(k), n);
+      if (m !== "working") {
+        for (const k of W.WAIT_KEYS.filter((x) => waits.includes(x))) add(`wait_${k}`, W.waitCauseLabel(k), r.idle_by_waited_on_ms && r.idle_by_waited_on_ms[k], k);
+        const lead = val(r.lead_ms);
+        const split = (val(r.working_ms) || 0) + (val(r.idle_ms) || 0);
+        if (lead !== null && lead - split > 1000) segs.push({ key: "unsplit", label: "Split not known (a task's log could not be read)", cause: null, ms: lead - split, state: "partial", bound: "unknown" });
+      }
+      const totalN = m === "working" ? r.working_ms : r.lead_ms;
+      const total = val(totalN);
+      if (m === "share") {
+        const lead = val(r.lead_ms);
+        for (const s of segs) {
+          s.share = lead > 0 ? s.ms / lead : 0;
+          if (r.lead_ms && r.lead_ms.state === "partial") s.state = "partial";
+        }
+      }
+      const tc = cellOf(totalN, false, "hours");
+      return { ...w, segments: segs, total, totalWords: m === "share" ? `${tc.words} of lead time, as 100%` : tc.words, totalShort: m === "share" ? "100%" : tc.short };
+    });
+  }
+
+  // The cause × week table (I2, I6): one row per cause in Pareto order over
+  // these weeks, one column per week (the oldest on the left), each cell its
+  // hours or its share of the week's lead time and a bar on one stated
+  // scale. Waiting causes are left out in working mode.
+  function causeTable(ot, mode) {
+    const m = mode === "all" || mode === "working" ? mode : "share";
+    const doc = ot.doc || {};
+    const keys = [];
+    if (m !== "working") for (const k of arr(doc.idle_waited_on).length ? doc.idle_waited_on : W.WAIT_KEYS) keys.push({ key: `waiting:${k}`, pick: (r) => r.idle_by_waited_on_ms && r.idle_by_waited_on_ms[k] });
+    const wastes = arr(doc.wastes).length ? doc.wastes : [...new Set(ot.weeks.flatMap((w) => Object.keys((w.raw && w.raw.by_waste_ms) || {})))].sort();
+    for (const k of wastes) keys.push({ key: `${k}:all`, pick: (r) => r.by_waste_ms && r.by_waste_ms[k] });
+    const kind = m === "share" ? "share" : "hours";
+    const rowsOut = keys
+      .map(({ key, pick }) => {
+        const ns = ot.weeks.map((w) => (w.empty ? null : pick(w.raw)));
+        const total = ns.reduce((a, n) => a + (val(n) || 0), 0);
+        const cells = ot.weeks.map((w, i) => {
+          const n = w.empty ? null : m === "share" ? shareOf(ns[i], w.raw.lead_ms) : ns[i];
+          return { week: w.week, ...cellOf(n, w.empty, kind) };
+        });
+        return { key, label: W.causeWords(key), segment: W.causeSegment(key), wait: key.startsWith("waiting:") ? key.slice(8) : null, href: causeRoute(key), total_ms: total, totalWords: hoursWords(total), cells };
+      })
+      .filter((r) => r.total_ms > 0)
+      .sort((a, b) => b.total_ms - a.total_ms || (a.key < b.key ? -1 : 1));
+    const max = Math.max(0, ...rowsOut.flatMap((r) => r.cells.map((c) => c.value || 0)));
+    let scale;
+    if (kind === "share") {
+      const top = [0.1, 0.2, 0.25, 0.5, 1].find((x) => x >= max - 1e-9) || 1;
+      scale = { max: top, words: `bars run from 0 to ${W.pctWords(top)} of each week's lead time, the same linear scale in every cell` };
+    } else {
+      const s = timeScale(max);
+      scale = { max: s.max_ms, words: `bars run from 0 to ${tickWords(s.max_ms, s)} ${s.unit} per week, the same linear scale in every cell` };
+    }
+    for (const r of rowsOut) for (const c of r.cells) c.frac = c.value === null || !(scale.max > 0) ? null : Math.min(1, c.value / scale.max);
+    return { mode: m, kind, columns: ot.weeks, rows: rowsOut, scale };
+  }
+
+  // Column widths for a chart of `n` weeks in `avail` pixels: fit the frame
+  // (never wider than `max`), and only when a column would be narrower than
+  // `min` let the chart scroll, opening at the newest week. Labels go on
+  // every `every`th week so no two overlap; value labels need `valuePx`.
+  function weekAxis(n, avail, o) {
+    const opt = o || {};
+    const min = opt.min || 8;
+    const max = opt.max || 120;
+    const labelPx = opt.labelPx || 58;
+    const valuePx = opt.valuePx || 40;
+    const count = Math.max(1, n);
+    const fit = Math.floor(avail / count);
+    const colW = Math.max(min, Math.min(max, fit));
+    return { colW, width: colW * count, scroll: colW * count > avail, every: Math.max(1, Math.ceil(labelPx / colW)), showValues: colW >= valuePx };
+  }
+
+  // Each task, in finish order (the "Each task" toggle): the stack-up's bars
+  // for finished tasks with a day, earliest first; the rest are counted.
+  function eachTaskBars(bars) {
+    const dated = arr(bars).filter((b) => b && b.finish && b.finish.day && !b.open);
+    return dated.slice().sort((a, b) => (a.finish.key < b.finish.key ? -1 : a.finish.key > b.finish.key ? 1 : 0) || (a.pos || 0) - (b.pos || 0));
   }
 
   // The picker's rows (walk.js pickerRows) with the finished group sorted by
@@ -1037,6 +1234,12 @@
     taskCauses,
     overTime,
     overTimeCell: cellOf,
+    weekBars,
+    causeTable,
+    weekAxis,
+    eachTaskBars,
+    ratioBound,
+    shareOf,
     sortPicker,
   };
 });

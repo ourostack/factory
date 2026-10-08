@@ -31,6 +31,10 @@
     <pattern id="hatch-unsplit" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="7" style="stroke: var(--baseline)" stroke-width="2" />
     </pattern>
+    <!-- Laid over a part known only in part (Compare, Over time). -->
+    <pattern id="ot-partial" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="5" style="stroke: var(--page-plane)" stroke-width="1.6" />
+    </pattern>
   </defs>
 </svg>
 
@@ -105,15 +109,29 @@
     </section>
     <section class="block" aria-labelledby="over-time-title" id="over-time">
       <h2 class="block-title" id="over-time-title">Over time</h2>
-      <p class="chart-caption">Each task is counted in the week it finished (UTC). Hollow points and hatched bars are figures we only know in part; the label says which way the true number lies. A finished task with no finish day is listed under the charts with its reason, never placed on a guessed date. Open tasks have not finished, so they are not here.</p>
-      <h3 class="sub-title" id="cause-weeks-title">Hours by finish week, per cause</h3>
+      <p class="chart-caption">Each task is counted in the week it finished (UTC). Hatched parts and ranges are figures we only know in part; the label says which way the true number lies. A finished task with no finish day is never placed on a guessed date. Open tasks have not finished, so they are not here.</p>
+      <div class="ot-base" id="over-time-base"></div>
+      <div class="ot-controls">
+        <div class="mode-toggle ot-toggle" role="group" aria-label="What each bar is" id="ot-over">
+          <button type="button" class="ot-btn" data-over="week" aria-pressed="true">By week</button>
+          <button type="button" class="ot-btn" data-over="task" aria-pressed="false">Each task</button>
+        </div>
+        <div class="mode-toggle ot-toggle" role="group" aria-label="What the bars count" id="ot-mode">
+          <button type="button" class="ot-btn" data-otmode="share" aria-pressed="true">Share of lead time</button>
+          <button type="button" class="ot-btn" data-otmode="all" aria-pressed="false">All elapsed time</button>
+          <button type="button" class="ot-btn" data-otmode="working" aria-pressed="false">Agent working time</button>
+        </div>
+      </div>
+      <p class="chart-caption" id="ot-bars-caption"></p>
+      <div id="ot-bars"></div>
+      <h3 class="sub-title" id="cause-weeks-title">Each cause, week by week</h3>
       <p class="chart-caption" id="cause-weeks-caption"></p>
       <div id="cause-weeks"></div>
-      <h3 class="sub-title" id="fe-title">Flow efficiency by finish day, each task a point</h3>
-      <p class="chart-caption">Flow efficiency is working time divided by lead time. Each finished task with a finish day is one point at that day, linked to its task. A filled point is measured; a hollow one is partial, with a mark for which way its flow efficiency lies. A short arrow from a point says which way its finish day lies (an "on or before" day points left). A dash across a week is that week's median over its measured tasks only.</p>
+      <h3 class="sub-title" id="fe-title">Flow efficiency by finish week</h3>
+      <p class="chart-caption">Flow efficiency is working time divided by lead time. Each finished task with a finish day is one mark in its week, linked to its task. A dot is a measured value. A line is the range a partial value lies in: from the figure up to 100% when it is at least that, down to 0% when it is at most that, with a short cap at the figure; a dotted line with "?" means the direction is not known. The labeled dash across a week is its median. An arrow under a week means its tasks' days are bounds: pointing left, some may have finished in earlier weeks; pointing right, in later ones.</p>
       <div id="fe-dots"></div>
       <div id="over-time-undated"></div>
-      <h3 class="sub-title" id="over-time-table-title">The same, by week, as a table</h3>
+      <h3 class="sub-title" id="over-time-table-title">The weeks, newest first</h3>
       <div id="over-time-table"></div>
     </section>
     <section class="block" aria-labelledby="stackup-table-title">

@@ -624,7 +624,20 @@
       const q = qi >= 0 ? full.slice(qi + 1) : "";
       // Compare tasks and Rank causes keep their chart mode in the URL; only
       // Compare tasks has the share mode.
-      const mode = (parts[0] === "compare" || parts[0] === "causes") && q === "mode=working" ? "working" : parts[0] === "compare" && q === "mode=share" ? "share" : null;
+      if (parts[0] === "compare") {
+        // Compare keeps the stack-up's mode and Over time's view and mode:
+        // "?mode=working&over=task&otmode=all". Unknown keys or values are
+        // left out.
+        const out = { view: "compare" };
+        for (const kv of q.split("&")) {
+          const [k, v] = kv.split("=");
+          if (k === "mode" && (v === "working" || v === "share")) out.mode = v;
+          else if (k === "over" && v === "task") out.over = v;
+          else if (k === "otmode" && (v === "all" || v === "working")) out.otmode = v;
+        }
+        return out;
+      }
+      const mode = parts[0] === "causes" && q === "mode=working" ? "working" : null;
       if (mode) return { view: parts[0], mode };
       // A glossary entry on Why Lean?: "#/why?term=capture-coverage".
       const term = parts[0] === "why" ? /^term=([a-z][a-z0-9-]{0,40})$/.exec(q) : null;
@@ -674,6 +687,17 @@
     const best = (xs) => xs.reduce((a, j) => (a === null || pos(j) > pos(a) ? j : a), null);
     const placed = list.filter((j) => j && pos(j) > 0);
     return best(placed.filter((j) => j.finish_basis === "labels")) || best(placed.filter((j) => j.status === "done")) || best(placed) || list[0] || null;
+  }
+
+  // The Compare route for its choices, defaults left out: the stack-up's
+  // mode ("all"), Over time's view ("week") and its mode ("share").
+  function compareHash(c) {
+    const o = c || {};
+    const q = [];
+    if (o.mode === "working" || o.mode === "share") q.push(`mode=${o.mode}`);
+    if (o.over === "task") q.push("over=task");
+    if (o.otmode === "all" || o.otmode === "working") q.push(`otmode=${o.otmode}`);
+    return `#/compare${q.length ? `?${q.join("&")}` : ""}`;
   }
 
   // An English ordinal for a finish position: 1st, 2nd, 3rd, 11th, 22nd.
@@ -936,5 +960,5 @@
   ];
 
   return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, finishDay, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

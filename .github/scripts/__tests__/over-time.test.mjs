@@ -1,7 +1,7 @@
-// Compare → Over time (S3 v1.1): hours by finish week per cause as small
-// multiples, flow efficiency by finish date with each task as a dated point,
-// and the finished tasks with no day listed with their reason, never placed
-// on a guessed date. Every rule lives in site/src/steps.js overTime.
+// Compare → Over time (S3 v1.1, fix round 1): the By week stacked bars in
+// three modes, the cause × week table, flow efficiency by week as ranges with
+// a bounded weekly median, the base and the day-certainty words, and the
+// finished tasks with no day. Every rule lives in site/src/steps.js.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -60,82 +60,8 @@ const jobs = [
   { id: "o", status: "processing", finish_date: u(["open_job"]) },
 ]
 const taskRows = doc().tasks.map((t) => ({ job: t.job, flow_efficiency: t.flow_efficiency }))
-const opts = { jobs, taskRows, nameOf: (j) => `Task ${j.id}`, year: 2026 }
-
-test("every week from first to last is listed; an empty week is a slot, never a zero bar; a week under 3 tasks is thin", () => {
-  const ot = S.overTime(doc(), opts)
-  assert.equal(ot.state, "ok")
-  assert.deepEqual(ot.weeks.map((w) => [w.week, w.n, w.empty, w.thin]), [["2026-W39", 2, false, true], ["2026-W40", 0, true, false], ["2026-W41", 3, false, false]])
-  assert.equal(ot.weeks[0].label, "21 Sep")
-  assert.equal(ot.weeks[2].count, "3 tasks, 2 partial")
-  // In every cause row, the empty week has no value at all.
-  for (const r of ot.causes.rows) assert.equal(r.cells[1].empty, true)
-})
-
-test("the small multiples are the top 5 causes by hours plus other, on one linear scale from zero that is stated", () => {
-  const ot = S.overTime(doc(), opts)
-  const keys = ot.causes.rows.map((r) => r.key)
-  assert.deepEqual(keys, ["waiting:no_session", "waiting:next_prompt", "waiting:other_task", "defects:all", "extra_processing:all", "other"])
-  const other = ot.causes.rows[5]
-  assert.equal(other.label, "Other (1 cause)")
-  assert.equal(other.cells[2].ms, H / 10)
-  // One scale for every row, from zero, at least the largest cell.
-  assert.equal(ot.causes.scale.ticks[0], 0)
-  assert.ok(ot.causes.scale.max_ms >= 10 * H)
-  assert.match(ot.causes.scaleWords, /^0 to \d+ hours per week, the same linear scale in every row$/)
-  // A partial cell names its bound in its label and its words.
-  const np = ot.causes.rows[1].cells[2]
-  assert.deepEqual([np.state, np.bound, np.short], ["partial", "lower", "≥5h"])
-  assert.match(np.words, /^at least 5 hours/)
-  // A measured zero is no bar and reads "none".
-  const ns = ot.causes.rows[0].cells[2]
-  assert.deepEqual([ns.ms, ns.short], [0, "none"])
-  // The unlabeled working time is said, with its base, since it is in no row.
-  assert.match(ot.causes.unlabeledWords, /not split by cause/)
-})
-
-test("flow efficiency by finish date: each dated task is a point with its finish day and its bound; no point is placed on a guessed date", () => {
-  const ot = S.overTime(doc(), opts)
-  assert.deepEqual(ot.points.map((p) => p.job), ["a", "b", "d", "e"])
-  const b = ot.points.find((p) => p.job === "b")
-  assert.equal(b.finish.words, "on or before 26 Sep")
-  assert.equal(b.hollow, false)
-  const d = ot.points.find((p) => p.job === "d")
-  assert.deepEqual([d.hollow, d.feBound], [true, "lower"])
-  assert.equal(d.finish.kind, "about")
-  // A dated task whose flow efficiency is not measured is counted and named, not drawn.
-  assert.deepEqual(ot.feOmitted.map((x) => x.job), ["c"])
-  assert.match(ot.feOmitted[0].words, /could not be read|not/)
-  // The axis spans the dated tasks' days.
-  assert.deepEqual([ot.range.first, ot.range.last], ["2026-09-22", "2026-10-07"])
-})
-
-test("finished tasks with no finish day are listed below the chart with their reason; open tasks are not finished and are only counted", () => {
-  const ot = S.overTime(doc(), opts)
-  assert.deepEqual(ot.unplaced.map((x) => [x.job, x.name]), [["z", "Task z"]])
-  assert.equal(ot.unplaced[0].words, `not dated yet: ${F.reasonText("no_finish_source")}`)
-  assert.equal(ot.open, 1)
-})
-
-test("a week's flow-efficiency median carries n of N and is shown only over measured points", () => {
-  const d = doc()
-  d.weeks[2].flow_efficiency = { median: { state: "partial", value: 0.05, reasons: ["unmeasured_members"], bound: null, bound_reason: "median_of_subset" }, n: 1, N: 3, of: "x" }
-  const ot = S.overTime(d, opts)
-  assert.equal(ot.medians[0].words, "median 20%, 2 of 2 tasks measured")
-  assert.equal(ot.medians[1].empty, true)
-  assert.equal(ot.medians[2].words, "median 5%, 1 of 3 tasks measured")
-})
-
-test("without the by-week file nothing is drawn rather than a zero", () => {
-  assert.equal(S.overTime(null, opts).state, "absent")
-  assert.equal(S.overTime({ schema: "factory.site.by_week/1", weeks: [], tasks: [], unplaced: { n: 0, jobs: [] } }, opts).state, "empty")
-})
-
-test("Compare has the Over time section and its lede", () => {
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
-  assert.match(html, /id="over-time"/)
-  assert.match(html, /Each task is counted in the week it finished \(UTC\)/)
-})
+const opts = { jobs, taskRows: doc().tasks.map((t) => ({ job: t.job, flow_efficiency: t.flow_efficiency, lead_time_ms: m(10 * H) })).concat([{ job: "z", lead_time_ms: m(30 * H) }]), nameOf: (j) => `Task ${j.id}`, year: 2026 }
+const fixture = () => JSON.parse(readFileSync(new URL("../../fixtures/over-time/by_week_26.json", import.meta.url), "utf8"))
 
 test("the picker sorts by finish day: newest first by default, oldest first on request; tasks with no day keep their place after the dated ones, and the other group keeps its own order", () => {
   const rows = [
@@ -158,4 +84,185 @@ test("every stack-up bar carries its task's finish day", () => {
   const jobs = [{ id: "a", status: "done", finish_order: m(1), finish_basis: "labels", finish_date: fd("2026-09-26", "partial", "upper") }]
   const bars = S.stackBars(jobs, [], [], { mode: "all", segments: F.SEGMENTS, nameOf: (j) => j.id })
   assert.equal(bars[0].finish.short.replace(/ \d{4}$/, ""), "≤26 Sep")
+})
+
+test("every week from first to last is listed; an empty week is a slot; a week under 3 tasks is thin", () => {
+  const ot = S.overTime(doc(), opts)
+  assert.equal(ot.state, "ok")
+  assert.deepEqual(ot.weeks.map((w) => [w.week, w.n, w.empty, w.thin]), [["2026-W39", 2, false, true], ["2026-W40", 0, true, false], ["2026-W41", 3, false, false]])
+  assert.equal(ot.weeks[0].label, "21 Sep")
+  assert.equal(ot.weeks[2].count, "3 tasks, 2 partial")
+  for (const mode of ["share", "all", "working"]) assert.deepEqual(S.weekBars(ot, mode)[1].segments, [])
+  for (const r of S.causeTable(ot, "all").rows) assert.equal(r.cells[1].empty, true)
+})
+
+test("B1: each week says how its days lean, and the page says how many days are exact and claims no change bound days could explain", () => {
+  const ot = S.overTime(doc(), opts)
+  // W39: a measured day and an "on or before" day.
+  assert.equal(ot.weeks[0].days.words, 'days: 1 exact, 1 on or before: may include tasks that finished earlier')
+  assert.equal(ot.weeks[0].days.bracket, "left")
+  // W41: "on or after", "about" and exact.
+  assert.equal(ot.weeks[2].days.bracket, "both")
+  assert.match(ot.weeks[2].days.words, /may include tasks that finished earlier or later/)
+  assert.match(ot.days.words, /^Finish days of the 5 dated tasks: 2 exact, 1 "on or before", 1 "on or after" and 1 with no direction\. So a week may hold tasks that finished in an earlier or later week/)
+  assert.equal(ot.days.coarse, true)
+  assert.match(ot.trend.words, /^No change from week to week is claimed/)
+  // Counts from the file win when it has them.
+  const d = doc()
+  Object.assign(d.weeks[0], { n_day_measured: 0, n_day_on_or_before: 2, n_day_on_or_after: 0, n_day_about: 0 })
+  assert.equal(S.overTime(d, opts).weeks[0].days.words, 'all "on or before" days: may include tasks that finished earlier')
+  // Two weeks whose days are all exact: the trend names them.
+  const sure = doc()
+  for (const t of sure.tasks) t.finish_date = fd(t.finish_date.value)
+  const ot2 = S.overTime(sure, { ...opts, jobs: [] })
+  assert.match(ot2.trend.words, /^In the weeks whose tasks all have exact days, agents' working time went from 20% of the week's lead time \(week of 21 Sep, 2 tasks\) to 20% of the week's lead time \(week of 5 Oct, 3 tasks, 2 partial\)\. The week of 21 Sep is thin \(fewer than 3 tasks\), so read this as a hint, not a trend\.$/)
+})
+
+test("I3 and I7: the base is stated once, and the undated tasks are summed in one line with their hours", () => {
+  const ot = S.overTime(doc(), opts)
+  assert.equal(ot.base.words, "These weeks hold 5 of the 6 finished tasks: 50 of their 80 lead-time hours. The other 1 is not dated yet.")
+  assert.equal(ot.unplaced.words, "1 finished task has no finish day yet, so it is on no chart here: 30 of the 80 lead-time hours of all finished tasks.")
+  assert.deepEqual(ot.unplaced.groups.map((g) => [g.words, g.items.map((x) => x.job)]), [[`not dated yet: ${F.reasonText("no_finish_source")}`, ["z"]]])
+  assert.equal(ot.open, 1)
+})
+
+test("B3: By week bars in share mode make each week 100% of its own lead time; all and working modes are hours", () => {
+  const d = doc()
+  // A week whose parts add up: 2 h working (0.25 value, 0.25 defects, 0.5 agents unlabeled, 1 not labeled) and 8 h waiting.
+  Object.assign(d.weeks[0], { by_class_ms: { value: m(H / 4), support: m(0) }, idle_by_waited_on_ms: { next_prompt: m(3 * H), no_session: m(4 * H), other_task: m(H), unknown: m(0) } })
+  const ot = S.overTime(d, opts)
+  const share = S.weekBars(ot, "share")[0]
+  const sum = share.segments.reduce((a, x) => a + x.share, 0)
+  assert.ok(Math.abs(sum - 1) < 1e-9, String(sum))
+  assert.equal(share.totalShort, "100%")
+  // Working parts first, in the stack-up's order, then the waits in theirs.
+  assert.deepEqual(share.segments.map((x) => x.key), ["value", "defects", "agents_working_unlabeled", "not_labeled", "wait_next_prompt", "wait_other_task", "wait_no_session"])
+  // The part of the lead time with no split is its own part.
+  const d2 = doc()
+  d2.weeks[0].lead_ms = m(12 * H)
+  const un = S.weekBars(S.overTime(d2, opts), "all")[0].segments.find((x) => x.key === "unsplit")
+  assert.ok(un && un.ms > 0)
+  const all = S.weekBars(ot, "all")[0]
+  assert.equal(all.total, 10 * H)
+  assert.equal(all.totalShort, "10h")
+  const working = S.weekBars(ot, "working")[0]
+  assert.equal(working.total, 2 * H)
+  assert.ok(working.segments.every((x) => !x.cause))
+  // A partial part keeps its direction.
+  const w41 = S.weekBars(ot, "all")[2]
+  assert.equal(w41.segments.find((x) => x.key === "wait_next_prompt").bound, "lower")
+})
+
+test("I2 and I6: the cause × week table has causes in Pareto order, one cell per week, one stated scale, and shares with an honest direction", () => {
+  const ot = S.overTime(doc(), opts)
+  const t = S.causeTable(ot, "all")
+  assert.deepEqual(t.rows.map((r) => r.key), ["waiting:no_session", "waiting:next_prompt", "waiting:other_task", "defects:all", "extra_processing:all", "waiting:unknown"])
+  assert.match(t.scale.words, /^bars run from 0 to \d+ hours per week, the same linear scale in every cell$/)
+  const np = t.rows[1].cells[2]
+  assert.deepEqual([np.short, np.bound], ["≥5h", "lower"])
+  assert.equal(t.rows[0].cells[2].short, "0")
+  assert.ok(t.rows.every((r) => r.cells.every((c) => c.empty || c.frac === null || (c.frac >= 0 && c.frac <= 1))))
+  const sh = S.causeTable(ot, "share")
+  assert.equal(sh.rows[1].cells[0].short, "30%")
+  // A lower-bound part over a measured lead time is at least that share.
+  assert.equal(sh.rows[1].cells[2].short, "≥50%")
+  assert.match(sh.scale.words, /^bars run from 0 to \d+% of each week's lead time/)
+  // Working mode leaves the waits out.
+  assert.ok(S.causeTable(ot, "working").rows.every((r) => !r.key.startsWith("waiting:")))
+  // An exact zero is zero of any lead time, partial or not; a lower-bound zero is at least zero.
+  assert.equal(S.shareOf({ state: "measured", value: 0, reasons: [] }, { state: "partial", value: 10, reasons: ["x"], bound: "unknown" }).state, "measured")
+  assert.equal(S.overTimeCell(S.shareOf({ state: "measured", value: 0, reasons: [] }, { state: "partial", value: 10, reasons: ["x"], bound: "unknown" }), false, "share").short, "0")
+  assert.equal(S.overTimeCell(S.shareOf({ state: "partial", value: 0, reasons: ["x"], bound: "lower" }, { state: "measured", value: 10, reasons: [] }), false, "share").short, "≥0")
+  // A share under 1% reads "<1%", never "~under 1%".
+  assert.equal(S.overTimeCell({ state: "partial", value: 0.004, reasons: ["x"], bound: "unknown" }, false, "share").short, "~<1%")
+  // The direction of a ratio from its parts.
+  assert.equal(S.ratioBound("lower", null), "lower")
+  assert.equal(S.ratioBound(null, "lower"), "upper")
+  assert.equal(S.ratioBound("lower", "lower"), "unknown")
+  assert.equal(S.ratioBound("upper", "lower"), "upper")
+})
+
+test("I4 and I5: flow efficiency by week is each task's range and the week's median in words", () => {
+  const d = doc()
+  d.weeks[2].flow_efficiency = { median: { state: "partial", value: 0.3, reasons: ["card_dates_shorter_than_work"], bound: "upper" }, n: 2, N: 3, of: "x" }
+  const ot = S.overTime(d, opts)
+  const w39 = ot.fe.weeks[0]
+  // b is measured 10%, a measured 50%.
+  assert.deepEqual(w39.marks.map((x) => [x.job, x.kind, x.lo, x.hi]), [["b", "exact", 0.1, 0.1], ["a", "exact", 0.5, 0.5]])
+  const d41 = ot.fe.weeks[2].marks.find((x) => x.job === "d")
+  assert.deepEqual([d41.kind, d41.lo, d41.hi, d41.words], ["at_least", 0.3, 1, "at least 30%"])
+  assert.equal(ot.fe.weeks[0].median.words, "median 20%, 2 of 2 tasks")
+  assert.equal(ot.fe.weeks[2].median.words, "median at most 30%, 2 of 3 tasks")
+  assert.equal(ot.fe.weeks[2].median.short, "≤30%")
+  assert.equal(ot.fe.weeks[1].median.words, "no task finished")
+  // A dated task with no flow efficiency is named, not drawn.
+  assert.deepEqual(ot.fe.omitted.map((x) => x.job), ["c"])
+})
+
+test("B2: 52 weeks fit the frame at 1280 px without scrolling, labels never overlap, and a phone scrolls only below the floor", () => {
+  const wide = S.weekAxis(52, 1040)
+  assert.equal(wide.scroll, false)
+  assert.ok(wide.width <= 1040)
+  assert.ok(wide.colW * wide.every >= 58)
+  assert.equal(wide.showValues, false)
+  const phone = S.weekAxis(52, 300)
+  assert.equal(phone.colW, 8)
+  assert.equal(phone.scroll, true)
+  const few = S.weekAxis(3, 1040)
+  assert.deepEqual([few.colW, few.scroll, few.every, few.showValues], [120, false, 1, true])
+})
+
+test("the 26-week fixture: every week is listed, the newest week is last, and every model holds together", () => {
+  const f = fixture()
+  const ot = S.overTime(f, { jobs: [], taskRows: f.tasks, year: 2026 })
+  assert.equal(ot.state, "ok")
+  assert.equal(ot.weeks.length, 26)
+  assert.equal(ot.weeks.filter((w) => w.empty).length, 4)
+  assert.ok(ot.weeks[25].starts_on > ot.weeks[0].starts_on)
+  for (const mode of ["share", "all", "working"]) {
+    const bars = S.weekBars(ot, mode)
+    assert.equal(bars.length, 26)
+    if (mode === "share") for (const b of bars.filter((x) => !x.empty)) assert.ok(Math.abs(b.segments.reduce((a, x) => a + x.share, 0) - 1) < 1e-6, b.week)
+    const t = S.causeTable(ot, mode)
+    assert.ok(t.rows.length > 0)
+    assert.ok(t.rows.every((r) => r.cells.length === 26))
+  }
+  // Weeks 19 to 26 are mostly exact: the trend may compare exact weeks only.
+  assert.ok(ot.weeks.slice(18).some((w) => w.days.counts.exact === w.n && w.n > 0))
+  assert.match(ot.trend.words, /^In the weeks whose tasks all have exact days|^No change/)
+  assert.equal(ot.fe.weeks.length, 26)
+})
+
+test("Each task: the stack-up's finished, dated bars in finish order", () => {
+  const bars = [
+    { job: "x", finish: F.finishDay(fd("2026-10-07")), open: false, pos: 3 },
+    { job: "y", finish: F.finishDay(fd("2026-09-22")), open: false, pos: 1 },
+    { job: "z", finish: F.finishDay(u(["no_finish_source"])), open: false, pos: 2 },
+    { job: "o", finish: F.finishDay(u(["open_job"])), open: true, pos: 4 },
+  ]
+  assert.deepEqual(S.eachTaskBars(bars).map((b) => b.job), ["y", "x"])
+})
+
+test("the route keeps the Over time choices in the query string", () => {
+  assert.deepEqual(F.parseRoute("#/compare?over=task&otmode=all"), { view: "compare", over: "task", otmode: "all" })
+  assert.deepEqual(F.parseRoute("#/compare?mode=working&otmode=working"), { view: "compare", mode: "working", otmode: "working" })
+  assert.deepEqual(F.parseRoute("#/compare?over=bogus"), { view: "compare" })
+  assert.deepEqual(F.parseRoute("#/compare?mode=share"), { view: "compare", mode: "share" })
+  assert.equal(F.compareHash({ mode: "all", over: "week", otmode: "share" }), "#/compare")
+  assert.equal(F.compareHash({ mode: "working", over: "task", otmode: "all" }), "#/compare?mode=working&over=task&otmode=all")
+})
+
+test("without the by-week file nothing is drawn rather than a zero", () => {
+  assert.equal(S.overTime(null, opts).state, "absent")
+  assert.equal(S.overTime({ schema: "factory.site.by_week/1", weeks: [], tasks: [], unplaced: { n: 0, jobs: [] } }, opts).state, "empty")
+})
+
+test("Compare has the Over time section, its lede, its two toggles and the cause × week table", () => {
+  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  assert.match(html, /id="over-time"/)
+  assert.match(html, /Each task is counted in the week it finished \(UTC\)/)
+  for (const v of ['data-over="week"', 'data-over="task"', 'data-otmode="share"', 'data-otmode="all"', 'data-otmode="working"', 'id="cause-weeks"', 'id="over-time-base"']) assert.ok(html.includes(v), v)
+  // The Over time buttons are not the stack-up's mode buttons.
+  const section = html.slice(html.indexOf('id="over-time"'), html.indexOf("</section>", html.indexOf('id="over-time"')))
+  assert.doesNotMatch(section, /class="mode-btn"/)
 })
