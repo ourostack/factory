@@ -455,7 +455,7 @@ async function ghGet(url) {
 // One read per pull request per build, shared by every use: merge state for
 // the featured sessions and the kaizen countermeasures, title and
 // visibility for names, opened and merged times for the PR clock and finish
-// days. The reader (pr-clock.mjs) answers merged and closed pull requests
+// days. The reader (pr-clock.mjs) answers merged pull requests
 // from the cache of earlier builds (--pulls-cache), asks about the rest with
 // their ETag, and makes at most maxLookups() requests; a pull request it
 // could not read, or the cap stopped, reads as null this build.

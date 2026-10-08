@@ -153,7 +153,7 @@
     github_lookup_capped: "the build reads a limited number of pull requests from GitHub, and this one was beyond the limit",
     github_not_read: "this build did not read pull requests from GitHub",
     merged_time_not_recorded: "GitHub says the pull request merged but gives no merge time",
-    anchor_unconfirmed: "nothing confirms when the task started on the wall clock: no pull request the session is known to have opened sets it, and no majority of its pull requests agrees, so its pull request times are at most these and its finish day at least this",
+    anchor_unconfirmed: "nothing confirms when the task started on the wall clock: no pull request the session is known to have opened sets it, and no majority of its pull requests agrees; its pull request times would be at most these and its finish day at least this, and when one unconfirmed pull request is all there is, its times are not placed",
     anchor_spread_too_wide: "the task's pull requests disagree by more than 15 minutes about when the task started, so their times are not placed on the task clock",
     anchor_github_unreadable: "the pull requests that set the task's clock could not be read from GitHub",
     anchor_github_lookup_capped: "the pull requests that set the task's clock were beyond the build's limit of reads from GitHub",

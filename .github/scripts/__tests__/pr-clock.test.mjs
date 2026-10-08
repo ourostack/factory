@@ -159,18 +159,26 @@ test("before D2, a timed pull request is placed through the anchor (its own ment
 
 // ------------------------------------------- confirming the anchor (fix round 1)
 
-test("one timed pull request with no created flag is an unconfirmed anchor: partial, a lower bound, and every time placed through it is an upper bound", () => {
-  // The session may only have mentioned it: its mention is at or after its creation.
+test("one timed pull request with no created flag is an unconfirmed anchor whose error cannot be measured: partial, a lower bound, and nothing is placed through it", () => {
+  // The session may only have mentioned it: here it was opened 3 days before the mention, so placing through it would put times 72 hours late.
   const prs = [{ repo: "o/r", number: 1, at_ms: 20 * M }, { repo: "o/r", number: 2 }]
-  const g = gh([["o/r#1", pull(T0 + 20 * M + 3 * S)], ["o/r#2", pull(T0 + 50 * M + 3 * S, { merged: T0 + 60 * M + 3 * S })]])
+  const g = gh([["o/r#1", pull(T0 - 72 * 60 * M + 20 * M)], ["o/r#2", pull(T0 + 50 * M + 3 * S, { merged: T0 + 60 * M + 3 * S })]])
   const c = prClock(prs, g)
   assert.deepEqual([c.anchor.state, c.anchor.bound, c.anchor.reasons, c.anchor.n], ["partial", "lower", ["anchor_unconfirmed"], 1])
+  assert.equal(c.anchor.uncertainty_ms, null, "one sample cannot measure its own error")
   const two = c.prs[1]
-  assert.equal(two.opened_at_ms, 50 * M)
-  assert.equal(two.opened_basis, "pr_anchor")
-  assert.deepEqual(two.opened_state, { state: "partial", bound: "upper", reasons: ["anchor_unconfirmed"] })
-  assert.deepEqual(two.merged_state, { state: "partial", bound: "upper", reasons: ["anchor_unconfirmed"] })
-  assert.deepEqual(two.reasons, ["anchor_unconfirmed"])
+  assert.equal(two.opened_at_ms, null)
+  assert.equal(two.opened_basis, "not_placed")
+  assert.equal(two.merged_at_ms, null)
+  assert.equal(two.merged_basis, "not_placed")
+  assert.deepEqual(two.opened_state, { state: "unavailable", reasons: ["anchor_unconfirmed"] })
+  assert.deepEqual(two.merged_state, { state: "unavailable", reasons: ["anchor_unconfirmed"] })
+  assert.equal("uncertainty_ms" in two, false)
+  assert.equal(two.state, "merged", "GitHub's state is still known")
+  // Once Desk flags it as created, the same task places again.
+  const flagged = prClock([{ ...prs[0], created: true }, prs[1]], g)
+  assert.equal(flagged.anchor.state, "measured")
+  assert.equal(flagged.prs[1].opened_basis, "pr_anchor")
 })
 
 test("one pull request Desk flags as created by the session confirms the anchor: measured", () => {
@@ -231,6 +239,16 @@ test("a merge never lands before its opening: a skewed pair is clamped and says 
   assert.equal(one.merged_at_ms, 10 * M)
   assert.deepEqual(one.merged_state, { state: "partial", bound: "lower", reasons: ["clock_skew"] })
   assert.deepEqual(one.reasons, ["clock_skew"])
+  // Through a partial anchor, the clamp adds its reason to the anchor's; it never replaces them.
+  const spread = [{ repo: "o/r", number: 1, at_ms: 10 * M, created: true }, { repo: "o/r", number: 2, at_ms: 20 * M, created: true }]
+  const g2 = gh([["o/r#1", pull(T0 + 10 * M, { merged: T0 + 10 * M + 30 * S })], ["o/r#2", pull(T0 + 20 * M + 189 * S)]])
+  const c2 = prClock(spread, g2)
+  assert.deepEqual(c2.anchor.reasons, ["anchor_spread"])
+  const skewed = c2.prs[0]
+  assert.equal(skewed.merged_at_ms, skewed.opened_at_ms)
+  // The merge came after the session's own opening time, so the clamped time is a lower bound whatever the anchor's spread.
+  assert.deepEqual(skewed.merged_state, { state: "partial", bound: "lower", reasons: ["anchor_spread", "clock_skew"] })
+  assert.deepEqual(skewed.reasons, ["anchor_spread", "clock_skew"])
 })
 
 test("when the pull requests that set the clock could not be read, a pull request that was read says so, not that it was unreadable", () => {
@@ -453,7 +471,7 @@ test("every reason the PR clock can give has the page's words, and the data inde
   assert.match(llmsText("{{FILES}}", [{ path: "map/j1.json", bytes: 10 }]), /not placed when the task's clock anchor may be off by more than 15 minutes/)
 })
 
-test("the pull reader treats merged and closed pull requests in its cache as final, asks about open ones with their ETag, and never answers a failed read with an old body", async () => {
+test("the pull reader treats only merged pull requests in its cache as final, asks about open and closed ones with their ETag, and never answers a failed read with an old body", async () => {
   const calls = []
   const replies = new Map()
   const fetchImpl = async (url, headers) => {
@@ -473,6 +491,8 @@ test("the pull reader treats merged and closed pull requests in its cache as fin
     },
   }
   replies.set("/repos/o/r/pulls/3", { ok: false, status: 304, headers: new Headers({ etag: '"o"' }), json: async () => null })
+  // Closed, not merged: it may be reopened or merged later, so it is asked again (a 304 costs nothing).
+  replies.set("/repos/o/r/pulls/2", { ok: false, status: 304, headers: new Headers({ etag: '"c"' }), json: async () => null })
   const reader = createPullReader({ fetch: fetchImpl, cache, max: 10 })
   assert.equal((await reader.read("o/r", 1)).merged, true)
   assert.equal((await reader.read("o/r", 2)).state, "closed")
@@ -481,8 +501,8 @@ test("the pull reader treats merged and closed pull requests in its cache as fin
   assert.equal(await reader.read("o/r", 4), null)
   // Read once per build.
   await reader.read("o/r", 3)
-  assert.deepEqual(calls, [["/repos/o/r/pulls/3", '"o"'], ["/repos/o/r/pulls/4", '"x"']])
-  assert.deepEqual(reader.counts, { requests: 2, fetched: 0, not_modified: 1, final_from_cache: 2, failed: 1, capped: 0 })
+  assert.deepEqual(calls, [["/repos/o/r/pulls/2", '"c"'], ["/repos/o/r/pulls/3", '"o"'], ["/repos/o/r/pulls/4", '"x"']])
+  assert.deepEqual(reader.counts, { requests: 3, fetched: 0, not_modified: 2, final_from_cache: 1, failed: 1, capped: 0 })
   assert.equal(reader.bodies.get("o/r#4"), null)
   // The old entry stays for the next build to ask about again.
   assert.ok(reader.cacheDoc().pulls["o/r#4"])

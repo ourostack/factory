@@ -44,9 +44,10 @@ function trim(b) {
   };
 }
 
-// A merged or closed pull request is final: its opened and merged times no
-// longer change, so a cached body answers without a request.
-const isFinal = (b) => !!b && (b.merged === true || typeof b.merged_at === "string" || b.state === "closed");
+// Only a merged pull request is final: its opened and merged times no
+// longer change, so a cached body answers without a request. A closed one
+// may be reopened or merged, so it is asked again with its ETag.
+const isFinal = (b) => !!b && (b.merged === true || typeof b.merged_at === "string");
 
 // One reader per build. read(repo, number) resolves to the trimmed body,
 // or null when it could not be read this build (failed, capped or

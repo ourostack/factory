@@ -1337,8 +1337,9 @@
   // ANCHOR_SPREAD_MS above them (a sample above the kept ones shows that the
   // true anchor is later still). Otherwise it is `partial`, with
   // `anchor_unconfirmed` or `anchor_spread`. A time is placed through a
-  // partial anchor only when it may be off by at most ANCHOR_PLACE_LIMIT_MS,
-  // and it then carries the anchor's reasons and direction.
+  // partial anchor only when its error is known and at most
+  // ANCHOR_PLACE_LIMIT_MS, and it then carries the anchor's reasons and
+  // direction; one unconfirmed sample places nothing until Desk flags it.
   //
   // These run in the Pages build (pr-clock.mjs re-exports them); they live
   // here so the map file has one implementation.
@@ -1427,7 +1428,8 @@
       dropped: samples.length - kept.length,
       spread_ms: top - samples[0],
       kept_spread_ms: keptSpread,
-      uncertainty_ms: basis === "timed" ? top - kept[0] : keptSpread,
+      // One unconfirmed sample cannot measure its own error: null, unknown.
+      uncertainty_ms: basis === "timed" ? (samples.length < 2 ? null : top - kept[0]) : keptSpread,
       value_ms: Math.round(medianOf(kept)),
     };
     const reasons = [];
@@ -1462,12 +1464,15 @@
     const capped = opts && opts.capped;
     const a = anchor || { state: "unavailable", reasons: ["no_timed_pr"] };
     const partialAnchor = a.state === "partial";
-    const tooWide = partialAnchor && finiteMs(a.uncertainty_ms) && a.uncertainty_ms > ANCHOR_PLACE_LIMIT_MS;
+    // A partial anchor places nothing when its error is unknown (one
+    // unconfirmed sample, which may be days off) or above the limit.
+    const unknownError = partialAnchor && !finiteMs(a.uncertainty_ms);
+    const tooWide = partialAnchor && (unknownError || a.uncertainty_ms > ANCHOR_PLACE_LIMIT_MS);
     const usable = a.state !== "unavailable" && finiteMs(a.value_ms) && !tooWide;
     // Why nothing was placed through the anchor, said about a pull request
     // GitHub did read: the anchor's own GitHub trouble is the anchor's.
     const noAnchor = tooWide
-      ? ["anchor_spread_too_wide"]
+      ? [unknownError ? "anchor_unconfirmed" : "anchor_spread_too_wide"]
       : (a.state === "unavailable" ? a.reasons : ["no_timed_pr"]).map((r) => (r === "github_unreadable" || r === "github_lookup_capped" ? `anchor_${r}` : r));
     // A time placed through a partial anchor: its reasons, and its direction
     // (an anchor that is a lower bound places times that are upper bounds).
@@ -1504,10 +1509,11 @@
           mergedState = viaAnchor();
           // The opening from the session and the merge through the anchor
           // use different clocks a few seconds apart; a merge never lands
-          // before its opening, and the true merge is at least then.
+          // before its opening, and the true merge is at least then. The
+          // clamp adds its reason to the anchor's; it never replaces them.
           if (opened !== null && merged < opened) {
             merged = opened;
-            mergedState = { state: "partial", bound: "lower", reasons: ["clock_skew"] };
+            mergedState = { state: "partial", bound: "lower", reasons: [...new Set([...mergedState.reasons, "clock_skew"])].sort() };
           }
         } else mergedState = none(t === null ? ["merged_time_not_recorded"] : noAnchor);
       } else mergedState = none([ghMissing]);

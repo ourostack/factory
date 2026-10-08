@@ -79,8 +79,8 @@ jobs:
           node .github/scripts/apply-corrections.mjs --store . | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The pull request reads of earlier builds (site/scripts/pr-clock.mjs):
-      # merged and closed pull requests are final and cost no request, and
-      # the rest are asked with their ETag. The cache lives in the runner's
+      # merged pull requests are final and cost no request, and the rest
+      # are asked with their ETag. The cache lives in the runner's
       # temp folder, never in site/dist, so it is never published.
       - name: Restore the pull request cache
         uses: actions/cache/restore@v4
