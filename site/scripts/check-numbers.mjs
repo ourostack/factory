@@ -287,12 +287,12 @@ export function checkByWeek(doc) {
     if (!w || typeof w.starts_on !== "string") return bad(`weeks[${i}]`, "bad_week");
     if (prev !== null && Date.parse(`${w.starts_on}T00:00:00Z`) - prev !== 7 * 86400000) bad(`weeks[${i}]`, "weeks_not_contiguous");
     prev = Date.parse(`${w.starts_on}T00:00:00Z`);
-    if (w.n === 0 && Object.keys(w).some((k) => !["week", "starts_on", "n", "n_partial", "jobs"].includes(k))) bad(`weeks[${i}]`, "empty_week_with_figures");
+    if (w.n === 0 && Object.keys(w).some((k) => !["week", "starts_on", "n", "n_partial", "n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about", "jobs"].includes(k))) bad(`weeks[${i}]`, "empty_week_with_figures");
   });
   return out;
 }
 const BY_WEEK_FINISH_PATH = /^tasks\[\d+\]\.finish_date$/;
-const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial"]);
+const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial", "n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about"]);
 
 // The check also runs on the serialized file: JSON.stringify turns NaN and
 // Infinity into null, so a null in the file is a number that went bad.

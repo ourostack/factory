@@ -390,9 +390,9 @@ test("each task's hours count in the week it finished, every week from first to 
   assert.equal(w40.not_labeled_ms.value, 0)
   assert.equal(w40.n_partial, 0)
   assert.equal(w40.flow_efficiency.median.value, 0.5)
-  assert.deepEqual([w40.flow_efficiency.n, w40.flow_efficiency.N, w40.flow_efficiency.of], [2, 2, "finished tasks with measured flow efficiency"])
+  assert.deepEqual([w40.flow_efficiency.n, w40.flow_efficiency.N, w40.flow_efficiency.of], [2, 2, "finished tasks with a flow efficiency figure"])
   // An empty week is a slot, not a zero bar.
-  assert.deepEqual(doc.weeks[1], { week: "2026-W41", starts_on: "2026-10-05", n: 0, n_partial: 0, jobs: [] })
+  assert.deepEqual(doc.weeks[1], { week: "2026-W41", starts_on: "2026-10-05", n: 0, n_partial: 0, n_day_measured: 0, n_day_on_or_before: 0, n_day_on_or_after: 0, n_day_about: 0, jobs: [] })
   // A task placed by an upper-bound day is partial.
   assert.equal(doc.weeks[2].n_partial, 1)
   // The open task is not counted; the finished one without a day is unplaced.
@@ -735,4 +735,50 @@ test("N6: in a 2-against-1 split the finish day follows the anchor, and disagree
   const apart = prAnchor([tp(1, 1000), tp(2, 1000), tp(3, 1000)], gh([["o/a", 1, T0 + 1000], ["o/a", 2, T0 + 1000 - DAY], ["o/a", 3, T0 + 1000 + DAY]]))
   const h = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: apart })
   assert.deepEqual([h.state, h.bound], ["partial", "lower"])
+})
+
+// ---------------------------------------------------------------- fix round 1 of #202: day counts and bounded medians
+
+test("B1: each week says how many of its tasks have an exact day, an 'on or before' day, an 'on or after' day or one with no direction", () => {
+  const stackup = { jobs: ["aaaa", "bbbb", "cccc", "dddd"].map((j) => stackRow(j)) }
+  const tasks = { jobs: ["aaaa", "bbbb", "cccc", "dddd"].map((j) => taskRow(j)) }
+  const finishDates = new Map([
+    ["aaaa", day("2026-10-06")],
+    ["bbbb", { ...partial("2026-10-06", ["finish_from_labels_landing"]), basis: "labels_landed", bound: "upper" }],
+    ["cccc", { ...partial("2026-10-07", ["anchor_unconfirmed"]), basis: "pr_anchor", bound: "lower" }],
+    ["dddd", { ...partial("2026-10-07", ["anchor_spread"]), basis: "pr_anchor", bound: "unknown" }],
+  ])
+  const doc = buildByWeek({ stackup, tasks, finishDates })
+  const w = doc.weeks[0]
+  assert.deepEqual([w.n_day_measured, w.n_day_on_or_before, w.n_day_on_or_after, w.n_day_about], [1, 1, 1, 1])
+  assert.deepEqual(checkByWeek(doc), [])
+  // An empty week carries zero counts and nothing else.
+  const gap = buildByWeek({ stackup: { jobs: [stackRow("aaaa"), stackRow("bbbb")] }, tasks, finishDates: new Map([["aaaa", day("2026-09-28")], ["bbbb", day("2026-10-12")]]) })
+  assert.deepEqual(gap.weeks[1], { week: "2026-W41", starts_on: "2026-10-05", n: 0, n_partial: 0, n_day_measured: 0, n_day_on_or_before: 0, n_day_on_or_after: 0, n_day_about: 0, jobs: [] })
+  assert.deepEqual(checkByWeek(gap), [])
+})
+
+test("I4: when every flow efficiency in a week leans one way, the week's median is bounded that way over the tasks with a figure", () => {
+  const jobs = ["aaaa", "bbbb", "cccc", "dddd", "eeee"]
+  const stackup = { jobs: jobs.map((j) => stackRow(j)) }
+  const atMost = (v) => part(v, ["card_dates_shorter_than_work"], "upper")
+  const tasks = { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", atMost(0.43)), taskRow("cccc", env(0.5)), taskRow("dddd", atMost(0.6)), taskRow("eeee", { state: "unavailable", reasons: ["source_unreadable"] })] }
+  const finishDates = new Map(jobs.map((j) => [j, day("2026-10-06")]))
+  const doc = buildByWeek({ stackup, tasks, finishDates })
+  const f = doc.weeks[0].flow_efficiency
+  // Median of 0.1, 0.43, 0.5, 0.6 is 0.465: each true value is at most its figure, so the true median of these 4 is at most that.
+  assert.deepEqual([f.median.state, f.median.bound, f.n, f.N], ["partial", "upper", 4, 5])
+  assert.ok(Math.abs(f.median.value - 0.465) < 1e-9)
+  assert.ok(f.median.reasons.includes("unmeasured_members"))
+  assert.equal(f.of, "finished tasks with a flow efficiency figure")
+  assert.deepEqual(checkByWeek(doc), [])
+  // All measured: measured.
+  const all = buildByWeek({ stackup, tasks: { jobs: jobs.map((j) => taskRow(j, env(0.2))) }, finishDates }).weeks[0].flow_efficiency
+  assert.deepEqual([all.median.state, all.median.value, all.n, all.N], ["measured", 0.2, 5, 5])
+  // At least and at most together: the median of the measured ones only, with no direction.
+  const mixed = buildByWeek({ stackup, tasks: { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", part(0.4, ["log_truncated"], "lower")), taskRow("cccc", env(0.5)), taskRow("dddd", env(0.7)), taskRow("eeee", env(0.9))] }, finishDates }).weeks[0].flow_efficiency
+  assert.deepEqual([mixed.median.value, mixed.median.bound, mixed.median.bound_reason, mixed.n, mixed.N], [0.7, null, "median_of_subset", 3, 5])
+  // Mixed with nothing measured: no median, because the reasons conflict.
+  const none = buildByWeek({ stackup: { jobs: [stackRow("aaaa"), stackRow("bbbb")] }, tasks: { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", part(0.4, ["log_truncated"], "lower"))] }, finishDates }).weeks[0].flow_efficiency
+  assert.deepEqual([none.median.state, none.median.reasons, none.n, none.N], ["unavailable", ["bound_reasons_conflict"], 0, 2])
 })
