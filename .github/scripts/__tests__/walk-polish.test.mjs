@@ -234,8 +234,8 @@ test("the store adds each task's name and finish order to tasks.json, and never 
     { id: "priv", finish_order: m(9), finish_group: m(2), finish_basis: "labels" },
   ] }
   const out = enrichTasks(tasks, data)
-  assert.deepEqual(out.store_fields, ["name", "finish_order", "finish_group", "finish_basis"])
-  assert.deepEqual(out.jobs[0], { ...tasks.jobs[0], name: "Fix the build", finish_order: m(4), finish_group: m(2), finish_basis: "labels" })
+  assert.deepEqual(out.store_fields, ["name", "finish_order", "finish_group", "finish_basis", "finish_date"])
+  assert.deepEqual(out.jobs[0], { ...tasks.jobs[0], name: "Fix the build", finish_order: m(4), finish_group: m(2), finish_basis: "labels", finish_date: null })
   assert.equal(out.jobs[1].name, null, "a private task has no name, as on the page")
   assert.deepEqual([out.jobs[2].name, out.jobs[2].finish_order, out.jobs[2].finish_basis], [null, null, null])
   assert.equal("bound" in out.jobs[0].working_ms, false, "no direction is invented")
@@ -256,7 +256,7 @@ test("llms.txt says which files state a partial figure's direction, from the fil
   assert.doesNotMatch(txt, /\{\{/)
   assert.doesNotMatch(txt, /in the page's words/, "tasks.json holds keys and milliseconds, and says so")
   assert.match(txt, /## Reading the reasons\n\n- reasons\.json/)
-  assert.match(txt, /plus the store's `name` \(null for a private task\), `finish_order`, `finish_group` and `finish_basis`/)
+  assert.match(txt, /plus the store's `name` \(null for a private task\), `finish_order`, `finish_group`, `finish_basis` and `finish_date`/)
   assert.match(txt, /`other_task` \(a session of the task was running, but its agent was working on another task; the other task is never named\)/)
   assert.match(txt, /where Desk gives `gaps\[\]\.idle_by_waited_on_ms`, that is the gap's exact split/)
   assert.match(txt, /kaizen_issues \(the problems in hand, each with the `cause` key it works on when one is known\)/)

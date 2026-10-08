@@ -21,6 +21,10 @@ const { hasReasonText } = createRequire(import.meta.url)("../src/format.js");
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
 const ROLLUP_KEYS = ["n", "N", "of", "out_of_scope", "excluded"];
+// Where a finish day came from (finish-date.mjs). A finish day is the only
+// stated number whose `basis` is one of these.
+const FINISH_BASES = new Set(["desk_transition", "desk_card_updated", "pr_anchor", "labels_landed"]);
+const FINISH_DATE_PATH = /^jobs\[\d+\]\.finish_date$/;
 // Reasons under which a rollup may carry a value with n of zero: every
 // member is flagged, but the flag still leaves a value (a lower bound from a
 // host that records partly, a capture share from unverified hosts). Each
@@ -60,7 +64,7 @@ const NUMBER_PATHS = [
   /^outcomes\.rework\.reason_check\.(compared|disagree)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
   /^jobs\[\d+\]\.(attention_ms|human_turns)$/,
-  /^jobs\[\d+\]\.(finish_order|finish_group|more_prs)$/,
+  /^jobs\[\d+\]\.(finish_order|finish_group|more_prs|finish_date)$/,
   /^jobs\[\d+\]\.waste\.(sessions_labeled|sessions_on_timeline|foreign_sessions|rows\[\d+\]\.total_ms)$/,
   /^labeled_waste\.(jobs_with_labels|jobs_finished|rows\[\d+\]\.(total_ms|jobs))$/,
   /^trend\[\d+\]\.(jobs|accepted|sent_back|flow_efficiency)$/,
@@ -132,7 +136,11 @@ export function checkNumbers(data) {
     if ("bound" in node && !["lower", "upper", "unknown"].includes(node.bound)) bad(path, "bad_bound");
     else if (node.state === "partial" && !("bound" in node)) bad(path, "partial_without_direction");
     else if (node.state !== "partial" && "bound" in node) bad(path, "bound_on_whole_number");
-    if ("basis" in node && node.basis !== "declared" && node.basis !== "inferred") bad(path, "bad_basis");
+    if (!FINISH_DATE_PATH.test(path) && "basis" in node && node.basis !== "declared" && node.basis !== "inferred") bad(path, "bad_basis");
+    if (FINISH_DATE_PATH.test(path) && node.state !== "unavailable") {
+      if (typeof node.value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(node.value)) bad(path, "bad_finish_day");
+      if (!FINISH_BASES.has(node.basis)) bad(path, "bad_basis");
+    }
     if ("run_url" in node && !(typeof node.run_url === "string" && node.run_url.startsWith("https://github.com/"))) bad(path, "bad_url");
     for (const [k, v] of Object.entries(node)) {
       if (!STATED_KEYS.has(k)) {
@@ -215,6 +223,77 @@ export function checkNumbers(data) {
   return out;
 }
 
+// The same rules for rollups/by_week.json (factory.site.by_week/1), which is
+// store-built and sits beside Desk's files, so its partial figures give a
+// direction as Desk does: `bound` "lower" or "upper", or null with a
+// `bound_reason`. Every figure is a stated number, an empty week holds no
+// sums, and the weeks run without a gap.
+const BY_WEEK_ENVELOPE_KEYS = new Set(["state", "value", "reasons", "bound", "bound_reason", "class", "basis"]);
+export function checkByWeek(doc) {
+  const out = [];
+  const bad = (path, code) => out.push({ path, code });
+  if (!doc || typeof doc !== "object" || doc.schema !== "factory.site.by_week/1") {
+    bad("", "wrong_schema");
+    return out;
+  }
+  const envelope = (node, path) => {
+    if (!STATES.has(node.state)) bad(path, "bad_state");
+    if (!Array.isArray(node.reasons)) bad(path, "missing_reasons");
+    else {
+      if (node.state === "measured" && node.reasons.length > 0) bad(path, "measured_with_reasons");
+      if (node.state !== "measured" && node.reasons.length === 0) bad(path, "missing_reasons");
+      for (const r of node.reasons) {
+        if (typeof r !== "string" || !r) bad(path, "bad_reason");
+        else if (!hasReasonText(r)) bad(path, "reason_without_text");
+      }
+    }
+    if (node.state === "unavailable") {
+      if ("value" in node) bad(path, "value_on_unavailable");
+    } else if (BY_WEEK_FINISH_PATH.test(path)) {
+      // A finish day is a real-shaped day with a known basis, as in data.json.
+      if (typeof node.value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(node.value)) bad(path, "bad_finish_day");
+      if (!FINISH_BASES.has(node.basis)) bad(path, "bad_basis");
+    } else if (typeof node.value !== "number" || !Number.isFinite(node.value)) bad(path, "bad_value");
+    if (node.state === "partial") {
+      if (!("bound" in node)) bad(path, "partial_without_direction");
+      else if (node.bound === null) {
+        if (typeof node.bound_reason !== "string" || !hasReasonText(node.bound_reason)) bad(path, "null_bound_without_reason");
+      } else if (node.bound !== "lower" && node.bound !== "upper") bad(path, "bad_bound");
+    } else if ("bound" in node || "bound_reason" in node) bad(path, "bound_on_whole_number");
+    for (const k of Object.keys(node)) if (!BY_WEEK_ENVELOPE_KEYS.has(k)) bad(`${path}.${k}`, "unknown_key");
+  };
+  const walk = (node, path) => {
+    if (node === null || node === undefined) return bad(path, "null_value");
+    if (typeof node === "number") return bad(path, Number.isFinite(node) ? "bare_number" : "non_finite");
+    if (typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach((x, i) => walk(x, `${path}[${i}]`));
+    if (typeof node.state === "string" || "reasons" in node) return envelope(node, path);
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "median" && v && typeof v === "object") walk(v, `${path}.${k}`);
+      else if (BY_WEEK_COUNT_KEYS.has(k)) {
+        if (!Number.isInteger(v) || v < 0) bad(`${path}.${k}`, "bad_count");
+      } else walk(v, path ? `${path}.${k}` : k);
+    }
+  };
+  const SKIP = new Set(["schema", "basis", "week_basis", "classes", "wastes", "idle_waited_on", "unplaced"]);
+  for (const [k, v] of Object.entries(doc)) if (!SKIP.has(k)) walk(v, k);
+  // The tasks left out for want of a finish day: a count, their keys and the reasons.
+  const un = doc.unplaced;
+  if (!un || !Number.isInteger(un.n) || !Array.isArray(un.jobs) || un.jobs.length !== un.n || !Array.isArray(un.reasons)) bad("unplaced", "bad_unplaced");
+  else for (const r of un.reasons) if (typeof r !== "string" || !hasReasonText(r)) bad("unplaced", "reason_without_text");
+  const weeks = Array.isArray(doc.weeks) ? doc.weeks : [];
+  let prev = null;
+  weeks.forEach((w, i) => {
+    if (!w || typeof w.starts_on !== "string") return bad(`weeks[${i}]`, "bad_week");
+    if (prev !== null && Date.parse(`${w.starts_on}T00:00:00Z`) - prev !== 7 * 86400000) bad(`weeks[${i}]`, "weeks_not_contiguous");
+    prev = Date.parse(`${w.starts_on}T00:00:00Z`);
+    if (w.n === 0 && Object.keys(w).some((k) => !["week", "starts_on", "n", "n_partial", "jobs"].includes(k))) bad(`weeks[${i}]`, "empty_week_with_figures");
+  });
+  return out;
+}
+const BY_WEEK_FINISH_PATH = /^tasks\[\d+\]\.finish_date$/;
+const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial"]);
+
 // The check also runs on the serialized file: JSON.stringify turns NaN and
 // Infinity into null, so a null in the file is a number that went bad.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -223,7 +302,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error("usage: check-numbers.mjs <data.json>");
     process.exit(2);
   }
-  const violations = checkNumbers(JSON.parse(readFileSync(file, "utf8")));
+  const doc = JSON.parse(readFileSync(file, "utf8"));
+  const violations = doc && doc.schema === "factory.site.by_week/1" ? checkByWeek(doc) : checkNumbers(doc);
   if (violations.length) {
     for (const v of violations.slice(0, 50)) console.error(`numbers-check: ${v.code} at ${v.path}`);
     console.error(`numbers-check: ${violations.length} violation(s) in ${file}`);
