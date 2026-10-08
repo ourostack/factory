@@ -445,7 +445,7 @@ test("the final review's fixes: one legend shape, a padded Pareto frame, the pic
   assert.match(css, /\.tw-legend-buttons li \{ display: grid; grid-template-columns: minmax\(min\(10em, 100%\), 1fr\) auto;/, "the cause link has its own column")
   assert.match(css, /\.tw-row > \.tw-ms \{ grid-column: 2;/, "every row puts its figure under its name")
   const app = read("site/src/app.js")
-  assert.match(app, /const plotW = colW \* n \+ \(phone \? 28 : 8\);/)
+  assert.match(app, /const plotW = colW \* n \+ \(phone \? rightW : 8\);/)
   assert.match(app, /share \? \(phone \? "% of lead time" : "% of each task's lead time"\)/)
   const html = read("site/src/index.html")
   assert.match(html, /<dt id="g-work-burst">Work burst<\/dt>/)
@@ -457,4 +457,38 @@ test("the final review's fixes: one legend shape, a padded Pareto frame, the pic
   assert.equal(a.feText, "100% (partial, direction not known)")
   assert.equal(a.badge, null)
   assert.equal(rows.find((r) => r.id === "b2").badge, "partial", "a bounded partial keeps its badge")
+})
+
+// ------------------------------------------- the live tour's polish fixes (S7)
+
+test("a cold load of a deep link shows the routed step's own shell, and an unrouted hash shows none", () => {
+  assert.equal(F.loadingView(""), "task")
+  assert.equal(F.loadingView("#/"), "task")
+  assert.equal(F.loadingView("#/act"), "act")
+  assert.equal(F.loadingView("#/causes"), "causes")
+  assert.equal(F.loadingView("#/compare?mode=share"), "compare")
+  assert.equal(F.loadingView("#/causes/waiting:next_prompt"), "cause")
+  assert.equal(F.loadingView("#/why?term=capture-coverage"), "why")
+  assert.equal(F.loadingView("#/task/abc123/session/def456"), "session")
+  // Not yet a view: only the status line's "Loading the store…" shows.
+  for (const h of ["#main", "#job-abc123", "#nonsense", "#/nope"]) assert.equal(F.loadingView(h), null, h)
+  const app = read("site/src/app.js")
+  assert.match(app, /async function main\(\) \{\n    showLoadingShell\(\);/, "the shell is chosen before any fetch")
+})
+
+test("every pair of neighbouring waiting causes differs clearly, in light and in dark", () => {
+  const css = read("site/src/styles.css")
+  const order = ["next_prompt", "other_task", "api_retry", "tool_failure", "long_tool_call", "queue_before_start", "no_session"]
+  const lin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  const lab = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => lin(parseInt(hex.slice(i, i + 2), 16)))
+    const [l, mm, s] = [0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b].map(Math.cbrt)
+    return [0.2104542553 * l + 0.793617785 * mm - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * mm + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * mm - 0.808675766 * s]
+  }
+  const dE = (a, b) => 100 * Math.hypot(...lab(a).map((x, i) => x - lab(b)[i]))
+  const [light, dark] = css.split("@media (prefers-color-scheme: dark)")
+  for (const [name, block] of [["light", light], ["dark", dark]]) {
+    const hex = order.map((k) => new RegExp(`--c-wait-${k}: (#[0-9a-f]{6});`).exec(block)[1])
+    for (let i = 0; i < hex.length - 1; i++) assert.ok(dE(hex[i], hex[i + 1]) >= 11, `${name}: ${order[i]} and ${order[i + 1]} are too close`)
+  }
 })

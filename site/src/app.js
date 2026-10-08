@@ -2912,9 +2912,9 @@
     const phone = container.clientWidth < 600;
     const width = Math.max(300, container.clientWidth);
     const colW = Math.min(120, Math.max(phone ? 70 : 78, Math.floor((width - leftW - rightW) / Math.max(n, 3))));
-    // The frame's end is padded so the last bar's label shows whole when
-    // the frame is scrolled fully right.
-    const plotW = colW * n + (phone ? 28 : 8);
+    // The frame's end is padded by the pinned axis's width, so the last
+    // bar's label shows whole, clear of the fade, when scrolled fully right.
+    const plotW = colW * n + (phone ? rightW : 8);
     const H = phone ? 220 : 260;
     const top = 26;
     const labelH = 62;
@@ -3724,7 +3724,19 @@
     }
   }
 
+  // Before the data arrives, show the routed view's own shell (its step label
+  // and heading), or nothing but the status line's "Loading the store…".
+  function showLoadingShell() {
+    const view = F.loadingView(window.location.hash);
+    for (const v of VIEWS) {
+      const node = document.getElementById(`view-${v}`);
+      if (node) node.hidden = v !== view;
+    }
+    if (view) document.body.dataset.view = view;
+  }
+
   async function main() {
+    showLoadingShell();
     let health = null;
     try {
       health = await loadJSON("./health.json");
