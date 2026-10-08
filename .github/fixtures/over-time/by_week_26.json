@@ -1,0 +1,4670 @@
+{
+ "schema": "factory.site.by_week/1",
+ "basis": "by_finish_week",
+ "week_basis": "iso_week_utc_monday_start",
+ "classes": [
+  "value",
+  "support"
+ ],
+ "wastes": [
+  "defects",
+  "extra_processing",
+  "unknown"
+ ],
+ "idle_waited_on": [
+  "next_prompt",
+  "other_task",
+  "api_retry",
+  "tool_failure",
+  "long_tool_call",
+  "queue_before_start",
+  "no_session",
+  "unknown"
+ ],
+ "weeks": [
+  {
+   "week": "2026-W15",
+   "starts_on": "2026-04-06",
+   "n": 4,
+   "n_partial": 2,
+   "n_day_measured": 2,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 1,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 235368932,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 115054662,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 114258761,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 36333051,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 60555085,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 12111017,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 6055509,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 57129381,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 22851752,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 34277628,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.49725271239876745,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 4,
+    "N": 4,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W16",
+   "starts_on": "2026-04-13",
+   "n": 1,
+   "n_partial": 0,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 96209089,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 31721134,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 62730319,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 10043631,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 16739385,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 3264180,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 1673938,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 30581031,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 12546064,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 19603225,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.3479792833328247,
+     "reasons": []
+    },
+    "n": 1,
+    "N": 1,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W17",
+   "starts_on": "2026-04-20",
+   "n": 5,
+   "n_partial": 4,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 3,
+   "n_day_on_or_after": 1,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa6",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa7",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 324171009,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 128535716,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 188154378,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 40804989,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 68008316,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "partial",
+     "value": 12921580,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    },
+    "extra_processing": {
+     "state": "partial",
+     "value": 6800832,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    },
+    "unknown": {
+     "state": "partial",
+     "value": 0,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 89373330,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 37630876,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 61150173,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.4294273167848587,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 5,
+    "N": 5,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W18",
+   "starts_on": "2026-04-27",
+   "n": 0,
+   "n_partial": 0,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": []
+  },
+  {
+   "week": "2026-W19",
+   "starts_on": "2026-05-04",
+   "n": 3,
+   "n_partial": 3,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 3,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 202406641,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 57666691,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 141059097,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 18404263,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 30673772,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 5521279,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 3067377,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 63476594,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 28211819,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 49370684,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.3934345602989197,
+     "reasons": []
+    },
+    "n": 3,
+    "N": 3,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W20",
+   "starts_on": "2026-05-11",
+   "n": 6,
+   "n_partial": 5,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 4,
+   "n_day_on_or_after": 1,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaf",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa10",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa12"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 558347767,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 149841573,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 398516756,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 47949303,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 79915506,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 13985213,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 7991551,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 174351081,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 79703351,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 144462324,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.3039123475551605,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 6,
+    "N": 6,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W21",
+   "starts_on": "2026-05-18",
+   "n": 2,
+   "n_partial": 2,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 2,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa13",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa14"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 95539831,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 45837873,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 46515368,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 14707339,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 24512231,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 4167079,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 2451223,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 19769032,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 9303074,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 17443263,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.5413237199187279,
+     "reasons": []
+    },
+    "n": 2,
+    "N": 2,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W22",
+   "starts_on": "2026-05-25",
+   "n": 0,
+   "n_partial": 0,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": []
+  },
+  {
+   "week": "2026-W23",
+   "starts_on": "2026-06-01",
+   "n": 6,
+   "n_partial": 4,
+   "n_day_measured": 2,
+   "n_day_on_or_before": 4,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa15",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa16",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa17",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa18",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa19",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1a"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 464206557,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 205051870,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 243720675,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 66145764,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 110242941,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 17638871,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 11024294,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 97488270,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 48744135,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 97488270,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.5004182517528534,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 6,
+    "N": 6,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W24",
+   "starts_on": "2026-06-08",
+   "n": 2,
+   "n_partial": 1,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 199072026,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 52233216,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 142755890,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 16894841,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 28158068,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 4364501,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 2815807,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 55317907,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 28551178,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 58886805,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.2904658079147339,
+     "reasons": []
+    },
+    "n": 2,
+    "N": 2,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W25",
+   "starts_on": "2026-06-15",
+   "n": 5,
+   "n_partial": 4,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 4,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1d",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1e",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1f",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa20",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa21"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 303657921,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 119792891,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 174152093,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 38851748,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 64752914,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 9712937,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 6475291,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 65307035,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 34830419,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 74014640,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.3927826642990112,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 5,
+    "N": 5,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W26",
+   "starts_on": "2026-06-22",
+   "n": 2,
+   "n_partial": 1,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 1,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa22",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa23"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 111672108,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 12975913,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 97606078,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 4219809,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 7033015,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 1019787,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 703301,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 35382203,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 19521216,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 42702659,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.1579262748360634,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 2,
+    "N": 2,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W27",
+   "starts_on": "2026-06-29",
+   "n": 0,
+   "n_partial": 0,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": []
+  },
+  {
+   "week": "2026-W28",
+   "starts_on": "2026-07-06",
+   "n": 2,
+   "n_partial": 2,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 2,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa24",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa25"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 140862889,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 21561983,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 117362090,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 7050240,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 11750399,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 1586304,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 1175040,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 39609705,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 23472418,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 54279967,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.17094706594944,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 2,
+    "N": 2,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W29",
+   "starts_on": "2026-07-13",
+   "n": 1,
+   "n_partial": 1,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa26"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 44411796,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 5887017,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 37977898,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 1930169,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 3216949,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 418203,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 321695,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 12342817,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 7595580,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 18039502,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.14486912488937378,
+     "reasons": []
+    },
+    "n": 1,
+    "N": 1,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W30",
+   "starts_on": "2026-07-20",
+   "n": 1,
+   "n_partial": 1,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa27"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 16002903,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 1463601,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 14398956,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 481184,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 801973,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 100247,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 80197,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 4499674,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 2879791,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 7019491,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.10022849440574647,
+     "reasons": []
+    },
+    "n": 1,
+    "N": 1,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W31",
+   "starts_on": "2026-07-27",
+   "n": 6,
+   "n_partial": 6,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 6,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa28",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa29",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2a",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2c",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2d"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 417104803,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 170791687,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 229421631,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 56304952,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 93841586,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 11260990,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 9384159,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 68826489,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 45884326,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 114710815,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.4842644989490509,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 6,
+    "N": 6,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W32",
+   "starts_on": "2026-08-03",
+   "n": 4,
+   "n_partial": 4,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 3,
+   "n_day_on_or_after": 1,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2e",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2f",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa30",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa31"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 471221360,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 157698102,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 297449347,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 52131604,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 86886007,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "partial",
+     "value": 9991891,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    },
+    "extra_processing": {
+     "state": "partial",
+     "value": 8688601,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    },
+    "unknown": {
+     "state": "partial",
+     "value": 0,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 85516687,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 59489869,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 152442791,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.37561736106872556,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 4,
+    "N": 4,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W33",
+   "starts_on": "2026-08-10",
+   "n": 0,
+   "n_partial": 0,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": []
+  },
+  {
+   "week": "2026-W34",
+   "starts_on": "2026-08-17",
+   "n": 1,
+   "n_partial": 0,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa32"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 129503671,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 60904521,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 62019437,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 20245270,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 33742117,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 3542922,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 3374212,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 16280102,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 12403887,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 33335447,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.5210990071296692,
+     "reasons": []
+    },
+    "n": 1,
+    "N": 1,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W35",
+   "starts_on": "2026-08-24",
+   "n": 4,
+   "n_partial": 1,
+   "n_day_measured": 3,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa33",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa34",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa35",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa36"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 260851596,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 80258657,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 171675310,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 26752886,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 44588143,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 4458814,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 4458814,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 42918828,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 34335062,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 94421421,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.21743176728487013,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 4,
+    "N": 4,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W36",
+   "starts_on": "2026-08-31",
+   "n": 4,
+   "n_partial": 1,
+   "n_day_measured": 3,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa37",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa38",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa39",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3a"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 481200075,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 186335188,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 273584266,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 62284743,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 103807904,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 9861751,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 10380790,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 64976263,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 54716853,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 153891150,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.436214542388916,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 4,
+    "N": 4,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W37",
+   "starts_on": "2026-09-07",
+   "n": 1,
+   "n_partial": 0,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 0,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3b"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 38579429,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 15021278,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 21795878,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 5035065,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 8391776,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "partial",
+     "value": 755260,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    },
+    "extra_processing": {
+     "state": "partial",
+     "value": 839178,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    },
+    "unknown": {
+     "state": "partial",
+     "value": 0,
+     "reasons": [
+      "unmeasured_members"
+     ],
+     "bound": "lower"
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 4904073,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 4359176,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 12532630,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.4350388705730438,
+     "reasons": []
+    },
+    "n": 1,
+    "N": 1,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W38",
+   "starts_on": "2026-09-14",
+   "n": 2,
+   "n_partial": 2,
+   "n_day_measured": 0,
+   "n_day_on_or_before": 2,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3c",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3d"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 113020276,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 19876290,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 90749923,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 6681106,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 11135177,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 946490,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 1113518,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 19284359,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 18149985,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 53315580,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "measured",
+     "value": 0.1866613686084747,
+     "reasons": []
+    },
+    "n": 2,
+    "N": 2,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W39",
+   "starts_on": "2026-09-21",
+   "n": 2,
+   "n_partial": 1,
+   "n_day_measured": 1,
+   "n_day_on_or_before": 1,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3e",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3f"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 65953817,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 25824790,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 36937199,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 8704985,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 14508309,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 1160665,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 1450831,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 7387440,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 7387440,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 22162319,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.4395945355296135,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 2,
+    "N": 2,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  },
+  {
+   "week": "2026-W40",
+   "starts_on": "2026-09-28",
+   "n": 5,
+   "n_partial": 2,
+   "n_day_measured": 3,
+   "n_day_on_or_before": 2,
+   "n_day_on_or_after": 0,
+   "n_day_about": 0,
+   "jobs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa40",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa41",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa42",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa43",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa44"
+   ],
+   "lead_ms": {
+    "state": "measured",
+    "value": 505646198,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 179616824,
+    "reasons": []
+   },
+   "idle_ms": {
+    "state": "measured",
+    "value": 303261045,
+    "reasons": []
+   },
+   "by_class_ms": {
+    "value": {
+     "state": "measured",
+     "value": 60715546,
+     "reasons": []
+    },
+    "support": {
+     "state": "measured",
+     "value": 101192577,
+     "reasons": []
+    }
+   },
+   "by_waste_ms": {
+    "defects": {
+     "state": "measured",
+     "value": 7589443,
+     "reasons": []
+    },
+    "extra_processing": {
+     "state": "measured",
+     "value": 10119258,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "idle_by_waited_on_ms": {
+    "next_prompt": {
+     "state": "measured",
+     "value": 56861446,
+     "reasons": []
+    },
+    "other_task": {
+     "state": "measured",
+     "value": 60652209,
+     "reasons": []
+    },
+    "api_retry": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "tool_failure": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "long_tool_call": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "queue_before_start": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    },
+    "no_session": {
+     "state": "measured",
+     "value": 185747390,
+     "reasons": []
+    },
+    "unknown": {
+     "state": "measured",
+     "value": 0,
+     "reasons": []
+    }
+   },
+   "agents_working_unlabeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "not_labeled_ms": {
+    "state": "measured",
+    "value": 0,
+    "reasons": []
+   },
+   "flow_efficiency": {
+    "median": {
+     "state": "partial",
+     "value": 0.428498363494873,
+     "reasons": [
+      "card_dates_shorter_than_work"
+     ],
+     "bound": "upper"
+    },
+    "n": 5,
+    "N": 5,
+    "of": "finished tasks with a flow efficiency figure"
+   }
+  }
+ ],
+ "tasks": [
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-04-12",
+    "reasons": [
+     "anchor_unconfirmed"
+    ],
+    "basis": "pr_anchor",
+    "bound": "lower"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.3711459994316101,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 50294130,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 18666465,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-04-06",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5576632976531982,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 132464671,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 73870685,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-04-06",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5963800609111786,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 35043068,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 20898987,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-04-12",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.4368421271443367,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 17567063,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 7674033,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-04-14",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.3479792833328247,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 96209089,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 33478770,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-04-25",
+    "reasons": [
+     "anchor_unconfirmed"
+    ],
+    "basis": "pr_anchor",
+    "bound": "lower"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.11360274851322175,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 28273563,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 3211954,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa6",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-04-25",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5179259538650512,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 124937354,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 64708298,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa7",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-04-22",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.4294273167848587,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 28839444,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 12384445,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-04-23",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5372243881225586,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 52256030,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 28073214,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-04-22",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.30755952596664426,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 89864618,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 27638719,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-06",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.3934345602989197,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 110512460,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 43479421,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-07",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.39564228653907774,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 19619894,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 7762460,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-09",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.1398237705230713,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 72274287,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 10105663,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-17",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.40878448486328123,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 94157062,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 38489946,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-15",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.41579494476318357,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 63866382,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 26555319,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaf",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-12",
+    "reasons": [
+     "anchor_unconfirmed"
+    ],
+    "basis": "pr_anchor",
+    "bound": "lower"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.10018060207366944,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 96096071,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 9626962,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa10",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-14",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.28357861042022703,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 69421516,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 19686457,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-15",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.24137136936187745,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 128662132,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 31055355,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa12",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-05-12",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.32424608469009397,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 106144605,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 34416973,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa13",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-20",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.4873860239982605,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 72738670,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 35451811,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa14",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-05-19",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5952614158391952,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 22801161,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 13572651,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa15",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-02",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5872212409973144,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 111037143,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 65203369,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa16",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-06-04",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.4931097388267517,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 63981240,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 31549773,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa17",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-03",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.5575602412223816,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 79778001,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 44481041,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa18",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-06-06",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.2688260436058044,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 73771020,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 19831571,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa19",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-03",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.2229345351457596,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 33173310,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 7395477,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1a",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-02",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5077267646789551,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 102465841,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 52024650,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1b",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-06-14",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.42140505313873294,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 93779600,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 39519197,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-13",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.15952656269073487,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 105292426,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 16796939,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1d",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-17",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.52235167324543,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 23157109,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 12096155,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1e",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-21",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.3779734134674072,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 75336726,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 28475280,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1f",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-19",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.39227663576602934,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 17904048,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 7023340,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa20",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-06-15",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.3927826642990112,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 117622863,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 46200222,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa21",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-20",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.5128127694129944,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 69637174,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 35710832,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa22",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-06-22",
+    "reasons": [
+     "anchor_unconfirmed"
+    ],
+    "basis": "pr_anchor",
+    "bound": "lower"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.20947825014591218,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 21211482,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 4443344,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa23",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-06-24",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.1063742995262146,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 90460626,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 9622686,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa24",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-10",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.18013787865638733,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 38916349,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 7010309,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa25",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-11",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.16175625324249268,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 101946540,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 16490490,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa26",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-17",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.14486912488937378,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 44411796,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 6433898,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa27",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-20",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.10022849440574647,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 16002903,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 1603947,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa28",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-28",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.176383113861084,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 52319888,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 9228345,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa29",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-31",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.590125298500061,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 81113260,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 47866987,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2a",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-08-01",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.49668256044387815,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 47940502,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 23811211,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2b",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-27",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.4718464374542236,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 111728548,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 52718717,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2c",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-31",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.23019154965877534,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 38941862,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 8964088,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2d",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-07-30",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5301367402076721,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 85060743,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 45093825,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2e",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-08-09",
+    "reasons": [
+     "anchor_unconfirmed"
+    ],
+    "basis": "pr_anchor",
+    "bound": "lower"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.4876245021820068,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 83402751,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 40669225,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2f",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-08-09",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.2636102199554443,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 133900310,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 35297490,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa30",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-08-09",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5674890041351318,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 145251384,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 82428563,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa31",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-08-07",
+    "reasons": [
+     "finish_from_labels_landing"
+    ],
+    "basis": "labels_landed",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.14150336980819703,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 108666916,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 15376735,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa32",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-08-17",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5210990071296692,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 129503671,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 67484234,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa33",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-08-25",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.27102737724781034,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 14527589,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 3937374,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa34",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-08-26",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5627030491828918,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 119324147,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 67144062,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa35",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-08-28",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.16383615732192994,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 80906263,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 13255371,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa36",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-08-25",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.10499242544174195,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 46093597,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 4839479,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa37",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-09-04",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.3652931213378906,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 149077081,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 54456832,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa38",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-05",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.38000926971435545,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 141463916,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 53757599,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa39",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-04",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.5656918942928314,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 75295656,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 42594142,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3a",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-05",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.49241981506347654,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 115363422,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 56807235,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3b",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-11",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.4350388705730438,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 38579429,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 16783551,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3c",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-09-20",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.10660473108291627,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 49178867,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 5242700,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3d",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-09-19",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.2667180061340332,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 63841409,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 17027653,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3e",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-23",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.4383921235799789,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 23129961,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 10139993,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3f",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-09-27",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.440796947479248,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 42823856,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 18876625,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa40",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-10-02",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.5177794456481933,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 91012637,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 47124473,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa41",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-09-29",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "partial",
+    "value": 0.15335474014282227,
+    "reasons": [
+     "card_dates_shorter_than_work"
+    ],
+    "bound": "upper"
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 81025241,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 12425605,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa42",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-29",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.428498363494873,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 150832645,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 64631541,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa43",
+   "finish_date": {
+    "state": "partial",
+    "value": "2026-09-29",
+    "reasons": [
+     "finish_from_card_update"
+    ],
+    "basis": "desk_card_updated",
+    "bound": "upper"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.41730055809020994,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 150379167,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 62753310,
+    "reasons": []
+   }
+  },
+  {
+   "job": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa44",
+   "finish_date": {
+    "state": "measured",
+    "value": "2026-09-28",
+    "reasons": [],
+    "basis": "desk_transition"
+   },
+   "flow_efficiency": {
+    "state": "measured",
+    "value": 0.4769101649522781,
+    "reasons": []
+   },
+   "lead_time_ms": {
+    "state": "measured",
+    "value": 32396508,
+    "reasons": []
+   },
+   "working_ms": {
+    "state": "measured",
+    "value": 15450224,
+    "reasons": []
+   }
+  }
+ ],
+ "unplaced": {
+  "n": 2,
+  "jobs": [
+   "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+   "ffffffffffffffffffffffffffffffff"
+  ],
+  "reasons": [
+   "no_finish_source"
+  ]
+ }
+}

@@ -250,7 +250,8 @@ test("a job report's finish inputs are read when Desk has them and are empty whe
   const got = finishInputsOf(withDesk)
   assert.deepEqual(got.desk, withDesk.timeline.finished_on)
   assert.deepEqual(got.leadWindow, withDesk.timeline.lead_window)
-  assert.deepEqual(got.prs, [{ repo: "o/a", number: 4, at_ms: 100, created: true }, { repo: "o/a", number: 5, at_ms: null }])
+  // The pull requests pass unchanged, as the map's PR clock reads them (the shared anchor checks them itself).
+  assert.deepEqual(got.prs, withDesk.timeline.prs)
   assert.deepEqual(finishInputsOf({ timeline: {} }), { desk: null, leadWindow: null, prs: [] })
   assert.deepEqual(finishInputsOf(null), { desk: null, leadWindow: null, prs: [] })
 })
@@ -389,9 +390,9 @@ test("each task's hours count in the week it finished, every week from first to 
   assert.equal(w40.not_labeled_ms.value, 0)
   assert.equal(w40.n_partial, 0)
   assert.equal(w40.flow_efficiency.median.value, 0.5)
-  assert.deepEqual([w40.flow_efficiency.n, w40.flow_efficiency.N, w40.flow_efficiency.of], [2, 2, "finished tasks with measured flow efficiency"])
+  assert.deepEqual([w40.flow_efficiency.n, w40.flow_efficiency.N, w40.flow_efficiency.of], [2, 2, "finished tasks with a flow efficiency figure"])
   // An empty week is a slot, not a zero bar.
-  assert.deepEqual(doc.weeks[1], { week: "2026-W41", starts_on: "2026-10-05", n: 0, n_partial: 0, jobs: [] })
+  assert.deepEqual(doc.weeks[1], { week: "2026-W41", starts_on: "2026-10-05", n: 0, n_partial: 0, n_day_measured: 0, n_day_on_or_before: 0, n_day_on_or_after: 0, n_day_about: 0, jobs: [] })
   // A task placed by an upper-bound day is partial.
   assert.equal(doc.weeks[2].n_partial, 1)
   // The open task is not counted; the finished one without a day is unplaced.
@@ -640,4 +641,177 @@ test("the build with no stack-up file writes no by-week file and still dates the
   assert.equal(existsSync(join(dirname(fx.out), "rollups/by_week.json")), false)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   assert.equal(data.jobs.find((j) => j.id === "aaaaaaaa").finish_date.value, "2026-10-03")
+})
+
+// ---------------------------------------------------------------- re-review of #200 (N1-N6)
+
+test("N1: with anchor_spread on a timed anchor the finish day follows the shared anchor's 'at least'", () => {
+  // Two timed pull requests five days apart: the shared anchor is partial, lower, anchor_spread.
+  const apart = prAnchor([tp(1, 1000), tp(2, 1000)], gh([["o/a", 1, T0 + 1000], ["o/a", 2, T0 + 1000 + 5 * DAY]]))
+  assert.deepEqual([apart.state, apart.bound, apart.reasons], ["partial", "lower", ["anchor_spread"]])
+  const f = resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: apart, today: "2026-10-20" })
+  assert.equal(f.state, "partial")
+  assert.equal(f.bound, "lower")
+  assert.ok(f.reasons.includes("anchor_spread"))
+  // Three timed pull requests 90 seconds apart (cluster spread 3 minutes): also at least.
+  const cluster = prAnchor([tp(1, 1000), tp(2, 1000), tp(3, 1000)], gh([["o/a", 1, T0], ["o/a", 2, T0 + 90000], ["o/a", 3, T0 + 180000]]))
+  assert.deepEqual([cluster.bound, cluster.reasons], ["lower", ["anchor_spread"]])
+  assert.equal(resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: cluster }).bound, "lower")
+  // At least (anchor) and at most (last work) pull both ways: no direction, and the rollup says the reasons conflict.
+  const g = resolveFinishDate({ ...base, leadWindow: win(DAY, "partial", ["card_dates_shorter_than_work"]), anchor: apart, today: "2026-10-20" })
+  assert.equal(g.bound, "unknown")
+  assert.equal(forRollupFile(g).bound_reason, "bound_reasons_conflict")
+  // A created-basis spread (the shared anchor has no direction) still has none.
+  const created = prAnchor([tp(1, 1000, true), tp(2, 1000, true)], gh([["o/a", 1, T0 + 1000], ["o/a", 2, T0 + 1000 + DAY]]))
+  assert.equal(created.bound, null)
+  const h = resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: created })
+  assert.deepEqual([h.bound, forRollupFile(h).bound_reason], ["unknown", "anchor_spread"])
+  const k = resolveFinishDate({ ...base, leadWindow: win(DAY, "partial", ["card_dates_shorter_than_work"]), anchor: created })
+  assert.deepEqual([k.bound, forRollupFile(k).bound_reason], ["unknown", "anchor_spread"])
+  assert.deepEqual(checkNumbers({ jobs: [f, g, h, k].map((finish_date, i) => ({ id: `j${i}`, finish_date })) }), [])
+})
+
+test("N1: an anchored day that is itself 'at most' does not conflict with a labels day that is 'at most'", () => {
+  const anchor = { state: "measured", reasons: [], value_ms: T0 }
+  // The anchored day (last work, at most 7 Oct) is after the labels day (at most 4 Oct): both are upper bounds, so the task finished on or before 4 Oct.
+  const f = resolveFinishDate({ ...base, anchor, leadWindow: win(6 * DAY, "partial", ["card_dates_shorter_than_work"]), labelsDay: "2026-10-04" })
+  assert.deepEqual(f, { state: "partial", value: "2026-10-04", reasons: ["finish_from_labels_landing"], basis: "labels_landed", bound: "upper" })
+  // A measured or 'at least' anchored day after the labels day still conflicts.
+  assert.deepEqual(resolveFinishDate({ ...base, anchor, leadWindow: win(6 * DAY), labelsDay: "2026-10-04" }).reasons, ["anchor_after_labels"])
+  const lone = prAnchor([tp(1, 1000)], gh([["o/a", 1, T0 + 1000]]))
+  assert.deepEqual(resolveFinishDate({ ...base, anchor: lone, leadWindow: win(6 * DAY), labelsDay: "2026-10-04" }).reasons, ["anchor_after_labels"])
+})
+
+test("N2: an 'at least' anchor on a window that ends at the last work has reasons that pull both ways", () => {
+  const lone = prAnchor([tp(1, 1000)], gh([["o/a", 1, T0 + 1000]]))
+  const f = resolveFinishDate({ ...base, leadWindow: win(2 * DAY, "partial", ["card_dates_shorter_than_work"]), anchor: lone })
+  assert.deepEqual(forRollupFile(f), { ...f, bound: null, bound_reason: "bound_reasons_conflict" })
+})
+
+test("N3: the finish day reads the task's pull requests exactly as the map's PR clock does", () => {
+  const report = { timeline: { prs: [{ repo: "o/a", number: 1, at_ms: -5000 }, { repo: "o/a", number: 2, at_ms: 1000 }, { repo: "bad repo", number: 3, at_ms: 1000 }] } }
+  assert.deepEqual(finishInputsOf(report).prs, report.timeline.prs)
+  const pulls = gh([["o/a", 1, T0 - 5000 + 12 * 3600000], ["o/a", 2, T0 + 1000]])
+  const ours = prAnchor(finishInputsOf(report).prs, pulls)
+  const maps = prAnchor(report.timeline.prs, pulls)
+  assert.deepEqual(ours, maps)
+})
+
+test("N4: a task whose status is unknown is ordered with open tasks, not finished ones", () => {
+  const jobs = ["unknown", "finished", "open"].map((id, i) => ({ id, lead_time_ms: measured(5), sessions: [{ session_id: `s${i}` }] }))
+  const factsAdded = new Map([["facts/f0.json", 0], ["facts/f1.json", 1], ["facts/f2.json", 2]])
+  const factsFileOf = new Map([["s0", "f0.json"], ["s1", "f1.json"], ["s2", "f2.json"]])
+  const finishDates = new Map([
+    ["unknown", unavailable(["status_unavailable"])],
+    ["finished", unavailable(["no_finish_source"])],
+    ["open", unavailable(["open_job"])],
+  ])
+  const out = finishOrder(jobs, { factsAdded, factsFileOf, finishDates })
+  const order = [...out].sort((a, b) => a[1].finish_order.value - b[1].finish_order.value).map(([id]) => id)
+  assert.deepEqual(order, ["finished", "unknown", "open"])
+})
+
+test("N5: the About 'Finish order' paragraph says what llms.txt says", () => {
+  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const para = /<h2 class="block-title">Finish order<\/h2>\s*<p>([^]*?)<\/p>/.exec(html)[1]
+  assert.match(para, /on or after/)
+  assert.match(para, /open tasks (come )?last/i)
+  assert.doesNotMatch(para, /measured when their times agree within 2 minutes/)
+  assert.match(para, /strict majority/)
+  assert.doesNotMatch(para, /Tasks with no labels yet \(open tasks, and done tasks/)
+})
+
+test("N6: in a 2-against-1 split the finish day follows the anchor, and disagreeing unflagged pull requests are never measured", () => {
+  // Two agree, the lone one is later: the later sample means the true start may be later, so the anchor is unconfirmed.
+  const later = prAnchor([tp(1, 1000), tp(2, 1000), tp(3, 1000)], gh([["o/a", 1, T0], ["o/a", 2, T0 + 30000], ["o/a", 3, T0 + DAY]]))
+  assert.deepEqual([later.state, later.reasons], ["partial", ["anchor_unconfirmed"]])
+  const f = resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: later })
+  assert.deepEqual([f.state, f.bound, f.reasons, f.value], ["partial", "lower", ["anchor_unconfirmed"], "2026-10-02"])
+  // Two agree, the lone one is earlier: a strict majority with none later is measured.
+  const earlier = prAnchor([tp(1, 1000), tp(2, 1000), tp(3, 1000)], gh([["o/a", 1, T0], ["o/a", 2, T0 + 30000], ["o/a", 3, T0 - DAY]]))
+  assert.equal(earlier.state, "measured")
+  assert.deepEqual(resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: earlier }), { state: "measured", value: "2026-10-02", reasons: [], basis: "pr_anchor" })
+  // Three unflagged pull requests that all disagree: partial, never measured, and at least the day shown.
+  const apart = prAnchor([tp(1, 1000), tp(2, 1000), tp(3, 1000)], gh([["o/a", 1, T0 + 1000], ["o/a", 2, T0 + 1000 - DAY], ["o/a", 3, T0 + 1000 + DAY]]))
+  const h = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: apart })
+  assert.deepEqual([h.state, h.bound], ["partial", "lower"])
+})
+
+// ---------------------------------------------------------------- fix round 1 of #202: day counts and bounded medians
+
+test("B1: each week says how many of its tasks have an exact day, an 'on or before' day, an 'on or after' day or one with no direction", () => {
+  const stackup = { jobs: ["aaaa", "bbbb", "cccc", "dddd"].map((j) => stackRow(j)) }
+  const tasks = { jobs: ["aaaa", "bbbb", "cccc", "dddd"].map((j) => taskRow(j)) }
+  const finishDates = new Map([
+    ["aaaa", day("2026-10-06")],
+    ["bbbb", { ...partial("2026-10-06", ["finish_from_labels_landing"]), basis: "labels_landed", bound: "upper" }],
+    ["cccc", { ...partial("2026-10-07", ["anchor_unconfirmed"]), basis: "pr_anchor", bound: "lower" }],
+    ["dddd", { ...partial("2026-10-07", ["anchor_spread"]), basis: "pr_anchor", bound: "unknown" }],
+  ])
+  const doc = buildByWeek({ stackup, tasks, finishDates })
+  const w = doc.weeks[0]
+  assert.deepEqual([w.n_day_measured, w.n_day_on_or_before, w.n_day_on_or_after, w.n_day_about], [1, 1, 1, 1])
+  assert.deepEqual(checkByWeek(doc), [])
+  // An empty week carries zero counts and nothing else.
+  const gap = buildByWeek({ stackup: { jobs: [stackRow("aaaa"), stackRow("bbbb")] }, tasks, finishDates: new Map([["aaaa", day("2026-09-28")], ["bbbb", day("2026-10-12")]]) })
+  assert.deepEqual(gap.weeks[1], { week: "2026-W41", starts_on: "2026-10-05", n: 0, n_partial: 0, n_day_measured: 0, n_day_on_or_before: 0, n_day_on_or_after: 0, n_day_about: 0, jobs: [] })
+  assert.deepEqual(checkByWeek(gap), [])
+})
+
+test("I4: when every flow efficiency in a week leans one way, the week's median is bounded that way over the tasks with a figure", () => {
+  const jobs = ["aaaa", "bbbb", "cccc", "dddd", "eeee"]
+  const stackup = { jobs: jobs.map((j) => stackRow(j)) }
+  const atMost = (v) => part(v, ["card_dates_shorter_than_work"], "upper")
+  const tasks = { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", atMost(0.43)), taskRow("cccc", env(0.5)), taskRow("dddd", atMost(0.6)), taskRow("eeee", { state: "unavailable", reasons: ["source_unreadable"] })] }
+  const finishDates = new Map(jobs.map((j) => [j, day("2026-10-06")]))
+  const doc = buildByWeek({ stackup, tasks, finishDates })
+  const f = doc.weeks[0].flow_efficiency
+  // Median of 0.1, 0.43, 0.5, 0.6 is 0.465: each true value is at most its figure, so the true median of these 4 is at most that.
+  assert.deepEqual([f.median.state, f.median.bound, f.n, f.N], ["partial", "upper", 4, 5])
+  assert.ok(Math.abs(f.median.value - 0.465) < 1e-9)
+  assert.ok(f.median.reasons.includes("unmeasured_members"))
+  assert.equal(f.of, "finished tasks with a flow efficiency figure")
+  assert.deepEqual(checkByWeek(doc), [])
+  // All measured: measured.
+  const all = buildByWeek({ stackup, tasks: { jobs: jobs.map((j) => taskRow(j, env(0.2))) }, finishDates }).weeks[0].flow_efficiency
+  assert.deepEqual([all.median.state, all.median.value, all.n, all.N], ["measured", 0.2, 5, 5])
+  // At least and at most together: the median of the measured ones only, with no direction.
+  const mixed = buildByWeek({ stackup, tasks: { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", part(0.4, ["log_truncated"], "lower")), taskRow("cccc", env(0.5)), taskRow("dddd", env(0.7)), taskRow("eeee", env(0.9))] }, finishDates }).weeks[0].flow_efficiency
+  assert.deepEqual([mixed.median.value, mixed.median.bound, mixed.median.bound_reason, mixed.n, mixed.N], [0.7, null, "median_of_subset", 3, 5])
+  // Mixed with nothing measured: no median, because the reasons conflict.
+  const none = buildByWeek({ stackup: { jobs: [stackRow("aaaa"), stackRow("bbbb")] }, tasks: { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", part(0.4, ["log_truncated"], "lower"))] }, finishDates }).weeks[0].flow_efficiency
+  assert.deepEqual([none.median.state, none.median.reasons, none.n, none.N], ["unavailable", ["bound_reasons_conflict"], 0, 2])
+})
+
+test("N3: checkByWeek refuses day counts that are missing, negative, do not add up to the week's tasks, or disagree with the tasks' own finish days", () => {
+  const fx = JSON.parse(readFileSync(new URL("../../fixtures/over-time/by_week_26.json", import.meta.url), "utf8"))
+  assert.deepEqual(checkByWeek(fx), [])
+  const i = fx.weeks.findIndex((w) => w.n >= 3 && w.n_day_on_or_before > 0)
+  const codes = (d) => checkByWeek(d).map((v) => v.code)
+  // Counts that add up but disagree with the tasks' days (the reviewer's first mutation).
+  const moved = structuredClone(fx)
+  moved.weeks[i].n_day_measured = moved.weeks[i].n - moved.weeks[i].n_day_on_or_after - moved.weeks[i].n_day_about
+  moved.weeks[i].n_day_on_or_before = 0
+  assert.ok(codes(moved).includes("day_counts_disagree_with_tasks"), codes(moved).join())
+  // A count larger than the week.
+  const big = structuredClone(fx)
+  big.weeks[i].n_day_on_or_before = big.weeks[i].n + 4
+  assert.ok(codes(big).includes("day_counts_do_not_sum"), codes(big).join())
+  // A count missing.
+  const gone = structuredClone(fx)
+  delete gone.weeks[i].n_day_about
+  assert.ok(codes(gone).includes("missing_day_count"), codes(gone).join())
+  // A negative or fractional count.
+  const neg = structuredClone(fx)
+  neg.weeks[i].n_day_about = -1
+  assert.ok(codes(neg).includes("bad_count"), codes(neg).join())
+  // n that disagrees with the week's job list.
+  const n7 = structuredClone(fx)
+  n7.weeks[i].n += 2
+  assert.ok(codes(n7).includes("n_disagrees_with_jobs"), codes(n7).join())
+  // An empty week must still carry zero counts.
+  const e = fx.weeks.findIndex((w) => w.n === 0)
+  const emptyGone = structuredClone(fx)
+  delete emptyGone.weeks[e].n_day_measured
+  assert.ok(codes(emptyGone).includes("missing_day_count"), codes(emptyGone).join())
 })

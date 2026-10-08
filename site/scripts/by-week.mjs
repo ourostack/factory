@@ -21,7 +21,7 @@ import { forRollupFile, isoWeek } from "./finish-date.mjs";
 import { measured, partial, unavailable } from "./state.mjs";
 
 export const BY_WEEK_SCHEMA = "factory.site.by_week/1";
-const FLOW_OF = "finished tasks with measured flow efficiency";
+const FLOW_OF = "finished tasks with a flow efficiency figure";
 const DAY_MS = 86400000;
 const FINISHED = new Set(["done", "cancelled"]);
 
@@ -45,16 +45,47 @@ function medianOf(values) {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
-// The median of the measured flow efficiencies in a week.
+// A week's median flow efficiency. When every task's figure is measured, it
+// is measured. When the partial ones all lean one way (each true value at most
+// its figure, or each at least), the median of the figures is bounded the
+// same way, since a median moves with its members: it is the median of the n
+// tasks with a figure, out of the week's N. When they lean both ways, or one
+// has no direction, only the measured figures are used and the median has no
+// direction (`median_of_subset`); with none measured there is no median
+// (`bound_reasons_conflict`). Desk's `bound_not_moved` is an exact figure.
 function flowMedian(figures) {
-  const ok = figures.filter((f) => f && f.state === "measured" && Number.isFinite(f.value));
-  const n = ok.length;
   const N = figures.length;
-  let median;
-  if (n === 0) median = unavailable(["no_measured_members"]);
-  else if (n === N) median = measured(medianOf(ok.map((f) => f.value)));
-  else median = { ...partial(medianOf(ok.map((f) => f.value)), ["unmeasured_members"]), bound: null, bound_reason: "median_of_subset" };
+  const usable = figures.filter((f) => f && (f.state === "measured" || f.state === "partial") && Number.isFinite(f.value));
+  const exact = (f) => f.state === "measured" || (f.bound === null && f.bound_reason === "bound_not_moved");
+  const dirs = new Set(usable.filter((f) => !exact(f)).map((f) => (f.bound === "lower" || f.bound === "upper" ? f.bound : "none")));
+  if (!usable.length) return { median: unavailable(["no_measured_members"]), n: 0, N, of: FLOW_OF };
+  if (dirs.has("none") || dirs.size > 1) {
+    const ok = usable.filter(exact);
+    if (!ok.length) return { median: unavailable(["bound_reasons_conflict"]), n: 0, N, of: FLOW_OF };
+    return { median: { ...partial(medianOf(ok.map((f) => f.value)), ["unmeasured_members"]), bound: null, bound_reason: "median_of_subset" }, n: ok.length, N, of: FLOW_OF };
+  }
+  const value = medianOf(usable.map((f) => f.value));
+  const n = usable.length;
+  if (!dirs.size && n === N && usable.every((f) => f.state === "measured")) return { median: measured(value), n, N, of: FLOW_OF };
+  const reasons = new Set(usable.filter((f) => f.state === "partial").flatMap((f) => f.reasons || []));
+  if (n < N) reasons.add("unmeasured_members");
+  if (!reasons.size) reasons.add("unmeasured_members");
+  const median = dirs.size ? { ...partial(value, [...reasons].sort()), bound: [...dirs][0] } : { ...partial(value, [...reasons].sort()), bound: null, bound_reason: "median_of_subset" };
   return { median, n, N, of: FLOW_OF };
+}
+
+// How many of a week's tasks have an exact finish day, an "on or before" day,
+// an "on or after" day, or one with no direction: a week whose days are "on
+// or before" may hold tasks that finished in earlier weeks.
+function dayCounts(dates) {
+  const c = { n_day_measured: 0, n_day_on_or_before: 0, n_day_on_or_after: 0, n_day_about: 0 };
+  for (const d of dates) {
+    if (d.state === "measured") c.n_day_measured += 1;
+    else if (d.bound === "upper") c.n_day_on_or_before += 1;
+    else if (d.bound === "lower") c.n_day_on_or_after += 1;
+    else c.n_day_about += 1;
+  }
+  return c;
 }
 
 function keysOf(rows, pick, listed) {
@@ -120,7 +151,7 @@ export function buildByWeek({ stackup, tasks, finishDates }) {
       const { week } = isoWeek(starts_on);
       const mine = placed.filter((r) => weekOf.get(r.job).starts_on === starts_on).sort((a, b) => a.job.localeCompare(b.job));
       if (!mine.length) {
-        doc.weeks.push({ week, starts_on, n: 0, n_partial: 0, jobs: [] });
+        doc.weeks.push({ week, starts_on, n: 0, n_partial: 0, ...dayCounts([]), jobs: [] });
         continue;
       }
       const partialTask = (r) => dateOf(r).state !== "measured" || figuresOf(r, keys).some((f) => !f || f.state !== "measured");
@@ -129,6 +160,7 @@ export function buildByWeek({ stackup, tasks, finishDates }) {
         starts_on,
         n: mine.length,
         n_partial: mine.filter(partialTask).length,
+        ...dayCounts(mine.map(dateOf)),
         jobs: mine.map((r) => r.job),
         lead_ms: sumBy(mine, (r) => r.lead_time_ms),
         working_ms: sumBy(mine, (r) => r.working_ms),

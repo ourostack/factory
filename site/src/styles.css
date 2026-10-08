@@ -1066,6 +1066,9 @@ table.data-table.handoffs-table th { white-space: normal; vertical-align: bottom
 .drawer-close { font: inherit; font-size: 14px; background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; color: var(--text-primary); cursor: pointer; }
 #drawer-body { padding: 12px 18px 18px; }
 .drawer-what { margin: 0 0 10px; font-size: 15px; }
+.drawer-task { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
+.picker-sort { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 0; font-size: 13px; color: var(--text-secondary); }
+.picker-finish { white-space: nowrap; }
 .drawer-what .swatch { margin-right: 8px; }
 .drawer-facts { margin: 0 0 10px; display: grid; gap: 4px; font-size: 14px; }
 .drawer-facts > div { display: grid; grid-template-columns: minmax(8em, 34%) minmax(0, 1fr); gap: 10px; }
@@ -1152,10 +1155,10 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 /* ---------- Steps 2 to 4: compare, rank, act ---------- */
 .compare-lede, .causes-lede { color: var(--text-primary); }
 .mode-toggle { display: inline-flex; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.mode-btn { font: inherit; font-size: 14px; padding: 6px 12px; min-height: 36px; background: var(--surface-1); color: var(--text-secondary); border: 0; cursor: pointer; }
-.mode-btn + .mode-btn { border-left: 1px solid var(--border); }
-.mode-btn[aria-pressed="true"] { background: var(--text-primary); color: var(--page-plane); font-weight: 600; }
-.mode-btn:focus-visible { outline-offset: -3px; }
+.mode-btn, .ot-btn { font: inherit; font-size: 14px; padding: 6px 12px; min-height: 36px; background: var(--surface-1); color: var(--text-secondary); border: 0; cursor: pointer; }
+.mode-btn + .mode-btn, .ot-btn + .ot-btn { border-left: 1px solid var(--border); }
+.mode-btn[aria-pressed="true"], .ot-btn[aria-pressed="true"] { background: var(--text-primary); color: var(--page-plane); font-weight: 600; }
+.mode-btn:focus-visible, .ot-btn:focus-visible { outline-offset: -3px; }
 /* A chart that is wider than the page scrolls inside its own frame. */
 .chart-frame { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; min-width: 0; }
 .sb-row { display: flex; align-items: flex-start; }
@@ -1187,6 +1190,49 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .sb-key-open { border: 1.5px dashed var(--text-secondary); }
 .sb-key-nodata { border: 1px dashed var(--text-muted); font-size: 10px; font-weight: 700; line-height: 10px; text-align: center; color: var(--text-muted); }
 .sb-key-star::before { content: "*"; display: block; font-weight: 700; line-height: 12px; text-align: center; color: var(--text-primary); }
+.sb-day { font-size: 10.5px; fill: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sb-key-day { width: auto; height: auto; font-size: 10.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+.vsm-finish { font-size: 14px; font-weight: 400; color: var(--text-secondary); }
+.cell-day { display: block; white-space: normal; font-size: 12.5px; color: var(--text-secondary); }
+/* Compare: over time */
+.ot-base { margin: 6px 0 10px; font-size: 15px; max-width: 72ch; }
+.ot-base p { margin: 0 0 6px; }
+.ot-base-more summary { cursor: pointer; }
+.ot-base-more p { font-size: 14px; }
+.ot-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.ot-toggle { flex-wrap: wrap; }
+.ot-scroll { overflow-x: auto; }
+.ot-cue { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.ot-plot { display: block; }
+.ot-partial-line { fill: url(#ot-partial); }
+.ot-hatch { fill: var(--page-plane); }
+.ot-empty { fill: none; stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; }
+.ot-empty-text { font-size: 11px; fill: var(--text-muted); }
+.ot-value { font-size: 11px; fill: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ot-thin { font-style: italic; }
+.ot-median { stroke: var(--text-primary); stroke-width: 2; }
+.ot-median-text { font-size: 10.5px; fill: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ot-range { stroke: var(--text-primary); stroke-width: 2; }
+.ot-range-unknown { stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 2 3; }
+.ot-q { font-size: 10px; fill: var(--text-secondary); font-weight: 700; }
+.ot-bracket { fill: none; stroke: var(--text-secondary); stroke-width: 1.3; }
+.ot-undated { margin-top: 14px; }
+.ot-undated summary { cursor: pointer; font-size: 14.5px; }
+.ot-undated-title { margin: 8px 0 4px; font-size: 14px; font-weight: 600; }
+table.data-table.ot-cause-table { width: auto; }
+table.data-table.ot-cause-table th, table.data-table.ot-cause-table td { min-width: 0; padding: 6px 6px; vertical-align: bottom; }
+table.data-table.ot-cause-table th:first-child, table.data-table.ot-cause-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--page-plane); min-width: 9.5em; max-width: 13em; white-space: normal; text-align: left; }
+.ot-col-head { display: block; font-size: 11.5px; line-height: 1.3; text-align: center; white-space: nowrap; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.ot-col-sub { display: block; font-weight: 400; color: var(--text-muted); }
+.ot-cell { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 52px; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.ot-cell-bar { display: block; height: 6px; background: var(--gridline); border-radius: 1px; position: relative; overflow: hidden; }
+.ot-cell-bar > span { position: absolute; left: 0; top: 0; bottom: 0; }
+.ot-cell-bar > span.is-partial { background-image: repeating-linear-gradient(135deg, var(--page-plane) 0 1.5px, transparent 1.5px 4px); }
+.ot-cell-empty { color: var(--text-muted); font-style: italic; }
+.ot-cause-name { display: inline-flex; gap: 6px; align-items: baseline; font-size: 13px; }
+table.data-table.ot-table td, table.data-table.ot-table th { white-space: normal; min-width: 0; }
+table.data-table.ot-table td.ot-fe { max-width: 14em; }
+table.data-table.ot-table td:first-child { white-space: nowrap; }
 .fe-dot { fill: var(--text-primary); stroke: var(--text-primary); stroke-width: 1.5; }
 .fe-hollow { fill: var(--page-plane); }
 .sb-table td:first-child { white-space: normal; min-width: 14em; max-width: 24em; }
@@ -1295,3 +1341,14 @@ details.full-table[open] > summary::before, details.unlabeled-list[open] > summa
 
 /* A day with no intake keeps the running total and is drawn lighter. */
 .svg-chart .mark-quiet { opacity: 0.35; }
+/* Over time tables fit their frame: the weekly tables never need a 640px floor, and the cause × week table keeps its names narrow on a phone so the newest weeks stay in view. */
+table.data-table.ot-table, table.data-table.ot-cause-table { min-width: 0; }
+table.data-table.ot-table { width: 100%; }
+@media (max-width: 640px) {
+  table.data-table.ot-cause-table th:first-child, table.data-table.ot-cause-table td:first-child { min-width: 6.5em; max-width: 7.5em; }
+  .ot-cause-name { font-size: 12px; }
+  table.data-table.ot-table td:first-child { white-space: normal; }
+}
+/* A cause's task table fits a phone: the day sits under the name, so the table needs no 640px floor. */
+table.data-table.cause-tasks { min-width: 0; width: 100%; }
+@media (max-width: 640px) { table.data-table.cause-tasks td:first-child { min-width: 9em; } table.data-table.cause-tasks th { white-space: normal; } }

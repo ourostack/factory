@@ -11,7 +11,7 @@
 import { createRequire } from "node:module";
 
 const W = createRequire(import.meta.url)("../src/walk.js");
-export const { ANCHOR_SPREAD_MS, ANCHOR_PLACE_LIMIT_MS, prKey, prAnchor, placePrs, prClock } = W;
+export const { ANCHOR_SPREAD_MS, ANCHOR_PLACE_LIMIT_MS, prKey, prAnchor, placePrs, prClock, validPr } = W;
 export const listStates = W.clockListStates;
 
 // How many requests for pull requests one build makes to GitHub, across
@@ -63,7 +63,7 @@ export function createPullReader({ fetch: fetchImpl, cache = null, max = MAX_PR_
   const pending = new Map();
   const bodies = new Map();
   const capped = new Set();
-  const counts = { requests: 0, fetched: 0, not_modified: 0, final_from_cache: 0, failed: 0, capped: 0 };
+  const counts = { requests: 0, fetched: 0, not_modified: 0, final_from_cache: 0, failed: 0, capped: 0, invalid: 0 };
   async function load(key, repo, number) {
     const old = entries.get(key);
     if (old && isFinal(old.body)) {
@@ -96,6 +96,11 @@ export function createPullReader({ fetch: fetchImpl, cache = null, max = MAX_PR_
     }
   }
   function read(repo, number) {
+    // A malformed owner/name or number never reaches a GitHub URL.
+    if (!validPr(repo, number)) {
+      counts.invalid += 1;
+      return Promise.resolve(null);
+    }
     const key = `${repo}#${number}`;
     if (!pending.has(key)) {
       pending.set(
@@ -108,7 +113,7 @@ export function createPullReader({ fetch: fetchImpl, cache = null, max = MAX_PR_
     }
     return pending.get(key);
   }
-  const summary = () => `GitHub pull request reads: ${counts.requests} requests (${counts.fetched} fetched, ${counts.not_modified} not modified, ${counts.final_from_cache} final from the cache, ${counts.failed} failed, ${counts.capped} capped)`;
+  const summary = () => `GitHub pull request reads: ${counts.requests} requests (${counts.fetched} fetched, ${counts.not_modified} not modified, ${counts.final_from_cache} final from the cache, ${counts.failed} failed, ${counts.capped} capped, ${counts.invalid} invalid)`;
   const cacheDoc = () => ({ schema: "factory.site.pulls-cache/1", pulls: Object.fromEntries([...entries.entries()].sort(([a], [b]) => a.localeCompare(b))) });
   return { read, bodies, capped, counts, summary, cacheDoc };
 }

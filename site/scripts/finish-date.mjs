@@ -26,12 +26,11 @@
 // Desk's fields may be absent (an older Desk) or present; both work. The
 // store never writes a time of day, only the day.
 
-import { direct } from "./bounds.mjs";
+import { FINISH_EARLIER_RECORD, FINISH_LATER_RECORD, direct } from "./bounds.mjs";
 import { measured, partial, unavailable } from "./state.mjs";
 
 export const MIN_DAY = "2025-01-01";
 const DAY_MS = 86400000;
-const PR_REPO = /^(?!\.{1,2}\/)[A-Za-z0-9._-]+\/(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
 const FINISHED = new Set(["done", "cancelled"]);
 const DESK_BASES = { transition: "desk_transition", card_updated: "desk_card_updated" };
 
@@ -67,9 +66,9 @@ export function isoWeek(day) {
 // requests. A report without them gives nulls and an empty list.
 export function finishInputsOf(report) {
   const t = report && typeof report === "object" && report.timeline && typeof report.timeline === "object" ? report.timeline : {};
-  const prs = (Array.isArray(t.prs) ? t.prs : [])
-    .filter((p) => p && typeof p.repo === "string" && PR_REPO.test(p.repo) && Number.isSafeInteger(p.number) && p.number > 0)
-    .map((p) => ({ repo: p.repo, number: p.number, at_ms: Number.isFinite(p.at_ms) && p.at_ms >= 0 ? p.at_ms : null, ...(typeof p.created === "boolean" ? { created: p.created } : {}) }));
+  // Unchanged, as the map's PR clock reads them: the shared anchor does its
+  // own checks, so one task has one anchor.
+  const prs = Array.isArray(t.prs) ? t.prs : [];
   return {
     desk: t.finished_on && typeof t.finished_on === "object" ? t.finished_on : null,
     leadWindow: t.lead_window && typeof t.lead_window === "object" ? t.lead_window : null,
@@ -104,8 +103,12 @@ function fromAnchor(anchor, leadWindow, today) {
   if (!Number.isFinite(leadWindow.end_ms) || leadWindow.end_ms < 0) return null;
   const day = utcDay(anchor.value_ms + leadWindow.end_ms);
   if (!validDay(day, today)) return null;
-  // The anchor's own reasons carry over (anchor_spread, anchor_unconfirmed).
+  // The anchor's own reasons carry over (anchor_spread, anchor_unconfirmed),
+  // and so does its direction: an anchor that is "at least" (a timed one,
+  // whose pull requests the session is not known to have opened, even when
+  // they disagree) is unconfirmed, so the day is at least the one shown.
   const reasons = [...(anchor.reasons || [])];
+  if (anchor.state === "partial" && anchor.bound === "lower" && !reasons.includes("anchor_unconfirmed")) reasons.push("anchor_unconfirmed");
   // A window that is partial only because the card's dates are shorter than the
   // work moves its start; its end is the end of the last recorded work, which is
   // on or after the card's move to done. Any other reason may move the end.
@@ -141,7 +144,12 @@ export function resolveFinishDate({ status, desk = null, leadWindow = null, anch
   // Labels are written when a task is done, so an anchored day after the day
   // they landed cannot be published as it stands. The labels day is published
   // with the conflict: it is not "on or before" when the task was reopened.
-  if (anchored && labels && anchored.value > labels) return stated(labels, ["anchor_after_labels"], "labels_landed");
+  // An anchored day that is itself "at most" does not conflict: both are upper
+  // bounds, so the task finished on or before the earlier, the labels day.
+  if (anchored && labels && anchored.value > labels) {
+    if (anchored.state === "partial" && anchored.bound === "upper") return stated(labels, ["finish_from_labels_landing"], "labels_landed");
+    return stated(labels, ["anchor_after_labels"], "labels_landed");
+  }
   if (anchored) return anchored;
   if (labels) return stated(labels, ["finish_from_labels_landing", ...githubReasons(anchor)], "labels_landed");
   return unavailable(["no_finish_source"]);
@@ -151,6 +159,13 @@ export function resolveFinishDate({ status, desk = null, leadWindow = null, anch
 // where there is none to state, as Desk writes it. data.json says "unknown".
 export function forRollupFile(fd) {
   if (!fd || typeof fd !== "object" || fd.state !== "partial" || fd.bound !== "unknown") return fd;
-  const why = ["anchor_spread", "lead_window_partial", "anchor_after_labels"].find((r) => (fd.reasons || []).includes(r));
+  const reasons = fd.reasons || [];
+  const up = reasons.some((r) => FINISH_LATER_RECORD.has(r));
+  const down = reasons.some((r) => FINISH_EARLIER_RECORD.has(r));
+  // A reason with no direction of its own explains it; else, when one reason
+  // says "at most" and another "at least", they pull both ways.
+  let why = ["lead_window_partial", "anchor_after_labels"].find((r) => reasons.includes(r));
+  if (!why && reasons.includes("anchor_spread") && !down) why = "anchor_spread";
+  if (!why && up && down) why = "bound_reasons_conflict";
   return { ...fd, bound: null, bound_reason: why || "bound_direction_undecided" };
 }

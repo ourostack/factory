@@ -282,17 +282,35 @@ export function checkByWeek(doc) {
   if (!un || !Number.isInteger(un.n) || !Array.isArray(un.jobs) || un.jobs.length !== un.n || !Array.isArray(un.reasons)) bad("unplaced", "bad_unplaced");
   else for (const r of un.reasons) if (typeof r !== "string" || !hasReasonText(r)) bad("unplaced", "reason_without_text");
   const weeks = Array.isArray(doc.weeks) ? doc.weeks : [];
+  const finishOf = new Map((Array.isArray(doc.tasks) ? doc.tasks : []).filter((t) => t && t.finish_date).map((t) => [t.job, t.finish_date]));
   let prev = null;
   weeks.forEach((w, i) => {
     if (!w || typeof w.starts_on !== "string") return bad(`weeks[${i}]`, "bad_week");
     if (prev !== null && Date.parse(`${w.starts_on}T00:00:00Z`) - prev !== 7 * 86400000) bad(`weeks[${i}]`, "weeks_not_contiguous");
     prev = Date.parse(`${w.starts_on}T00:00:00Z`);
-    if (w.n === 0 && Object.keys(w).some((k) => !["week", "starts_on", "n", "n_partial", "jobs"].includes(k))) bad(`weeks[${i}]`, "empty_week_with_figures");
+    if (w.n === 0 && Object.keys(w).some((k) => !["week", "starts_on", "n", "n_partial", ...DAY_KEYS, "jobs"].includes(k))) bad(`weeks[${i}]`, "empty_week_with_figures");
+    // Each week's finish-day counts (N3): all four present, adding up to n,
+    // n matching the job list, and each count matching a recount of the
+    // week's tasks' own finish days, because the page trusts these counts.
+    const jobs = Array.isArray(w.jobs) ? w.jobs : [];
+    if (w.n !== jobs.length) bad(`weeks[${i}].n`, "n_disagrees_with_jobs");
+    const missing = DAY_KEYS.filter((k) => !(k in w));
+    if (missing.length) return missing.forEach((k) => bad(`weeks[${i}].${k}`, "missing_day_count"));
+    if (DAY_KEYS.some((k) => !Number.isInteger(w[k]) || w[k] < 0)) return;
+    if (DAY_KEYS.reduce((a, k) => a + w[k], 0) !== w.n) bad(`weeks[${i}]`, "day_counts_do_not_sum");
+    const recount = { n_day_measured: 0, n_day_on_or_before: 0, n_day_on_or_after: 0, n_day_about: 0 };
+    for (const job of jobs) {
+      const d = finishOf.get(job);
+      if (!d) return bad(`weeks[${i}].jobs`, "week_job_without_task");
+      recount[d.state === "measured" ? "n_day_measured" : d.bound === "upper" ? "n_day_on_or_before" : d.bound === "lower" ? "n_day_on_or_after" : "n_day_about"] += 1;
+    }
+    if (DAY_KEYS.some((k) => recount[k] !== w[k])) bad(`weeks[${i}]`, "day_counts_disagree_with_tasks");
   });
   return out;
 }
 const BY_WEEK_FINISH_PATH = /^tasks\[\d+\]\.finish_date$/;
-const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial"]);
+const DAY_KEYS = ["n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about"];
+const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial", "n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about"]);
 
 // The check also runs on the serialized file: JSON.stringify turns NaN and
 // Infinity into null, so a null in the file is a number that went bad.

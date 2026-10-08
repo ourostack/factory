@@ -3,7 +3,8 @@
 // A task with a finish date (finish-date.mjs) is ordered by it, earliest
 // first. Ties, and every task with no date, use the labels rule below.
 // Finished tasks with no date follow the dated ones, and open tasks (those
-// whose finish date says `open_job`) come last. The basis names what
+// whose finish date says `open_job`, and those whose status could not be
+// read, `status_unavailable`) come last. The basis names what
 // the task has: "labels" for a task with labels (the page counts those as
 // the labeled, finished tasks), "date" for a dated task with no labels yet,
 // "facts" for the rest.
@@ -108,7 +109,9 @@ export function finishOrder(jobs, { labelAdded = new Map(), factsAdded = new Map
     const lead = lt && lt.state !== "unavailable" && typeof lt.value === "number" ? lt.value : -1;
     const fd = finishDates.get(j.id);
     const date = fd && fd.state !== "unavailable" && typeof fd.value === "string" ? fd.value : null;
-    const isOpen = !!(fd && Array.isArray(fd.reasons) && fd.reasons.includes("open_job"));
+    // A task whose status could not be read is not called finished: it is
+    // ordered with the open tasks.
+    const isOpen = !!(fd && Array.isArray(fd.reasons) && (fd.reasons.includes("open_job") || fd.reasons.includes("status_unavailable")));
     return { id: j.id, label, facts, lead, date, isOpen };
   });
   const cmp = (a, b) => (a ?? Infinity) - (b ?? Infinity);

@@ -558,7 +558,8 @@ test("the page wires fix round 1: the working view, the waste label, the phone t
   assert.match(app, /row\.append\(left, frame, right\)/)
   assert.match(app, /unlabeledNote\(document\.getElementById\("act-unlabeled"\), data, "act"\)/)
   assert.match(app, /unlabeledNote\(document\.getElementById\("causes-unlabeled"\), data, "causes"\)/)
-  assert.match(app, /history\.replaceState\(null, "", `#\/\$\{which\}\$\{modes\[which\] !== "all" \? `\?mode=\$\{modes\[which\]\}` : ""\}`\)/)
+  // Compare's route also keeps Over time's choices (format.js compareHash); Rank causes keeps its mode alone.
+  assert.match(app, /history\.replaceState\(null, "", which === "compare" \? F\.compareHash\(\{ mode: modes\.compare, \.\.\.overTimeView \}\) : `#\/\$\{which\}\$\{modes\[which\] !== "all" \? `\?mode=\$\{modes\[which\]\}` : ""\}`\)/)
   for (const id of ["stackup-left-out", "causes-unlabeled", "act-unlabeled"]) assert.match(html, new RegExp(`id="${id}"`), id)
   // On Act the note sits below "Problems in hand".
   assert.ok(html.indexOf('id="act-unlabeled"') > html.indexOf('id="problems"'))

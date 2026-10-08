@@ -624,7 +624,20 @@
       const q = qi >= 0 ? full.slice(qi + 1) : "";
       // Compare tasks and Rank causes keep their chart mode in the URL; only
       // Compare tasks has the share mode.
-      const mode = (parts[0] === "compare" || parts[0] === "causes") && q === "mode=working" ? "working" : parts[0] === "compare" && q === "mode=share" ? "share" : null;
+      if (parts[0] === "compare") {
+        // Compare keeps the stack-up's mode and Over time's view and mode:
+        // "?mode=working&over=task&otmode=all". Unknown keys or values are
+        // left out.
+        const out = { view: "compare" };
+        for (const kv of q.split("&")) {
+          const [k, v] = kv.split("=");
+          if (k === "mode" && (v === "working" || v === "share")) out.mode = v;
+          else if (k === "over" && v === "task") out.over = v;
+          else if (k === "otmode" && (v === "all" || v === "working")) out.otmode = v;
+        }
+        return out;
+      }
+      const mode = parts[0] === "causes" && q === "mode=working" ? "working" : null;
       if (mode) return { view: parts[0], mode };
       // A glossary entry on Why Lean?: "#/why?term=capture-coverage".
       const term = parts[0] === "why" ? /^term=([a-z][a-z0-9-]{0,40})$/.exec(q) : null;
@@ -676,6 +689,17 @@
     return best(placed.filter((j) => j.finish_basis === "labels")) || best(placed.filter((j) => j.status === "done")) || best(placed) || list[0] || null;
   }
 
+  // The Compare route for its choices, defaults left out: the stack-up's
+  // mode ("all"), Over time's view ("week") and its mode ("share").
+  function compareHash(c) {
+    const o = c || {};
+    const q = [];
+    if (o.mode === "working" || o.mode === "share") q.push(`mode=${o.mode}`);
+    if (o.over === "task") q.push("over=task");
+    if (o.otmode === "all" || o.otmode === "working") q.push(`otmode=${o.otmode}`);
+    return `#/compare${q.length ? `?${q.join("&")}` : ""}`;
+  }
+
   // An English ordinal for a finish position: 1st, 2nd, 3rd, 11th, 22nd.
   function ordinal(n) {
     const s = String(n);
@@ -716,6 +740,39 @@
       return `It was labeled together with ${others} other task${others === 1 ? "" : "s"}${latest ? ", the latest batch" : ""}; within a batch, tasks are ordered by lead time, so it is ${pos} labeled tasks.`;
     }
     return `It was the ${pos} labeled tasks to finish.`;
+  }
+
+  // A task's finish day in words, with its state and bound: "on 26 Sep"
+  // (measured), "on or before 26 Sep" (an upper bound), "on or after 26 Sep"
+  // (a lower bound), "about 26 Sep (direction not known)" (partial with no
+  // direction: `unknown` in data.json, `null` in the rollup and map files),
+  // or "not dated yet: <reason>" when no source gives a day. A day is never
+  // guessed. The year is added when it is not `opts.year` (this UTC year by
+  // default). Returns { kind, day, key, words, short, reasons }: `kind` is
+  // "on", "on_or_before", "on_or_after", "about", "open" (a task still open)
+  // or "none"; `key` is the "YYYY-MM-DD" value, for sorting; `short` is the
+  // chart label ("26 Sep", "≤26 Sep", "≥26 Sep", "~26 Sep", "no date").
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function dayLabel(value, year) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const t = Date.parse(`${value}T00:00:00Z`);
+    if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== value) return null;
+    const d = new Date(t);
+    const y = d.getUTCFullYear();
+    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}${y === year ? "" : ` ${y}`}`;
+  }
+  function finishDay(fd, opts) {
+    const year = opts && Number.isInteger(opts.year) ? opts.year : new Date().getUTCFullYear();
+    const reasons = fd && Array.isArray(fd.reasons) ? fd.reasons.filter((r) => typeof r === "string" && r) : [];
+    const day = fd && (fd.state === "measured" || fd.state === "partial") ? dayLabel(fd.value, year) : null;
+    if (!day) {
+      const why = reasons.length ? reasons : ["not_recorded"];
+      return { kind: why.includes("open_job") ? "open" : "none", day: null, key: null, words: `not dated yet: ${why.map(reasonText).join("; ")}`, short: "no date", reasons: why };
+    }
+    const kind = fd.state === "measured" ? "on" : fd.bound === "upper" ? "on_or_before" : fd.bound === "lower" ? "on_or_after" : "about";
+    const words = { on: `on ${day}`, on_or_before: `on or before ${day}`, on_or_after: `on or after ${day}`, about: `about ${day} (direction not known)` }[kind];
+    const short = { on: day, on_or_before: `≤${day}`, on_or_after: `≥${day}`, about: `~${day}` }[kind];
+    return { kind, day, key: fd.value, words, short, reasons };
   }
 
   // A task's public name: its local name on the operator's own machine, else
@@ -903,5 +960,5 @@
   ];
 
   return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

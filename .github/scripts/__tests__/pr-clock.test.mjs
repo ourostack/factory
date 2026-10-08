@@ -454,7 +454,7 @@ globalThis.fetch = async (url, init = {}) => {
   assert.deepEqual(pulls.pulls, { "o/private#3": null, "o/r#1": { created_at: "2026-10-05T12:00:05Z", merged_at: "2026-10-05T13:00:00Z", state: "closed" }, "o/r#2": { created_at: "2026-10-05T12:30:00Z", merged_at: null, state: "open" } })
   assert.deepEqual(pulls.capped, [])
   assert.equal(requests().length, 3, "each pull request is read once, however many tasks and uses name it")
-  assert.match(r.stdout, /GitHub pull request reads: 3 requests \(2 fetched, 0 not modified, 0 final from the cache, 1 failed, 0 capped\)/)
+  assert.match(r.stdout, /GitHub pull request reads: 3 requests \(2 fetched, 0 not modified, 0 final from the cache, 1 failed, 0 capped, 0 invalid\)/)
   // The cache keeps only the fields the build uses, with each ETag; never the author.
   const cached = JSON.parse(readFileSync(cache, "utf8"))
   assert.equal(cached.schema, "factory.site.pulls-cache/1")
@@ -465,7 +465,7 @@ globalThis.fetch = async (url, init = {}) => {
   const r2 = run(["--pulls-out", pullsOut, "--pulls-cache", cache], {})
   assert.equal(r2.status, 0, r2.stderr)
   assert.deepEqual(requests().sort(), ["/repos/o/private/pulls/3 -", '/repos/o/r/pulls/2 "e-2"'])
-  assert.match(r2.stdout, /GitHub pull request reads: 2 requests \(0 fetched, 1 not modified, 1 final from the cache, 1 failed, 0 capped\)/)
+  assert.match(r2.stdout, /GitHub pull request reads: 2 requests \(0 fetched, 1 not modified, 1 final from the cache, 1 failed, 0 capped, 0 invalid\)/)
   assert.deepEqual(JSON.parse(readFileSync(pullsOut, "utf8")).pulls, pulls.pulls, "the same answer from fewer reads")
   // The cap holds: with a cap of 1 and no cache, the first pull request is read and the rest are capped.
   writeFileSync(log, "")
@@ -523,7 +523,7 @@ test("the pull reader treats only merged pull requests in its cache as final, as
   // Read once per build.
   await reader.read("o/r", 3)
   assert.deepEqual(calls, [["/repos/o/r/pulls/2", '"c"'], ["/repos/o/r/pulls/3", '"o"'], ["/repos/o/r/pulls/4", '"x"']])
-  assert.deepEqual(reader.counts, { requests: 3, fetched: 0, not_modified: 2, final_from_cache: 1, failed: 1, capped: 0 })
+  assert.deepEqual(reader.counts, { requests: 3, fetched: 0, not_modified: 2, final_from_cache: 1, failed: 1, capped: 0, invalid: 0 })
   assert.equal(reader.bodies.get("o/r#4"), null)
   // The old entry stays for the next build to ask about again.
   assert.ok(reader.cacheDoc().pulls["o/r#4"])
@@ -532,5 +532,31 @@ test("the pull reader treats only merged pull requests in its cache as final, as
   assert.equal((await capped.read("o/r", 1)).merged, true)
   assert.equal(await capped.read("o/r", 3), null)
   assert.deepEqual([...capped.capped], ["o/r#3"])
-  assert.match(capped.summary(), /GitHub pull request reads: 0 requests \(0 fetched, 0 not modified, 1 final from the cache, 0 failed, 1 capped\)/)
+  assert.match(capped.summary(), /GitHub pull request reads: 0 requests \(0 fetched, 0 not modified, 1 final from the cache, 0 failed, 1 capped, 0 invalid\)/)
+})
+
+test("M1: the pull reader never asks GitHub for a malformed owner/name or number, and counts it as invalid", async () => {
+  const asked = []
+  const fetchImpl = async (url) => {
+    asked.push(url)
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ created_at: "2026-10-05T12:00:00Z", state: "open", base: { repo: { private: false } } }) }
+  }
+  const reader = createPullReader({ fetch: fetchImpl, max: 10 })
+  for (const [repo, number] of [["../../x", 1], ["/name", 1], ["owner/", 1], ["o/..", 1], ["o/r/extra", 1], ["-o/r", 1], ["o/r", 0], ["o/r", -3], ["o/r", 1.5]]) {
+    assert.equal(await reader.read(repo, number), null, `${repo}#${number}`)
+  }
+  assert.deepEqual(asked, [])
+  assert.equal(reader.counts.invalid, 9)
+  assert.match(reader.summary(), /9 invalid/)
+  assert.ok(await reader.read("ourostack/factory", 202))
+  assert.deepEqual(asked, ["https://api.github.com/repos/ourostack/factory/pulls/202"])
+})
+
+test("M1: the shared anchor and the placement skip malformed pull requests; a negative time stays a time on the task clock", () => {
+  const g = gh([["o/r#1", pull(T0 + 10 * M)], ["../x#2", pull(T0 + 5 * M)], ["o/r#3", pull(T0 - 5 * S)]])
+  // A negative offset is real: work can begin before the card was created.
+  const a = prAnchor([{ repo: "o/r", number: 1, at_ms: 10 * M, created: true }, { repo: "../x", number: 2, at_ms: 10 * M, created: true }, { repo: "o/r", number: 3, at_ms: -5 * S, created: true }], g)
+  assert.deepEqual([a.n, a.state, a.value_ms], [2, "measured", T0])
+  const placed = placePrs([{ repo: "../x", number: 2, at_ms: 10 * M }, { repo: "o/r", number: 0, at_ms: 10 * M }, { repo: "o", number: 4, at_ms: 1 }], g, a)
+  assert.deepEqual(placed, [])
 })
