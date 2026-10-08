@@ -137,12 +137,14 @@
     over_budget_after_binning: "this session's activity is drawn at its coarsest: even with every short run merged, its swimlane file is larger than its size budget",
     agents_working: "agents were working during this stretch, so it is not counted as waiting; the evaluator had labeled it waiting",
     job_share_unknown: "for some of the job's sessions there is no record of which part was this job's, so their labels are left out and this is at least this much",
-    session_work_unattributed: "a session of this task did work that no task claims, so that time is counted as cause not recorded and some of it may have been another task's",
+    session_work_unattributed: "a session of this task did work that no task's binding claims, so that time stays under cause not recorded and some of it may have been another task's",
     // Why Desk gives a partial figure no direction (its `bound_reason`,
-    // beside `bound: null`); the page says "direction not known, because …".
+    // beside `bound: null`), in Desk's own words; the page says
+    // "direction not known, because …" where the direction is truly open.
     bound_reasons_conflict: "its reasons pull it both ways, so the true figure may be higher or lower",
-    bound_not_moved: "none of its reasons moves it in a known direction",
-    bound_not_one_quantity: "it is a ranking or a split, not one quantity, so it has no single direction",
+    bound_not_moved: "its reasons do not change this figure, so it is exact for the task's window as stated",
+    bound_not_one_quantity: "it is a ranking or a status, not one quantity, so it has no single direction",
+    bound_direction_undecided: "one of its reasons has no decided direction yet, so the true figure may be higher or lower",
   };
 
   // Every reason that can reach the page has words. The site build stops on
@@ -232,7 +234,9 @@
     }
     const unknownDirection = number.bound === "unknown";
     // Desk's own "no direction" (bound: null) says why, when it says.
-    const noDirection = number.bound === null && typeof number.bound_reason === "string" ? `direction not known, because ${reasonText(number.bound_reason)}` : null;
+    // bound_not_moved is not an open direction: the figure is exact for its
+    // window, so its words stand alone.
+    const noDirection = number.bound === null && typeof number.bound_reason === "string" ? (number.bound_reason === "bound_not_moved" ? reasonText(number.bound_reason) : `direction not known, because ${reasonText(number.bound_reason)}`) : null;
     // An unknown direction is said in the visible marker too, so a reader
     // does not have to hover to learn the figure could be off either way.
     return {

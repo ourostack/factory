@@ -394,7 +394,13 @@ test("a partial figure Desk marks bound: null reads with no direction, never a g
 })
 
 test("Desk's new reason codes have words, and a figure with no direction says why", () => {
-  for (const code of ["session_work_unattributed", "bound_reasons_conflict", "bound_not_moved", "bound_not_one_quantity"]) assert.ok(F.hasReasonText(code), code)
+  for (const code of ["session_work_unattributed", "bound_reasons_conflict", "bound_not_moved", "bound_not_one_quantity", "bound_direction_undecided"]) assert.ok(F.hasReasonText(code), code)
+  // Desk's own words for the five (Desk #235's final table).
+  assert.equal(F.reasonText("bound_not_moved"), "its reasons do not change this figure, so it is exact for the task's window as stated")
+  assert.equal(F.reasonText("bound_direction_undecided"), "one of its reasons has no decided direction yet, so the true figure may be higher or lower")
+  assert.match(F.describe({ state: "partial", value: H, reasons: ["card_dates_shorter_than_work"], bound: null, bound_reason: "bound_not_moved" }, "duration").reason, /; its reasons do not change this figure, so it is exact for the task's window as stated$/, "an exact-in-window figure is not called direction not known")
+  const und = W.ledeText(W.lede({ job: "j", lead_time_ms: m(10 * H), working_ms: { state: "partial", value: H, reasons: ["log_truncated"], bound: null, bound_reason: "bound_direction_undecided" }, idle_ms: m(9 * H), waiting_by_waited_on_ms: { next_prompt: m(9 * H) }, flow_efficiency: m(0.1) }, F.reasonText))
+  assert.match(und, /Agents were working for 1 hour of it \(direction not known, because one of its reasons has no decided direction yet, so the true figure may be higher or lower\)/)
   const n = { state: "partial", value: H, reasons: ["log_truncated"], bound: null, bound_reason: "bound_reasons_conflict" }
   const d = F.describe(n, "duration")
   assert.equal(d.text, F.describe(m(H), "duration").text)
