@@ -18,6 +18,12 @@
 //   from_reasons      read from the reasons (below)
 //   upper_if_awaiting an upper bound when every reason is a sign-off still
 //                     awaited, else unknown
+//   finish_date       a finish day (finish-date.mjs): an upper bound when its
+//                     source is a later record (the card's last update, the
+//                     labels' landing), no direction when the clock anchor
+//                     disagrees with itself or the lead window is partial
+//   from_members      a sum over members (sumDirection below), read from the
+//                     members' own directions, never from reasons
 //
 // `from_reasons`: a shared worker's time and counts are counted for every
 // job that shares it, so `worker_shared` pulls the figure up (upper). Every
@@ -34,6 +40,10 @@
 const FROM = "from_reasons";
 const LEAD_FLOORS = new Set(["censored", "card_dates_shorter_than_work"]);
 const AWAITING = new Set(["awaiting_signoff"]);
+// A finish day taken from a record written after the task finished is at or
+// after the true day.
+const FINISH_LATER_RECORD = new Set(["finish_from_card_update", "finish_from_labels_landing", "finish_from_last_work"]);
+const FINISH_NO_DIRECTION = new Set(["anchor_spread", "lead_window_partial", "anchor_after_labels"]);
 
 export const DIRECTIONS = Object.freeze({
   // Per-job report measures (jobs table and job page).
@@ -98,6 +108,11 @@ export const DIRECTIONS = Object.freeze({
   // not yet proven, or a listing that fell back), or that leaves out old or
   // invalid machine records, can be off either way.
   capture_share: "unknown",
+  // Dates and trends by finish week. A day's direction comes from its
+  // reasons; a week's sums from their members; a week's median has none.
+  finish_date: "finish_date",
+  week_sum: "from_members",
+  week_median: "unknown",
 });
 
 function fromReasons(reasons) {
@@ -112,6 +127,11 @@ export function directionOf(measure, reasons) {
   const rule = DIRECTIONS[measure];
   if (rule === FROM) return fromReasons(reasons);
   if (rule === "upper_if_awaiting") return reasons.length > 0 && reasons.every((r) => AWAITING.has(r)) ? "upper" : "unknown";
+  if (rule === "finish_date") {
+    if (reasons.some((r) => FINISH_NO_DIRECTION.has(r))) return "unknown";
+    return reasons.some((r) => FINISH_LATER_RECORD.has(r)) ? "upper" : "unknown";
+  }
+  if (rule === "from_members") throw new Error(`the measure ${measure} takes its direction from its members: use sumDirection`);
   if (rule === "lower_if_censored") return reasons.length > 0 && reasons.every((r) => LEAD_FLOORS.has(r)) ? "lower" : "unknown";
   return rule;
 }
@@ -128,4 +148,31 @@ export function direct(number, measure) {
     return number;
   }
   return { ...number, bound: direction };
+}
+
+// The direction of a sum over members (each a stated number): the members'
+// shared direction, or `bound: null` with the reason there is none, the
+// words Desk uses (`bound_reasons_conflict`, `bound_direction_undecided`).
+// A member that is not there leaves the sum at least what it is (lower). A
+// partial member whose file states no direction leaves the sum undecided.
+export function sumDirection(members) {
+  const dirs = new Set();
+  const reasons = new Set();
+  let exact = false;
+  for (const m of members) {
+    if (!m || m.state === "unavailable") dirs.add("lower");
+    else if (m.state === "partial") {
+      if (m.bound === "lower" || m.bound === "upper") dirs.add(m.bound);
+      // Desk's bound_not_moved means the figure is exact: it adds nothing, like a measured member.
+      else if (m.bound === null && m.bound_reason === "bound_not_moved") exact = true;
+      else {
+        dirs.add("none");
+        reasons.add(m.bound === null && typeof m.bound_reason === "string" && m.bound_reason ? m.bound_reason : "bound_direction_undecided");
+      }
+    }
+  }
+  if (dirs.has("none")) return { bound: null, bound_reason: dirs.size === 1 && reasons.size === 1 ? [...reasons][0] : "bound_reasons_conflict" };
+  if (dirs.size > 1) return { bound: null, bound_reason: "bound_reasons_conflict" };
+  if (dirs.size === 1) return { bound: [...dirs][0] };
+  return exact ? { bound: null, bound_reason: "bound_not_moved" } : {};
 }

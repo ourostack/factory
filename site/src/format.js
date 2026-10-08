@@ -159,6 +159,16 @@
     anchor_github_lookup_capped: "the pull requests that set the task's clock were beyond the build's limit of reads from GitHub",
     clock_skew: "the session's clock and GitHub's are a few seconds apart, so the merge is drawn at the opening; it happened then or later",
     not_merged: "the pull request has not merged",
+    // A task's finish day (the store's finish-date ladder).
+    finish_from_card_update: "the day comes from the task card's last update, so the task finished on or before it",
+    finish_from_labels_landing: "the day comes from when the task's labels reached the store, so the task finished on or before it",
+    reopened: "the task was reopened, so its latest finish counts",
+    lead_window_partial: "the end of the task's lead time is itself only partly known",
+    finish_from_last_work: "the day is that of the task's last recorded work, which is on or after the day its card was moved to done",
+    anchor_after_labels: "the task's pull requests put its finish after the day its labels landed, so the two disagree; the labels' day is shown and may be too early",
+    median_of_subset: "a median of only the tasks that were measured has no direction: the others could move it either way",
+    no_finish_source: "no record gives the day this task finished",
+    job_offsets_withheld: "the desk withholds this task's timing",
   };
 
   // Every reason that can reach the page has words. The site build stops on

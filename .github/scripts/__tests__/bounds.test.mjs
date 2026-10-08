@@ -15,7 +15,7 @@ test("a measure with no row in the direction table cannot be made partial: the b
 
 test("every row in the table names a known rule", () => {
   for (const [measure, rule] of Object.entries(DIRECTIONS)) {
-    assert.ok(["lower", "upper", "unknown", "from_reasons", "lower_if_censored", "upper_if_awaiting"].includes(rule), measure)
+    assert.ok(["lower", "upper", "unknown", "from_reasons", "lower_if_censored", "upper_if_awaiting", "finish_date", "from_members"].includes(rule), measure)
   }
 })
 

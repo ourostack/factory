@@ -51,13 +51,15 @@ const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
 // The table that links a kaizen issue to the cause it works on (steps.js),
 // written into data.json so agents read the mapping as data.
 const { kaizenCauseOf } = createRequire(import.meta.url)("../src/steps.js");
-import { checkNumbers } from "./check-numbers.mjs";
+import { checkByWeek, checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
 import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluatorVersionsFigure, jobWaste, labeledWaste, ownShare, qualifiersOf } from "./waste.mjs";
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
-import { finishOrder, firstAdded } from "./finish-order.mjs";
+import { finishOrder, firstAdded, firstAddedDays, labelDays } from "./finish-order.mjs";
+import { anchorFromPulls, finishInputsOf, resolveFinishDate, utcDay } from "./finish-date.mjs";
+import { buildByWeek } from "./by-week.mjs";
 import { taskNames } from "./task-names.mjs";
 import { createPullReader, maxLookups, prKey, pullsDoc } from "./pr-clock.mjs";
 
@@ -207,7 +209,15 @@ const mudaOverall = mudaRaw.groupings?.overall?.all ?? null;
 const jobsDir = join(reportsDir, "jobs");
 const jobFiles = listJSON(jobsDir);
 
-const jobs = jobFiles.map((f) => jobSummary(readJSON(join(jobsDir, f), {}), f));
+// What each job's finish day is worked out from (finish-date.mjs), read from
+// the same report as the summary.
+const finishInputs = new Map();
+const jobs = jobFiles.map((f) => {
+  const report = readJSON(join(jobsDir, f), {});
+  const summary = jobSummary(report, f);
+  finishInputs.set(summary.id, finishInputsOf(report));
+  return summary;
+});
 // Until an outcome is accepted, the band answers per delivered task instead.
 outcomes.attention.per_delivered = attentionPerDelivered(jobs);
 
@@ -337,13 +347,8 @@ for (const j of jobs) {
   j.waste = jobWaste(docs, j.sessions.map((x) => x.session_id), shares);
 }
 
-// Finish order (finish-order.mjs): the position of the commit that first
-// added the task's labels to main, then open tasks by their first facts
-// file. Only the position is published, never a date.
-{
-  const order = finishOrder(jobs, { labelAdded: firstAdded(mainDir, "labels/"), factsAdded: firstAdded(mainDir, "facts/"), factsFileOf });
-  for (const j of jobs) Object.assign(j, order.get(j.id));
-}
+// Finish order (finish-order.mjs) is set below, with the finish dates, once
+// GitHub can be read.
 
 // Fact-level totals. The pipeline's own totals (rollups/totals.json) apply
 // every facts flag and host constant in one place and count every published
@@ -581,6 +586,30 @@ if (!OFFLINE) {
   }
   // Read failures show in the step summary, so a spent rate limit is seen.
   console.log(pullReader.summary());
+}
+
+// Finish dates (finish-date.mjs) and finish order (finish-order.mjs). Each
+// task's finish day comes from the first source that has one: Desk's own
+// record, the task's clock tied to GitHub through its pull requests, or the
+// day its labels landed on main. Tasks are then ordered by that day.
+{
+  const today = utcDay(Date.now());
+  const labelAdded = firstAdded(mainDir, "labels/");
+  const labelsDay = labelDays(labelAdded, firstAddedDays(mainDir, "labels/"));
+  const createdMs = async (repo, number) => {
+    const t = Date.parse((await pullInfo(repo, number))?.created_at);
+    return Number.isFinite(t) ? t : null;
+  };
+  const finishDates = new Map();
+  for (const j of jobs) {
+    const inputs = finishInputs.get(j.id) || { desk: null, leadWindow: null, prs: [] };
+    const deskDay = inputs.desk && (inputs.desk.state === "measured" || inputs.desk.state === "partial");
+    // The anchor needs GitHub; it is read only when Desk has no day to give.
+    const anchor = deskDay || OFFLINE ? null : await anchorFromPulls(inputs.prs, createdMs);
+    finishDates.set(j.id, resolveFinishDate({ status: j.status, desk: inputs.desk, leadWindow: inputs.leadWindow, anchor, labelsDay: labelsDay.get(j.id) || null, today }));
+  }
+  const order = finishOrder(jobs, { labelAdded, factsAdded: firstAdded(mainDir, "facts/"), factsFileOf, finishDates });
+  for (const j of jobs) Object.assign(j, order.get(j.id), { finish_date: finishDates.get(j.id) });
 }
 
 // ---------------------------------------------------------------------------
@@ -997,7 +1026,19 @@ const health = buildHealth({
 
 // The numbers regression check. It runs before anything is written, so a
 // number that lost its state fails the build and the old site stays up.
-const violations = [...checkNumbers(data).map((v) => ({ ...v, file: "data.json" })), ...checkNumbers(health).map((v) => ({ ...v, file: "health.json" }))];
+// Finished tasks' hours by finish week (by-week.mjs), from Desk's stack-up
+// and the finish dates above; none when there is no stack-up file.
+const byWeek = buildByWeek({
+  stackup: readJSON(join(reportsDir, "rollups/stackup.json"), null),
+  tasks: readJSON(join(reportsDir, "rollups/tasks.json"), null),
+  finishDates: new Map(jobs.map((j) => [j.id, j.finish_date])),
+});
+
+const violations = [
+  ...checkNumbers(data).map((v) => ({ ...v, file: "data.json" })),
+  ...checkNumbers(health).map((v) => ({ ...v, file: "health.json" })),
+  ...(byWeek ? checkByWeek(byWeek).map((v) => ({ ...v, file: "rollups/by_week.json" })) : []),
+];
 if (violations.length) {
   for (const v of violations.slice(0, 50)) console.error(`numbers-check: ${v.code} at ${v.file}:${v.path}`);
   console.error(`numbers-check: ${violations.length} violation(s); data not written`);
@@ -1007,6 +1048,10 @@ if (violations.length) {
 mkdirSync(dirname(outFile), { recursive: true });
 writeFileSync(outFile, JSON.stringify(data), "utf8");
 writeFileSync(join(dirname(outFile), "health.json"), JSON.stringify(health), "utf8");
+if (byWeek) {
+  mkdirSync(join(dirname(outFile), "rollups"), { recursive: true });
+  writeFileSync(join(dirname(outFile), "rollups/by_week.json"), JSON.stringify(byWeek), "utf8");
+}
 
 console.log(
   `factory site data: ${jobs.length} jobs, ${factFiles.length} facts files (${scopedSessionCount} substantial), ${toolRollups.kinds.length} tool kinds, ${modelRolls.models.length} models, ${kaizenIssues.length} kaizen issues, ${andonIssues.length} andon issues, ${featured.length} featured sessions (${prLookupsUsed} PR lookups), verdict ${health.verdict.status} -> ${outFile}`,

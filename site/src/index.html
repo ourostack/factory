@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>The factory</title>
-<meta name="description" content="Where the time went on real agentic work, walked the way Lean walks a factory floor: follow one task, compare tasks, rank the causes, act. No who, no when." />
+<meta name="description" content="Where the time went on real agentic work, walked the way Lean walks a factory floor: follow one task, compare tasks, rank the causes, act. No who, no content." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232a78d6'/%3E%3Cpath d='M7 22V10l6 5 6-5v12M25 22V13' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="alternate" type="text/plain" href="llms.txt" title="Index of the data files, for agents" />
 <link rel="stylesheet" href="styles.css" />
@@ -256,18 +256,18 @@
       <li><strong>Kaizen closes the loop.</strong> Evidence becomes an improvement issue naming the measure, the countermeasure and, once it ships, whether the data confirms it helped.</li>
     </ol>
 
-    <h2 class="block-title">No who, no when, just how</h2>
+    <h2 class="block-title">No who, no content, just how</h2>
     <ul class="plain-list">
       <li><strong>No who.</strong> No contributor, operator, account, machine, host name, desk path or branch appears in any facts file. A task is identified only by a one-way key.</li>
-      <li><strong>No when.</strong> Facts carry durations and offsets from the session start, never a date, a time of day or an epoch value. The site shows no calendar date for any task.</li>
+      <li><strong>Dates and times are stated, and how precise.</strong> Facts carry durations and offsets from the session start and the task card's creation. The one calendar fact is the UTC day a task finished, never a time of day. Times inside a task sit on the task's own clock, an offset from its card's creation; pull request times come from GitHub, which already shows them. A finish day taken from a later record (the card's last update, or the day the task's labels landed) is marked "on or before". Anyone can therefore read which days the work was done. That cost was accepted on 2026-10-08: accuracy and precision outrank privacy here.</li>
       <li><strong>No content.</strong> No transcript text, prompt, response, tool argument, file content, file path or task card title ever leaves the contributor's machine.</li>
       <li><strong>Public references only.</strong> References to private repositories are dropped and only counted. Public pull requests and commits are, like any GitHub contribution, already public.</li>
-      <li><strong>Public work is named publicly.</strong> A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened (that time is never published), plus how many more it has. If some of its pull requests could not be read, the name comes from those that could, and the task page says so. A task with no public pull request is shown as "Private task" with a short key.</li>
-      <li><strong>Operator turns appear only as counts.</strong> The site does not place the operator's individual prompts on a task's clock.</li>
+      <li><strong>Public work is named publicly.</strong> A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened, plus how many more it has. If some of its pull requests could not be read, the name comes from those that could, and the task page says so. A task with no public pull request is shown as "Private task" with a short key.</li>
+      <li><strong>Operator turns are on the task's clock.</strong> Each prompt has a time on the task's clock, and the size class of the prompt and of the output the operator read, never the text. This is a time within the task, not a time of day.</li>
     </ul>
 
     <h2 class="block-title">Finish order</h2>
-    <p>Tasks are ordered without dates. A task's waste labels are written when it reaches done, so the order in which each task's first label file landed in the store is the order in which tasks finished. Only the position (1st, 2nd, 3rd) is published, never the date. Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on the finished task with the latest finish position, named or private.</p>
+    <p>Tasks are ordered by the UTC day they finished, earliest first. The day comes from the first source that has one: Desk's record of the day the task's card moved to done or cancelled (measured); the task's clock tied to GitHub through its pull requests (measured when their times agree within 2 minutes); or the day the task's first waste labels landed in the store (a task finished on or before that day, so it is marked as an upper bound). A task with no day is shown without one, with the reason. Tasks finished on the same day, and tasks with no day, keep the order in which each task's first label file landed in the store. Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on the finished task with the latest finish position, named or private.</p>
 
     <h2 class="block-title">How to read the numbers</h2>
     <ul class="plain-list" id="guide">
@@ -363,7 +363,7 @@
 
     <section class="block" aria-labelledby="tasks-title">
       <h2 class="block-title" id="tasks-title">Every task</h2>
-      <p class="chart-caption" id="tasks-sub">Finish order is a position, never a date: the order in which each task's waste labels first landed in the store. Open tasks follow, in the order their first session was published.</p>
+      <p class="chart-caption" id="tasks-sub">Tasks are ordered by the UTC day they finished; where a day is not known, by the order in which each task's waste labels first landed in the store. Open tasks follow, in the order their first session was published.</p>
       <div id="jobs-table"></div>
     </section>
     <section class="block" aria-label="Where time goes in a finished task">

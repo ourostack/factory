@@ -96,6 +96,7 @@ test("#/ lands on the finished task with the latest finish position, named or pr
   // About and llms.txt state the same rule.
   const about = read("site/src/index.html")
   assert.match(about, /Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position\./)
+  assert.match(about, /Tasks are ordered by the UTC day they finished, earliest first\./)
   assert.match(about, /"Follow a task" opens on the finished task with the latest finish position, named or private\./)
   assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the finished task with the latest finish position \(`finish_order`\), named or private: the labeled task \(`finish_basis: "labels"`\) with the largest `finish_order` in `rollups\/tasks\.json`\./)
 })
@@ -158,7 +159,7 @@ test("when a pull request cannot be read, the name comes from what was read and 
   const tn = F.taskName({}, { id: "0123456789abcdef", name: "Read, opened later", name_basis: "partial", more_prs: measured(2) })
   assert.equal(tn.partial, true)
   const html = read("site/src/index.html")
-  assert.match(html, /A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened \(that time is never published\)/)
+  assert.match(html, /A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened, plus/)
   assert.match(html, /If some of its pull requests could not be read, the name comes from those that could, and the task page says so\./)
   assert.doesNotMatch(html, /first public pull request its sessions opened/)
   // The numbers check accepts the basis as a word.
@@ -498,8 +499,10 @@ test("no decorative cards: no stat tiles, takeaway cards, pipeline steps or char
   // The privacy rules and the data's journey are prose lists on About, with the finish-order rule.
   const about = html.slice(html.indexOf('id="view-about"'), html.indexOf('id="view-store"'))
   assert.match(about, /<h2 class="block-title">How this data gets here<\/h2>\s*<ol class="plain-list">/)
-  assert.match(about, /<h2 class="block-title">No who, no when, just how<\/h2>\s*<ul class="plain-list">/)
-  assert.match(about, /Only the position \(1st, 2nd, 3rd\) is published, never the date/)
+  assert.match(about, /<h2 class="block-title">No who, no content, just how<\/h2>\s*<ul class="plain-list">/)
+  assert.match(about, /never a time of day/)
+  assert.match(about, /accuracy and precision outrank privacy/)
+  assert.doesNotMatch(about, /only as counts|No when|shows no calendar date/)
 })
 
 test("public copy says the operator, not you, and shows no calendar date", () => {
