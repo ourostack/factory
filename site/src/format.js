@@ -169,6 +169,7 @@
     median_of_subset: "a median of only the tasks that were measured has no direction: the others could move it either way",
     no_finish_source: "no record gives the day this task finished",
     job_offsets_withheld: "the desk withholds this task's timing",
+    pr_time_not_placed: "some of the task's pull requests have no time on the task clock, so they cannot be counted in a box",
     clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
   };
 

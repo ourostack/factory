@@ -200,6 +200,9 @@
   function statedText(n, kind, none) {
     const x = stated(n);
     if (x.state === "unavailable") return none || "no data";
+    // A lower bound of zero says nothing a reader can use (format.js says
+    // the same).
+    if (x.state === "partial" && x.bound !== "upper" && x.value === 0) return "none recorded";
     const t = kind === "duration" ? durationShort(x.value) : x.value.toLocaleString("en-US");
     return `${boundWords(x)}${t}`;
   }
@@ -762,16 +765,24 @@
   // The rows of a box's data box, in the design's fixed order.
   function dataBox(box, sessionCount, prsHere) {
     const ws = box.working_state ? stated(box.working_state) : { state: "measured" };
+    // Each row carries its figure's reasons, which the page shows on hover
+    // and to screen readers, for a figure that is not measured.
+    const why = (n) => {
+      const x = n ? stated(n) : { state: "measured" };
+      return x.state === "measured" ? [] : Array.isArray(x.reasons) ? [...x.reasons] : [];
+    };
+    const row = (key, label, n, none) => ({ key, label, text: statedText(n, null, none), reasons: why(n) });
+    const prs = prsHere || box.prs;
     return [
-      { key: "working", label: "Working time", text: ws.state === "measured" ? durationShort(box.working_ms) : ws.state === "partial" ? `at least ${durationShort(box.working_ms)}` : `${durationShort(box.working_ms)} (span)` },
-      { key: "agents", label: "Agents", text: statedText(box.agents) },
-      { key: "tool_calls", label: "Tool calls", text: statedText(box.tool_calls) },
-      { key: "tool_failures", label: "Failed tool calls", text: statedText(box.tool_failures) },
-      { key: "operator_turns", label: "Operator turns", text: statedText(box.operator_turns, null, "not recorded") },
+      { key: "working", label: "Working time", text: ws.state === "measured" ? durationShort(box.working_ms) : ws.state === "partial" ? (box.working_ms > 0 ? `at least ${durationShort(box.working_ms)}` : "none recorded") : `${durationShort(box.working_ms)} (span)`, reasons: why(box.working_state) },
+      row("agents", "Agents", box.agents),
+      row("tool_calls", "Tool calls", box.tool_calls),
+      row("tool_failures", "Failed tool calls", box.tool_failures),
+      row("operator_turns", "Operator turns", box.operator_turns, "not recorded"),
       // The clock's count (boxPrCount) when there is one, so the box and the
       // ladder's pull request lane agree; else Desk's burst count.
-      { key: "prs", label: "Pull requests first appeared", text: statedText(prsHere || box.prs, null, "not recorded") },
-      { key: "session", label: "Session", text: sessionWords(box.session_numbers, sessionCount) },
+      row("prs", "Pull requests first appeared", prs, "not recorded"),
+      { key: "session", label: "Session", text: sessionWords(box.session_numbers, sessionCount), reasons: [] },
     ];
   }
 
@@ -1343,6 +1354,11 @@
     const waitOf = (t) => waits.find((w) => w.session === t.session && w.end_ms === t.at_ms) || null;
     // How far outside the lead window a time lies (0 inside it).
     const items = (model && model.items) || [];
+    const stepOf = (at, ms) => {
+      if (at.outside || !items[at.item]) return { step: null, step_frac: null };
+      const sp = stepPlace(items[at.item], ms);
+      return sp ? { step: sp.step, step_frac: sp.frac } : { step: null, step_frac: null };
+    };
     const outsideMs = (ms, at) => (!at || !at.outside || !items.length ? 0 : at.outside === "before" ? items[0].start_ms - ms : ms - items[items.length - 1].end_ms);
     const prompts = turns
       .map((turn, idx) => ({ turn, idx }))
@@ -1352,8 +1368,23 @@
         const at = placeOnMap(model, turn.at_ms) || { item: 0, frac: 0, outside: null };
         const wait = waitOf(turn);
         const why = typeof turn.why === "string" ? turn.why : wait && typeof wait.why === "string" ? wait.why : "not_known";
-        return { n: i + 1, total: all.length, idx, turn, ms: turn.at_ms, item: at.item, frac: at.frac, outside: at.outside, outside_ms: outsideMs(turn.at_ms, at), wait, why };
+        return { n: i + 1, total: all.length, idx, turn, ms: turn.at_ms, item: at.item, frac: at.frac, ...stepOf(at, turn.at_ms), outside: at.outside, outside_ms: outsideMs(turn.at_ms, at), wait, why };
       });
+    // How long the task was idle before each prompt, as the map counts it.
+    const listOf = (x) => (Array.isArray(x) ? x : x && Array.isArray(x.items) ? x.items : []);
+    const gapsL = listOf(mp.gaps);
+    const burstsL = listOf(mp.bursts);
+    const firstStart = items.length ? items[0].start_ms : null;
+    const near = (a, b) => isMs(a) && Math.abs(a - b) <= 1000;
+    for (const p of prompts) {
+      const g = gapsL.find((x) => x && near(x.end_ms, p.ms) && isMs(x.start_ms));
+      const b = g ? null : burstsL.find((x) => x && near(x.end_ms, p.ms) && isMs(x.start_ms));
+      const bIdle = b ? (isMs(b.idle_ms) ? b.idle_ms : (() => { const w = stated(b.working_ms); return w.state === "unavailable" ? 0 : Math.max(0, b.end_ms - b.start_ms - w.value); })()) : 0;
+      if (g) p.idle = { kind: "gap", ms: g.end_ms - g.start_ms };
+      else if (b && bIdle > 0) p.idle = { kind: "burst", ms: bIdle };
+      else if (isMs(firstStart) && p.ms <= firstStart) p.idle = { kind: "start", ms: 0 };
+      else p.idle = { kind: "none", ms: 0 };
+    }
     // How long the agent then worked: to its next stop in the same session
     // (the next after-stop prompt's time minus its wait), or it was still
     // working at the next prompt, or no later prompt came.
@@ -1380,23 +1411,69 @@
         const s = st && typeof st === "object" ? st : { state: isMs(ms) ? "measured" : "unavailable", reasons: [] };
         if (isMs(ms)) {
           const at = placeOnMap(model, ms) || { item: 0, frac: 0, outside: null };
-          marks.push({ kind, pr, k, ms, item: at.item, frac: at.frac, outside: at.outside, outside_ms: outsideMs(ms, at), state: s.state === "partial" ? "partial" : "measured", bound: s.state === "partial" ? (s.bound === "upper" || s.bound === "lower" ? s.bound : null) : null });
+          marks.push({ kind, pr, k, ms, item: at.item, frac: at.frac, ...stepOf(at, ms), outside: at.outside, outside_ms: outsideMs(ms, at), state: s.state === "partial" ? "partial" : "measured", bound: s.state === "partial" ? (s.bound === "upper" || s.bound === "lower" ? s.bound : null) : null });
         } else if (kind === "opened" || pr.state === "merged") unplaced.push({ pr, k, what: kind, reasons: Array.isArray(s.reasons) ? s.reasons : [] });
       }
     });
     marks.sort((a, b) => a.ms - b.ms || a.k - b.k || (a.kind === "opened" ? -1 : 1));
-    return { prompts, prs: marks, unplaced, by_item };
+    // An open task's map ends at its last recorded work.
+    const lw = mp.lead_window || {};
+    const open = (Array.isArray(lw.reasons) && lw.reasons.includes("censored")) || (mp.finish_date && Array.isArray(mp.finish_date.reasons) && mp.finish_date.reasons.includes("open_job"));
+    return { prompts, prs: marks, unplaced, by_item, open: !!open };
   }
 
   // A time outside the task's lead window, in words, or null inside it.
-  function outsideWords(ms, model) {
+  // `open`: the task has not finished, so its map ends at the last
+  // recorded work, not at an end of its lead time.
+  const afterEnd = (open) => (open ? "after the last recorded work" : "after the task's lead time ended");
+  function outsideWords(ms, model, open) {
     const items = (model && model.items) || [];
     if (!isMs(ms) || !items.length) return null;
     const a = items[0].start_ms;
     const b = items[items.length - 1].end_ms;
     if (ms < a) return `${durationWords(a - ms)} before the task started`;
-    if (ms > b) return `${durationWords(ms - b)} after the task's lead time ended`;
+    if (ms > b) return `${durationWords(ms - b)} ${afterEnd(open)}`;
     return null;
+  }
+
+  // Where a time sits on its item's ladder steps: a box draws its working
+  // time, then its folded waits; a wait draws one step. A time inside a
+  // folded gap is on the folded step, at its share of the box's idle time
+  // before it; any other time in a box is on the working step, at its share
+  // of the box's working time before it; a time in a wait is at its share
+  // of the wait's idle time before it. Returns { step, frac }.
+  function stepPlace(it, ms) {
+    const clamp = (x) => Math.min(1, Math.max(0, x));
+    if (!it || !isMs(ms)) return null;
+    if (it.type === "wait") {
+      let before = 0;
+      for (const g of it.gaps) {
+        if (ms >= g.end_ms) before += g.end_ms - g.start_ms;
+        else if (ms > g.start_ms) before += ms - g.start_ms;
+      }
+      return { step: "wait", frac: it.duration_ms > 0 ? clamp(before / it.duration_ms) : 0 };
+    }
+    const folded = it.folded || [];
+    const inGap = folded.find((g) => ms >= g.start_ms && ms < g.end_ms);
+    if (inGap && it.inner_wait_ms > 0) {
+      let before = 0;
+      for (const g of folded) {
+        if (g === inGap) {
+          before += ms - g.start_ms;
+          break;
+        }
+        if (g.end_ms <= ms) before += g.end_ms - g.start_ms;
+      }
+      return { step: "fold", frac: clamp(before / it.inner_wait_ms) };
+    }
+    let before = 0;
+    for (const b of it.bursts || []) {
+      const w = stated(b.working_ms);
+      const work = w.state === "unavailable" ? b.end_ms - b.start_ms : w.value;
+      if (ms >= b.end_ms) before += work;
+      else if (ms > b.start_ms && b.end_ms > b.start_ms) before += (work * (ms - b.start_ms)) / (b.end_ms - b.start_ms);
+    }
+    return { step: "work", frac: it.working_ms > 0 ? clamp(before / it.working_ms) : 0 };
   }
 
   const prName = (pr) => `${pr.repo}#${pr.number}`;
@@ -1498,17 +1575,37 @@
   function ladderLanes(clock, sizes, opts) {
     const o = opts || {};
     const c = clock || { prompts: [], prs: [] };
-    const size = (i) => (Array.isArray(sizes) && isMs(sizes[i]) ? sizes[i] : 0);
-    const promptMarks = c.prompts.map((p) => ({ kind: "prompt", n: p.n, ms: p.ms, item: p.item, frac: p.frac, outside: p.outside, outside_ms: p.outside_ms || 0, ref: p }));
-    const prMarks = c.prs.map((x) => ({ kind: x.kind, pr: x.pr, ms: x.ms, item: x.item, frac: x.frac, outside: x.outside, outside_ms: x.outside_ms || 0, state: x.state, bound: x.bound, ref: x }));
+    const geo = (i) => (Array.isArray(sizes) ? sizes[i] : null);
+    // A mark's position: inside its step's drawn range when the layout
+    // gives the steps ({ work: [a, b], fold: [a, b] } or { wait: [a, b] }),
+    // else along the item's whole length (a number).
+    const place = (x) => {
+      const g = geo(x.item);
+      if (isMs(g)) return { step: x.step || "item", pos: x.frac * g };
+      if (!g || typeof g !== "object") return { step: x.step || "item", pos: 0 };
+      const step = g[x.step] ? x.step : g.work ? "work" : Object.keys(g)[0];
+      const r = g[step] || [0, 0];
+      const f = g[x.step] ? (isMs(x.step_frac) ? x.step_frac : 0) : x.frac;
+      return { step, pos: r[0] + f * (r[1] - r[0]) };
+    };
+    const promptMarks = c.prompts.map((p) => ({ kind: "prompt", n: p.n, ms: p.ms, item: p.item, frac: p.frac, step: p.step, step_frac: p.step_frac, outside: p.outside, outside_ms: p.outside_ms || 0, ref: p }));
+    const prMarks = c.prs.map((x) => ({ kind: x.kind, pr: x.pr, ms: x.ms, item: x.item, frac: x.frac, step: x.step, step_frac: x.step_frac, outside: x.outside, outside_ms: x.outside_ms || 0, state: x.state, bound: x.bound, ref: x }));
+    const open = !!c.open;
     const lane = (marks, lname, w, words) => {
       const inside = marks.filter((x) => !x.outside);
-      for (const x of inside) x.pos = x.frac * size(x.item);
+      for (const x of inside) Object.assign(x, place(x));
       const out = [];
-      for (const item of [...new Set(inside.map((x) => x.item))].sort((a, b) => a - b)) {
-        for (const g of groupMarks(inside.filter((x) => x.item === item), w, o.badge)) {
+      // Marks group within one step of one item: a group never spans steps.
+      const keys = [...new Set(inside.map((x) => `${x.item}|${x.step}`))].sort((a, b) => {
+        const [ia] = a.split("|");
+        const [ib] = b.split("|");
+        return Number(ia) - Number(ib) || (inside.find((x) => `${x.item}|${x.step}` === a).pos - inside.find((x) => `${x.item}|${x.step}` === b).pos);
+      });
+      for (const key of keys) {
+        const here = inside.filter((x) => `${x.item}|${x.step}` === key);
+        for (const g of groupMarks(here, w, o.badge)) {
           const ms = [...g.marks].sort((a, b) => a.ms - b.ms);
-          out.push({ lane: lname, item, from: g.from, to: g.to, pos: g.pos, count: ms.length, marks: ms, when: spanWords(ms[0].ms, ms[ms.length - 1].ms, o.origin), ...words(ms, o.origin) });
+          out.push({ lane: lname, item: here[0].item, step: here[0].step, from: g.from, to: g.to, pos: g.pos, count: ms.length, marks: ms, when: spanWords(ms[0].ms, ms[ms.length - 1].ms, o.origin), ...words(ms, o.origin) });
         }
       }
       return out;
@@ -1517,11 +1614,24 @@
       const ps = promptMarks.filter((x) => x.outside === side);
       const rs = prMarks.filter((x) => x.outside === side);
       const all = [...ps, ...rs];
-      if (!all.length) return { prompts: ps, prs: rs, count: 0, marks: [], short: null, label: null };
+      if (!all.length) return { prompts: ps, prs: rs, count: 0, marks: [], short: null, label: null, title: null, when: null };
       const far = all.map((x) => x.outside_ms).sort((a, b) => a - b);
       const parts = [ps.length ? `${ps.length} prompt${ps.length === 1 ? "" : "s"}` : null, rs.length ? `${rs.length} PR event${rs.length === 1 ? "" : "s"}` : null].filter(Boolean).join(" and ");
-      const how = far[0] === far[far.length - 1] || durationWords(far[0]) === durationWords(far[far.length - 1]) ? `${durationWords(far[0])} ${side === "before" ? "before" : "after"}` : `from ${durationWords(far[0])} to ${durationWords(far[far.length - 1])} ${side === "before" ? "before" : "after"}`;
-      return { prompts: ps, prs: rs, count: all.length, marks: [...all].sort((a, b) => a.ms - b.ms), short: parts, label: `${side === "before" ? "Before the task started" : "After the task's lead time ended"}: ${parts}, ${how}` };
+      const one = far[0] === far[far.length - 1] || durationWords(far[0]) === durationWords(far[far.length - 1]);
+      const word = side === "before" ? "before" : "after";
+      const how = one ? `${durationWords(far[0])} ${word}` : `from ${durationWords(far[0])} to ${durationWords(far[far.length - 1])} ${word}`;
+      const end = side === "before" ? "before the task started" : afterEnd(open);
+      const title = side === "before" ? "Before the task started" : open ? "After the last recorded work" : "After the task's lead time ended";
+      const when = one ? `${durationWords(far[0])} ${end}` : `from ${durationWords(far[0])} to ${durationWords(far[far.length - 1])} ${end}`;
+      // Each kind on its own, for a margin's badges: prompts and pull
+      // request times are never counted together.
+      const kindOf = (list, noun) => {
+        if (!list.length) return null;
+        const f = list.map((y) => y.outside_ms).sort((a, b) => a - b);
+        const same = f[0] === f[f.length - 1] || durationWords(f[0]) === durationWords(f[f.length - 1]);
+        return { lane: noun === "prompt" ? "prompt" : "pr", count: list.length, marks: [...list].sort((a, b) => a.ms - b.ms), short: `${list.length} ${noun}${list.length === 1 ? "" : "s"}`, when: same ? `${durationWords(f[0])} ${end}` : `from ${durationWords(f[0])} to ${durationWords(f[f.length - 1])} ${end}` };
+      };
+      return { prompts: ps, prs: rs, count: all.length, marks: [...all].sort((a, b) => a.ms - b.ms), short: parts, title, when, label: `${title}: ${parts}, ${how}`, kinds: [kindOf(ps, "prompt"), kindOf(rs, "PR event")].filter(Boolean) };
     };
     return { prompts: lane(promptMarks, "prompt", TICK_PX, promptGroupWords), prs: lane(prMarks, "pr", GLYPH_PX, prGroupWords), before: margin("before"), after: margin("after") };
   }
@@ -1557,12 +1667,29 @@
   }
 
   // The wait before a prompt, in words, from Desk's window_ms.
-  function waitedWords(turn) {
+  // How long the session's main agent had stopped before a prompt (its
+  // stop-to-prompt window). Other agents of the task may have been working.
+  function stoppedWords(turn) {
     if (!turn || turn.basis === "first") return "first prompt of the session";
     if (!isMs(turn.window_ms)) return "not recorded";
-    if (turn.basis === "mid_turn") return `while the agent was working, ${durationWords(turn.window_ms)} after the previous prompt`;
-    return `${durationWords(turn.window_ms)} after the agent stopped`;
+    if (turn.basis === "mid_turn") return `not stopped: it was still working, ${durationWords(turn.window_ms)} after the previous prompt`;
+    return durationWords(turn.window_ms);
   }
+
+  // How long the task was idle before a prompt (no agent of the task
+  // working), as the map counts it: the gap that ends at the prompt; else,
+  // when the burst before ends there, its idle time, which the map does not
+  // place inside the burst; else none.
+  function idleWords(p) {
+    const x = p.idle || { kind: "none" };
+    if (x.kind === "gap") return durationWords(x.ms);
+    if (x.kind === "burst") return `at most ${durationWords(x.ms)} (idle inside the burst before it; when is not recorded)`;
+    if (x.kind === "start") return "none: the task starts here";
+    return "none: an agent of this task was working";
+  }
+
+  // The one sentence that tells the two waits apart.
+  const HANDOFF_EXPLAIN = "Task idle before this prompt is the map's waiting: no agent of this task was working. Main agent stopped before this prompt is how long the session's main agent had stopped before the operator prompted it; other agents of this task may have been working in that time, so the map can count it as working.";
 
   // How long the agent worked after a prompt, in words.
   function workedWords(p) {
@@ -1622,18 +1749,16 @@
       n: p.n,
       session: String(p.turn.session || "").slice(0, 8),
       clock: clockAt(p.ms, origin),
-      waited: waitedWords(p.turn),
+      idle: idleWords(p),
+      stopped: stoppedWords(p.turn),
       worked: workedWords(p),
-      counted: p.turn.basis !== "after_stop" ? "—" : p.wait && isMs(p.wait.next_prompt_ms) ? durationWords(p.wait.next_prompt_ms) : "not recorded",
       why: p.turn.basis !== "after_stop" ? "—" : whyStopWords(p, reasonText),
       prompt: sizeWords(p.turn.prompt_class),
       output: sizeWords(p.turn.output_class),
     }));
-    const show_counted = ps.some((p) => p.wait && isMs(p.wait.next_prompt_ms));
     const show_why = ps.some((p) => p.wait || (p.why && p.why !== "not_known"));
-    const gone = [!show_counted ? "the waiting time before each prompt" : null, !show_why ? "why the agent stopped" : null].filter(Boolean);
-    const note = rows.length && gone.length ? `Desk does not publish ${gone.join(" or ")} yet, so ${gone.length === 1 ? "that column is" : "those columns are"} left out until it does.` : null;
-    return { rows, show_counted, show_why, note };
+    const note = rows.length && !show_why ? "Desk does not publish why the agent stopped yet, so that column is left out until it does." : null;
+    return { rows, show_why, note, explain: HANDOFF_EXPLAIN };
   }
   // The rows alone, for callers that draw every column.
   function handoffRows(clock, origin, reasonText, leadMs) {
@@ -1652,9 +1777,11 @@
   }
 
   // A time's words with how far outside the lead window it lies, if it does.
-  function withOutside(text, ms, model) {
-    const o = outsideWords(ms, model);
-    return o ? `${text} (${o})` : text;
+  // "Before the task started" is said once: the clock words already say
+  // "before the task's start".
+  function withOutside(text, ms, model, open) {
+    const o = outsideWords(ms, model, open);
+    return o && !/before the task started$/.test(o) ? `${text} (${o})` : text;
   }
 
   // A pull request time in words, with its direction when it is partial.
@@ -1706,7 +1833,9 @@
         ["What it is", `A prompt from the operator, ${BASIS_WORDS[t.basis] || "its relation to the agent's stop not recorded"}`],
         ["On the task clock", `${clockAt(p.ms, c.origin_ms)}${markPlace(p, c.model)}`],
         ["Session", `session ${String(t.session || "not recorded").slice(0, 8)}`],
-        ["Wait before it", waitedWords(t)],
+        ["Task idle before this prompt", idleWords(p)],
+        ["Main agent stopped before this prompt", stoppedWords(t)],
+        ["Agent then worked", workedWords(p)],
       ];
       // Left out until Desk publishes the wait before the prompt.
       if (t.basis === "after_stop" && p.wait && isMs(p.wait.next_prompt_ms)) rows.push(["Counted as waiting", countedWords(p, c.lead_ms)]);
@@ -1719,11 +1848,11 @@
     const pr = thing.pr;
     const rows = [
       ["What it is", prStateWords(pr)],
-      ["Opened", withOutside(prTimeWords(pr.opened_at_ms, pr.opened_state, c.origin_ms, words), pr.opened_at_ms, c.model)],
+      ["Opened", withOutside(prTimeWords(pr.opened_at_ms, pr.opened_state, c.origin_ms, words), pr.opened_at_ms, c.model, c.open)],
     ];
     const ob = prBasisWords(pr.opened_basis, pr.opened_state, "opening");
     if (ob) rows.push(["Opened, from", ob]);
-    rows.push(["Merged", pr.state === "open" ? "not merged" : pr.state === "closed" ? "closed without merging" : withOutside(prTimeWords(pr.merged_at_ms, pr.merged_state, c.origin_ms, words), pr.merged_at_ms, c.model)]);
+    rows.push(["Merged", pr.state === "open" ? "not merged" : pr.state === "closed" ? "closed without merging" : withOutside(prTimeWords(pr.merged_at_ms, pr.merged_state, c.origin_ms, words), pr.merged_at_ms, c.model, c.open)]);
     const mb = prBasisWords(pr.merged_basis, pr.merged_state, "merge");
     if (mb) rows.push(["Merged, from", mb]);
     if (isMs(pr.opened_at_ms) && isMs(pr.merged_at_ms)) {
@@ -1744,7 +1873,7 @@
     if (thing.kind === "prompt") {
       const p = thing.mark;
       const t = p.turn || {};
-      const after = t.basis === "after_stop" && isMs(t.window_ms) ? `, ${durationWords(t.window_ms)} after the agent stopped` : t.basis === "mid_turn" && isMs(t.window_ms) ? `, ${durationWords(t.window_ms)} after the previous prompt` : "";
+      const after = t.basis === "after_stop" && isMs(t.window_ms) ? `, ${durationWords(t.window_ms)} after the main agent stopped` : t.basis === "mid_turn" && isMs(t.window_ms) ? `, ${durationWords(t.window_ms)} after the previous prompt` : "";
       return {
         what: `operator prompt ${p.n} of ${p.total} (${BASIS_WORDS[t.basis] || "relation to the agent's stop not recorded"})`,
         where: `It came at minute ${minuteAt(p.ms, c.origin_ms)} after the task's start${after}; the page never shows a prompt's text`,
@@ -1754,12 +1883,19 @@
     }
     const pr = thing.pr;
     const q = (st) => (st && st.state === "partial" ? (st.bound === "upper" ? "at most " : st.bound === "lower" ? "at least " : "about ") : "");
-    const parts = [];
-    if (isMs(pr.opened_at_ms)) parts.push(`opened at ${q(pr.opened_state)}minute ${minuteAt(pr.opened_at_ms, c.origin_ms)}`);
-    if (isMs(pr.merged_at_ms)) parts.push(`merged at ${q(pr.merged_state)}minute ${minuteAt(pr.merged_at_ms, c.origin_ms)}`);
+    const verb = pr.created === true ? "opened" : "first appeared";
+    const times = [];
+    if (isMs(pr.opened_at_ms)) times.push([verb, q(pr.opened_state), minuteAt(pr.opened_at_ms, c.origin_ms)]);
+    if (isMs(pr.merged_at_ms)) times.push(["merged", q(pr.merged_state), minuteAt(pr.merged_at_ms, c.origin_ms)]);
+    // A time before the task's start reads as minutes before it, never a
+    // negative minute.
+    const at = ([v, qq, m]) => (m < 0 ? `${v} ${qq}${Math.abs(m).toLocaleString("en-US")} minutes before the task's start` : `${v} at ${qq}minute ${m.toLocaleString("en-US")} after the task's start`);
+    let where = "Its times are not placed on the task clock";
+    if (times.length && times.every((t) => t[2] >= 0)) where = `It was ${times.map(([v, qq, m]) => `${v} at ${qq}minute ${m.toLocaleString("en-US")}`).join(" and ")} after the task's start`.replace("It was first appeared", "It first appeared");
+    else if (times.length) where = `It ${times.map(at).join(", and ")}`;
     return {
       what: `pull request ${prName(pr)}`,
-      where: parts.length ? `It was ${parts.join(" and ")} after the task's start` : "Its times are not placed on the task clock",
+      where,
       locator: `prs[${thing.k}]`,
       select: `pr=${thing.k + 1}`,
     };
@@ -2263,6 +2399,7 @@
     placeOnMap,
     clockMarks,
     ladderLanes,
+    stepPlace,
     groupMarks,
     markLine,
     outsideWords,

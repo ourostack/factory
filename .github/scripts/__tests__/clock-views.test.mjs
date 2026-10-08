@@ -173,7 +173,8 @@ test("a mark outside the lead window is never drawn at the map's edge: it goes t
   assert.equal(W.outsideWords(H, model), null)
   // The drawer and the table say it too.
   const r = Object.fromEntries(W.drawer({ kind: "pr", pr: map.prs[0], k: 0 }, { origin_ms: 0, model, reasonText: F.reasonText }).rows)
-  assert.equal(r.Opened, "16 days before the task's start (16 days before the task started)")
+  // "Before the task started" is said once: the clock words already say it.
+  assert.equal(r.Opened, "16 days before the task's start")
   assert.equal(r.Merged, "24 hours after the task's start (20 hours after the task's lead time ended)")
 })
 
@@ -192,9 +193,13 @@ test("the Handoffs table has one row per prompt, in clock order: when it came, t
   assert.deepEqual(rows.map((r) => r.n), [1, 2, 3])
   assert.equal(rows[0].clock, "at the task's start")
   // "Came" is folded into the wait before it.
-  assert.equal(rows[0].waited, "first prompt of the session")
-  assert.equal(rows[1].waited, "2 hours after the agent stopped")
-  assert.equal(rows[2].waited, "while the agent was working, 30 minutes after the previous prompt")
+  // Two waits, two names: the task's idle time (the map's waiting: no agent of the task working) and the main agent's stop.
+  assert.equal(rows[0].idle, "none: the task starts here")
+  assert.equal(rows[1].idle, "2 hours")
+  assert.equal(rows[2].idle, "none: an agent of this task was working")
+  assert.equal(rows[0].stopped, "first prompt of the session")
+  assert.equal(rows[1].stopped, "2 hours")
+  assert.equal(rows[2].stopped, "not stopped: it was still working, 30 minutes after the previous prompt")
   // The agent then worked: to its next stop (the next after-stop prompt's time minus its wait), still working at a mid-turn prompt, or no later prompt.
   assert.equal(rows[0].worked, "1 hour, then it stopped")
   assert.equal(rows[1].worked, "still working at the next prompt, 30 minutes later")
@@ -202,16 +207,16 @@ test("the Handoffs table has one row per prompt, in clock order: when it came, t
   assert.equal(rows[1].prompt, "short (21 to 200 characters)")
   assert.equal(rows[1].output, "long (1,001 to 5,000 characters)")
   // Columns with no data in any row are dropped, and the table says so once.
-  assert.deepEqual([t.show_counted, t.show_why], [false, false])
-  assert.equal(t.note, "Desk does not publish the waiting time before each prompt or why the agent stopped yet, so those columns are left out until it does.")
+  assert.equal(t.show_why, false)
+  assert.equal(t.note, "Desk does not publish why the agent stopped yet, so that column is left out until it does.")
+  assert.equal(t.explain, "Task idle before this prompt is the map's waiting: no agent of this task was working. Main agent stopped before this prompt is how long the session's main agent had stopped before the operator prompted it; other agents of this task may have been working in that time, so the map can count it as working.")
   assert.equal(rows[1].why, "not known yet: Desk does not publish why the agent stopped")
   // With Desk's waits, the columns come back.
   const withWaits = twoBursts({ waits: [{ session: "s1", start_ms: H, end_ms: 3 * H, next_prompt_ms: 2 * H - 5 * M, why: null, why_source: "none", reasons: ["not_labeled"] }] })
   const t2 = W.handoffTable(W.clockMarks(withWaits, W.mapModel(withWaits, { maxBoxes: 7 })), 0, F.reasonText, 4 * H)
-  assert.deepEqual([t2.show_counted, t2.show_why, t2.note], [true, true, null])
-  assert.equal(t2.rows[1].counted, "1.9 hours")
+  assert.deepEqual([t2.show_why, t2.note], [true, null])
   assert.equal(t2.rows[1].why, "not known (not labeled for waste yet)")
-  assert.equal(t2.rows[0].counted, "—", "a first prompt follows no stop")
+  assert.equal(t2.rows[0].why, "—", "a first prompt follows no stop")
   // A prompt before the task's start says so.
   assert.equal(W.clockAt(-90 * S, 0), "2 minutes before the task's start")
   assert.equal(W.clockAt(30 * S, 0), "30 seconds after the task's start")
@@ -258,7 +263,9 @@ test("the drawer for a prompt gives its time, the wait before it, why the agent 
   assert.equal(rows["What it is"], "A prompt from the operator, after the agent had stopped")
   assert.equal(rows["On the task clock"], "3 hours after the task's start, at the start of work box 2 of 2")
   assert.equal(rows.Session, "session s1")
-  assert.equal(rows["Wait before it"], "2 hours after the agent stopped")
+  assert.equal(rows["Task idle before this prompt"], "2 hours")
+  assert.equal(rows["Main agent stopped before this prompt"], "2 hours")
+  assert.equal(rows["Agent then worked"], "no later prompt in this session; it ended 1 hour later")
   assert.equal(rows["Counted as waiting"], "2 hours (50% of the lead time)")
   assert.equal(rows["Why the agent stopped"], "it reported finished work for the operator's acceptance (the evaluator's label, medium confidence)")
   assert.equal(rows["How the agent's turn ended"], "it ended its turn normally; its last message ended with a question mark; none of its own background agents was running")
@@ -312,7 +319,7 @@ test("Copy as a prompt names the prompt or pull request, where it sits, the link
   const c = W.clockMarks(map, model)
   const p = W.promptItem({ kind: "prompt", mark: c.prompts[1] }, { origin_ms: 0, model })
   assert.equal(p.what, "operator prompt 2 of 2 (after the agent had stopped)")
-  assert.equal(p.where, "It came at minute 180 after the task's start, 2 hours after the agent stopped; the page never shows a prompt's text")
+  assert.equal(p.where, "It came at minute 180 after the task's start, 2 hours after the main agent stopped; the page never shows a prompt's text")
   assert.equal(p.locator, "human_turns[0]")
   assert.equal(p.select, "prompt=2")
   const q = W.promptItem({ kind: "pr", pr: map.prs[0], k: 0 }, { origin_ms: 0, model })
@@ -385,7 +392,8 @@ test("the page no longer says prompts and pull requests stay off the clock", () 
   // Every reason the clock views can give has the page's words.
   for (const r of ["clock_skew_conflict"]) assert.ok(F.hasReasonText(r), r)
   // One statement of the merge rule, the same in the legend and the merged mark's drawer; no "one pixel" or "one place" claim.
-  assert.match(app, /Marks that would overlap on the ladder are shown as one count/)
+  assert.match(app, /const MERGE_RULE = "Marks that would overlap are shown as one count; select it for the list, each with its time\."/)
+  assert.equal((app.match(/would overlap/g) || []).length, 1, "the merge rule is written once, as MERGE_RULE")
   assert.doesNotMatch(app, /within one pixel|marks at one place|Marks within a pixel|within one mark's width/)
   // On a phone the box's info row (its operator marker) shows whenever it has content.
   assert.match(app, /if \(info\.childNodes\.length\) body\.appendChild\(info\)/)
@@ -400,4 +408,92 @@ test("a merged mark's list gives each mark its time, to the minute, so marks tha
   // A long group names its marks in the drawer, not in its label.
   const many = Array.from({ length: 8 }, (_, i) => ({ kind: "merged", pr: { repo: "o/r", number: i + 1 }, ms: i * S, item: 0, frac: 0, outside: null, state: "measured", k: i }))
   assert.equal(W.ladderLanes({ prompts: [], prs: many }, [100], { origin: 0 }).prs[0].label, "8 PRs merged, from 0s to 7 seconds after the task's start")
+})
+
+
+test("a data box never reads at least 0: a lower bound of zero reads none recorded, and a partial row carries its reasons", () => {
+  const pz = (reasons) => ({ state: "partial", value: 0, bound: "lower", reasons })
+  const box = { type: "box", working_ms: 0, working_state: pz(["host_records_partly"]), agents: pz(["host_records_partly"]), tool_calls: pz(["host_records_partly"]), tool_failures: pz(["host_records_partly"]), operator_turns: pz(["host_records_partly"]), prs: pz(["host_records_partly"]), session_numbers: [1] }
+  const rows = W.dataBox(box, 1, pz(["host_records_partly", "pr_time_not_placed"]))
+  for (const r of rows) assert.doesNotMatch(r.text, /at least 0\b/, r.key)
+  for (const k of ["agents", "tool_calls", "tool_failures", "operator_turns", "prs"]) assert.equal(rows.find((r) => r.key === k).text, "none recorded", k)
+  assert.deepEqual(rows.find((r) => r.key === "prs").reasons, ["host_records_partly", "pr_time_not_placed"])
+  assert.deepEqual(rows.find((r) => r.key === "session").reasons, [])
+  assert.equal(W.statedText({ state: "partial", value: 0, bound: "lower", reasons: [] }), "none recorded")
+  assert.equal(W.statedText({ state: "partial", value: 3, bound: "lower", reasons: [] }), "at least 3")
+  assert.ok(F.hasReasonText("pr_time_not_placed"))
+})
+
+test("a ladder mark sits over the step that holds its time: a box's working step for a time in a burst, its folded-wait step for a time in a folded gap", () => {
+  // One box: burst 0-1h (working 1h), folded gap 1h-1h05m, burst 1h05m-2h05m (working 1h).
+  const map = { lead_window: { state: "measured", reasons: [], start_ms: 0, end_ms: 2 * H + 5 * M }, bursts: [{ start_ms: 0, end_ms: H, working_ms: H }, { start_ms: H + 5 * M, end_ms: 2 * H + 5 * M, working_ms: H }], gaps: [{ start_ms: H, end_ms: H + 5 * M, waited_on: "unknown" }], human_turns: [{ session: "s", at_ms: H + 2 * M, basis: "first" }, { session: "s", at_ms: 1.5 * H + 5 * M, basis: "after_stop", window_ms: M }], prs: [] }
+  const model = W.mapModel(map, { maxBoxes: 1, })
+  assert.equal(model.items.length, 1)
+  const it = model.items[0]
+  assert.deepEqual(W.stepPlace(it, H + 2 * M), { step: "fold", frac: 2 / 5 })
+  assert.deepEqual(W.stepPlace(it, 1.5 * H + 5 * M), { step: "work", frac: 0.75 })
+  assert.deepEqual(W.stepPlace(it, H + 5 * M), { step: "work", frac: 0.5 }, "a time that ends a folded gap starts the next burst")
+  const c = W.clockMarks(map, model)
+  const L = W.ladderLanes(c, [{ work: [0, 98], fold: [98, 144] }], { origin: 0 })
+  assert.deepEqual(L.prompts.map((g) => [g.step, Math.round(g.pos)]), [["work", 74], ["fold", 116]])
+})
+
+test("on the real maps, every in-window mark sits over the step whose time holds it (f735ccc8, 1f0ae588, 015ff969)", () => {
+  const maps = JSON.parse(read(".github/scripts/__tests__/fixtures/clock-maps.json"))
+  for (const [id, map] of Object.entries(maps)) {
+    for (const maxBoxes of [4, 6]) {
+      const model = W.mapModel(map, { maxBoxes })
+      // A drawn layout: each box's working step, then its folded step; a wait is one step.
+      const geo = model.items.map((it) => (it.type === "box" ? (it.inner_wait_ms > 0 ? { work: [0, 98], fold: [98, 144] } : { work: [0, 144] }) : { wait: [0, 96] }))
+      const c = W.clockMarks(map, model)
+      const L = W.ladderLanes(c, geo, { origin: map.lead_window.start_ms })
+      let n = 0
+      for (const g of [...L.prompts, ...L.prs]) {
+        const it = model.items[g.item]
+        const [a, b] = geo[g.item][g.step]
+        assert.ok(g.pos >= a && g.pos <= b, `${id} item ${g.item} ${g.step}`)
+        for (const x of g.marks) {
+          assert.ok(x.ms >= it.start_ms && x.ms <= it.end_ms, `${id}: a mark lies in its item's time`)
+          const inFold = it.type === "box" && it.folded.some((f) => x.ms >= f.start_ms && x.ms < f.end_ms)
+          assert.equal(g.step, it.type === "wait" ? "wait" : inFold ? "fold" : "work", `${id}: mark at ${x.ms} on the ${g.step} step`)
+          n++
+        }
+      }
+      assert.ok(n > 0, id)
+    }
+  }
+})
+
+test("margins say how far outside in full words, never claim an end an open task has not reached, and never count prompts with pull requests", () => {
+  const base = twoBursts({ lead_window: { state: "partial", reasons: ["censored"], start_ms: 0, end_ms: 4 * H }, human_turns: [{ session: "s1", at_ms: 6 * H, basis: "first" }], prs: [{ repo: "o/r", number: 1, created: null, opened_at_ms: 5 * H, opened_state: { state: "measured", reasons: [] }, merged_at_ms: null, merged_state: { state: "unavailable", reasons: ["not_merged"] }, state: "open", reasons: [] }] })
+  const model = W.mapModel(base, { maxBoxes: 7 })
+  const c = W.clockMarks(base, model)
+  assert.equal(c.open, true)
+  assert.equal(W.outsideWords(5 * H, model, true), "1 hour after the last recorded work")
+  const L = W.ladderLanes(c, [100, 100, 100], { origin: 0 })
+  assert.equal(L.after.title, "After the last recorded work")
+  assert.equal(L.after.when, "from 1 hour to 2 hours after the last recorded work")
+  assert.deepEqual([L.after.prompts.length, L.after.prs.length], [1, 1])
+  const closed = W.ladderLanes(W.clockMarks(twoBursts({ prs: [] , human_turns: [{ session: "s1", at_ms: 5 * H, basis: "first" }] }), model), [100, 100, 100], { origin: 0 })
+  assert.equal(closed.after.title, "After the task's lead time ended")
+  assert.equal(closed.after.when, "1 hour after the task's lead time ended")
+})
+
+test("the prompt drawer says how long the agent then worked, and a pull request's copied prompt says first appeared and never a negative minute", () => {
+  const map = twoBursts({ prs: [{ repo: "o/r", number: 5, created: null, opened_at_ms: -16 * 24 * H, opened_state: { state: "measured", reasons: [] }, merged_at_ms: 3.5 * H, merged_state: { state: "measured", reasons: [] }, state: "merged", reasons: [] }] })
+  const model = W.mapModel(map, { maxBoxes: 7 })
+  const c = W.clockMarks(map, model)
+  const d = Object.fromEntries(W.drawer({ kind: "prompt", mark: c.prompts[0] }, { origin_ms: 0, model }).rows)
+  assert.equal(d["Agent then worked"], "1 hour, then it stopped")
+  const q = W.promptItem({ kind: "pr", pr: map.prs[0], k: 0 }, { origin_ms: 0, model })
+  assert.equal(q.where, "It first appeared 23,040 minutes before the task's start, and merged at minute 210 after the task's start")
+  assert.doesNotMatch(q.where, /minute -/)
+})
+
+test("the swimlane draws its operator pins and pull request glyphs through the same overlap rule as the ladder", () => {
+  const app = read("site/src/app.js")
+  const lane = app.slice(app.indexOf("function drawClockLanes"), app.indexOf("async function renderSwimlane"))
+  assert.equal((lane.match(/W\.groupMarks\(/g) || []).length, 2)
+  assert.match(app, /li\(el\("span", "lane-key-count", "2"\), MERGE_RULE\)/, "the swimlane legend states the one merge rule")
+  assert.doesNotMatch(app, /Public pull requests the task's sessions referenced/)
 })
