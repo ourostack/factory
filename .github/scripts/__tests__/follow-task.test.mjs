@@ -652,8 +652,11 @@ test("the map file (factory.site.map/2) keeps what the landing view draws, every
   // A burst keeps Desk's pull request count envelope.
   assert.deepEqual(slim.bursts[0].prs, m(1))
   // With no GitHub data, a pull request is not placed and says why: nothing is invented.
-  assert.deepEqual(slim.prs, [{ repo: "o/r", number: 7, created: null, opened_at_ms: null, opened_basis: "not_placed", merged_at_ms: null, merged_basis: "not_placed", state: null, reasons: ["github_not_read"] }])
-  assert.deepEqual(slim.pr_anchor, { state: "unavailable", reasons: ["github_not_read"] })
+  const notRead = { state: "unavailable", reasons: ["github_not_read"] }
+  assert.deepEqual(slim.prs, [{ repo: "o/r", number: 7, created: null, opened_at_ms: null, opened_basis: "not_placed", opened_state: notRead, merged_at_ms: null, merged_basis: "not_placed", merged_state: notRead, state: null, reasons: ["github_not_read"] }])
+  assert.deepEqual(slim.pr_anchor, { state: "unavailable", reasons: ["github_not_read"], basis: "timed", n: 0 })
+  // The same placement as the build's, with no GitHub data: one implementation (walk.js prClock).
+  assert.deepEqual(slim.prs, W.prClock(report.timeline.prs, null).prs)
   assert.equal(slim.finish_date, null, "no finish date until the store resolves one")
   assert.equal(slim.bursts.length, 1)
   assert.deepEqual(slim.gaps, [{ start_ms: 10, end_ms: 20, waited_on: "next_prompt" }])
@@ -688,6 +691,9 @@ test("the map file takes the store's pull request clock and finish date, and joi
   const slim = W.slimMap(report, { pr_clock: clock, finish_date: finish })
   assert.deepEqual(slim.human_turns.map((t) => t.why), [null, "acceptance", null])
   assert.deepEqual(slim.waits[0], report.timeline.waits[0])
+  // A stop keeps only the fields the store reviewed.
+  const extra = W.slimMap({ timeline: { waits: [{ ...report.timeline.waits[0], stop: { end: "end_turn", asks: false, pending_agents: false, text: "never" } }] } })
+  assert.deepEqual(extra.waits[0].stop, { end: "end_turn", asks: false, pending_agents: false })
   assert.equal(slim.waits.length, 2)
   assert.deepEqual(slim.human_turns_state, { state: "partial", bound: "lower", reasons: ["log_truncated"], basis: "desk" })
   assert.deepEqual(slim.prs, clock.prs)

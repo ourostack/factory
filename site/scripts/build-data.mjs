@@ -59,7 +59,7 @@ import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 import { finishOrder, firstAdded } from "./finish-order.mjs";
 import { taskNames } from "./task-names.mjs";
-import { MAX_PR_LOOKUPS, prKey, pullsDoc } from "./pr-clock.mjs";
+import { createPullReader, maxLookups, prKey, pullsDoc } from "./pr-clock.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -452,24 +452,37 @@ async function ghGet(url) {
   }
 }
 
-// One read per pull request per build: merge state for the featured
-// sessions and the kaizen countermeasures, title and visibility for names,
-// opened and merged times for the PR clock. At most MAX_PR_LOOKUPS distinct
-// pull requests are read (pr-clock.mjs); a pull request beyond the cap
-// reads as unreadable, and the PR clock names it github_lookup_capped.
-const pullCache = new Map();
-const pullCapped = new Set();
+// One read per pull request per build, shared by every use: merge state for
+// the featured sessions and the kaizen countermeasures, title and
+// visibility for names, opened and merged times for the PR clock and finish
+// days. The reader (pr-clock.mjs) answers merged and closed pull requests
+// from the cache of earlier builds (--pulls-cache), asks about the rest with
+// their ETag, and makes at most maxLookups() requests; a pull request it
+// could not read, or the cap stopped, reads as null this build.
+const pullsCachePath = arg("pulls-cache");
+const PR_LOOKUP_CAP = maxLookups();
+const pullReader = createPullReader({
+  fetch: (url, headers) => fetch(url, { headers: { ...ghHeaders, ...headers }, signal: AbortSignal.timeout(20000) }),
+  cache: pullsCachePath ? readJSON(pullsCachePath, null) : null,
+  max: PR_LOOKUP_CAP,
+  offline: OFFLINE,
+});
 function pullInfo(repo, number) {
-  const key = `${repo}#${number}`;
-  if (!pullCache.has(key)) {
-    if (pullCache.size >= MAX_PR_LOOKUPS) {
-      pullCapped.add(key);
-      return Promise.resolve(null);
-    }
-    pullCache.set(key, ghGet(`https://api.github.com/repos/${repo}/pulls/${number}`));
-  }
-  return pullCache.get(key);
+  return pullReader.read(repo, number);
 }
+
+// Every pull request on a task's timeline is read first, so the task
+// readers (the PR clock here, finish days) are never starved by the cap
+// that featured sessions and names share: they read the same cache.
+const timelinePrKeys = new Map();
+for (const f of jobFiles) {
+  for (const p of readJSON(join(jobsDir, f), {})?.timeline?.prs || []) if (p && typeof p.repo === "string" && Number.isInteger(p.number)) timelinePrKeys.set(prKey(p), p);
+}
+await mapLimit(
+  [...timelinePrKeys.keys()].sort().map((k) => timelinePrKeys.get(k)),
+  8,
+  (p) => pullInfo(p.repo, p.number),
+);
 
 async function checkMerged(repo, number) {
   const body = await pullInfo(repo, number);
@@ -493,7 +506,7 @@ async function mapLimit(items, limit, fn) {
 let prLookupsUsed = 0;
 const featured = [];
 for (const { d, prs } of featuredCandidates) {
-  const prsToCheck = prs.slice(0, Math.max(0, MAX_PR_LOOKUPS - prLookupsUsed));
+  const prsToCheck = prs.slice(0, Math.max(0, PR_LOOKUP_CAP - prLookupsUsed));
   prLookupsUsed += prsToCheck.length;
   const results = await mapLimit(prsToCheck, 8, (pr) => checkMerged(pr.repo, pr.number));
   const checked = results.filter((r) => r !== null);
@@ -550,23 +563,24 @@ for (const { d, prs } of featuredCandidates) {
   }
 }
 
-// The PR clock's GitHub reads (pr-clock.mjs): opened time, merged time and
-// state of every pull request on every task's timeline, written to
+// The PR clock's GitHub reads (read above, first): opened time, merged time
+// and state of every pull request on every task's timeline, written to
 // --pulls-out for publish-files.mjs, which places them on each task's clock
-// in its map file. The file stays in the build and is never published.
-// Offline, nothing is read and no file is written.
-{
+// in its map file; and the cache for the next build (--pulls-cache). Both
+// files stay in the build and are never published. Offline, nothing is read
+// and no file is written.
+if (!OFFLINE) {
   const pullsOut = arg("pulls-out");
-  if (pullsOut && !OFFLINE) {
-    const keys = new Map();
-    for (const f of jobFiles) {
-      for (const p of readJSON(join(jobsDir, f), {})?.timeline?.prs || []) if (p && typeof p.repo === "string" && Number.isInteger(p.number)) keys.set(prKey(p), p);
-    }
-    const bodies = new Map();
-    await mapLimit([...keys.values()], 8, async (p) => bodies.set(prKey(p), await pullInfo(p.repo, p.number)));
+  if (pullsOut) {
     mkdirSync(dirname(pullsOut), { recursive: true });
-    writeFileSync(pullsOut, JSON.stringify(pullsDoc(bodies, pullCapped, [...keys.keys()])), "utf8");
+    writeFileSync(pullsOut, JSON.stringify(pullsDoc(pullReader.bodies, pullReader.capped, [...timelinePrKeys.keys()])), "utf8");
   }
+  if (pullsCachePath) {
+    mkdirSync(dirname(pullsCachePath), { recursive: true });
+    writeFileSync(pullsCachePath, JSON.stringify(pullReader.cacheDoc()), "utf8");
+  }
+  // Read failures show in the step summary, so a spent rate limit is seen.
+  console.log(pullReader.summary());
 }
 
 // ---------------------------------------------------------------------------
@@ -895,7 +909,7 @@ const data = {
     substantial_active_ms: SUBSTANTIAL_ACTIVE_MS,
     stale_after_hours: STALE_AFTER_HOURS,
     low_coverage_below: LOW_COVERAGE_BELOW,
-    max_pr_lookups: MAX_PR_LOOKUPS,
+    max_pr_lookups: PR_LOOKUP_CAP,
   },
   coverage: {
     sessions_with_facts: counted(coverageRaw.sessions_with_facts ?? factFiles.length),

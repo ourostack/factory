@@ -567,7 +567,13 @@ test("the Pages workflow publishes the data files and llms.txt, and writes the s
   const wf = read(".github/workflows/pages.yml")
   assert.match(wf, /node site\/scripts\/publish-files\.mjs --reports _reports --dist site\/dist --template site\/src\/llms-template\.txt --pulls "\$RUNNER_TEMP\/pulls\.json" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
   // The build's GitHub reads for the PR clock go to the runner's temp folder, never into site/dist.
-  assert.match(wf, /node site\/scripts\/build-data\.mjs --reports _reports --main \. --out site\/dist\/data\.json --pulls-out "\$RUNNER_TEMP\/pulls\.json"/)
+  assert.match(wf, /node site\/scripts\/build-data\.mjs --reports _reports --main \. --out site\/dist\/data\.json --pulls-out "\$RUNNER_TEMP\/pulls\.json" --pulls-cache "\$RUNNER_TEMP\/pulls-cache\.json" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
+  // The pull request reads are cached across builds (never under site/dist): restored before the data build, saved after it.
+  const restore = wf.indexOf("uses: actions/cache/restore@v4")
+  const save = wf.indexOf("uses: actions/cache/save@v4")
+  assert.ok(restore > 0 && restore < wf.indexOf("Build site data") && wf.indexOf("Build site data") < save, "restore, build, save")
+  assert.equal((wf.match(/path: \$\{\{ runner\.temp \}\}\/pulls-cache\.json/g) || []).length, 2)
+  assert.match(wf, /key: pr-pulls-\$\{\{ github\.run_id \}\}\n\s+restore-keys: pr-pulls-/)
   // It runs after the data build and before the upload.
   assert.ok(wf.indexOf("Build site data") < wf.indexOf("Publish data files") && wf.indexOf("Publish data files") < wf.indexOf("Upload Pages artifact"))
 })
