@@ -275,3 +275,36 @@ test("the machines without a loop slot are not said to be on a Desk that does no
   assert.match(F.WITHOUT_LOOP_WORDS, /older Desk/)
   assert.match(F.WITHOUT_LOOP_WORDS, /not measured for over three days/)
 })
+
+// ------------------------------------------------------------- finish days (S3 v1.1)
+
+test("a finish day reads with its state and bound in words", () => {
+  const y = { year: 2026 }
+  const day = (extra) => ({ value: "2026-09-26", basis: "pr_anchor", ...extra })
+  assert.equal(F.finishDay(day({ state: "measured", reasons: [] }), y).words, "on 26 Sep")
+  assert.equal(F.finishDay(day({ state: "partial", reasons: ["finish_from_labels_landing"], bound: "upper" }), y).words, "on or before 26 Sep")
+  assert.equal(F.finishDay(day({ state: "partial", reasons: ["anchor_unconfirmed"], bound: "lower" }), y).words, "on or after 26 Sep")
+  assert.equal(F.finishDay(day({ state: "partial", reasons: ["anchor_spread"], bound: "unknown" }), y).words, "about 26 Sep (direction not known)")
+  // The rollup and map files write no direction as null.
+  assert.equal(F.finishDay(day({ state: "partial", reasons: ["anchor_unconfirmed", "finish_from_last_work"], bound: null, bound_reason: "bound_reasons_conflict" }), y).words, "about 26 Sep (direction not known)")
+  // A day with no source says so, with the reason, never a guessed date.
+  const none = F.finishDay({ state: "unavailable", reasons: ["no_finish_source"] }, y)
+  assert.equal(none.words, `not dated yet: ${F.reasonText("no_finish_source")}`)
+  assert.equal(none.day, null)
+  assert.equal(F.finishDay(undefined, y).words, `not dated yet: ${F.reasonText("not_recorded")}`)
+  assert.equal(F.finishDay({ state: "unavailable", reasons: ["open_job"] }, y).kind, "open")
+})
+
+test("a finish day has a short form for chart labels, a sort key, and its year when it is not this year", () => {
+  const y = { year: 2026 }
+  const f = (bound, state = "partial") => F.finishDay({ state, value: "2026-10-07", reasons: state === "measured" ? [] : ["x"], basis: "labels_landed", ...(bound !== undefined ? { bound } : {}) }, y)
+  assert.equal(f(undefined, "measured").short, "7 Oct")
+  assert.equal(f("upper").short, "≤7 Oct")
+  assert.equal(f("lower").short, "≥7 Oct")
+  assert.equal(f("unknown").short, "~7 Oct")
+  assert.equal(F.finishDay({ state: "unavailable", reasons: ["no_finish_source"] }, y).short, "no date")
+  assert.equal(f("upper").key, "2026-10-07")
+  assert.equal(F.finishDay({ state: "measured", value: "2025-12-30", reasons: [], basis: "desk_transition" }, y).words, "on 30 Dec 2025")
+  // A malformed day is not shown as a date.
+  assert.equal(F.finishDay({ state: "measured", value: "2026-13-40", reasons: [] }, y).day, null)
+})

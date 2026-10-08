@@ -103,10 +103,18 @@
       <div id="stackup"></div>
       <p class="chart-caption" id="stackup-left-out" hidden></p>
     </section>
-    <section class="block" aria-labelledby="fe-title">
-      <h2 class="block-title" id="fe-title">Flow efficiency, task by task</h2>
-      <p class="chart-caption">Flow efficiency is working time divided by lead time. One dot per task, in the same order as the bars above; a hollow dot is a partial figure, and its tooltip says which way the true figure lies. A task whose flow efficiency is not measured has no dot.</p>
+    <section class="block" aria-labelledby="over-time-title" id="over-time">
+      <h2 class="block-title" id="over-time-title">Over time</h2>
+      <p class="chart-caption">Each task is counted in the week it finished (UTC). Hollow points and hatched bars are figures we only know in part; the label says which way the true number lies. A finished task with no finish day is listed under the charts with its reason, never placed on a guessed date. Open tasks have not finished, so they are not here.</p>
+      <h3 class="sub-title" id="cause-weeks-title">Hours by finish week, per cause</h3>
+      <p class="chart-caption" id="cause-weeks-caption"></p>
+      <div id="cause-weeks"></div>
+      <h3 class="sub-title" id="fe-title">Flow efficiency by finish day, each task a point</h3>
+      <p class="chart-caption">Flow efficiency is working time divided by lead time. Each finished task with a finish day is one point at that day, linked to its task. A filled point is measured; a hollow one is partial, with a mark for which way its flow efficiency lies. A short arrow from a point says which way its finish day lies (an "on or before" day points left). A dash across a week is that week's median over its measured tasks only.</p>
       <div id="fe-dots"></div>
+      <div id="over-time-undated"></div>
+      <h3 class="sub-title" id="over-time-table-title">The same, by week, as a table</h3>
+      <div id="over-time-table"></div>
     </section>
     <section class="block" aria-labelledby="stackup-table-title">
       <h2 class="block-title" id="stackup-table-title">The same, as a table</h2>

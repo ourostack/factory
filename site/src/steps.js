@@ -138,6 +138,9 @@
         open,
         shared: !!(task && task.labels_from_shared_session),
         href: `#/task/${j.id}`,
+        // Its finish day in words (format.js finishDay), for the bar's date
+        // label, its tooltip and the table.
+        finish: F.finishDay(j.finish_date),
       };
       const noData = (reasons) => ({ ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(reasons))] });
       if (!stack && !task) return noData(["not_published"]);
@@ -400,6 +403,165 @@
       points.push({ job: b.job, name: b.name, short: b.short, group: b.group, href: b.href, value: v, hollow: n.state === "partial", words: W.feWords(r) });
     }
     return { points, omitted, reasons: [...why.entries()].sort((a, b) => b[1] - a[1]).map(([code, count]) => ({ code, count })) };
+  }
+
+  // ------------------------------------------------------ over time
+
+  // Compare → Over time, from the store's rollups/by_week.json
+  // (factory.site.by_week/1). Each task counts in the ISO week (UTC, Monday
+  // first) it finished. Returns:
+  //   weeks    every week from the first finished task's to the last; a week
+  //            with no finished task is `empty` (a slot, never a zero bar),
+  //            and one with fewer than 3 tasks is `thin`
+  //   causes   small multiples: the top 5 causes by hours over the weeks,
+  //            plus "Other", each with one cell per week, on one linear
+  //            scale from zero (`scale`, `scaleWords`)
+  //   points   each finished task with a finish day, as a dated point of its
+  //            flow efficiency; `feOmitted` the dated tasks whose flow
+  //            efficiency is not measured (named, not drawn)
+  //   medians  each week's median flow efficiency over measured tasks only,
+  //            with n of N
+  //   unplaced the finished tasks with no finish day, with their reason:
+  //            they are listed, never placed on a guessed date
+  // `opts`: { jobs (data.json jobs), taskRows (rollups/tasks.json rows),
+  // nameOf(job), year }.
+  const TOP_CAUSES = 5;
+  const THIN_WEEK = 3;
+  const isWeek = (w) => w && typeof w.week === "string" && typeof w.starts_on === "string" && Number.isInteger(w.n);
+  function cellOf(n, empty) {
+    if (empty) return { empty: true, ms: null, state: null, bound: null, short: "", words: "no task finished this week" };
+    const v = val(n);
+    if (v === null) return { empty: false, ms: null, state: "unavailable", bound: null, short: "no data", words: `not measured: ${arr(n && n.reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded")}` };
+    if (n.state !== "partial") return { empty: false, ms: v, state: "measured", bound: null, short: v === 0 ? "none" : hoursShort(v), words: v === 0 ? "none" : hoursWords(v) };
+    const bound = n.bound === "lower" || n.bound === "upper" ? n.bound : "unknown";
+    if (v === 0 && bound === "lower") return { empty: false, ms: 0, state: "partial", bound, short: "none recorded", words: "none recorded (partial)" };
+    const sign = { lower: "≥", upper: "≤", unknown: "~" }[bound];
+    const word = { lower: "at least ", upper: "at most ", unknown: "about " }[bound];
+    return { empty: false, ms: v, state: "partial", bound, short: `${sign}${hoursShort(v)}`, words: `${word}${hoursWords(v)}${bound === "unknown" ? " (direction not known)" : ""}` };
+  }
+  // The sum of several cells of one week, as one stated number.
+  function sumCells(ns) {
+    const have = ns.filter((n) => val(n) !== null);
+    if (!have.length) return { state: "unavailable", reasons: ["no_measured_members"] };
+    const value = have.reduce((a, n) => a + n.value, 0);
+    const partial = have.length < ns.length || have.some((n) => n.state === "partial");
+    if (!partial) return { state: "measured", value, reasons: [] };
+    const dirs = new Set(ns.map((n) => (val(n) === null ? "lower" : n.state === "partial" ? (n.bound === "lower" || n.bound === "upper" ? n.bound : "none") : null)).filter(Boolean));
+    return { state: "partial", value, reasons: ["unmeasured_members"], bound: dirs.size === 1 && !dirs.has("none") ? [...dirs][0] : null };
+  }
+  function overTime(doc, opts) {
+    const o = opts || {};
+    const year = Number.isInteger(o.year) ? o.year : undefined;
+    const fdOpts = year ? { year } : undefined;
+    if (!doc || typeof doc !== "object" || doc.schema !== "factory.site.by_week/1" || !Array.isArray(doc.weeks)) return { state: "absent" };
+    const jobById = new Map(arr(o.jobs).filter((j) => j && typeof j.id === "string").map((j) => [j.id, j]));
+    const nameOf = (id) => (jobById.has(id) && typeof o.nameOf === "function" ? o.nameOf(jobById.get(id)) : `Task ${String(id).slice(0, 8)}`);
+    const rows = byJob(o.taskRows);
+    const weeks = doc.weeks.filter(isWeek).map((w) => {
+      const label = F.finishDay({ state: "measured", value: w.starts_on, reasons: [] }, fdOpts).day || w.starts_on;
+      const parts = Number.isInteger(w.n_partial) && w.n_partial > 0 ? `, ${w.n_partial} partial` : "";
+      return { week: w.week, starts_on: w.starts_on, label, n: w.n, n_partial: w.n_partial || 0, empty: w.n === 0, thin: w.n > 0 && w.n < THIN_WEEK, count: w.n === 0 ? "no task finished" : `${plural(w.n, "task")}${parts}`, jobs: arr(w.jobs), raw: w };
+    });
+    const unplacedIds = arr(doc.unplaced && doc.unplaced.jobs);
+    const open = arr(o.jobs).filter((j) => j && F.finishDay(j.finish_date, fdOpts).kind === "open").length;
+    if (!weeks.length) return { state: "empty", weeks: [], causes: { rows: [] }, points: [], feOmitted: [], medians: [], unplaced: unplacedIds.map((id) => ({ job: id, name: nameOf(id), href: `#/task/${id}`, words: F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : { state: "unavailable", reasons: arr(doc.unplaced.reasons) }, fdOpts).words })), open };
+
+    // The causes: waits by what they waited on, and wastes by label.
+    const keys = [];
+    for (const k of arr(doc.idle_waited_on).length ? doc.idle_waited_on : W.WAIT_KEYS) keys.push({ key: `waiting:${k}`, pick: (w) => w.idle_by_waited_on_ms && w.idle_by_waited_on_ms[k] });
+    for (const k of arr(doc.wastes)) keys.push({ key: `${k}:all`, pick: (w) => w.by_waste_ms && w.by_waste_ms[k] });
+    // Older files without the key lists: read the keys from the weeks.
+    if (!arr(doc.wastes).length) {
+      const seen = new Set();
+      for (const w of weeks) for (const k of Object.keys((w.raw && w.raw.by_waste_ms) || {})) seen.add(k);
+      for (const k of [...seen].sort()) keys.push({ key: `${k}:all`, pick: (w) => w.by_waste_ms && w.by_waste_ms[k] });
+    }
+    const series = keys.map(({ key, pick }) => {
+      const ns = weeks.map((w) => (w.empty ? null : pick(w.raw)));
+      return { key, ns, total: ns.reduce((a, n) => a + (val(n) || 0), 0) };
+    });
+    const ranked = series.filter((x) => x.total > 0).sort((a, b) => b.total - a.total || (a.key < b.key ? -1 : 1));
+    const top = ranked.slice(0, TOP_CAUSES);
+    const rest = ranked.slice(TOP_CAUSES);
+    const causeRows = top.map((x) => ({ key: x.key, label: W.causeWords(x.key), segment: W.causeSegment(x.key), wait: x.key.startsWith("waiting:") ? x.key.slice(8) : null, total_ms: x.total, href: causeRoute(x.key), cells: x.ns.map((n, i) => ({ week: weeks[i].week, ...cellOf(n, weeks[i].empty) })) }));
+    if (rest.length) {
+      causeRows.push({
+        key: "other",
+        label: `Other (${plural(rest.length, "cause")})`,
+        members: rest.map((x) => x.key),
+        segment: "other",
+        wait: null,
+        total_ms: rest.reduce((a, x) => a + x.total, 0),
+        href: null,
+        cells: weeks.map((w, i) => ({ week: w.week, ...cellOf(w.empty ? null : sumCells(rest.map((x) => x.ns[i])), w.empty) })),
+      });
+    }
+    const maxCell = Math.max(0, ...causeRows.flatMap((r) => r.cells.map((c) => c.ms || 0)));
+    const scale = timeScale(maxCell);
+    const scaleWords = `0 to ${tickWords(scale.max_ms, scale)} ${scale.unit} per week, the same linear scale in every row`;
+    const unl = sumCells(weeks.filter((w) => !w.empty).map((w) => sumCells([w.raw.agents_working_unlabeled_ms, w.raw.not_labeled_ms])));
+    const unlCell = cellOf(unl, false);
+    const unlabeledWords = val(unl) === null ? "Agents' working time not split by cause could not be measured for these weeks." : `Agents' working time not split by cause (not labeled yet, or agents working with no label) is in no row: ${unlCell.words} over the ${plural(weeks.filter((w) => !w.empty).length, "week")} with finished tasks.`;
+
+    // Each finished task with a day, as a dated point.
+    const points = [];
+    const feOmitted = [];
+    const dated = [];
+    for (const t of arr(doc.tasks)) {
+      if (!t || typeof t.job !== "string") continue;
+      const finish = F.finishDay(t.finish_date, fdOpts);
+      if (!finish.day) continue;
+      dated.push(finish.key);
+      const row = rows.get(t.job) || { job: t.job, flow_efficiency: t.flow_efficiency };
+      const fe = row.flow_efficiency;
+      const v = val(fe);
+      const base = { job: t.job, name: nameOf(t.job), href: `#/task/${t.job}`, finish };
+      if (v === null) {
+        feOmitted.push({ ...base, words: `flow efficiency not measured: ${arr(fe && fe.reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded")}` });
+        continue;
+      }
+      const hollow = fe.state === "partial";
+      points.push({ ...base, value: v, hollow, feBound: hollow ? (fe.bound === "lower" || fe.bound === "upper" ? fe.bound : "unknown") : null, feWords: W.feWords(row) || W.pctWords(v) });
+    }
+    const byDay = (a, b) => (a.finish.key < b.finish.key ? -1 : a.finish.key > b.finish.key ? 1 : a.job < b.job ? -1 : 1);
+    points.sort(byDay);
+    feOmitted.sort(byDay);
+    dated.sort();
+    const medians = weeks.map((w) => {
+      if (w.empty) return { week: w.week, starts_on: w.starts_on, empty: true, value: null, words: "no task finished" };
+      const f = w.raw.flow_efficiency || {};
+      const v = val(f.median);
+      const n = Number.isInteger(f.n) ? f.n : 0;
+      const N = Number.isInteger(f.N) ? f.N : w.n;
+      if (v === null || n === 0) return { week: w.week, starts_on: w.starts_on, empty: false, value: null, n, N, words: `no median: 0 of ${plural(N, "task")} measured` };
+      return { week: w.week, starts_on: w.starts_on, empty: false, value: v, n, N, words: `median ${W.pctWords(v)}, ${n} of ${plural(N, "task")} measured` };
+    });
+    const unplaced = unplacedIds.map((id) => ({ job: id, name: nameOf(id), href: `#/task/${id}`, words: F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : { state: "unavailable", reasons: arr(doc.unplaced.reasons) }, fdOpts).words }));
+    return { state: "ok", weeks, causes: { rows: causeRows, scale, scaleWords, unlabeledWords }, points, feOmitted, medians, unplaced, open, range: { first: dated[0] || null, last: dated[dated.length - 1] || null } };
+  }
+
+  // The picker's rows (walk.js pickerRows) with the finished group sorted by
+  // finish day: "newest" (the default) or "oldest" first; finished tasks with
+  // no day keep their order after the dated ones. The other group keeps its
+  // own order (the latest to start first). Each row gains `finish`, its
+  // finish day in words. `finishOf(id)` is format.js finishDay for that task.
+  function sortPicker(rows, finishOf, dir) {
+    const oldest = dir === "oldest";
+    const list = arr(rows).map((r, i) => ({ ...r, finish: finishOf(r.id), i }));
+    const groupRank = new Map();
+    for (const r of list) if (!groupRank.has(r.group)) groupRank.set(r.group, groupRank.size);
+    list.sort((a, b) => {
+      const g = groupRank.get(a.group) - groupRank.get(b.group);
+      if (g) return g;
+      if (a.group !== "finished") return a.i - b.i;
+      const ak = a.finish.key;
+      const bk = b.finish.key;
+      if (ak && bk && ak !== bk) return (ak < bk ? -1 : 1) * (oldest ? 1 : -1);
+      if (ak && !bk) return -1;
+      if (!ak && bk) return 1;
+      return a.i - b.i;
+    });
+    return list.map(({ i, ...r }) => r);
   }
 
   // -------------------------------------------------- the Pareto of causes
@@ -873,5 +1035,8 @@
     alarmKeyWords,
     alarmRows,
     taskCauses,
+    overTime,
+    overTimeCell: cellOf,
+    sortPicker,
   };
 });

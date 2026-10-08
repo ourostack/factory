@@ -780,13 +780,15 @@
       return;
     }
     const table = el("table", "data-table task-table");
-    tableHead(table, [["Finish order", "num"], ["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Working time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
+    tableHead(table, [["Finish order", "num"], ["Finished (UTC)", ""], ["Task", ""], ["Status", ""], ["Elapsed", "num"], ["Working time", "num"], ["Operator turns", "num"], ["Sent back", "num"], ["Largest waste", ""], ["Public PRs", "num"]]);
     const tbody = document.createElement("tbody");
     const notes = new Map();
     for (const j of byFinishDesc(jobs)) {
       const tr = document.createElement("tr");
       const pos = F.finishCell(j);
       plainCell(tr, "Finish order", el("span", j.finish_basis === "labels" ? "finish-pos" : "finish-pos muted", pos), "num");
+      const fday = F.finishDay(j.finish_date);
+      plainCell(tr, "Finished (UTC)", el("span", fday.day ? "finish-day" : "finish-day muted", fday.kind === "open" ? "open" : fday.words));
       const name = el("span", "task-name");
       name.appendChild(jobLink(j.id, jobLabel(j)));
       plainCell(tr, "Task", name, "task-cell");
@@ -1369,12 +1371,23 @@
   // `extra` holds links ({ text, href, external }), the prompt ({ what, name,
   // route, dataPath }) and an optional `more(container)` that loads deeper
   // evidence on request.
+  // A task's finish day (UTC) as words for a sentence: "finished on or
+  // before 6 Oct (UTC)", "still open", or "finished, not dated yet: why".
+  // "short" leaves out the sentence's subject and stop.
+  function finishSentence(j, form) {
+    const f = F.finishDay(j && j.finish_date);
+    const what = f.kind === "open" ? "still open" : f.day ? `finished ${f.words} (UTC)` : `finished, ${f.words}`;
+    return form === "short" ? what : `This task ${f.kind === "open" ? "is still open" : what}. `;
+  }
+
   function openDrawer(opener, content, extra) {
     if (!drawerEl) return;
     const x = extra || {};
     if (opener) drawerOpener = opener;
     document.getElementById("drawer-title").textContent = content.title;
     drawerBody.innerHTML = "";
+    // Which task this is, and when it finished (UTC), under the title.
+    if (x.job) drawerBody.appendChild(el("p", "drawer-task", `${jobLabel(x.job)} · ${finishSentence(x.job, "short")}`));
     const what = el("p", "drawer-what");
     // A wait wears its cause's own swatch, as on the bar, the legend and Rank causes.
     what.appendChild(content.mark ? clockGlyph(content.mark, { why: content.why }) : content.cause ? waitSwatch(content.cause) : swatch(content.segment));
@@ -1476,6 +1489,26 @@
     head.appendChild(label);
     const count = el("p", "picker-count");
     head.appendChild(count);
+    // Sort by finish day (UTC): newest first by default.
+    const sortBox = el("div", "picker-sort mode-toggle");
+    sortBox.setAttribute("role", "group");
+    sortBox.setAttribute("aria-label", "Sort by finish day");
+    sortBox.appendChild(el("span", null, "Finished (UTC):"));
+    let sortDir = "newest";
+    const sortBtns = [["newest", "newest first"], ["oldest", "oldest first"]].map(([dir, text]) => {
+      const b = el("button", "mode-btn", text);
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(dir === sortDir));
+      b.addEventListener("click", () => {
+        sortDir = dir;
+        for (const x of sortBtns) x.setAttribute("aria-pressed", String(x === b));
+        draw();
+      });
+      sortBox.appendChild(b);
+      return b;
+    });
+    head.appendChild(sortBox);
+    const jobById = new Map(jobs.map((j) => [j.id, j]));
     wrap.appendChild(head);
     const list = el("ul", "picker-list");
     list.id = "picker-list";
@@ -1489,14 +1522,14 @@
       return W.statedText(n, "duration");
     };
     const draw = () => {
-      const rows = W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value);
+      const rows = S.sortPicker(W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value), (id) => F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : null), sortDir);
       list.innerHTML = "";
       count.textContent = `${rows.length} of ${jobs.length} tasks`;
       let group = null;
       for (const r of rows) {
         if (r.group !== group) {
           group = r.group;
-          list.appendChild(el("li", "picker-group", group === "finished" ? "Finished, the latest first" : "Still open or not labeled yet, the latest to start first"));
+          list.appendChild(el("li", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open or not labeled yet, the latest to start first"));
         }
         const li = document.createElement("li");
         const a = el("a", "picker-row");
@@ -1508,6 +1541,7 @@
         a.appendChild(name);
         const meta = el("span", "picker-meta");
         meta.appendChild(el("span", null, r.status || "status unknown"));
+        if (r.finish && r.finish.kind !== "open") meta.appendChild(el("span", "picker-finish", r.finish.day ? `finished ${r.finish.words}` : r.finish.words));
         meta.appendChild(el("span", null, `lead ${fig(r.lead, "duration")}`));
         meta.appendChild(el("span", null, `flow ${r.feText || "no data"}`));
         if (r.badge) meta.appendChild(el("span", `picker-badge picker-badge-${r.badge === "partial" ? "partial" : "none"}`, r.badge));
@@ -1659,6 +1693,7 @@
       const content = W.drawer(thing, ctxDrawer);
       const route = F.safeRoute("task", j.id) || "#/";
       openDrawer(opener, content, {
+        job: j,
         links: linksFor(it),
         prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: mapPath(j.id) },
         more: (box) => stretchesIn(box, j, map, it, ctxDrawer),
@@ -2377,7 +2412,7 @@
     const route = F.safeRoute("task", j.id, "session", detail.session) || F.safeRoute("task", j.id) || "#/";
     const links = [{ text: `Open session ${String(detail.session).slice(0, 8)} to scale`, href: route }];
     if (detail.labels_from_shared_session) content.rows.push(["Labels", "These labels come from a session this task shared with other tasks"]);
-    openDrawer(opener, content, { links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: `jobs/${j.id}/${detail.session}.json` } });
+    openDrawer(opener, content, { job: j, links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: `jobs/${j.id}/${detail.session}.json` } });
   }
 
   // ------------------------------------------- where this task's time went
@@ -2554,6 +2589,7 @@
     });
     safely("task-lede", () => {
       renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
+      ledeEl.prepend(el("span", "lede-finish", finishSentence(j)));
       tokens.push(...ledeEl.querySelectorAll(".lede-num"));
     });
     safely("time-went", () => {
@@ -3227,7 +3263,7 @@
     const barW = colW - 8;
     bars.forEach((b, i) => {
       const x0 = i * colW + 4 + 4;
-      const label = `${b.name}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
+      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${b.finish.words} (UTC)` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
       const a = svgLink(b.href, `${label}. Follow this task.`);
       a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
       a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
@@ -3263,11 +3299,19 @@
       const v = svg("text", { x: vx, y: vy, class: "sb-value", transform: `rotate(-90 ${vx} ${vy})` });
       v.textContent = b.state === "no_data" ? "" : `${b.label}${b.shared ? "*" : ""}`;
       a.appendChild(v);
-      const lx = x0 + barW / 2 + 4;
+      // Under each bar: its finish day (UTC) and its name, two lines read upward.
+      const dated = b.finish && b.finish.kind !== "open";
+      const lx = x0 + barW / 2 + (dated ? 9 : 4);
       const ly = T + H + 8;
       const name = svg("text", { x: lx, y: ly, class: "sb-name", "text-anchor": "end", transform: `rotate(-90 ${lx} ${ly})` });
       name.textContent = clip(b.name, 18);
       a.appendChild(name);
+      if (dated) {
+        const dx = lx - 11;
+        const day = svg("text", { x: dx, y: ly, class: "sb-day", "text-anchor": "end", transform: `rotate(-90 ${dx} ${ly})` });
+        day.textContent = b.finish.short;
+        a.appendChild(day);
+      }
       const tipRows = [];
       if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
       else {
@@ -3275,6 +3319,7 @@
         for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g) });
         if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
       }
+      if (b.finish && b.finish.kind !== "open") tipRows.push({ label: "Finished (UTC)", value: b.finish.words });
       if (b.open) tipRows.push({ label: "State", value: "still open, figures so far" });
       if (b.shared) tipRows.push({ label: "Partial", value: "its labels come from a session it shared with other tasks" });
       markTip(a, b.name, tipRows);
@@ -3325,27 +3370,133 @@
     if (present.has("unsplit")) marks.push([keyFor("sb-key-unsplit"), "Split not known: the lead time alone, because a session's log could not be read"]);
     if (bars.some((b) => b.open)) marks.push([keyFor("sb-key-open"), "Dashed outline: still open, so its figures are so far"]);
     if (bars.some((b) => b.shared)) marks.push([keyFor("sb-key-star"), "Partial: its labels come from a session it shared with other tasks"]);
+    if (bars.some((b) => b.finish && b.finish.kind !== "open")) marks.push([Object.assign(keyFor("sb-key-day"), { textContent: "7 Oct" }), "Under each finished bar, its finish day (UTC): plain when measured, ≤ on or before, ≥ on or after, ~ direction not known, \"no date\" with the reason in its tooltip"]);
     if (bars.some((b) => b.state === "no_data")) marks.push([Object.assign(keyFor("sb-key-nodata"), { textContent: "?" }), mode === "working" ? "Not measured: no working time is known for it, so no bar is drawn rather than a zero" : "Not measured: no lead time is known for it, so no bar is drawn rather than a zero"]);
     group("Marks", marks);
     container.appendChild(legend);
   }
 
-  // The flow efficiency dot plot.
-  function drawFeDots(container, model) {
+  // ------------------------------------------------- step 2: over time
+
+  // The fill of one cause's row in the small multiples: its wait's color or
+  // its waste's, as on the stack-up and Rank causes.
+  function causeRowFill(row) {
+    if (row.key === "other") return "var(--baseline)";
+    if (row.wait) return row.wait === "unknown" ? "var(--text-muted)" : `var(--c-wait-${W.WAIT_KEYS.includes(row.wait) ? row.wait : "unknown"})`;
+    const seg = SEGMENT_BY_KEY.get(row.segment);
+    return seg && seg.fill === "solid" ? `var(${seg.token})` : "var(--c-waste-unknown)";
+  }
+  // A diagonal hatch laid over a partial bar, so a figure known only in part
+  // never reads as a whole one, whatever its color.
+  function partialHatch(parent, id) {
+    const defs = svg("defs", {});
+    const pat = svg("pattern", { id, patternUnits: "userSpaceOnUse", width: 6, height: 6, patternTransform: "rotate(45)" });
+    pat.appendChild(svg("rect", { x: 0, y: 0, width: 2.2, height: 6, class: "ot-hatch" }));
+    defs.appendChild(pat);
+    parent.appendChild(defs);
+  }
+  const OT = { labelW: 0, rowH: 58, top: 16, weekH: 40 };
+
+  // Hours by finish week, per cause: one row per cause, one column per
+  // week, every row on one linear scale from zero. An empty week is a
+  // labeled slot, never a zero bar.
+  function drawCauseWeeks(container, ot) {
     container.innerHTML = "";
-    if (!model.points.length) {
-      emptyState(container, "No task's flow efficiency is measured yet.");
+    const rows = ot.causes.rows;
+    if (!rows.length) {
+      emptyState(container, "No cause has time in the weeks with finished tasks.");
       return;
     }
-    const phone = container.clientWidth < 600;
-    const H = phone ? 150 : 170;
-    const top = 12;
+    const weeks = ot.weeks;
+    const avail = Math.max(240, container.clientWidth - 4);
+    const colW = Math.max(64, Math.min(200, Math.floor(avail / weeks.length)));
+    const plotW = colW * weeks.length;
+    const H = OT.rowH;
+    const scale = ot.causes.scale;
+    const y = (ms) => OT.top + H - (ms / scale.max_ms) * H;
+    const frame = el("div", "ot-frame chart-frame");
+    const grid = el("div", "ot-rows");
+    rows.forEach((r, ri) => {
+      const row = el("div", "ot-row");
+      const head = el("p", "ot-row-head");
+      head.appendChild(causeSwatch(r.key));
+      if (r.href) head.appendChild(causeLink(r.key, r.label));
+      else head.appendChild(document.createTextNode(r.label));
+      head.appendChild(el("span", "ot-row-total", ` · ${S.hoursWords(r.total_ms)} over these weeks${r.cells.some((c) => c.state === "partial") ? " (some weeks partial)" : ""}`));
+      row.appendChild(head);
+      const last = ri === rows.length - 1;
+      const totalH = OT.top + H + (last ? OT.weekH : 6);
+      const plot = svg("svg", { class: "ot-plot", width: plotW, height: totalH, role: "img", "aria-label": `${r.label}: ${r.cells.map((c, i) => `week of ${weeks[i].label}, ${c.empty ? "no task finished" : c.words}`).join("; ")}. Scale ${ot.causes.scaleWords}.` });
+      const hatchId = `ot-hatch-${ri}`;
+      partialHatch(plot, hatchId);
+      plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(scale.max_ms), y2: y(scale.max_ms), class: "sb-grid" }));
+      plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: OT.top + H, y2: OT.top + H, class: "sb-base" }));
+      const fill = causeRowFill(r);
+      r.cells.forEach((c, i) => {
+        const x0 = i * colW;
+        const barW = Math.min(44, colW - 24);
+        const bx = x0 + (colW - barW) / 2;
+        if (c.empty) {
+          plot.appendChild(svg("rect", { x: x0 + 4, y: OT.top, width: colW - 8, height: H, class: "ot-empty" }));
+          const t = svg("text", { x: x0 + colW / 2, y: OT.top + H / 2 + 4, class: "ot-empty-text", "text-anchor": "middle" });
+          t.textContent = "no task";
+          plot.appendChild(t);
+        } else if (c.ms > 0) {
+          const top = y(c.ms);
+          const rect = svg("rect", { x: bx, y: top, width: barW, height: OT.top + H - top, class: "ot-bar" });
+          rect.style.fill = fill;
+          plot.appendChild(rect);
+          if (c.state === "partial") plot.appendChild(svg("rect", { x: bx, y: top, width: barW, height: OT.top + H - top, fill: `url(#${hatchId})`, class: "ot-bar-partial" }));
+        }
+        if (!c.empty) {
+          const t = svg("text", { x: x0 + colW / 2, y: (c.ms > 0 ? y(c.ms) : OT.top + H) - 4, class: "ot-value", "text-anchor": "middle" });
+          t.textContent = c.short;
+          plot.appendChild(t);
+        }
+        if (last) {
+          const wk = weeks[i];
+          const t1 = svg("text", { x: x0 + colW / 2, y: OT.top + H + 16, class: "axis-tick", "text-anchor": "middle" });
+          t1.textContent = `w/c ${wk.label}`;
+          plot.appendChild(t1);
+          const t2 = svg("text", { x: x0 + colW / 2, y: OT.top + H + 31, class: `axis-tick${wk.thin ? " ot-thin" : ""}`, "text-anchor": "middle" });
+          t2.textContent = wk.empty ? "none finished" : `${wk.n} task${wk.n === 1 ? "" : "s"}${wk.thin ? ", thin" : ""}`;
+          plot.appendChild(t2);
+        }
+      });
+      row.appendChild(plot);
+      grid.appendChild(row);
+    });
+    frame.appendChild(grid);
+    container.appendChild(frame);
+    const marks = el("p", "chart-caption");
+    marks.textContent = `Each column is one ISO week (UTC), named by the Monday it starts on ("w/c"), with the number of tasks that finished in it; a week with fewer than 3 tasks is marked thin. Hatched bars are partial: "≥" means at least, "≤" at most, "~" direction not known. ${ot.causes.unlabeledWords}`;
+    container.appendChild(marks);
+  }
+
+  // Flow efficiency by finish day: each finished task with a day is one
+  // point at that day. Partial flow efficiency is hollow, with a mark for
+  // its direction (a diamond when not known); the finish day's own bound is a
+  // short arrow (left for "on or before", right for "on or after", both ways
+  // for "about"). Each week's median over measured tasks is a dash.
+  function drawFeByDate(container, ot) {
+    container.innerHTML = "";
+    if (!ot.points.length) {
+      emptyState(container, "No finished task with a finish day has a flow efficiency yet.");
+      return;
+    }
+    const DAY = 86400000;
+    const t0 = Date.parse(`${ot.weeks[0].starts_on}T00:00:00Z`);
+    const tEnd = Date.parse(`${ot.weeks[ot.weeks.length - 1].starts_on}T00:00:00Z`) + 7 * DAY;
+    const days = Math.round((tEnd - t0) / DAY);
     const axisW = SB.axisW;
-    const avail = Math.max(200, container.clientWidth - axisW - 4);
-    const colW = Math.max(26, Math.min(48, Math.floor(avail / model.points.length)));
-    const plotW = colW * model.points.length + 8;
-    const y = (v) => top + H - v * H;
-    const totalH = top + H + SB.labelH;
+    const avail = Math.max(240, container.clientWidth - axisW - 4);
+    const dayW = Math.max(16, Math.min(40, avail / days));
+    const plotW = Math.round(dayW * days);
+    const H = container.clientWidth < 600 ? 170 : 200;
+    const top = 14;
+    const totalH = top + H + 56;
+    const x = (key) => ((Date.parse(`${key}T00:00:00Z`) - t0) / DAY + 0.5) * dayW;
+    const y = (v) => top + H - Math.min(1, Math.max(0, v)) * H;
     const row = el("div", "sb-row");
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.25, 0.5, 0.75, 1]) {
@@ -3355,29 +3506,135 @@
     }
     row.appendChild(axis);
     const frame = el("div", "sb-frame chart-frame");
-    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": `Flow efficiency of ${model.points.length} tasks, 0 to 100%, in the order of the bars above. Each dot is a link to its task.` });
-    for (const t of [0, 0.25, 0.5, 0.75, 1]) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
-    const firstOpen = model.points.findIndex((p) => p.group === "open");
-    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 4, x2: firstOpen * colW + 4, y1: top, y2: top + H, class: "sb-divider" }));
-    model.points.forEach((p, i) => {
-      const cx = i * colW + 4 + colW / 2;
-      const a = svgLink(p.href, `${p.name}: flow efficiency ${p.words}. Follow this task.`);
-      a.appendChild(svg("rect", { x: i * colW + 4, y: 0, width: colW, height: totalH, class: "hit" }));
-      a.appendChild(svg("circle", { cx, cy: y(Math.min(1, Math.max(0, p.value))), r: 5.5, class: p.hollow ? "fe-dot fe-hollow" : "fe-dot" }));
-      const ty = top + H + 8;
-      const t = svg("text", { x: cx + 4, y: ty, class: "axis-tick", "text-anchor": "end", transform: `rotate(-90 ${cx + 4} ${ty})` });
-      t.textContent = clip(p.name, 18);
-      a.appendChild(t);
-      markTip(a, p.name, [{ label: "Flow efficiency", value: p.words }, ...(p.hollow ? [{ label: "Partial", value: "a hollow dot; the words say which way the true figure lies" }] : [])]);
-      plot.appendChild(a);
+    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": `Flow efficiency of ${ot.points.length} finished tasks by finish day (UTC), 0 to 100%, from the week of ${ot.weeks[0].label} to the week of ${ot.weeks[ot.weeks.length - 1].label}. Each point is a link to its task.` });
+    // Week bands, labeled under the axis.
+    ot.weeks.forEach((w, i) => {
+      const wx = i * 7 * dayW;
+      if (i % 2) plot.appendChild(svg("rect", { x: wx, y: top, width: 7 * dayW, height: H, class: "ot-band" }));
+      plot.appendChild(svg("line", { x1: wx, x2: wx, y1: top, y2: top + H + 34, class: "sb-grid" }));
+      const t = svg("text", { x: wx + 4, y: top + H + 30, class: "axis-tick" });
+      t.textContent = `w/c ${w.label}`;
+      plot.appendChild(t);
+      const t2 = svg("text", { x: wx + 4, y: top + H + 45, class: "axis-tick" });
+      t2.textContent = w.empty ? "none finished" : `${w.n} finished`;
+      plot.appendChild(t2);
+      const med = ot.medians[i];
+      if (med && med.value !== null && !med.empty) {
+        const line = svg("line", { x1: wx + 4, x2: wx + 7 * dayW - 4, y1: y(med.value), y2: y(med.value), class: "ot-median" });
+        const title = svg("title", {});
+        title.textContent = `Week of ${w.label}: ${med.words}`;
+        line.appendChild(title);
+        plot.appendChild(line);
+      }
     });
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
+    // Points on one day sit side by side.
+    const seen = new Map();
+    for (const p of ot.points) {
+      const k = seen.has(p.finish.key) ? seen.get(p.finish.key) : 0;
+      seen.set(p.finish.key, k + 1);
+      const sameDay = ot.points.filter((q) => q.finish.key === p.finish.key).length;
+      const cx = x(p.finish.key) + (k - (sameDay - 1) / 2) * Math.min(12, dayW / Math.max(1, sameDay));
+      const cy = y(p.value);
+      const a = svgLink(p.href, `${p.name}: finished ${p.finish.words} (UTC); flow efficiency ${p.feWords}. Follow this task.`);
+      a.appendChild(svg("rect", { x: cx - 9, y: top, width: 18, height: H, class: "hit" }));
+      // The finish day's direction.
+      const arm = 11;
+      if (p.finish.kind === "on_or_before" || p.finish.kind === "about") a.appendChild(svg("path", { d: `M${cx - 6} ${cy} H${cx - 6 - arm} m4 -3 l-4 3 l4 3`, class: "ot-date-arm" }));
+      if (p.finish.kind === "on_or_after" || p.finish.kind === "about") a.appendChild(svg("path", { d: `M${cx + 6} ${cy} H${cx + 6 + arm} m-4 -3 l4 3 l-4 3`, class: "ot-date-arm" }));
+      if (p.hollow && p.feBound === "unknown") a.appendChild(svg("path", { d: `M${cx} ${cy - 6.5} L${cx + 6.5} ${cy} L${cx} ${cy + 6.5} L${cx - 6.5} ${cy} Z`, class: "fe-dot fe-hollow" }));
+      else a.appendChild(svg("circle", { cx, cy, r: 5.5, class: p.hollow ? "fe-dot fe-hollow" : "fe-dot" }));
+      if (p.hollow && p.feBound === "lower") a.appendChild(svg("path", { d: `M${cx} ${cy - 7} V${cy - 15} m-3 4 l3 -4 l3 4`, class: "ot-fe-arm" }));
+      if (p.hollow && p.feBound === "upper") a.appendChild(svg("path", { d: `M${cx} ${cy + 7} V${cy + 15} m-3 -4 l3 4 l3 -4`, class: "ot-fe-arm" }));
+      markTip(a, p.name, [{ label: "Finished (UTC)", value: p.finish.words }, { label: "Flow efficiency", value: p.feWords }]);
+      plot.appendChild(a);
+    }
     frame.appendChild(plot);
     row.appendChild(frame);
     container.appendChild(row);
     const note = el("p", "chart-caption");
-    note.appendChild(document.createTextNode("Filled: measured. Hollow: partial. Each dot is labeled with its task's name, as its bar is above. "));
-    if (model.omitted) note.appendChild(document.createTextNode(`${model.omitted} task${model.omitted === 1 ? "" : "s"} not measured: ${model.reasons.map((r) => `${r.count} because ${F.reasonText(r.code)}`).join("; ")}.`));
+    const omitted = ot.feOmitted.length;
+    note.textContent = `${ot.points.length} finished task${ot.points.length === 1 ? "" : "s"} drawn. Filled: measured. Hollow: partial; an arrow up means at least, down at most, a diamond direction not known.${omitted ? ` ${omitted} task${omitted === 1 ? " has" : "s have"} a finish day but no measured flow efficiency, so ${omitted === 1 ? "it is" : "they are"} named below and not drawn.` : ""}`;
     container.appendChild(note);
+  }
+
+  // The tasks the charts do not place: finished with no day (never on a
+  // guessed date), and dated but with no flow efficiency.
+  function drawUndated(container, ot) {
+    container.innerHTML = "";
+    const list = (title, items) => {
+      if (!items.length) return;
+      const box = el("div", "ot-undated");
+      box.appendChild(el("p", "ot-undated-title", title));
+      const ul = el("ul", "plain-list");
+      for (const t of items) {
+        const li = document.createElement("li");
+        li.appendChild(jobLink(t.job, t.name));
+        li.appendChild(document.createTextNode(`: ${t.words}`));
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+      container.appendChild(box);
+    };
+    // Grouped by reason, so a reason shared by many tasks is said once.
+    const byWords = new Map();
+    for (const t of ot.unplaced) byWords.set(t.words, [...(byWords.get(t.words) || []), t]);
+    for (const [words, items] of byWords) {
+      const box = el("div", "ot-undated");
+      box.appendChild(el("p", "ot-undated-title", `Finished, ${words.replace(/^not dated yet: /, "not dated yet because ")} (${items.length} task${items.length === 1 ? "" : "s"}), so on no chart above`));
+      const ul = el("ul", "plain-list ot-undated-list");
+      for (const t of items) {
+        const li = document.createElement("li");
+        li.appendChild(jobLink(t.job, t.name));
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+      container.appendChild(box);
+    }
+    list(`Finished with a day, but no measured flow efficiency (${ot.feOmitted.length})`, ot.feOmitted.map((t) => ({ ...t, words: `finished ${t.finish.words}; ${t.words}` })));
+    if (ot.open) container.appendChild(el("p", "chart-caption", `${ot.open} task${ot.open === 1 ? " is" : "s are"} still open, so ${ot.open === 1 ? "it has" : "they have"} no finish day and ${ot.open === 1 ? "is" : "are"} not counted here.`));
+  }
+
+  // The weeks as a table, and each dated task, in words.
+  function drawOverTimeTable(container, ot) {
+    container.innerHTML = "";
+    const table = el("table", "data-table ot-table");
+    tableHead(table, [["Week (UTC)", ""], ["Tasks finished", ""], ["Lead time", "num"], ["Working", "num"], ["Waiting", "num"], ["Flow efficiency", ""]]);
+    const tb = document.createElement("tbody");
+    ot.weeks.forEach((w, i) => {
+      const tr = document.createElement("tr");
+      tr.appendChild(el("td", null, `${w.week}, from ${w.label}`));
+      tr.appendChild(el("td", null, `${w.count}${w.thin ? " (thin)" : ""}`));
+      const c = (n) => (w.empty ? "—" : S.overTimeCell(n, false).words);
+      tr.appendChild(el("td", "num", c(w.raw.lead_ms)));
+      tr.appendChild(el("td", "num", c(w.raw.working_ms)));
+      tr.appendChild(el("td", "num", c(w.raw.idle_ms)));
+      tr.appendChild(el("td", null, w.empty ? "—" : ot.medians[i].words));
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    const wrap = el("div", "table-wrap");
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+    const det = el("details", "full-table");
+    det.appendChild(el("summary", null, `Each finished task with a day (${ot.points.length + ot.feOmitted.length}), by finish day`));
+    const t2 = el("table", "data-table");
+    tableHead(t2, [["Task", ""], ["Finished (UTC)", ""], ["Flow efficiency", ""]]);
+    const b2 = document.createElement("tbody");
+    for (const p of [...ot.points.map((p) => ({ ...p, fe: p.feWords })), ...ot.feOmitted.map((p) => ({ ...p, fe: p.words }))].sort((a, b) => (a.finish.key < b.finish.key ? -1 : a.finish.key > b.finish.key ? 1 : 0))) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.appendChild(jobLink(p.job, p.name));
+      tr.appendChild(td);
+      tr.appendChild(el("td", null, p.finish.words));
+      tr.appendChild(el("td", null, p.fe));
+      b2.appendChild(tr);
+    }
+    t2.appendChild(b2);
+    const w2 = el("div", "table-wrap");
+    w2.appendChild(t2);
+    det.appendChild(w2);
+    container.appendChild(det);
   }
 
   // The stack-up as a table: every figure in words.
@@ -3393,6 +3650,8 @@
         const tr = document.createElement("tr");
         const td = document.createElement("td");
         td.appendChild(jobLink(r.job, r.name));
+        const fb = bars.find((x) => x.job === r.job);
+        if (fb && fb.finish && fb.finish.kind !== "open") td.appendChild(el("span", "cell-day", `finished ${fb.finish.words}`));
         tr.appendChild(td);
         tr.appendChild(el("td", "num", r.lead));
         tr.appendChild(el("td", "num", r.waiting));
@@ -3413,7 +3672,7 @@
 
   function drawFullStackTable(container, bars) {
     const table = el("table", "data-table sb-table");
-    tableHead(table, [["Task", ""], ["Place", ""], ["Lead time", "num"], ["Working", "num"], ["Waiting", "num"], ["Largest wait", ""], ["Note", ""]]);
+    tableHead(table, [["Task", ""], ["Place", ""], ["Finished (UTC)", ""], ["Lead time", "num"], ["Working", "num"], ["Waiting", "num"], ["Largest wait", ""], ["Note", ""]]);
     const tb = document.createElement("tbody");
     for (const b of bars) {
       const tr = document.createElement("tr");
@@ -3421,6 +3680,7 @@
       name.appendChild(jobLink(b.job, b.name));
       tr.appendChild(name);
       tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish` : b.open ? "open" : b.status === "done" ? "done, not labeled" : b.status || "no data"));
+      tr.appendChild(el("td", null, b.finish ? (b.finish.kind === "open" ? "open" : b.finish.words) : "—"));
       tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
       const g = (k) => b.groups.find((x) => x.key === k);
       tr.appendChild(el("td", "num", g("working") ? groupWords(g("working")) : "not known"));
@@ -3442,7 +3702,7 @@
   async function renderCompare(data) {
     const seq = ++stepSeq;
     const ledeEl = document.getElementById("compare-lede");
-    const [tasks, stack] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
+    const [tasks, stack, byWeek] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile("rollups/by_week.json")]);
     if (seq !== stepSeq) return;
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
     const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs : null;
@@ -3472,8 +3732,14 @@
     };
     wireModes("view-compare", "compare", draw);
     draw();
+    const ot = S.overTime(byWeek, { jobs: data.jobs, taskRows, nameOf: (j) => jobLabel(j) });
     const drawRest = () => {
-      safely("fe-dots", () => (all.length ? drawFeDots(document.getElementById("fe-dots"), S.feDots(all, taskRows)) : emptyState(document.getElementById("fe-dots"), "Not published yet.")));
+      const none = ot.state === "absent" ? "The weekly file (rollups/by_week.json) is not published yet, so no week is drawn rather than a zero." : ot.state === "empty" ? "No finished task has a finish day yet, so no week can be drawn." : null;
+      document.getElementById("cause-weeks-caption").textContent = ot.state === "ok" ? `Hours per finish week for the ${ot.causes.rows.length > 5 ? "5 largest causes, then the rest as Other" : "causes with time"}, each a row on one scale: ${ot.causes.scaleWords}.` : "";
+      safely("cause-weeks", () => (none ? emptyState(document.getElementById("cause-weeks"), none) : drawCauseWeeks(document.getElementById("cause-weeks"), ot)));
+      safely("fe-dots", () => (none ? emptyState(document.getElementById("fe-dots"), none) : drawFeByDate(document.getElementById("fe-dots"), ot)));
+      safely("over-time-undated", () => (ot.state === "absent" ? (document.getElementById("over-time-undated").innerHTML = "") : drawUndated(document.getElementById("over-time-undated"), ot)));
+      safely("over-time-table", () => (ot.state === "ok" ? drawOverTimeTable(document.getElementById("over-time-table"), ot) : emptyState(document.getElementById("over-time-table"), none)));
     };
     drawRest();
     const drawTable = () => safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "Not published yet.")));
@@ -3761,13 +4027,16 @@
     tsh.id = "cause-tasks-title";
     ts.appendChild(tsh);
     const table = el("table", "data-table cause-tasks");
-    tableHead(table, [["Task", ""], ["Time on this cause", "num"], ["Share of this cause", "num"]]);
+    tableHead(table, [["Task", ""], ["Finished (UTC)", ""], ["Time on this cause", "num"], ["Share of this cause", "num"]]);
     const tb = document.createElement("tbody");
     for (const t of d.tasks) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
       td.appendChild(jobLink(t.job, t.name));
       tr.appendChild(td);
+      const tj = byId.get(t.job);
+      const tf = F.finishDay(tj ? tj.finish_date : null);
+      tr.appendChild(el("td", null, tf.kind === "open" ? "open" : tf.words));
       tr.appendChild(el("td", "num", t.ms === null ? "not stated" : `${t.bound === "lower" ? "at least " : ""}${S.hoursWords(t.ms)}`));
       tr.appendChild(el("td", "num", t.ms === null || !(d.ms > 0) ? "—" : W.pctWords(t.ms / d.ms)));
       tb.appendChild(tr);
