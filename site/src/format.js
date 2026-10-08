@@ -146,7 +146,7 @@
     bound_not_one_quantity: "it is a ranking or a status, not one quantity, so it has no single direction",
     bound_direction_undecided: "one of its reasons has no decided direction yet, so the true figure may be higher or lower",
     // The PR clock (site/scripts/pr-clock.mjs): pull request times placed on the task clock through GitHub.
-    anchor_spread: "the task's pull requests disagree by more than 2 minutes about when the task started, so their times on the task clock may be off by that much",
+    anchor_spread: "the task's pull requests disagree by more than 2 minutes about when the task started, so times placed through them (pull request times and the finish day) may be off by up to that much, either way",
     no_timed_pr: "no session of this task timed a pull request, so GitHub's times cannot be placed on the task clock",
     no_created_timed_pr: "no session of this task timed a pull request it opened, so GitHub's times cannot be placed on the task clock",
     github_unreadable: "GitHub could not be read for this pull request (it may be private)",
@@ -169,7 +169,7 @@
     median_of_subset: "a median of only the tasks that were measured has no direction: the others could move it either way",
     no_finish_source: "no record gives the day this task finished",
     job_offsets_withheld: "the desk withholds this task's timing",
-    clock_skew_conflict: "the merge time through the task's clock anchor is at most a time before the opening the session recorded, so the two disagree and which way the true merge time lies is not known; it is drawn at the opening",
+    clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
   };
 
   // Every reason that can reach the page has words. The site build stops on

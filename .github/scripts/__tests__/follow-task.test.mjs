@@ -268,7 +268,7 @@ test("the data box keeps the design's order, the rework loop counts defect stret
   const model = W.mapModel(map, { maxBoxes: 10 })
   const box = model.items.find((x) => x.type === "box" && x.defect_stretches)
   // The pull requests opened in each box are back (v1.1 addendum §3): pull request times are on the task clock.
-  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests opened", "Session"])
+  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests first appeared", "Session"])
   assert.equal(W.reworkWords({ defect_stretches: 12, defect_ms: 3 * M }), "12 defect stretches, 3 minutes")
   assert.equal(W.reworkWords({ defect_stretches: 0, defect_ms: 0 }), null)
   assert.equal(W.reworkWords({ defect_stretches: u(["not_labeled"]), defect_ms: u(["not_labeled"]) }), null, "an unlabeled box draws no loop")
