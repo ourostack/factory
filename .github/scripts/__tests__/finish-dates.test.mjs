@@ -782,3 +782,36 @@ test("I4: when every flow efficiency in a week leans one way, the week's median 
   const none = buildByWeek({ stackup: { jobs: [stackRow("aaaa"), stackRow("bbbb")] }, tasks: { jobs: [taskRow("aaaa", atMost(0.1)), taskRow("bbbb", part(0.4, ["log_truncated"], "lower"))] }, finishDates }).weeks[0].flow_efficiency
   assert.deepEqual([none.median.state, none.median.reasons, none.n, none.N], ["unavailable", ["bound_reasons_conflict"], 0, 2])
 })
+
+test("N3: checkByWeek refuses day counts that are missing, negative, do not add up to the week's tasks, or disagree with the tasks' own finish days", () => {
+  const fx = JSON.parse(readFileSync(new URL("../../fixtures/over-time/by_week_26.json", import.meta.url), "utf8"))
+  assert.deepEqual(checkByWeek(fx), [])
+  const i = fx.weeks.findIndex((w) => w.n >= 3 && w.n_day_on_or_before > 0)
+  const codes = (d) => checkByWeek(d).map((v) => v.code)
+  // Counts that add up but disagree with the tasks' days (the reviewer's first mutation).
+  const moved = structuredClone(fx)
+  moved.weeks[i].n_day_measured = moved.weeks[i].n - moved.weeks[i].n_day_on_or_after - moved.weeks[i].n_day_about
+  moved.weeks[i].n_day_on_or_before = 0
+  assert.ok(codes(moved).includes("day_counts_disagree_with_tasks"), codes(moved).join())
+  // A count larger than the week.
+  const big = structuredClone(fx)
+  big.weeks[i].n_day_on_or_before = big.weeks[i].n + 4
+  assert.ok(codes(big).includes("day_counts_do_not_sum"), codes(big).join())
+  // A count missing.
+  const gone = structuredClone(fx)
+  delete gone.weeks[i].n_day_about
+  assert.ok(codes(gone).includes("missing_day_count"), codes(gone).join())
+  // A negative or fractional count.
+  const neg = structuredClone(fx)
+  neg.weeks[i].n_day_about = -1
+  assert.ok(codes(neg).includes("bad_count"), codes(neg).join())
+  // n that disagrees with the week's job list.
+  const n7 = structuredClone(fx)
+  n7.weeks[i].n += 2
+  assert.ok(codes(n7).includes("n_disagrees_with_jobs"), codes(n7).join())
+  // An empty week must still carry zero counts.
+  const e = fx.weeks.findIndex((w) => w.n === 0)
+  const emptyGone = structuredClone(fx)
+  delete emptyGone.weeks[e].n_day_measured
+  assert.ok(codes(emptyGone).includes("missing_day_count"), codes(emptyGone).join())
+})

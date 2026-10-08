@@ -106,7 +106,10 @@ test("B1: each week says how its days lean, and the page says how many days are 
   assert.match(ot.weeks[2].days.words, /may include tasks that finished earlier or later/)
   assert.match(ot.days.words, /^Finish days of the 5 dated tasks: 2 exact, 1 "on or before", 1 "on or after" and 1 with no direction\. So a week may hold tasks that finished in an earlier or later week/)
   assert.equal(ot.days.coarse, true)
-  assert.match(ot.trend.words, /^No change from week to week is claimed/)
+  assert.equal(ot.trend.words, "No change from week to week is claimed: there are not yet enough exact finish days to compare.")
+  assert.equal(ot.trend.claimed, false)
+  // N6: one short summary sentence leads; the rest sits behind a disclosure.
+  assert.equal(ot.summary.words, "5 of 6 finished tasks are dated (50h of 80h lead time); only 2 of 5 days are exact, so no change between weeks is claimed.")
   // Counts from the file win when it has them.
   const d = doc()
   Object.assign(d.weeks[0], { n_day_measured: 0, n_day_on_or_before: 2, n_day_on_or_after: 0, n_day_about: 0 })
@@ -115,7 +118,23 @@ test("B1: each week says how its days lean, and the page says how many days are 
   const sure = doc()
   for (const t of sure.tasks) t.finish_date = fd(t.finish_date.value)
   const ot2 = S.overTime(sure, { ...opts, jobs: [] })
-  assert.match(ot2.trend.words, /^In the weeks whose tasks all have exact days, agents' working time went from 20% of the week's lead time \(week of 21 Sep, 2 tasks\) to 20% of the week's lead time \(week of 5 Oct, 3 tasks, 2 partial\)\. The week of 21 Sep is thin \(fewer than 3 tasks\), so read this as a hint, not a trend\.$/)
+  assert.equal(ot2.trend.claimed, true)
+  assert.match(ot2.summary.words, /^5 of 6 finished tasks are dated \(50h of 80h lead time\)\. Agents' working time went from 20% to 20% of lead time between the weeks of 21 Sep and 5 Oct; see how the weeks are dated\.$/)
+  // N2: a bounded day that could fall into a compared week stops the claim: an "on or before" day in a later week, or an "on or after" day in an earlier one.
+  const later = structuredClone(sure)
+  later.weeks.push(week("2026-W42", "2026-10-12", ["f"], {}, {}))
+  later.tasks.push({ job: "f", finish_date: fd("2026-10-13", "partial", "upper"), flow_efficiency: m(0.2) })
+  assert.equal(S.overTime(later, { ...opts, jobs: [] }).trend.claimed, false)
+  const earlier = structuredClone(sure)
+  earlier.weeks.unshift(week("2026-W38", "2026-09-14", ["g"], {}, {}))
+  earlier.tasks.unshift({ job: "g", finish_date: fd("2026-09-15", "partial", "lower"), flow_efficiency: m(0.2) })
+  assert.equal(S.overTime(earlier, { ...opts, jobs: [] }).trend.claimed, false)
+  // A bounded day that cannot reach them leaves the claim: "on or before" in an earlier week.
+  const harmless = structuredClone(sure)
+  harmless.weeks.unshift(week("2026-W38", "2026-09-14", ["g"], {}, {}))
+  harmless.tasks.unshift({ job: "g", finish_date: fd("2026-09-15", "partial", "upper"), flow_efficiency: m(0.2) })
+  assert.equal(S.overTime(harmless, { ...opts, jobs: [] }).trend.claimed, true)
+  assert.match(ot2.trend.words, /^In weeks whose tasks all have exact days and that no bounded finish day could reach, agents' working time went from 20% of the week's lead time \(week of 21 Sep, 2 tasks\) to 20% of the week's lead time \(week of 5 Oct, 3 tasks, 2 partial\)\. The week of 21 Sep is thin \(fewer than 3 tasks\), so read this as a hint, not a trend\.$/)
 })
 
 test("I3 and I7: the base is stated once, and the undated tasks are summed in one line with their hours", () => {
@@ -151,6 +170,25 @@ test("B3: By week bars in share mode make each week 100% of its own lead time; a
   // A partial part keeps its direction.
   const w41 = S.weekBars(ot, "all")[2]
   assert.equal(w41.segments.find((x) => x.key === "wait_next_prompt").bound, "lower")
+  // N1: a share's direction is the share's own, computed from its part and the week's lead time, and it agrees with the cause table.
+  const sh41 = S.weekBars(ot, "share")[2]
+  const table = S.causeTable(ot, "share")
+  for (const seg of sh41.segments.filter((x) => x.cause)) {
+    const row = table.rows.find((r) => r.key === `waiting:${seg.cause}`)
+    if (!row) continue
+    assert.equal(seg.bound, row.cells[2].bound, seg.key)
+  }
+  // A lower part over a lower lead time has no direction; a lower part over a measured lead time is at least; an exact part over an "at least" lead time is at most.
+  const d3 = doc()
+  Object.assign(d3.weeks[0], { lead_ms: { state: "partial", value: 10 * H, reasons: ["x"], bound: "lower" }, idle_by_waited_on_ms: { next_prompt: { state: "partial", value: 3 * H, reasons: ["x"], bound: "lower" }, no_session: m(4 * H), other_task: m(H), unknown: m(0) } })
+  const s3 = S.weekBars(S.overTime(d3, opts), "share")[0].segments
+  assert.equal(s3.find((x) => x.key === "wait_next_prompt").bound, "unknown")
+  assert.equal(s3.find((x) => x.key === "wait_no_session").bound, "upper")
+  const d4 = doc()
+  Object.assign(d4.weeks[0], { idle_by_waited_on_ms: { next_prompt: { state: "partial", value: 3 * H, reasons: ["x"], bound: "lower" }, no_session: m(4 * H), other_task: m(H), unknown: m(0) } })
+  const s4 = S.weekBars(S.overTime(d4, opts), "share")[0].segments
+  assert.equal(s4.find((x) => x.key === "wait_next_prompt").bound, "lower")
+  assert.equal(s4.find((x) => x.key === "wait_no_session").bound, null)
 })
 
 test("I2 and I6: the cause × week table has causes in Pareto order, one cell per week, one stated scale, and shares with an honest direction", () => {
@@ -173,6 +211,18 @@ test("I2 and I6: the cause × week table has causes in Pareto order, one cell pe
   assert.equal(S.shareOf({ state: "measured", value: 0, reasons: [] }, { state: "partial", value: 10, reasons: ["x"], bound: "unknown" }).state, "measured")
   assert.equal(S.overTimeCell(S.shareOf({ state: "measured", value: 0, reasons: [] }, { state: "partial", value: 10, reasons: ["x"], bound: "unknown" }), false, "share").short, "0")
   assert.equal(S.overTimeCell(S.shareOf({ state: "partial", value: 0, reasons: ["x"], bound: "lower" }, { state: "measured", value: 10, reasons: [] }), false, "share").short, "≥0")
+  // N4: one qualifier per figure, never "about under 1%" or "at least under 1%".
+  const tiny = (bound) => S.overTimeCell({ state: "partial", value: 0.004, reasons: ["x"], bound }, false, "share").words
+  assert.equal(tiny("unknown"), "less than 1% of the week's lead time recorded (direction not known)")
+  assert.equal(tiny("lower"), "at least a sliver of the week's lead time (under 1% recorded)")
+  assert.equal(tiny("upper"), "under 1% of the week's lead time")
+  assert.ok(![tiny("unknown"), tiny("lower"), tiny("upper")].some((w) => /(about|at least|at most) under/.test(w)))
+  // The same rule holds for flow efficiency marks and medians.
+  const fd2 = doc()
+  fd2.weeks[2].flow_efficiency = { n: 1, N: 1, of: "x", median: { state: "partial", value: 0.004, reasons: ["x"], bound: "upper" } }
+  const med = S.overTime(fd2, opts).fe.weeks[2].median
+  assert.equal(med.words, "median under 1%, 1 of 1 task")
+  assert.equal(med.short, "<1%")
   // A share under 1% reads "<1%", never "~under 1%".
   assert.equal(S.overTimeCell({ state: "partial", value: 0.004, reasons: ["x"], bound: "unknown" }, false, "share").short, "~<1%")
   // The direction of a ratio from its parts.
@@ -208,6 +258,18 @@ test("B2: 52 weeks fit the frame at 1280 px without scrolling, labels never over
   const phone = S.weekAxis(52, 300)
   assert.equal(phone.colW, 8)
   assert.equal(phone.scroll, true)
+  // N5: every label lies inside the frame and no two overlap, at phone and desktop widths; the newest week is always labeled.
+  for (const [n, avail] of [[26, 300], [26, 994], [52, 1040], [3, 300], [13, 320]]) {
+    const ax = S.weekAxis(n, avail, { min: 10, max: 96, labelPx: 52 })
+    const ls = ax.labels
+    assert.ok(ls.length > 0 && ls[ls.length - 1].i === n - 1, `${n}@${avail}: newest labeled`)
+    for (const l of ls) assert.ok(l.left >= 0 && l.right <= ax.width + 0.001, `${n}@${avail}: label ${l.i} inside`)
+    for (let k = 1; k < ls.length; k++) assert.ok(ls[k].left >= ls[k - 1].right, `${n}@${avail}: labels ${ls[k - 1].i} and ${ls[k].i} overlap`)
+    for (const l of ls) assert.ok(["start", "middle", "end"].includes(l.anchor))
+  }
+  // Arrows for bounded days are drawn only when a column is at least 14 px wide.
+  assert.equal(S.weekAxis(26, 300, { min: 10 }).brackets, false)
+  assert.equal(S.weekAxis(3, 1040).brackets, true)
   const few = S.weekAxis(3, 1040)
   assert.deepEqual([few.colW, few.scroll, few.every, few.showValues], [120, false, 1, true])
 })
@@ -227,9 +289,12 @@ test("the 26-week fixture: every week is listed, the newest week is last, and ev
     assert.ok(t.rows.length > 0)
     assert.ok(t.rows.every((r) => r.cells.length === 26))
   }
-  // Weeks 19 to 26 are mostly exact: the trend may compare exact weeks only.
+  // N2: weeks 19 to 26 are mostly exact, but "on or before" days in later weeks could reach every all-exact week, so nothing is claimed.
   assert.ok(ot.weeks.slice(18).some((w) => w.days.counts.exact === w.n && w.n > 0))
-  assert.match(ot.trend.words, /^In the weeks whose tasks all have exact days|^No change/)
+  const reachable = (i) => ot.weeks.some((w, j) => (j >= i && w.days.counts.before) || (j <= i && w.days.counts.after) || w.days.counts.about)
+  assert.ok(ot.weeks.every((w, i) => w.empty || w.days.counts.exact !== w.n || reachable(i)))
+  assert.equal(ot.trend.claimed, false)
+  assert.equal(ot.trend.words, "No change from week to week is claimed: there are not yet enough exact finish days to compare.")
   assert.equal(ot.fe.weeks.length, 26)
 })
 
@@ -280,4 +345,18 @@ test("every drawer on a task's page states the task's finish day: each openDrawe
     if (!/\bjob: (j|openMark\.job)\b/.test(span)) missing.push(`line ${i + 1}`)
   })
   assert.deepEqual(missing, [])
+})
+
+test("N7: a week's median label never overlaps its marks: marks keep to the left of the label, or the label is left to the words", () => {
+  for (const colW of [12, 40, 60, 100, 160]) {
+    for (const n of [0, 1, 3, 5, 9]) {
+      const L = S.feLayout(colW, n, { labelPx: 34 })
+      assert.equal(L.xs.length, n)
+      for (const x of L.xs) assert.ok(x - 5 >= 0 && x + 5 <= colW, `${colW}/${n}: mark inside`)
+      if (L.label) for (const x of L.xs) assert.ok(x + 5 <= L.label.left, `${colW}/${n}: mark ${x} meets the label at ${L.label.left}`)
+      if (L.label) assert.ok(L.label.left >= 0 && L.label.right <= colW)
+    }
+  }
+  assert.ok(S.feLayout(160, 5, { labelPx: 34 }).label)
+  assert.equal(S.feLayout(40, 5, { labelPx: 34 }).label, null)
 })

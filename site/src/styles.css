@@ -1197,6 +1197,8 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 /* Compare: over time */
 .ot-base { margin: 6px 0 10px; font-size: 15px; max-width: 72ch; }
 .ot-base p { margin: 0 0 6px; }
+.ot-base-more summary { cursor: pointer; }
+.ot-base-more p { font-size: 14px; }
 .ot-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
 .ot-toggle { flex-wrap: wrap; }
 .ot-scroll { overflow-x: auto; }

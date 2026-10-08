@@ -2046,9 +2046,6 @@
   }
   const infoOf = (p, gh, capped) => (gh && !(capped && capped.has(prKey(p))) ? gh.get(prKey(p)) || null : null);
 
-  // One entry per pull request, in Desk's order, keeping the earliest timed
-  // mention; `created` is true if any entry says so, else false if any
-  // says so, else null.
   // A GitHub owner/name and a pull request number, as GitHub allows them: no
   // path segment, nothing that could reach another API path.
   const PR_REPO_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/;
@@ -2056,6 +2053,9 @@
     return typeof repo === "string" && PR_REPO_SHAPE.test(repo) && Number.isSafeInteger(number) && number > 0;
   }
 
+  // One entry per pull request, in Desk's order, keeping the earliest timed
+  // mention; `created` is true if any entry says so, else false if any
+  // says so, else null.
   function uniquePrs(prs) {
     const out = new Map();
     for (const p of Array.isArray(prs) ? prs : []) {

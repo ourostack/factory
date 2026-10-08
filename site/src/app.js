@@ -3485,9 +3485,10 @@
           g.appendChild(t);
         }
       }
-      dayBracket(g, x0, ax.colW, T + H + 8, b.days && b.days.bracket);
-      if ((bars.length - 1 - i) % ax.every === 0) {
-        const t = svg("text", { x: x0 + ax.colW / 2, y: T + H + 26, class: "axis-tick", "text-anchor": "middle" });
+      if (ax.brackets) dayBracket(g, x0, ax.colW, T + H + 8, b.days && b.days.bracket);
+      const lab = ax.labels.find((l) => l.i === i);
+      if (lab) {
+        const t = svg("text", { x: lab.x + (x0 - i * ax.colW), y: T + H + 26, class: "axis-tick", "text-anchor": lab.anchor });
         t.textContent = b.label;
         g.appendChild(t);
       }
@@ -3508,7 +3509,7 @@
       ul.appendChild(li);
     }
     container.appendChild(ul);
-    container.appendChild(el("p", "chart-caption", `The number above a bar is how many tasks finished that week; * marks a thin week (fewer than 3). A dashed slot is a week with no finished task, never a zero bar. Hatched parts are partial. Weeks are labeled by the Monday they start on${ax.every > 1 ? `, every ${ax.every} weeks` : ""}.`));
+    container.appendChild(el("p", "chart-caption", `The number above a bar is how many tasks finished that week; * marks a thin week (fewer than 3). A dashed slot is a week with no finished task, never a zero bar. Hatched parts are partial. Weeks are labeled by the Monday they start on${ax.every > 1 ? `, every ${ax.every} weeks` : ""}.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here; the table below gives each week's days."}`));
   }
 
   // The cause × week table (I2, I6): rows are causes in Pareto order,
@@ -3607,10 +3608,10 @@
     weeks.forEach((w, i) => {
       const x0 = i * ax.colW;
       const wk = ot.weeks[i];
-      const n = w.marks.length;
-      const step = n ? Math.min(12, (ax.colW - 8) / n) : 0;
+      const hasMedian = w.median && w.median.value !== null && w.median.value !== undefined;
+      const L = S.feLayout(ax.colW, w.marks.length, { labelPx: hasMedian && ax.showValues ? Math.max(30, 7 * String(w.median.short || "").length + 6) : ax.colW });
       w.marks.forEach((p, k) => {
-        const cx = x0 + ax.colW / 2 + (k - (n - 1) / 2) * step;
+        const cx = x0 + L.xs[k];
         const a = svgLink(p.href, `${p.name}: finished ${p.finish.words} (UTC); flow efficiency ${p.words}. Follow this task.`);
         a.appendChild(svg("rect", { x: cx - 5, y: top, width: 10, height: H, class: "hit" }));
         if (p.kind === "unknown") {
@@ -3627,22 +3628,23 @@
         markTip(a, p.name, [{ label: "Finished (UTC)", value: p.finish.words }, { label: "Flow efficiency", value: p.words }]);
         plot.appendChild(a);
       });
-      if (w.median && w.median.value !== null && w.median.value !== undefined) {
+      if (hasMedian) {
         const my = y(w.median.value);
         const line = svg("line", { x1: x0 + 3, x2: x0 + ax.colW - 3, y1: my, y2: my, class: "ot-median" });
         const title = svg("title", {});
         title.textContent = `Week of ${w.label}: ${w.median.words}`;
         line.appendChild(title);
         plot.appendChild(line);
-        if (ax.showValues) {
-          const t = svg("text", { x: x0 + ax.colW - 3, y: my - 4, class: "ot-median-text", "text-anchor": "end" });
+        if (ax.showValues && L.label) {
+          const t = svg("text", { x: x0 + L.label.x, y: my - 4, class: "ot-median-text", "text-anchor": "end" });
           t.textContent = w.median.short;
           plot.appendChild(t);
         }
       }
-      dayBracket(plot, x0, ax.colW, top + H + 8, wk.days && wk.days.bracket);
-      if ((weeks.length - 1 - i) % ax.every === 0) {
-        const t = svg("text", { x: x0 + ax.colW / 2, y: top + H + 26, class: "axis-tick", "text-anchor": "middle" });
+      if (ax.brackets) dayBracket(plot, x0, ax.colW, top + H + 8, wk.days && wk.days.bracket);
+      const lab = ax.labels.find((l) => l.i === i);
+      if (lab) {
+        const t = svg("text", { x: lab.x + (x0 - i * ax.colW), y: top + H + 26, class: "axis-tick", "text-anchor": lab.anchor });
         t.textContent = w.label;
         plot.appendChild(t);
       }
@@ -3652,7 +3654,7 @@
     container.appendChild(row);
     newestInView(frame, container);
     const omitted = ot.fe.omitted.length;
-    container.appendChild(el("p", "chart-caption", `${ot.fe.n} finished task${ot.fe.n === 1 ? "" : "s"} drawn${omitted ? `; ${omitted} more ${omitted === 1 ? "has" : "have"} a finish day but no flow efficiency figure (named in the table below the charts)` : ""}. Each week's median, in words, is in the table below.`));
+    container.appendChild(el("p", "chart-caption", `${ot.fe.n} finished task${ot.fe.n === 1 ? "" : "s"} drawn${omitted ? `; ${omitted} more ${omitted === 1 ? "has" : "have"} a finish day but no flow efficiency figure (named in the table below the charts)` : ""}. Each week's median, in words, is in the table below.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here."}`));
   }
 
   // The finished tasks the charts do not place, behind one line (I7).
@@ -3864,9 +3866,17 @@
       const baseEl = document.getElementById("over-time-base");
       baseEl.replaceChildren();
       if (ot.state !== "absent") {
-        for (const t of [ot.base.words, [ot.days && ot.days.words, ot.trend && ot.trend.words].filter(Boolean).join(" ")]) {
-          if (t) baseEl.append(el("p", null, t));
-        }
+        // One short sentence, then the base, the days and the trend in full
+        // behind a disclosure (N6).
+        const more = [ot.base.words, [ot.days && ot.days.words, ot.trend && ot.trend.words].filter(Boolean).join(" ")].filter(Boolean);
+        if (ot.state === "ok" && more.length) {
+          // The sentence is the disclosure's own line, so the block stays
+          // that one sentence until the reader opens it.
+          const d = el("details", "ot-base-more");
+          d.append(el("summary", "ot-summary", ot.summary.words));
+          for (const t of more) d.append(el("p", null, t));
+          baseEl.append(d);
+        } else baseEl.append(el("p", "ot-summary", ot.summary.words));
       }
       for (const b of document.querySelectorAll("#ot-over .ot-btn")) b.setAttribute("aria-pressed", String(b.dataset.over === overTimeView.over));
       for (const b of document.querySelectorAll("#ot-mode .ot-btn")) b.setAttribute("aria-pressed", String(b.dataset.otmode === overTimeView.otmode));
