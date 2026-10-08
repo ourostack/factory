@@ -50,6 +50,8 @@
   --c-wait-queue_before_start: #e6a764;
   --c-wait-no_session: #edc495;
   --c-wait-unknown: #d1661f;
+  /* The agent was working on another task: the family's rose shade. */
+  --c-wait-other_task: #b8475c;
   --c-alarm: #c62f2f;
   --c-accent: #6b4fd8;
 
@@ -109,6 +111,7 @@
     --c-wait-queue_before_start: #a9672f;
     --c-wait-no_session: #7d5530;
     --c-wait-unknown: #e8833c;
+    --c-wait-other_task: #ec8597;
     --c-alarm: #ef5a5a;
     --c-accent: #9d88f0;
 
@@ -706,18 +709,20 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .task-lede { font-size: 17px; line-height: 1.7; margin-bottom: 8px; }
 .task-lede dfn { font-style: italic; color: var(--text-primary); }
 .lede-missing { font-style: italic; }
+/* A lede number is a control: a tinted chip with a solid underline. */
 .lede-num {
   font: inherit;
   color: var(--text-primary);
   font-weight: 650;
-  background: none;
+  background: color-mix(in srgb, var(--focus) 9%, transparent);
   border: 0;
-  border-bottom: 2px dotted var(--baseline);
-  padding: 0 1px;
+  border-bottom: 2px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  border-radius: 3px 3px 0 0;
+  padding: 0 3px;
   cursor: pointer;
   line-height: inherit;
 }
-.lede-num:hover { border-bottom-color: var(--text-secondary); }
+.lede-num:hover { background: color-mix(in srgb, var(--focus) 16%, transparent); border-bottom-color: var(--focus); }
 .lede-num[aria-pressed="true"] { background: color-mix(in srgb, var(--focus) 16%, transparent); border-bottom: 2px solid var(--focus); }
 
 /* The task picker: a compact list, the latest to finish first. */
@@ -765,9 +770,9 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .picker-meta { display: flex; flex-wrap: wrap; gap: 0 12px; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 400; }
 /* No text cell narrower than 60px, even at 320px. */
 .picker-meta > span { min-width: 60px; }
-.picker-badge { border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; font-size: 12px; }
-.picker-badge-partial { border-style: dashed; }
-.picker-badge-none { font-style: italic; }
+/* A badge is a note on the row, not a control of its own: plain text. */
+.picker-badge { font-size: 12px; color: var(--text-muted); font-style: italic; }
+.picker-badge::before { content: "· "; font-style: normal; }
 
 /* ---------- The value stream map ---------- */
 .vsm { margin: 18px 0 10px; }
@@ -850,13 +855,17 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
   padding: 0;
   height: 46px;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  border-radius: 4px;
 }
+/* Each step is a control: its label is underlined, and it tints on hover. */
+.lad:hover, .lad:focus-visible { background: color-mix(in srgb, var(--focus) 9%, transparent); }
 .lad::before { content: ""; position: absolute; left: 0; right: 0; border-top: 2.5px solid var(--text-secondary); }
 .lad-high::before { top: 6px; border-color: var(--c-waste-waiting); }
 .lad-low::before { bottom: 6px; }
 .lad-turn::after { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; border-left: 1.5px solid var(--baseline); }
 .lad-folded { flex: 0 0 auto; width: 34%; max-width: 46px; }
-.lad-label { position: absolute; left: 0; right: 0; font-size: 12px; text-align: center; color: var(--text-primary); white-space: nowrap; }
+.lad-label { position: absolute; left: 0; right: 0; font-size: 12px; text-align: center; color: var(--link); white-space: nowrap; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent); text-underline-offset: 2px; }
 .lad-high .lad-label { top: 12px; }
 .lad-low .lad-label { top: 8px; }
 .lad-folded .lad-label { color: var(--text-muted); font-size: 11px; }
@@ -931,7 +940,10 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .tw-group { display: flex; height: 100%; min-width: 0; }
 .tw-unsplit { background: repeating-linear-gradient(135deg, var(--gridline) 0 2px, transparent 2px 7px); box-shadow: inset 0 0 0 1.5px var(--baseline); }
 .tw-group + .tw-group { border-left: 2px solid var(--text-primary); }
-.tw-seg { height: 100%; min-width: 0; }
+.tw-seg { height: 100%; min-width: 0; padding: 0; border: 0; border-radius: 0; cursor: pointer; font: inherit; display: block; }
+.tw-seg:hover { filter: brightness(0.92); }
+.tw-seg:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; position: relative; z-index: 1; }
+.tw-seg[aria-pressed="true"] { outline: 3px solid var(--focus); outline-offset: 1px; position: relative; z-index: 1; }
 .tw-seg + .tw-seg { border-left: 1px solid var(--page-plane); }
 .tw-group-head { margin: 14px 0 0; font-size: 14px; color: var(--text-secondary); }
 .tw-group-head strong { color: var(--text-primary); }
@@ -943,10 +955,20 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .wait-long_tool_call { --sw: var(--c-wait-long_tool_call); background: var(--sw); }
 .wait-queue_before_start { --sw: var(--c-wait-queue_before_start); background: var(--sw); }
 .wait-no_session { --sw: var(--c-wait-no_session); background: var(--sw); }
+.wait-other_task { --sw: var(--c-wait-other_task); background: var(--sw); }
 .wait-unknown { --sw: var(--c-wait-unknown); background: repeating-linear-gradient(135deg, var(--sw) 0 2px, transparent 2px 6px); box-shadow: inset 0 0 0 1px var(--sw); }
 .tw-legend { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 4px 24px; font-size: 14px; }
 .tw-legend li { display: flex; align-items: baseline; gap: 8px; }
-.tw-name { flex: 1 1 auto; }
+/* The task bar's legend rows are buttons that light the map. */
+.tw-legend-buttons li { flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.tw-row { flex: 1 1 14em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: inherit; color: inherit; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; cursor: pointer; }
+.tw-row:hover { background: var(--surface-1); border-color: var(--border); }
+.tw-row[aria-pressed="true"] { background: color-mix(in srgb, var(--focus) 12%, transparent); border-color: var(--focus); }
+.tw-cause-link { font-size: 13px; white-space: nowrap; }
+.tw-name { flex: 0 1 auto; }
+/* A legend row keeps its name whole: the figure moves to its own line before the name is squeezed. */
+.tw-legend-buttons .tw-name { min-width: 7em; }
+.tw-legend-buttons { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
 .tw-ms { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cause-list { margin: 6px 0 4px; padding-left: 22px; }
 .cause-list li { margin: 4px 0; }
@@ -1153,3 +1175,31 @@ details.full-table[open] > summary::before, details.unlabeled-list[open] > summa
 @media (max-width: 599px) {
   table.data-table.pareto-table td:nth-child(2) { min-width: 8em; }
 }
+
+/* ---------- S6: whole-walk review fixes ---------- */
+
+/* The status line is one line; the full alarm text sits behind "Health details". */
+.status-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.status-summary { min-width: 0; }
+.status-term { color: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+.status-details { font-size: 13px; }
+.status-details > summary { cursor: pointer; color: var(--link); }
+.status-details[open] { flex: 1 1 100%; }
+.status-full { margin: 4px 0 0; color: var(--text-secondary); }
+
+/* "Skip to the map", before the picker's rows. */
+.skip-map { display: inline-block; font-size: 13px; margin: 0 0 4px; }
+
+/* A glossary entry opened by a link. */
+.glossary dt.is-target { background: color-mix(in srgb, var(--focus) 14%, transparent); border-radius: 4px; padding: 0 4px; margin-left: -4px; }
+.glossary dt .swatch { margin-right: 6px; }
+
+/* A session the task shared with other tasks. */
+.session-shared { display: block; font-size: 12px; color: var(--text-muted); }
+
+/* A cause already taken on, and Act's count. */
+.taken-on { font-weight: 600; margin: 4px 0 6px; }
+.act-summary { margin: 0 0 10px; color: var(--text-secondary); }
+
+/* A day with no intake keeps the running total and is drawn lighter. */
+.svg-chart .mark-quiet { opacity: 0.35; }

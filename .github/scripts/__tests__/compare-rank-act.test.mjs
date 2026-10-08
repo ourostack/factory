@@ -473,7 +473,8 @@ test("Act lists one row per kaizen issue with its countermeasure, a cause only f
   assert.deepEqual(rows[1].cause, { key: "waiting:next_prompt", label: "Waiting · next prompt (the agent had stopped)", href: "#/causes/waiting:next_prompt", ranked: true })
   assert.equal(rows[2].cause.ranked, false)
   assert.deepEqual(rows[1].countermeasure, { ref: "ourostack/desk#65", url: "https://github.com/ourostack/desk/pull/65", merged: true, kind: "countermeasure" })
-  assert.equal(rows[1].title, "desk skill friction, human_wait")
+  assert.equal(rows[1].title, "Agents stopped and waited too long for the operator's next prompt while using Desk's skills.", "a plain sentence from the title table, not the issue's internal code")
+  assert.equal(rows[0].title, "waiting for the next prompt", "an issue with no row reads from its own title")
   assert.ok(rows.every((r) => r.check === "not enough labeled tasks yet"))
   assert.deepEqual(Object.keys(S.KAIZEN_CAUSES).sort(), ["ourostack/factory#52", "ourostack/factory#53"])
   for (const k of Object.values(S.KAIZEN_CAUSES)) assert.ok(S.isCauseKey(k))
@@ -557,7 +558,7 @@ test("the page wires fix round 1: the working view, the waste label, the phone t
   assert.match(app, /row\.append\(left, frame, right\)/)
   assert.match(app, /unlabeledNote\(document\.getElementById\("act-unlabeled"\), data, "act"\)/)
   assert.match(app, /unlabeledNote\(document\.getElementById\("causes-unlabeled"\), data, "causes"\)/)
-  assert.match(app, /history\.replaceState\(null, "", `#\/\$\{which\}\$\{modes\[which\] === "working" \? "\?mode=working" : ""\}`\)/)
+  assert.match(app, /history\.replaceState\(null, "", `#\/\$\{which\}\$\{modes\[which\] !== "all" \? `\?mode=\$\{modes\[which\]\}` : ""\}`\)/)
   for (const id of ["stackup-left-out", "causes-unlabeled", "act-unlabeled"]) assert.match(html, new RegExp(`id="${id}"`), id)
   // On Act the note sits below "Problems in hand".
   assert.ok(html.indexOf('id="act-unlabeled"') > html.indexOf('id="problems"'))

@@ -81,25 +81,23 @@ test("#/ opens the labeled done task that finished last, and falls back without 
   assert.equal(F.defaultTask([]), null)
 })
 
-test("#/ lands on a done task with at least ten minutes of work from the latest finish group, preferring a named one", () => {
-  const j = (id, order, group, workMs, name, status = "done") => ({ id, status, finish_order: measured(order), finish_group: measured(group), finish_basis: "labels", active_time_ms: workMs === null ? unavailable(["source_unreadable"]) : measured(workMs), ...(name ? { name } : {}) })
+test("#/ lands on the finished task with the latest finish position, named or private, as llms.txt and About say", () => {
+  const j = (id, order, group, workMs, name, status = "done", basis = "labels") => ({ id, status, finish_order: measured(order), finish_group: measured(group), finish_basis: basis, active_time_ms: workMs === null ? unavailable(["source_unreadable"]) : measured(workMs), ...(name ? { name } : {}) })
   const MIN = 60000
-  // Group 2 is the latest; within it the 37-second task is skipped, and the named task wins over a later unnamed one.
+  // The latest position wins, however short its work and whether or not it has a public name (S5 review I-1).
   const jobs = [j("old", 1, 1, 50 * MIN, "Old named"), j("tiny", 6, 2, 30000), j("unnamed", 5, 2, 40 * MIN), j("named", 4, 2, 12 * MIN, "Fix the build"), j("unread", 3, 2, null, "No working time")]
-  assert.equal(F.defaultTask(jobs).id, "named")
-  // Without a named task in the group, the latest position with enough work.
-  assert.equal(F.defaultTask(jobs.filter((x) => x.id !== "named")).id, "unnamed")
-  // A partial working time counts by its lower bound.
-  assert.equal(F.defaultTask([j("p", 2, 1, 0), { ...j("q", 1, 1, 0), active_time_ms: { state: "partial", value: 11 * MIN, reasons: ["session_open"], bound: "lower" } }]).id, "q")
-  // When the latest group has nothing long enough, an earlier group is used.
-  assert.equal(F.defaultTask([j("tiny", 3, 2, 1000), j("old", 1, 1, 50 * MIN)]).id, "old")
-  // An open task never lands, however long.
-  assert.equal(F.defaultTask([j("open", 9, 3, 90 * MIN, "Open", "processing"), j("old", 1, 1, 50 * MIN)]).id, "old")
-  assert.equal(F.LANDING_MIN_WORK_MS, 10 * MIN)
-  // About states both rules.
+  assert.equal(F.defaultTask(jobs).id, "tiny")
+  assert.equal(F.defaultTask(jobs.filter((x) => x.id !== "tiny")).id, "unnamed")
+  // Today's store: 825084c9 (position 9, private) over fc8b915a (position 6, named).
+  assert.equal(F.defaultTask([j("fc8b915a", 6, 2, 54 * MIN, "Revocable sessions"), j("825084c9", 9, 2, 17 * 60 * MIN)]).id, "825084c9")
+  // An open or unlabeled task never lands while a labeled one exists, however late its position.
+  assert.equal(F.defaultTask([j("open", 30, 3, 90 * MIN, "Open", "processing", "facts"), j("old", 1, 1, 50 * MIN)]).id, "old")
+  assert.equal(F.LANDING_MIN_WORK_MS, undefined, "no minimum working time")
+  // About and llms.txt state the same rule.
   const about = read("site/src/index.html")
   assert.match(about, /Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position\./)
-  assert.match(about, /opens on a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name\./)
+  assert.match(about, /"Follow a task" opens on the finished task with the latest finish position, named or private\./)
+  assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the finished task with the latest finish position \(`finish_order`\), named or private: the labeled task \(`finish_basis: "labels"`\) with the largest `finish_order` in `rollups\/tasks\.json`\./)
 })
 
 test("tasks first labeled in the same commit share a finish group and are ordered by lead time, the longest latest", () => {
@@ -510,7 +508,7 @@ test("public copy says the operator, not you, and shows no calendar date", () =>
   assert.doesNotMatch(text, /\byou(r|rs|rself)?\b/i)
   const app = read("site/src/app.js")
   // The drawer's button and the cause page's button keep the wording the design gives them, "Copy as a prompt for your agent" and "Start an A3 with your agent": they name the reader's own agent, not the operator.
-  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "").replace("Start an A3 with your agent", "")
+  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "").replace("Start an A3 with your agent", "").replace("Check or extend the A3 with your agent", "")
   assert.doesNotMatch(strings, /\byou(r|rs|rself)?\b/i)
   assert.doesNotMatch(app, /dateStyle/)
   assert.doesNotMatch(app, /toLocaleDateString|toISOString/)
@@ -521,7 +519,10 @@ test("Why Lean? gives the eight wastes as our mapping, the glossary, and its sou
   const why = html.slice(html.indexOf('id="view-why"'), html.indexOf('id="view-about"'))
   for (const w of ["Waiting", "Defects", "Extra processing", "Overproduction", "Motion", "Transportation", "Inventory", "Non-utilized talent"]) assert.match(why, new RegExp(`</span>${w}</dt>`), w)
   assert.match(why, /our own mapping/)
-  for (const term of ["Lead time", "Working time", "Flow efficiency", "Value-adding", "Necessary", "Waste", "Value stream map", "Timeline ladder", "Inventory triangle", "Yamazumi", "Pareto chart", "A3", "Kaizen", "Andon"]) assert.match(why, new RegExp(`<dt>(<span[^>]*></span>)?${term}`), term)
+  for (const term of ["Lead time", "Working time", "Waiting", "Flow efficiency", "Value-adding", "Necessary", "Waste", "Agent on another task", "Evaluator-labeled pause \\(inside working time\\)", "The evaluator", "Session", "Card", "The operator", "Sign-off", "Capture coverage", "Improvement loop", "Job-hours", "Value stream map", "Timeline ladder", "Inventory triangle", "Yamazumi", "Pareto chart", "A3", "Kaizen", "Andon"]) assert.match(why, new RegExp(`<dt id="g-[a-z0-9-]+">(<span[^>]*></span>)?${term}`), term)
+  // The ladder's "+5m" steps are explained, and "Labeled wait" is gone everywhere.
+  assert.match(why, /A step labeled with a plus sign, such as "\+5m", is the short waits folded inside the box before it\./)
+  assert.doesNotMatch(html + read("site/src/app.js") + read("site/src/walk.js"), /Labeled wait/)
   assert.match(why, /its time is waiting, not the inventory waste/)
   assert.match(why, /classic yamazumi stacks each operator's work against takt/)
   assert.ok((why.match(/href="https:/g) || []).length >= 10, "sources are linked inline")
@@ -544,21 +545,22 @@ test("the Pages build copies the job and rollup files, tolerates missing ones, a
   write(join(reports, "rollups/index.md"), "#")
   const { copied, files } = publishData({ reports, dist })
   assert.deepEqual(copied.sort(), ["jobs/aaaaaaaa11.json", "jobs/aaaaaaaa11/session-1.json", "rollups/muda.json", "rollups/tasks.json"])
-  assert.deepEqual(files.map((f) => f.path).sort(), ["data.json", "health.json", "jobs/aaaaaaaa11.json", "jobs/aaaaaaaa11/session-1.json", "rollups/muda.json", "rollups/tasks.json"])
-  assert.match(sizeLine(files), /^Published data files: 6 files, 0\.29 MB total, largest jobs\/aaaaaaaa11\.json \(0\.29 MB\)$/)
+  assert.deepEqual(files.map((f) => f.path).sort(), ["data.json", "health.json", "jobs/aaaaaaaa11.json", "jobs/aaaaaaaa11/session-1.json", "reasons.json", "rollups/muda.json", "rollups/tasks.json"])
+  assert.match(sizeLine(files), /^Published data files: 7 files, 0\.30 MB total, largest jobs\/aaaaaaaa11\.json \(0\.29 MB\)$/)
   assert.equal(sizeLine([]), "Published data files: none")
   const txt = llmsText(read("site/src/llms-template.txt"), files)
   assert.match(txt, /^# The factory/)
   assert.match(txt, /1\. Follow a task[\s\S]*2\. Compare tasks[\s\S]*3\. Rank causes[\s\S]*4\. Act/)
   assert.match(txt, /- data\.json \(1 KB, small enough to read whole\)/)
   assert.match(txt, /- jobs\/aaaaaaaa11\.json \(\d+ KB, large: read only the parts you need\)/)
-  assert.match(txt, /- rollups\/tasks\.json \(1 KB, small enough to read whole\): each task's lead time/)
+  assert.match(txt, /- rollups\/tasks\.json \(1 KB, small enough to read whole\): one row per task, keyed by `job`: its lead time/)
+  assert.match(txt, /- reasons\.json \(\d+ KB, small enough to read whole\): every reason code/)
   // A file the pipeline does not write yet is not listed.
   assert.doesNotMatch(txt, /stackup\.json|causes\.json \(/)
   assert.doesNotMatch(txt, /\{\{/)
   assert.ok(READ_WHOLE_BYTES >= 64 * 1024)
   // Nothing at all to copy is fine.
-  assert.deepEqual(publishData({ reports: join(dir, "missing"), dist: join(dir, "empty") }).files, [])
+  assert.deepEqual(publishData({ reports: join(dir, "missing"), dist: join(dir, "empty") }).files.map((f) => f.path), ["reasons.json"], "the reason words need no report")
 })
 
 test("the Pages workflow publishes the data files and llms.txt, and writes the size line to the step summary", () => {

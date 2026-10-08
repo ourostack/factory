@@ -362,10 +362,10 @@ test("a lead time raised to the span of the job's recorded work says so: the led
   const W = createRequire(import.meta.url)("../../../site/src/walk.js")
   const raised = { state: "partial", value: 9 * 3600000, reasons: ["card_dates_shorter_than_work"] }
   const row = { lead_time_ms: raised, working_ms: { state: "partial", value: 3600000, reasons: [] }, value_in_working_ms: { state: "unavailable", reasons: ["not_labeled"] }, flow_efficiency: { state: "unavailable", reasons: ["card_dates_shorter_than_work"] } }
-  assert.match(W.ledeText(W.lede(row, F.reasonText)), /^This task took at least 9 hours, counted from its first session because the card was created after work began\./)
+  assert.match(W.ledeText(W.lede(row, F.reasonText)), /^This task took at least 9 hours, counted from its first session because its card \(its record on the desk\) was created after work began\./)
   const open = { ...row, lead_time_ms: { ...raised, reasons: ["card_dates_shorter_than_work", "censored"] } }
-  assert.match(W.ledeText(W.lede(open, F.reasonText)), /^This task is still open\. So far it has taken at least 9 hours, counted from its first session because the card was created after work began\./)
-  assert.match(W.ledeText(W.lede({ ...row, lead_time_ms: { state: "measured", value: 5 * 3600000, reasons: [] } }, F.reasonText)), /^This task took 5 hours from its card's creation to its end\./)
+  assert.match(W.ledeText(W.lede(open, F.reasonText)), /^This task is still open\. So far it has taken at least 9 hours, counted from its first session because its card \(its record on the desk\) was created after work began\./)
+  assert.match(W.ledeText(W.lede({ ...row, lead_time_ms: { state: "measured", value: 5 * 3600000, reasons: [] } }, F.reasonText)), /^This task took 5 hours from the creation of its card \(its record on the desk\) to its end\./)
 })
 
 test("an unavailable flow efficiency carrying the lead-time floor reason passes the numbers check and has words", () => {

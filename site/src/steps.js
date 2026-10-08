@@ -199,6 +199,35 @@
     return { bars: kept, left_out: out.length, text: `${head}: ${parts.join("; ")}. The table below lists every task.` };
   }
 
+  // "Share of each task" mode: every bar of "all" mode drawn as shares of
+  // its own lead time, 0 to 100%, with the same parts in the same order, so
+  // the make-up of a 20-minute task compares with a 200-hour one. A bar
+  // whose split is not known stays one hatched "split not known" part (all
+  // of its lead time, never 100% of one class), and a bar with no lead time
+  // stays "no data". Each bar's label is the share agents were working
+  // (its flow efficiency), with the bound its task row states. `rows` are
+  // the tasks.json rows.
+  function shareBars(bars, rows) {
+    const tasks = byJob(rows);
+    return arr(bars).map((b) => {
+      if (b.state === "no_data") return { ...b, share: true };
+      if (b.state === "unsplit" || !(b.total_ms > 0)) return { ...b, share: true, state: b.state === "ok" ? "unsplit" : b.state, total_ms: 1, label: "split not known", segments: [{ key: "unsplit", label: "Split not known", ms: 1 }], groups: [] };
+      const t = b.total_ms;
+      const part = (x) => ({ ...x, ms: x.ms / t });
+      const groups = arr(b.groups).map((g) => ({ ...g, share_of_lead: g.ms / t, segments: arr(g.segments).map(part) }));
+      const work = groups.find((g) => g.key === "working");
+      const bound = feBound(tasks.get(b.job));
+      const q = { lower: "≥", upper: "≤", unknown: "~" }[bound] || "";
+      return { ...b, share: true, total_ms: 1, lead_ms: t, segments: arr(b.segments).map(part), groups, label: work ? `${q}${shortPct(work.share_of_lead)} working` : "split not known" };
+    });
+  }
+  // A share in a few characters, for labels and phone tables: "14%", "<1%".
+  function shortPct(share) {
+    const p = share * 100;
+    if (p > 0 && p < 1) return "<1%";
+    return `${Math.round(p)}%`;
+  }
+
   // The finished task to label on the chart. In "all" mode it is the one
   // that waited longest, by idle waiting only (lead time minus working
   // time), in the lede's own words; labeled waste describes working time
@@ -206,6 +235,8 @@
   // most labeled waste.
   const WASTE_SEGMENTS = new Set(["waiting", "defects", "extra_processing", "overproduction", "motion", "transportation", "inventory", "non_utilized_talent", "unknown"]);
   function mostWaste(bars, mode) {
+    // Every share bar is full height: no single bar is labeled there.
+    if (mode === "share") return null;
     const working = mode === "working";
     let best = null;
     arr(bars).forEach((b, index) => {
@@ -265,6 +296,7 @@
     long_tool_call: "during long tool calls",
     queue_before_start: "queued before the first session",
     no_session: "with no session of the task running",
+    other_task: "while the agent was working on another task",
     unknown: "with its cause not recorded",
   };
 
@@ -276,6 +308,7 @@
     const n = row && row.flow_efficiency;
     if (!n || n.state !== "partial") return null;
     if (n.bound === "lower" || n.bound === "upper") return n.bound;
+    if (n.bound === null) return null;
     const wb = W.boundOf(row.working_ms);
     const lb = totalBound(row.lead_time_ms);
     const low = wb === "lower" || lb === "upper";
@@ -630,12 +663,20 @@
   // moves when the ranking changes).
   function a3Prompt(d, links) {
     const l = links || {};
+    const index = l.indexUrl ? ` Index of every data file: ${l.indexUrl}` : "";
     const top = arr(d.tasks).filter((t) => t.ms !== null).slice(0, 3);
     const named = top.map((t) => `${t.promptName || `factory task ${String(t.job).slice(0, 8)}`}, ${t.bound === "lower" ? "at least " : ""}${hoursWords(t.ms)}`);
     const tasksText = named.length ? ` Its largest ${named.length === 1 ? "task is" : "tasks are"} ${named.join("; ")}${d.jobs > named.length ? `; of ${d.jobs} tasks in all` : ""}.` : "";
     const share = d.all && typeof d.all.share === "number" ? `, ${W.pctWords(d.all.share)} of all the time ranked` : "";
     const rank = d.all && d.all.rank ? ` It ranks ${ordinal(d.all.rank)} of ${d.all.of} causes by time.` : "";
-    return `Help me start an A3 on factory cause "${d.label}" (${d.key}). It cost ${hoursWords(d.ms)}, counted per task${share}.${rank}${tasksText} Its page is ${l.route}, and its data is the entry with cause "${d.key}" in ${l.dataUrl}. Walk me through its biggest stretches first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.`;
+    const facts = `It cost ${hoursWords(d.ms)}, counted per task${share}.${rank}${tasksText} Its page is ${l.route}, and its data is the entry with cause "${d.key}" in ${l.dataUrl}.`;
+    // An A3 already open for this cause: check or extend it, never start a duplicate.
+    const open = arr(l.existing).filter((x) => x && x.url);
+    if (open.length) {
+      const at = open.map((x) => `${x.ref} (${x.url})${x.countermeasure ? `, with countermeasure ${x.countermeasure.ref}${x.countermeasure.merged ? ", merged, not yet checked" : ", not yet merged"}` : ""}`).join("; ");
+      return `Factory cause "${d.label}" (${d.key}): an A3 already exists at ${at}; help me check or extend it. ${facts} Walk me through its biggest stretches first, then help me check whether the countermeasure worked, with labeled tasks from before and after it shipped, or extend the A3 if the cause is still open.${index}`;
+    }
+    return `Help me start an A3 on factory cause "${d.label}" (${d.key}). ${facts} Walk me through its biggest stretches first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.${index}`;
   }
 
   // ------------------------------------------------------------- act
@@ -649,6 +690,36 @@
     "ourostack/factory#53": "waiting:next_prompt",
     "ourostack/factory#52": "waiting:api_retry",
   };
+
+  // The cause a kaizen issue works on, from its URL, or null: what the
+  // store build writes into data.json kaizen_issues[].cause, so agents read
+  // the mapping without this file.
+  function kaizenCauseOf(url, table) {
+    const map = table || KAIZEN_CAUSES;
+    const ref = refOf(url);
+    return ref && Object.prototype.hasOwnProperty.call(map, ref) ? map[ref] : null;
+  }
+
+  // Each kaizen issue's problem as a plain sentence, for Act's rows. The
+  // issues' own titles are internal codes ("desk skill friction,
+  // human_wait"); a new issue without a row here reads from its title.
+  const ISSUE_TITLES = {
+    "ourostack/factory#39": "Desk's checkout guard failed long shell loops, so shell tool calls failed.",
+    "ourostack/factory#50": "Desk's MCP tools caused friction in agents' work; no measure was chosen.",
+    "ourostack/factory#51": "Calls to Desk's MCP tools failed too often.",
+    "ourostack/factory#52": "Model requests were retried too often during Desk releases.",
+    "ourostack/factory#53": "Agents stopped and waited too long for the operator's next prompt while using Desk's skills.",
+    "ourostack/factory#54": "Agents retouched work they had already finished while using Desk's skills.",
+  };
+  // A title in the kaizen form "Kaizen: desk skill friction, human_wait"
+  // reads as a sentence when no row names it.
+  function issueTitle(ref, title) {
+    if (ref && Object.prototype.hasOwnProperty.call(ISSUE_TITLES, ref)) return ISSUE_TITLES[ref];
+    const t = typeof title === "string" ? title.replace(/^Kaizen:\s*/i, "").trim() : "";
+    const m = /^([a-z0-9_-]+) ([a-z_]+) friction(?:, ([a-z_]+))?$/.exec(t);
+    if (m) return `Friction in ${m[1] === "desk" ? "Desk" : m[1]}'s ${m[2].replace(/_/g, " ")}${m[3] ? `, measured by ${m[3].replace(/_/g, " ")}` : ""}.`;
+    return t || null;
+  }
 
   // "ourostack/factory#53" from an issue or pull request URL.
   function refOf(url) {
@@ -673,13 +744,17 @@
       .filter((i) => i && typeof i.url === "string")
       .map((i) => {
         const ref = refOf(i.url);
-        const key = ref && Object.prototype.hasOwnProperty.call(map, ref) ? map[ref] : null;
+        // The data file states each issue's cause (data.json
+        // kaizen_issues[].cause, from this same table at build time); an
+        // older build without it reads the table.
+        const stated = typeof i.cause === "string" && isCauseKey(i.cause) ? i.cause : null;
+        const key = stated || (ref && Object.prototype.hasOwnProperty.call(map, ref) ? map[ref] : null);
         const res = i.resolution && typeof i.resolution === "object" ? i.resolution : null;
         return {
           ref: ref || String(i.ref || "issue"),
           short: typeof i.ref === "string" ? i.ref : ref,
           url: i.url,
-          title: typeof i.title === "string" && i.title ? i.title.replace(/^Kaizen:\s*/i, "") : null,
+          title: issueTitle(ref, i.title),
           state: i.issue_state === "open" ? "open" : i.issue_state === "closed" ? "closed" : "unknown",
           countermeasure: res && typeof res.url === "string" ? { ref: refOf(res.url) || String(res.ref || "pull request"), url: res.url, merged: res.merged === true, kind: res.kind || null } : null,
           cause: key ? { key, label: W.causeWords(key), href: causeRoute(key), ranked: ranked.has(key) } : null,
@@ -687,6 +762,31 @@
         };
       })
       .sort((a, b) => Number(b.state === "open") - Number(a.state === "open") || num(b.ref) - num(a.ref));
+  }
+
+  // Act's opening count: how many issues are open and closed, and that
+  // none is checked yet (no countermeasure has labeled tasks on both sides).
+  function actSummary(rows) {
+    const list = arr(rows);
+    if (!list.length) return "";
+    const closed = list.filter((r) => r.state === "closed").length;
+    const open = list.filter((r) => r.state === "open").length;
+    const n = list.length;
+    const head = closed === n ? (n === 1 ? "The one issue is closed" : n === 2 ? "Both issues are closed" : `All ${n} are closed`) : open === n ? (n === 1 ? "The one issue is open" : `All ${n} are open`) : `${open} of ${n} ${open === 1 ? "is" : "are"} open and ${closed} closed`;
+    return `${plural(n, "problem")} taken on so far. ${head}; none is checked yet, because no countermeasure has labeled tasks on both sides of it.`;
+  }
+
+  // The kaizen issues already open for a cause: the A3 already taken on.
+  // `rows` are actRows. Returns [{ ref, url, state, countermeasure }].
+  function causeIssues(rows, key) {
+    return arr(rows).filter((r) => r.cause && r.cause.key === key).map((r) => ({ ref: r.ref, url: r.url, state: r.state, countermeasure: r.countermeasure }));
+  }
+  // "Already taken on: factory#53, with countermeasure desk#65 (merged, not yet checked)".
+  const shortRef = (ref) => String(ref).replace(/^ourostack\//, "");
+  function takenOnWords(list) {
+    const xs = arr(list);
+    if (!xs.length) return "";
+    return `Already taken on: ${xs.map((x) => `${shortRef(x.ref)}${x.countermeasure ? `, with countermeasure ${shortRef(x.countermeasure.ref)} (${x.countermeasure.merged ? "merged, not yet checked" : "not yet merged"})` : ", with no countermeasure yet"}`).join("; ")}.`;
   }
 
   // An alarm key in words, as the status line names it.
@@ -759,9 +859,17 @@
     spanItem,
     a3Prompt,
     KAIZEN_CAUSES,
+    kaizenCauseOf,
+    ISSUE_TITLES,
+    issueTitle,
     CHECK_WORDS,
     refOf,
     actRows,
+    actSummary,
+    causeIssues,
+    takenOnWords,
+    shareBars,
+    shortPct,
     alarmKeyWords,
     alarmRows,
     taskCauses,

@@ -230,12 +230,22 @@
       return;
     }
     // Each day's count is a measured number; the running total is their sum.
+    // The axis is honest about time: every day from the first intake to the
+    // last has its place, and a day with no intake keeps the running total,
+    // drawn lighter, so day 5 and day 9 are four days apart, not one.
     let running = 0;
-    const items = rawItems.map((i) => {
-      running += i.count.value;
+    const byDay = new Map();
+    for (const i of rawItems) {
       const n = dayNumber(rawItems[0].day, i.day);
-      return { day: n === null ? "a day" : `day ${n}`, count: running, added: i.count };
-    });
+      if (n !== null && n > 0) byDay.set(n, byDay.has(n) ? byDay.get(n) + i.count.value : i.count.value);
+    }
+    const lastDay = Math.max(1, ...byDay.keys());
+    const items = [];
+    for (let n = 1; n <= lastDay; n++) {
+      const added = byDay.has(n) ? byDay.get(n) : 0;
+      running += added;
+      items.push({ day: `day ${n}`, count: running, added: { state: "measured", value: added, reasons: [] }, quiet: !byDay.has(n) });
+    }
     const width = 600;
     const height = 190;
     const padL = 34;
@@ -250,7 +260,7 @@
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("class", "svg-chart");
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", "Cumulative sessions published, by day since the first intake");
+    svg.setAttribute("aria-label", "Cumulative sessions published, one bar per day since the first intake, every day in order; days with no intake keep the total and are drawn lighter");
 
     [0, 0.5, 1].forEach((frac) => {
       const y = padT + innerH * (1 - frac);
@@ -286,7 +296,7 @@
       rect.setAttribute("height", String(Math.max(h, 0)));
       rect.setAttribute("rx", "2");
       rect.setAttribute("fill", "var(--series-1)");
-      rect.setAttribute("class", "mark");
+      rect.setAttribute("class", item.quiet ? "mark mark-quiet" : "mark");
       rect.setAttribute("tabindex", "0");
       const showTT = (evt) => {
         const box = rect.getBoundingClientRect();
@@ -826,29 +836,71 @@
     }
     const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues, alarmIssuesVerification: data.alarm_issues_verification });
     container.className = `status-line status-${s.state}`;
-    const word = el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`);
-    container.appendChild(word);
-    container.appendChild(document.createTextNode(": "));
+    // One line: the state, what each alarm is about (each word linked to its
+    // glossary entry) and whether anyone is on it; the full text sits behind
+    // "Health details".
+    const line = el("span", "status-summary");
+    line.appendChild(el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`));
+    line.appendChild(document.createTextNode(": "));
+    if (s.state === "abnormal") {
+      const topics = [];
+      for (const a of s.alarms) {
+        const t = statusTopic(a.key);
+        if (!topics.some((x) => x.term === t.term && x.text === t.text)) topics.push(t);
+      }
+      topics.forEach((t, i) => {
+        if (i) line.appendChild(document.createTextNode(i === topics.length - 1 ? " and " : ", "));
+        if (t.term) {
+          const a = el("a", "status-term", t.text);
+          const safe = F.glossaryRoute(t.term);
+          if (safe) a.href = safe;
+          line.appendChild(a);
+        } else line.appendChild(document.createTextNode(t.text));
+      });
+      const unowned = s.alarms.filter((a) => !a.owner).length;
+      line.appendChild(document.createTextNode(` (${s.alarms.length === 1 ? "1 alarm" : `${s.alarms.length} alarms`}${unowned === s.alarms.length ? `, ${unowned === 1 ? "no one is on it" : "no one is on them"}` : unowned ? `, ${unowned} with no one on ${unowned === 1 ? "it" : "them"}` : ", each with an owner"}). `));
+    } else if (s.state === "normal") {
+      line.appendChild(document.createTextNode("no alarm. "));
+    } else {
+      line.appendChild(document.createTextNode("no alarm, but not everything is watched. "));
+    }
+    container.appendChild(line);
+    const det = el("details", "status-details");
+    det.appendChild(el("summary", null, "Health details"));
+    const body = el("p", "status-full");
     if (s.state === "abnormal") {
       s.alarms.forEach((a, i) => {
-        if (i) container.appendChild(document.createTextNode("; "));
-        container.appendChild(document.createTextNode(`${a.text}, `));
+        if (i) body.appendChild(document.createTextNode("; "));
+        body.appendChild(document.createTextNode(`${a.text.charAt(0).toUpperCase()}${a.text.slice(1)}, `));
         if (a.owner) {
-          container.appendChild(document.createTextNode("tracked in "));
-          container.appendChild(safeLink(`issue ${a.owner.ref}`, a.owner.url));
-        } else container.appendChild(el("span", a.ownerText === "no one is on this" ? "status-owner" : "status-owner status-owner-unchecked", a.ownerText || "no one is on this"));
+          body.appendChild(document.createTextNode("tracked in "));
+          body.appendChild(safeLink(`issue ${a.owner.ref}`, a.owner.url));
+        } else body.appendChild(el("span", a.ownerText === "no one is on this" ? "status-owner" : "status-owner status-owner-unchecked", a.ownerText || "no one is on this"));
       });
-      container.appendChild(document.createTextNode(". "));
+      body.appendChild(document.createTextNode(". "));
     } else if (s.state === "normal") {
-      container.appendChild(document.createTextNode(`no alarm. Checked ${listWords(s.checked)}. `));
+      body.appendChild(document.createTextNode(`Checked ${listWords(s.checked)}. `));
     } else {
-      container.appendChild(document.createTextNode(`no alarm is raised, but not everything is watched. Not recorded: ${listWords(s.missing)}.${s.checked.length ? ` Checked: ${listWords(s.checked)}.` : ""} `));
+      body.appendChild(document.createTextNode(`Not recorded: ${listWords(s.missing)}.${s.checked.length ? ` Checked: ${listWords(s.checked)}.` : ""} `));
     }
     const more = document.createElement("a");
     const safe = F.safeRoute("store");
     if (safe) more.href = safe;
-    more.textContent = "Health details";
-    container.appendChild(more);
+    more.textContent = "The store's own health, in full";
+    body.appendChild(more);
+    det.appendChild(body);
+    container.appendChild(det);
+  }
+
+  // What an alarm is about, in the status line's one line, and the glossary
+  // entry that defines it.
+  function statusTopic(key) {
+    const k = String(key || "");
+    if (k.startsWith("capture:") || k === "capture_alarm") return { text: "capture coverage", term: "capture-coverage" };
+    if (k.startsWith("loop:") || k === "loop_alarm") return { text: "the improvement loop", term: "improvement-loop" };
+    if (k === "andon") return { text: "andon", term: "andon" };
+    if (k === "site") return { text: "the site's data", term: null };
+    return { text: "an alarm", term: null };
   }
 
   // A headline figure as plain text: its label, the figure, and its notes.
@@ -1035,11 +1087,16 @@
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
     container.appendChild(el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
 
+    // One line on sign-off (the operator's recorded acceptance or return of
+    // a delivery): the outcome says it, and a sign-off figure is added only
+    // when one is recorded.
     const status = el("p", "task-status");
     status.appendChild(outcomeNode(j));
-    status.appendChild(document.createTextNode(" · sign-off: "));
-    status.appendChild(cellNum(j.signoff, "text"));
-    if (j.signoff.state === "unavailable") status.appendChild(el("span", "muted", ` (${F.describe(j.signoff, "text").reason})`));
+    if (j.signoff.state === "unavailable") status.appendChild(el("span", "muted", ` (sign-off is the operator's recorded acceptance or return of a delivery; ${F.describe(j.signoff, "text").reason})`));
+    else {
+      status.appendChild(document.createTextNode(" · sign-off: "));
+      status.appendChild(cellNum(j.signoff, "text"));
+    }
     if (j.outcome === "accepted" || j.outcome === "sent_back") status.appendChild(el("span", "muted", " (recorded by the agent on the operator's word)"));
     if (j.signoff_wait.state !== "unavailable") {
       status.appendChild(document.createTextNode(" · "));
@@ -1133,7 +1190,11 @@
         const safe = F.safeRoute("task", j.id, "session", s.session_id);
         if (safe) link.href = safe;
         link.textContent = `${s.host} · ${s.session_id.slice(0, 8)}`;
-        plainCell(tr, "Session", link, "task-cell");
+        // A session that worked several tasks: its figures are the whole
+        // session's, not this task's part, and the row says so.
+        const others = f && Array.isArray(f.jobs) ? f.jobs.filter((x) => x && x.id !== j.id).length : 0;
+        const cellNode = others ? words(link, el("span", "session-shared", ` shared with ${others} other task${others === 1 ? "" : "s"}; these figures are the whole session's`)) : link;
+        plainCell(tr, "Session", cellNode, "task-cell");
         tableCell(tr, notes, "Length", f ? f.duration_ms : none, "duration", "num");
         tableCell(tr, notes, "Working time", f ? f.active_ms : none, "duration", "num");
         tableCell(tr, notes, "Tool calls", f ? f.tool_calls_total : none, "count", "num");
@@ -1315,7 +1376,8 @@
     document.getElementById("drawer-title").textContent = content.title;
     drawerBody.innerHTML = "";
     const what = el("p", "drawer-what");
-    what.appendChild(swatch(content.segment));
+    // A wait wears its cause's own swatch, as on the bar, the legend and Rank causes.
+    what.appendChild(content.cause ? waitSwatch(content.cause) : swatch(content.segment));
     what.appendChild(document.createTextNode(content.rows.length ? content.rows[0][1] : ""));
     drawerBody.appendChild(what);
     const dl = el("dl", "drawer-facts");
@@ -1367,7 +1429,7 @@
       drawerBody.appendChild(ul);
     }
     if (x.prompt) {
-      const text = W.promptText({ ...x.prompt, route: absolute(x.prompt.route), dataUrl: absolute(x.prompt.dataPath) });
+      const text = W.promptText({ ...x.prompt, route: absolute(x.prompt.route), dataUrl: absolute(x.prompt.dataPath), indexUrl: absolute("llms.txt") });
       const box = el("div", "drawer-prompt");
       const btn = el("button", "copy-prompt", "Copy as a prompt for your agent");
       btn.type = "button";
@@ -1457,16 +1519,30 @@
     };
     input.addEventListener("input", draw);
     draw();
+    // A link before the list, so the keyboard can pass the picker's rows.
+    const skip = el("a", "skip-map", "Skip to the map");
+    const safe = F.safeRoute("task", String(current || ""));
+    if (safe) skip.href = safe;
+    skip.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      const target = document.getElementById("vsm-title");
+      if (target) {
+        target.tabIndex = -1;
+        target.focus();
+        target.scrollIntoView({ block: "start" });
+      }
+    });
+    container.appendChild(skip);
     container.appendChild(wrap);
-    // Keep the current task in view inside the list.
-    const cur = list.querySelector('[aria-current="page"]');
-    if (cur) list.scrollTop = Math.max(0, cur.parentElement.offsetTop - 4);
+    // The list starts at the top, with the newest tasks; the current one is
+    // highlighted wherever it sits.
+    list.scrollTop = 0;
   }
 
   // ------------------------------------------------------------------ lede
 
-  function renderLede(container, row, published, idle, onToken) {
-    const model = W.lede(row, F.reasonText, { published, idle });
+  function renderLede(container, row, published, idle, onToken, unlabeled) {
+    const model = W.lede(row, F.reasonText, { published, idle, unlabeled_ms: unlabeled });
     container.innerHTML = "";
     container.classList.toggle("lede-missing", model.state !== "ok");
     const parts = model.parts.slice();
@@ -1499,19 +1575,19 @@
 
   // What each lede number lights up on the map (walk.js highlightSelector):
   // a cause lights only the waits that waited on it.
-  function highlight(root, key, item, cause) {
-    const tag = `${key}|${item === undefined ? "" : item}|${cause || ""}`;
+  function highlight(root, key, item, cause, seg) {
+    const tag = `${key}|${item === undefined ? "" : item}|${cause || ""}|${seg || ""}`;
     const on = root.dataset.hl === tag;
     root.dataset.hl = on ? "" : tag;
     for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
     if (on) return false;
-    const pick = W.highlightSelector(key, { item, cause });
+    const pick = W.highlightSelector(key, { item, cause, seg });
     if (pick) for (const n of root.querySelectorAll(pick)) n.classList.add("is-hl");
     return true;
   }
 
   function renderMap(container, ctx) {
-    const { j, map, row, tasksPublished, idle } = ctx;
+    const { j, map, row, tasksPublished, idle, unlabeled } = ctx;
     container.innerHTML = "";
     if (!map) {
       emptyState(container, tasksPublished === false ? "The value stream map is not published yet: the walk's data files are not part of this build." : "This task's value stream map is not published yet, so no box or triangle is drawn rather than empty ones.");
@@ -1584,7 +1660,7 @@
     // The top row: the operator as customer, top right, and the card's status changes.
     const customer = el("div", "vsm-customer");
     customer.appendChild(el("span", "vsm-customer-name", "The operator"));
-    customer.appendChild(el("span", "vsm-customer-role", "customer: asks for the work and accepts it"));
+    customer.appendChild(el("span", "vsm-customer-role", "the customer: the person the agents work for, who asks for the work and accepts it"));
     const oc = el("span", "vsm-customer-outcome");
     oc.appendChild(outcomeNode(j));
     customer.appendChild(oc);
@@ -1620,7 +1696,12 @@
       let main;
       let data = null;
       if (it.type === "box") {
-        main = el("button", "vsm-box");
+        // Which working parts of the task's bar light this box.
+        const hasMs = (n) => {
+          const x = W.stated(n);
+          return x.state !== "unavailable" && x.value > 0;
+        };
+        main = el("button", `vsm-box${hasMs(it.value_ms) ? " has-value" : ""}${hasMs(it.defect_stretches) ? " has-defects" : ""}`);
         main.type = "button";
         main.dataset.item = String(i);
         main.appendChild(el("span", "vsm-box-title", W.boxTitle(it)));
@@ -1700,7 +1781,7 @@
     };
     // The same words as the lede, so the two never disagree.
     const words = new Map();
-    for (const p of W.lede(row, F.reasonText, { published: tasksPublished, idle }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, `${p.q || ""}${p.text}`);
+    for (const p of W.lede(row, F.reasonText, { published: tasksPublished, idle, unlabeled_ms: unlabeled }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, `${p.q || ""}${p.text}`);
     const leadWords = (words.has("lead") && row && row.lead_time_ms && row.lead_time_ms.state === "partial" && !/^at /.test(words.get("lead")) ? "at least " : "") + (words.get("lead") || "");
     const fig = (key, n) => {
       if (words.has(key)) return document.createTextNode((key === "lead" && n && n.state === "partial" && !/^at /.test(words.get(key)) ? "at least " : "") + words.get(key));
@@ -1730,7 +1811,7 @@
     };
     lg("key-box", "A box is a burst of agent work; its data box lists what happened in it.");
     lg("key-tri", "A triangle is waiting: idle time between bursts of work, when no agent of this task was working, with what it waited on. Waiting always means idle time here; the evaluator's labels describe working time only.");
-    lg("key-ladder", phone ? "The ladder runs down the left: a line on the left is working time, a line on the right is waiting." : "The ladder under the map: the low line is working time, the high line is waiting, each step labeled with its length.");
+    lg("key-ladder", `${phone ? "The ladder runs down the left: a line on the left is working time, a line on the right is waiting." : "The ladder under the map: the low line is working time, the high line is waiting, each step labeled with its length."} A step marked “+” (such as “+5m”) is the short waits folded inside the box before it. Select any step for its evidence.`);
     lg("key-rework", "A loop arrow marks rework: stretches the evaluator labeled as defects inside that box.");
     container.appendChild(legend);
     container.appendChild(el("p", "chart-caption", `${W.foldWords(model)} Lead time ${leadWords || W.durationWords(model.totals.lead_ms)} = working ${W.durationWords(model.totals.working_ms)} + waits inside boxes ${W.durationWords(model.totals.inner_wait_ms)} + waits between boxes ${W.durationWords(model.totals.waiting_ms)}.`));
@@ -1775,7 +1856,7 @@
       root,
       model,
       select,
-      highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause),
+      highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause, tok.seg),
     };
   }
 
@@ -1835,7 +1916,7 @@
   // ------------------------------------------- where this task's time went
 
   function renderTimeWent(container, ctx) {
-    const { j, row, stackRow, stackPublished, idle } = ctx;
+    const { j, row, stackRow, stackPublished, idle, light } = ctx;
     container.innerHTML = "";
     if (!stackRow) {
       container.appendChild(el("p", "chart-caption", stackPublished === false ? "The walk's stack-up file is not published yet, so this shows the labeled time the store's own report holds instead." : "This task has no row in the walk's stack-up file, so this shows the labeled time the store's own report holds instead."));
@@ -1864,14 +1945,23 @@
     }
     const atLeast = bar.lead_state === "partial" ? "at least " : "";
     container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${atLeast}${W.durationWords(bar.total_ms)}. Working time comes first, split by the evaluator's labels; then waiting, idle time, split by what it waited on.`));
+    // Each part of the bar, and each legend row, is a button that lights its
+    // evidence on the map: a working part lights the boxes that hold it, a
+    // waiting cause its triangles and ladder steps.
+    const press = (s, btn) => {
+      if (typeof light === "function") light(s.cause ? { key: "wait_cause", cause: s.cause } : { key: "class", seg: s.key }, btn);
+    };
+    const partWords = (s) => `${s.label}: ${W.durationWords(s.ms)}, ${W.pctWords(s.share)} of the lead time`;
     const track = el("div", "tw-bar");
-    track.setAttribute("role", "img");
-    track.setAttribute("aria-label", `Lead time ${atLeast}${W.durationWords(bar.total_ms)}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.durationWords(g.ms)} (${g.segments.map((s) => `${s.label} ${W.durationWords(s.ms)}`).join(", ") || "nothing"})`).join("; ")}. The list below gives every part.`);
+    track.setAttribute("role", "group");
+    track.setAttribute("aria-label", `Lead time ${atLeast}${W.durationWords(bar.total_ms)}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.durationWords(g.ms)}`).join("; ")}. Each part lights its evidence on the map.`);
     for (const g of bar.groups) {
       const gd = el("div", `tw-group tw-group-${g.key}`);
       gd.style.width = `${Math.max(0, (g.ms / bar.total_ms) * 100)}%`;
       for (const s of g.segments) {
-        const d = el("div", `tw-seg tw-${s.key}`);
+        const d = el("button", `tw-seg tw-part tw-${s.key}`);
+        d.type = "button";
+        d.setAttribute("aria-pressed", "false");
         d.style.width = g.ms > 0 ? `${(s.ms / g.ms) * 100}%` : "0";
         if (s.cause) d.classList.add(`wait-${s.cause}`);
         else {
@@ -1879,7 +1969,9 @@
           const seg = SEGMENT_BY_KEY.get(s.key);
           if ((seg && seg.fill === "outline") || s.key === "working_unsplit") d.style.boxShadow = `inset 0 0 0 1.5px var(${seg ? seg.token : "--c-not-labeled"})`;
         }
-        d.title = `${s.label}: ${W.durationWords(s.ms)} (${W.pctWords(s.share)})`;
+        d.title = partWords(s);
+        d.setAttribute("aria-label", `${partWords(s)}. Lights it on the map.`);
+        d.addEventListener("click", () => press(s, d));
         gd.appendChild(d);
       }
       track.appendChild(gd);
@@ -1888,14 +1980,28 @@
     for (const g of bar.groups) {
       const head = el("p", "tw-group-head");
       head.appendChild(el("strong", null, g.label));
-      head.appendChild(document.createTextNode(` ${g.qualifier || ""}${W.durationWords(g.ms)} · ${W.pctWords(g.ms / bar.total_ms)}${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
+      head.appendChild(document.createTextNode(` ${g.qualifier || ""}${W.durationWords(g.ms)} · ${W.pctWords(g.ms / bar.total_ms)} of the lead time${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
       container.appendChild(head);
-      const ul = el("ul", "tw-legend");
+      const ul = el("ul", "tw-legend tw-legend-buttons");
       for (const s of g.segments) {
         const li = document.createElement("li");
-        li.appendChild(s.cause ? waitSwatch(s.cause) : swatch(s.key === "working_unsplit" ? "not_labeled" : s.key));
-        li.appendChild(el("span", "tw-name", s.label));
-        li.appendChild(el("span", "tw-ms", `${W.durationWords(s.ms)} · ${W.pctWords(s.share)}`));
+        const b = el("button", "tw-row tw-part");
+        b.type = "button";
+        b.setAttribute("aria-pressed", "false");
+        b.appendChild(s.cause ? waitSwatch(s.cause) : swatch(s.key === "working_unsplit" ? "not_labeled" : s.key));
+        b.appendChild(el("span", "tw-name", s.label));
+        b.appendChild(el("span", "tw-ms", `${W.durationWords(s.ms)} · ${W.pctWords(s.share)} of the lead time`));
+        b.setAttribute("aria-label", `${partWords(s)}. Lights it on the map.`);
+        b.addEventListener("click", () => press(s, b));
+        li.appendChild(b);
+        if (s.cause) {
+          const a = el("a", "tw-cause-link", "Rank this cause");
+          const key = `waiting:${s.cause}`;
+          const safe = window.FactorySteps.isCauseKey(key) ? window.FactorySteps.causeRoute(key) : null;
+          if (safe) a.href = safe;
+          a.setAttribute("aria-label", `Rank ${W.causeWords(key)} across every task`);
+          li.appendChild(a);
+        }
         ul.appendChild(li);
       }
       if (!g.segments.length) ul.appendChild(el("li", "chart-empty", "none"));
@@ -1961,25 +2067,37 @@
     // One waiting figure for the lede, the map's summary and the bar.
     const idle = W.idleSplit(row, map);
     let drawn = null;
+    // Every control that lights part of the map: the lede's numbers and the
+    // parts of "Where this task's time went". One is pressed at a time.
     const tokens = [];
+    const light = (tok, btn) => {
+      if (!drawn) return;
+      const on = drawn.highlight(tok);
+      for (const b of tokens) b.setAttribute("aria-pressed", String(on && b === btn));
+      if (on) drawn.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+    let unlabeled = null;
+    try {
+      unlabeled = stackRow ? W.unlabeledMs(W.timeBar(stackRow, row, idle, F.SEGMENTS)) : null;
+    } catch (err) {
+      unlabeled = null;
+    }
     safely("vsm", () => {
-      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle });
+      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
     });
     safely("task-lede", () => {
-      renderLede(ledeEl, row, !!taskRows, idle, (tok, btn) => {
-        if (!drawn) return;
-        const on = drawn.highlight(tok);
-        for (const b of tokens) b.setAttribute("aria-pressed", String(on && b === btn));
-        if (on) drawn.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      });
+      renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
       tokens.push(...ledeEl.querySelectorAll(".lede-num"));
     });
-    safely("time-went", () => renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle }));
+    safely("time-went", () => {
+      renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle, light });
+      tokens.push(...twEl.querySelectorAll(".tw-part"));
+    });
     // Redraw the map when the width crosses between phone and wide or
     // changes how many boxes fit.
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
-      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle });
+      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
     });
     if (select && drawn) safely("vsm", () => drawn.select(select));
   }
@@ -2283,7 +2401,7 @@
     };
     const present = new Set(stretches.map(W.stretchSegment));
     for (const sg of F.SEGMENTS) if (present.has(sg.key) && sg.key !== "waiting") li(swatch(sg.key), sg.label);
-    if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), "Labeled wait (cross-hatched): the evaluator's label, with what it waited on; it is not the page's waiting, which is idle time");
+    if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), `${W.LABELED_PAUSE} (cross-hatched): a stretch the evaluator labeled waiting, with what it waited on; it is not the page's waiting, which is idle time`);
     if (leadMs !== null && (t0 < origin || t1 > origin + leadMs)) li(keyFor("lane-key-outside"), "Shaded: outside this task's lead time");
     li(keyFor("lane-key-act"), "Agent activity (turns, tool calls, subagents)");
     li(keyFor("lane-key-fail"), "Failed tool call (wider where several share a pixel)");
@@ -2341,6 +2459,7 @@
 
   const S = window.FactorySteps;
   let stepSeq = 0;
+  // A chart's mode: "all" or "working"; Compare tasks also has "share".
   const modes = { compare: "all", causes: "all" };
   let lastStepRender = null;
   let lastStepWidth = 0;
@@ -2377,11 +2496,11 @@
     for (const b of document.querySelectorAll(`#${viewId} .mode-btn`)) {
       b.setAttribute("aria-pressed", String(b.dataset.mode === modes[which]));
       b.onclick = () => {
-        modes[which] = b.dataset.mode === "working" ? "working" : "all";
+        modes[which] = b.dataset.mode === "working" || (b.dataset.mode === "share" && which === "compare") ? b.dataset.mode : "all";
         for (const x of document.querySelectorAll(`#${viewId} .mode-btn`)) x.setAttribute("aria-pressed", String(x.dataset.mode === modes[which]));
         // The mode goes in the URL, so a link or a reload opens this view.
         try {
-          history.replaceState(null, "", `#/${which}${modes[which] === "working" ? "?mode=working" : ""}`);
+          history.replaceState(null, "", `#/${which}${modes[which] !== "all" ? `?mode=${modes[which]}` : ""}`);
         } catch (err) {
           /* a sandboxed frame may refuse; the mode still applies */
         }
@@ -2453,30 +2572,34 @@
     }
     const phone = container.clientWidth < 600;
     const H = phone ? 220 : 280;
+    // "Share of each task": every bar is its own lead time as 0 to 100%, so
+    // the bars are full height and their labels need room above them.
+    const share = mode === "share";
+    const T = share ? 104 : SB.top;
     const avail = Math.max(200, container.clientWidth - SB.axisW - 4);
     // A few bars (agent working time mode) get wider columns.
     const colW = Math.max(phone ? 28 : 26, Math.min(bars.length <= 12 ? 64 : 40, Math.floor(avail / bars.length)));
     const plotW = colW * bars.length + 8;
     const drawn = bars.filter((b) => b.state !== "no_data" && typeof b.total_ms === "number");
     // Headroom above the tallest bar for its value label.
-    const scale = S.timeScale(Math.max(0, ...drawn.map((b) => b.total_ms)) * 1.15);
-    const y = (ms) => SB.top + H - (ms / scale.max_ms) * H;
-    const totalH = SB.top + H + SB.labelH;
+    const scale = share ? { unit: "share", per: 1, max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total_ms)) * 1.15);
+    const y = (ms) => T + H - (ms / scale.max_ms) * H;
+    const totalH = T + H + SB.labelH;
 
     const row = el("div", "sb-row");
     // The axis stays put while the bars scroll inside their frame.
     const axis = svg("svg", { class: "sb-axis", width: SB.axisW, height: totalH, "aria-hidden": "true" });
-    axis.appendChild(svg("text", { x: 12, y: SB.top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${SB.top + H / 2})`, "text-anchor": "middle" })).textContent = `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
+    axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? "% of each task's lead time" : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
     for (const t of scale.ticks) {
       const ty = y(t);
       const tx = svg("text", { x: SB.axisW - 6, y: ty + 4, class: "axis-tick", "text-anchor": "end" });
-      tx.textContent = S.tickWords(t, scale);
+      tx.textContent = share ? `${Math.round(t * 100)}%` : S.tickWords(t, scale);
       axis.appendChild(tx);
     }
     row.appendChild(axis);
 
     const frame = el("div", "sb-frame chart-frame");
-    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": `Stack-up of ${bars.length} tasks, ${mode === "working" ? "agent working time" : "all elapsed time"}, in ${scale.unit}, linear from zero. Each bar is a link to its task.` });
+    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": share ? `Stack-up of ${bars.length} tasks, each as shares of its own lead time on a 0 to 100% axis. Each bar is a link to its task.` : `Stack-up of ${bars.length} tasks, ${mode === "working" ? "agent working time" : "all elapsed time"}, in ${scale.unit}, linear from zero. Each bar is a link to its task.` });
     for (const t of scale.ticks) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
     // The two groups, named above the bars.
     const firstOpen = bars.findIndex((b) => b.group === "open");
@@ -2486,19 +2609,19 @@
       plot.appendChild(t);
     };
     if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, in finish order →");
-    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: SB.top + H, class: "sb-divider" }));
+    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: T + H, class: "sb-divider" }));
     if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Not finished →" : "Still open or not labeled yet, by when work began →");
 
     const barW = colW - 8;
     bars.forEach((b, i) => {
       const x0 = i * colW + 4 + 4;
-      const label = `${b.name}: ${b.state === "no_data" ? "no data" : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
+      const label = `${b.name}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
       const a = svgLink(b.href, `${label}. Follow this task.`);
       a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
-      a.appendChild(svg("rect", { x: i * colW + 4, y: SB.top - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
+      a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
       if (b.state === "no_data") {
-        a.appendChild(svg("rect", { x: x0, y: SB.top + H - 18, width: barW, height: 18, class: "sb-nodata" }));
-        const q = svg("text", { x: x0 + barW / 2, y: SB.top + H - 5, class: "sb-nodata-q", "text-anchor": "middle" });
+        a.appendChild(svg("rect", { x: x0, y: T + H - 18, width: barW, height: 18, class: "sb-nodata" }));
+        const q = svg("text", { x: x0 + barW / 2, y: T + H - 5, class: "sb-nodata-q", "text-anchor": "middle" });
         q.textContent = "?";
         a.appendChild(q);
       } else {
@@ -2518,18 +2641,18 @@
           base += s.ms;
         }
         if (b.open) {
-          const top = Math.min(y(b.total_ms), SB.top + H - 3);
-          a.appendChild(svg("rect", { x: x0 - 2.5, y: top - 2.5, width: barW + 5, height: SB.top + H - top + 2.5, class: "sb-open" }));
+          const top = Math.min(y(b.total_ms), T + H - 3);
+          a.appendChild(svg("rect", { x: x0 - 2.5, y: top - 2.5, width: barW + 5, height: T + H - top + 2.5, class: "sb-open" }));
         }
       }
       // Value and name read upward, so neighbors never overlap.
-      const vy = b.state === "no_data" ? SB.top + H - 22 : Math.min(y(b.total_ms), SB.top + H) - 4;
+      const vy = b.state === "no_data" ? T + H - 22 : Math.min(y(b.total_ms), T + H) - 4;
       const vx = x0 + barW / 2 + 4;
       const v = svg("text", { x: vx, y: vy, class: "sb-value", transform: `rotate(-90 ${vx} ${vy})` });
       v.textContent = b.state === "no_data" ? "" : `${b.label}${b.shared ? "*" : ""}`;
       a.appendChild(v);
       const lx = x0 + barW / 2 + 4;
-      const ly = SB.top + H + 8;
+      const ly = T + H + 8;
       const name = svg("text", { x: lx, y: ly, class: "sb-name", "text-anchor": "end", transform: `rotate(-90 ${lx} ${ly})` });
       name.textContent = clip(b.name, 18);
       a.appendChild(name);
@@ -2537,7 +2660,7 @@
       if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
       else {
         tipRows.push({ label: mode === "working" ? "Agent working time" : "Lead time", value: b.words });
-        for (const g of b.groups) tipRows.push({ label: g.label, value: groupWords(g) });
+        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g) });
         if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
       }
       if (b.open) tipRows.push({ label: "State", value: "still open, figures so far" });
@@ -2550,7 +2673,7 @@
     if (marked && bars[marked.index] && bars[marked.index].job === marked.job) {
       const b = bars[marked.index];
       const cx = marked.index * colW + 8 + barW / 2;
-      const valueTop = Math.min(y(b.total_ms), SB.top + H) - 4 - (b.label.length + (b.shared ? 1 : 0)) * 6.4 - 4;
+      const valueTop = Math.min(y(b.total_ms), T + H) - 4 - (b.label.length + (b.shared ? 1 : 0)) * 6.4 - 4;
       const ty = 30;
       const right = cx + 150 > plotW;
       const t = svg("text", { x: right ? cx + 4 : cx - 4, y: ty, class: "sb-callout", "text-anchor": right ? "end" : "start" });
@@ -2721,9 +2844,11 @@
       document.getElementById("stackup-caption").textContent =
         mode === "working"
           ? "Agent working time only, for the tasks whose working time the evaluator has labeled, in finish order, linear from zero at their own scale. Waiting is left out, so defects, rework and necessary steps, where agent-side fixes live, show. Select a bar to follow its task."
-          : "The whole lead time of each task, linear from zero. Left to right: finished tasks in finish order, the latest on the right; then tasks still open or not labeled yet, by when work began. Select a bar to follow its task.";
-      const view = !all.length || mode === "all" ? null : S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working")));
-      const bars = !all.length ? [] : view ? view.bars : all;
+          : mode === "share"
+            ? "Each task's own lead time as 100%, on a 0 to 100% axis, with the same parts in the same order, so a 20-minute task's make-up compares with a 200-hour one's. Each bar is labeled with the share agents were working. A task whose split is not known is one hatched bar, never 100% of one part. Select a bar to follow its task."
+            : "The whole lead time of each task, linear from zero. Left to right: finished tasks in finish order, the latest on the right; then tasks still open or not labeled yet, by when work began. Select a bar to follow its task.";
+      const view = !all.length || mode !== "working" ? null : S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working")));
+      const bars = !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
       const leftOut = document.getElementById("stackup-left-out");
       leftOut.textContent = view ? view.text : "";
       leftOut.hidden = !(view && view.text);
@@ -2871,6 +2996,7 @@
   function drawParetoTable(container, model) {
     container.innerHTML = "";
     if (!model.bars.length) return;
+    const phone = container.clientWidth < 600;
     const table = el("table", "data-table pareto-table");
     tableHead(table, [["Rank", "num"], ["Cause", ""], ["Time", "num"], ["Share", "num"], ["Running total", "num"], ["Tasks", "num"]]);
     const tb = document.createElement("tbody");
@@ -2882,8 +3008,9 @@
       if (b.href) td.appendChild(causeLink(b.key, b.label));
       else td.appendChild(document.createTextNode(`${b.label}: ${b.members.map((k) => W.causeWords(k)).join("; ")}`));
       tr.appendChild(td);
-      tr.appendChild(el("td", "num", S.hoursWords(b.ms)));
-      tr.appendChild(el("td", "num", W.pctWords(b.share)));
+      // On a phone, the short forms ("117h", "17m", "<1%") keep a row on one line.
+      tr.appendChild(el("td", "num", phone ? S.hoursShort(b.ms) : S.hoursWords(b.ms)));
+      tr.appendChild(el("td", "num", phone ? S.shortPct(b.share) : W.pctWords(b.share)));
       tr.appendChild(el("td", "num", S.cumWords(b.cum)));
       tr.appendChild(el("td", "num", String(b.jobs)));
       tb.appendChild(tr);
@@ -2906,7 +3033,14 @@
       document.getElementById("causes-lede").textContent = S.causesLede(all, working, { doc, taskRows: tasks && tasks.jobs, stackRows: stack && stack.jobs, nameOf });
     });
     // With no causes file the chart says so once; the notes add nothing.
-    document.getElementById("pareto-note").textContent = all.state === "absent" ? "" : S.paretoNote(all, F.reasonText);
+    const noteEl = document.getElementById("pareto-note");
+    noteEl.textContent = all.state === "absent" ? "" : S.paretoNote(all, F.reasonText);
+    if (all.state !== "absent" && all.basis === "job_hours") {
+      const g = el("a", null, "What job-hours means");
+      const safe = F.glossaryRoute("job-hours");
+      if (safe) g.href = safe;
+      noteEl.append(" ", g);
+    }
     if (all.state === "absent") document.getElementById("causes-unlabeled").hidden = true;
     else unlabeledNote(document.getElementById("causes-unlabeled"), data, "causes");
     const draw = () => {
@@ -2953,16 +3087,38 @@
     lede.textContent = `${S.causeMeaning(key)} Across the ${d.n} tasks the ranking counts, it cost ${S.hoursWords(d.ms)} (counted per task), ${W.pctWords(d.all.share)} of all the time ranked: ${rankWords}${d.working ? `, and ${F.ordinal(d.working.rank)} of ${d.working.of} once waiting is left out` : ""}. ${d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`}`;
     box.appendChild(lede);
 
-    // Start an A3: S2's copy-as-prompt, naming the cause, its time, its top tasks and its data.
+    // The A3: an issue already taken on for this cause (Act's mapping
+    // table), or S2's copy-as-prompt that starts one, naming the cause, its
+    // time, its top tasks and its data.
+    const existing = S.causeIssues(S.actRows(data.kaizen_issues, doc), key);
     const a3 = el("section", "block a3-block");
     a3.setAttribute("aria-labelledby", "a3-title");
-    const a3h = el("h2", "block-title", "Start an A3");
+    const a3h = el("h2", "block-title", existing.length ? "Its A3" : "Start an A3");
     a3h.id = "a3-title";
     a3.appendChild(a3h);
-    a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt hands the agent this cause, its time, its largest tasks and its data, and asks it to draft one. When a countermeasure is agreed, file it as a kaizen issue; it appears on Act on the next build."));
-    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(key)), dataUrl: absolute("rollups/causes.json") });
+    if (existing.length) {
+      const taken = el("p", "taken-on");
+      taken.appendChild(document.createTextNode("Already taken on: "));
+      existing.forEach((x, i) => {
+        if (i) taken.appendChild(document.createTextNode("; "));
+        taken.appendChild(safeLink(x.ref.replace(/^ourostack\//, ""), x.url));
+        if (x.countermeasure) {
+          taken.appendChild(document.createTextNode(", with countermeasure "));
+          taken.appendChild(safeLink(x.countermeasure.ref.replace(/^ourostack\//, ""), x.countermeasure.url));
+          taken.appendChild(document.createTextNode(x.countermeasure.merged ? " (merged, not yet checked)" : " (not yet merged)"));
+        } else taken.appendChild(document.createTextNode(", with no countermeasure yet"));
+      });
+      taken.appendChild(document.createTextNode(". "));
+      const act = el("a", null, "See it on Act");
+      const safe = F.safeRoute("act");
+      if (safe) act.href = safe;
+      taken.appendChild(act);
+      a3.appendChild(taken);
+      a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. One already exists for this cause, so this prompt asks the agent to help check it or extend it rather than start another."));
+    } else a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt hands the agent this cause, its time, its largest tasks and its data, and asks it to draft one. When a countermeasure is agreed, file it as a kaizen issue; it appears on Act on the next build."));
+    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt"), existing });
     const pbox = el("div", "drawer-prompt");
-    const btn = el("button", "copy-prompt", "Start an A3 with your agent");
+    const btn = el("button", "copy-prompt", existing.length ? "Check or extend the A3 with your agent" : "Start an A3 with your agent");
     btn.type = "button";
     const status = el("span", "copy-status");
     status.setAttribute("role", "status");
@@ -3063,6 +3219,7 @@
       emptyState(box, verified ? "No kaizen issue has been opened yet." : "Kaizen issues could not be checked for this build (GitHub could not be reached). This says nothing about how many exist.");
     } else {
       if (!verified) box.appendChild(el("p", "chart-caption", "GitHub could not be reached for this build, so this list may be missing issues."));
+      box.appendChild(el("p", "act-summary", S.actSummary(rows)));
       const ul = el("ul", "act-list");
       for (const r of rows) {
         const li = el("li", "act-row");
@@ -3179,13 +3336,26 @@
     }
     const failed = (id) => (err) => emptyState(document.getElementById(id), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`);
     // The chart mode comes from the URL (#/compare?mode=working).
-    if (r.view === "compare" || r.view === "causes") modes[r.view] = r.mode === "working" ? "working" : "all";
+    if (r.view === "compare" || r.view === "causes") modes[r.view] = r.mode === "working" || (r.mode === "share" && r.view === "compare") ? r.mode : "all";
     if (r.view === "compare") renderCompare(data).catch(failed("stackup"));
     if (r.view === "causes") renderCauses(data).catch(failed("pareto"));
     if (r.view === "act") renderAct(data).catch(failed("problems"));
     document.title = `${title} \u00b7 The factory`;
     if (r.view === "cause") renderCause(data, r.cause).catch(failed("cause-detail"));
     window.scrollTo(0, 0);
+    // A glossary link (#/why?term=…) opens Why Lean? at that entry.
+    if (r.view === "why" && r.term) {
+      const dt = document.getElementById(`g-${r.term}`);
+      if (dt) {
+        dt.tabIndex = -1;
+        dt.scrollIntoView({ block: "start" });
+        dt.focus({ preventScroll: true });
+        for (const x of document.querySelectorAll(".glossary .is-target")) x.classList.remove("is-target");
+        dt.classList.add("is-target");
+        routedOnce = true;
+        return;
+      }
+    }
     // After the first page load, move focus to the new view's heading, so a
     // keyboard or screen reader user lands where the content changed.
     if (routedOnce) {

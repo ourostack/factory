@@ -86,7 +86,10 @@
     long_tool_call: { short: "long tool call", long: "a tool call of five minutes or more was running" },
     queue_before_start: { short: "queued before the first session", long: "the task was waiting for its first session to start" },
     no_session: { short: "no session running", long: "no session of this task was running" },
-    unknown: { short: "cause not recorded", long: "nothing was running for this task, and what it waited on was not recorded" },
+    // A session of this task was running, but its agent was working on
+    // another task (Desk's "other_task"; the other task is never named).
+    other_task: { short: "agent on another task", long: "the agent was working on another task" },
+    unknown: { short: "cause not recorded", long: "no agent was working on this task, and the cause was not recorded" },
     mixed: { short: "several causes", long: "several waits with different causes, folded together" },
   };
   function waitedOnWords(key, which) {
@@ -97,16 +100,18 @@
   // An evidence interval's kind, in words (Desk's interval kinds).
   const KIND_WORDS = { turn: "agent turn", tool: "tool call", subagent: "subagent", human_wait: "waiting for the operator", api_retry: "API retry" };
 
-  // A stretch the evaluator labeled waiting is a "labeled wait": on this page
-  // "waiting" means idle time only (lead time - working time), and the
-  // evaluator's label is a different thing, so it has its own name.
+  // A stretch the evaluator labeled waiting is an "evaluator-labeled pause":
+  // on this page "waiting" means idle time only (lead time - working time),
+  // and the evaluator's labels describe working time, so a pause it labeled
+  // sits inside working time and has its own name.
+  const LABELED_PAUSE = "Evaluator-labeled pause (inside working time)";
   function waitLabel(key) {
     const w = waitedOnWords(key || "unknown", "short");
-    return `labeled wait: ${w.replace(/ \(the agent had stopped\)$/, "")}`;
+    return `labeled pause: ${w.replace(/ \(the agent had stopped\)$/, "")}`;
   }
   // The name of a stretch's label in the swimlane and its drawer.
   function stretchWasteWords(waste) {
-    return waste === "waiting" ? "Labeled wait" : WASTE_WORDS[waste] || "Could not classify";
+    return waste === "waiting" ? LABELED_PAUSE : WASTE_WORDS[waste] || "Could not classify";
   }
 
   const CLASS_WORDS = { value: "Value-adding", support: "Necessary", muda: "Waste", unlabeled: "Not labeled" };
@@ -151,7 +156,8 @@
       if (x.state !== "unavailable" && v === null) return { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : ["not_recorded"] };
       if (x.state === "unavailable") return { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : [] };
       const out = { state: x.state, value: v, reasons: Array.isArray(x.reasons) ? x.reasons : [] };
-      if (x.state === "partial" && (x.bound === "lower" || x.bound === "upper")) out.bound = x.bound;
+      if (x.state === "partial" && (x.bound === "lower" || x.bound === "upper" || x.bound === null)) out.bound = x.bound;
+      if (x.state === "partial" && x.bound === null && typeof x.bound_reason === "string") out.bound_reason = x.bound_reason;
       return out;
     }
     return { state: "unavailable", reasons: ["not_recorded"] };
@@ -168,7 +174,11 @@
     if (!known.length) return { state: "unavailable", reasons };
     const value = known.reduce((a, x) => a + x.value, 0);
     if (known.length === parts.length && known.every((x) => x.state === "measured")) return { state: "measured", value, reasons: [] };
-    return { state: "partial", value, bound: "lower", reasons };
+    // Missing or lower-bound parts make the sum a lower bound; a part Desk
+    // says could be off the other way, or in no known direction, leaves the
+    // sum with no direction (bound: null), never a guessed one.
+    const open = known.some((x) => x.state === "partial" && (x.bound === null || x.bound === "upper"));
+    return { state: "partial", value, bound: open ? null : "lower", reasons };
   }
 
   // The largest of stated numbers, under the same rule.
@@ -204,9 +214,23 @@
   // Which way a partial figure may be off: "lower" (the true value is at
   // least this), "upper" (at most this), "window" (exact within the task's
   // counted window), or null for a measured figure.
+  // Desk's "no direction" for a partial figure (bound: null), with its
+  // reason: "direction not known, because …". The lede says it only when
+  // the figure could truly be off either way (its reasons pull both ways);
+  // a figure no reason moves (bound_not_moved, such as working time inside
+  // a card's window) reads as the plain figure, as it always has. The
+  // figure's own reason text carries every bound_reason.
+  function noDirectionWords(n, words) {
+    return `direction not known, because ${words(n.bound_reason)}`;
+  }
+  const saysNoDirection = (n) => !!(n && n.bound === null && n.bound_reason && n.bound_reason !== "bound_not_moved");
+
   function boundOf(n) {
     if (!n || n.state !== "partial") return null;
     if (n.bound === "lower" || n.bound === "upper") return n.bound;
+    // Desk states bound: null when it does not know which way a figure is
+    // off; that is said as no direction, never guessed from its reasons.
+    if (n.bound === null) return null;
     const rs = Array.isArray(n.reasons) ? n.reasons : [];
     return rs.length && rs.every((r) => WINDOW_REASONS.has(r)) ? "window" : "lower";
   }
@@ -222,7 +246,36 @@
   // time minus the working time, split by what it waited on. The evaluator's
   // labels (value-adding, necessary, each waste) describe working time only.
   // The causes, in the order the bar stacks them.
-  const WAIT_KEYS = ["next_prompt", "api_retry", "tool_failure", "long_tool_call", "queue_before_start", "no_session", "unknown"];
+  const WAIT_KEYS = ["next_prompt", "other_task", "api_retry", "tool_failure", "long_tool_call", "queue_before_start", "no_session", "unknown"];
+
+  // One gap's idle time by what it waited on. Desk after the "other task"
+  // change states a per-gap split (`idle_by_waited_on_ms`, bare numbers or
+  // stated numbers); it is used as given, scaled to fit the gap if it
+  // overshoots, with any rest as "cause not recorded". Without it the whole
+  // gap is its dominant cause (`waited_on`). Returns { key: ms }.
+  function gapIdleBy(g) {
+    const len = Math.max(0, (g && g.end_ms) - (g && g.start_ms)) || 0;
+    const by = {};
+    const src = g && g.idle_by_waited_on_ms;
+    if (src && typeof src === "object" && !Array.isArray(src)) {
+      for (const [k, x] of Object.entries(src)) {
+        const v = typeof x === "number" ? (Number.isFinite(x) ? x : null) : x && x.state !== "unavailable" && typeof x.value === "number" && Number.isFinite(x.value) ? x.value : null;
+        if (v === null || v <= 0) continue;
+        const key = WAIT_KEYS.includes(k) ? k : "unknown";
+        by[key] = (by[key] || 0) + v;
+      }
+      const named = Object.values(by).reduce((a, x) => a + x, 0);
+      if (named > 0) {
+        if (named > len) for (const k of Object.keys(by)) by[k] = (by[k] * len) / named;
+        else if (len - named > 0) by.unknown = (by.unknown || 0) + (len - named);
+        return by;
+      }
+    }
+    if (len > 0) by[WAIT_KEYS.includes(g && g.waited_on) ? g.waited_on : "unknown"] = len;
+    return by;
+  }
+  // The causes of a gap, largest first.
+  const gapCauses = (g) => Object.entries(gapIdleBy(g)).sort((a, b) => b[1] - a[1] || WAIT_KEYS.indexOf(a[0]) - WAIT_KEYS.indexOf(b[0])).map(([k]) => k);
 
   // Which way the waiting figure may be off, from its lead and working
   // times: waiting = lead - working, so a working time that is a lower bound
@@ -307,7 +360,8 @@
       if (n.value - named > SECOND) by.unknown = (by.unknown || 0) + (n.value - named);
       const r = out(n.value, by, "rollup", n.state);
       if (n.state === "partial") {
-        r.bound = n.bound || bound || "lower";
+        r.bound = n.bound === null ? null : n.bound || bound || "lower";
+        if (n.bound === null && n.bound_reason) r.bound_reason = n.bound_reason;
         r.reasons = n.reasons;
       }
       return r;
@@ -320,13 +374,11 @@
     const gaps = listOf(map && map.gaps);
     if (!map || (!bursts.length && !gaps.length)) return out(Math.max(0, lead - work), { unknown: Math.max(0, lead - work) }, "rollup_total");
     const by = {};
-    for (const g of gaps) {
-      const k = WAIT_KEYS.includes(g.waited_on) ? g.waited_on : "unknown";
-      by[k] = (by[k] || 0) + Math.max(0, g.end_ms - g.start_ms);
-    }
+    for (const g of gaps) for (const [k, ms] of Object.entries(gapIdleBy(g))) by[k] = (by[k] || 0) + ms;
     for (const b of bursts) for (const [k, ms] of Object.entries(burstIdleBy(b))) by[k] = (by[k] || 0) + ms;
     const total = Object.values(by).reduce((a, x) => a + x, 0);
     const r = out(total, by, "map");
+    r.gap_split = gaps.some((g) => g && g.idle_by_waited_on_ms && typeof g.idle_by_waited_on_ms === "object");
     r.burst_causes = bursts.some((b) => b && b.idle_by_waited_on_ms && typeof b.idle_by_waited_on_ms === "object");
     return r;
   }
@@ -364,11 +416,11 @@
     if (lead === null) {
       add(`This task's lead time is not measured, because ${reasons(row.lead_time_ms)}. So this view cannot say how much of its time was waiting.`);
     } else if (row.lead_time_ms.state === "measured") {
-      add("This task took ", tok("lead", leadW), " from its card's creation to its end.");
+      add("This task took ", tok("lead", leadW), " from the creation of its card (its record on the desk) to its end.");
     } else if (open) {
-      add("This task is still open. So far it has taken at least ", tok("lead", leadW, { q: "at least " }), fromFirst ? ", counted from its first session because the card was created after work began." : ".");
+      add("This task is still open. So far it has taken at least ", tok("lead", leadW, { q: "at least " }), fromFirst ? ", counted from its first session because its card (its record on the desk) was created after work began." : ".");
     } else if (fromFirst) {
-      add("This task took at least ", tok("lead", leadW, { q: "at least " }), ", counted from its first session because the card was created after work began.");
+      add("This task took at least ", tok("lead", leadW, { q: "at least " }), ", counted from its first session because its card (its record on the desk) was created after work began.");
     } else {
       add("This task took ", tok("lead", leadW), `, a partial figure: ${reasons(row.lead_time_ms)}.`);
     }
@@ -381,10 +433,11 @@
     if (working === null) {
       add(` How long agents were working is not measured, because ${reasons(row.working_ms)}.`);
     } else {
-      const q = wb === "lower" ? "at least " : wb === "upper" ? "at most " : open ? "at least " : "";
+      const q = wb === "lower" ? "at least " : wb === "upper" ? "at most " : open && row.working_ms.bound !== null ? "at least " : "";
       add(` Agents were working for ${q}`, tok("working", durationWords(working), { q }), lead === null ? "" : " of it");
       // Only the reasons that make it a bound are given here; a shared
       // session's labels are said once, below.
+      if (saysNoDirection(row.working_ms)) add(` (${noDirectionWords(row.working_ms, words)})`);
       if (wb === "lower" || wb === "upper") {
         const why = (row.working_ms.reasons || []).filter((r) => !WINDOW_REASONS.has(r));
         add(` (${wb === "lower" ? "a lower bound" : "an upper bound"}: ${why.length ? why.map(words).join("; ") : reasons(row.working_ms)})`);
@@ -394,14 +447,18 @@
         // "not labeled yet (not labeled)" says nothing twice.
         add(/not labeled/i.test(why) ? "; that work is not labeled yet, so how much of it added value is not known." : `; that work is not labeled yet (${why}), so how much of it added value is not known.`);
       } else if (value === 0) {
-        add("; the evaluator judged ", tok("value", "none"), " of that work value-adding: all of it was necessary steps, rework, or work not labeled.");
+        add("; the evaluator (an independent agent that labels the work) judged ", tok("value", "none"), " of that work value-adding: all of it was necessary steps, rework, or work not labeled.");
         if (row.labels_from_shared_session) add(" Those labels come from a session this task shared with other tasks, so that split is partial.");
       } else {
         const vb = boundOf(row.value_in_working_ms);
         const vq = vb === "lower" ? "at least " : vb === "upper" ? "at most " : "";
-        add(`; the evaluator judged ${vq}`, tok("value", durationWords(value), { q: vq }), " of that work value-adding, and the rest necessary steps, rework, or work not labeled.");
+        add(`; the evaluator (an independent agent that labels the work) judged ${vq}`, tok("value", durationWords(value), { q: vq }), " of that work value-adding, and the rest necessary steps, rework, or work not labeled.");
         if (row.labels_from_shared_session) add(" Those labels come from a session this task shared with other tasks, so that split is partial.");
       }
+      // More than half the working time carries no label: say so, so a
+      // small value-adding figure is not read as the whole story.
+      const unl = typeof o.unlabeled_ms === "number" && Number.isFinite(o.unlabeled_ms) ? o.unlabeled_ms : null;
+      if (value !== null && unl !== null && working > 0 && unl > 0.5 * working) add(` More than half of that working time, ${durationWords(unl)} (${pctWords(unl / working)} of the working time), carries no label from the evaluator, so what it was is not known yet.`);
     }
 
     // 3. Waiting: idle time, in system terms. One sentence when one cause
@@ -410,7 +467,7 @@
     if (lead !== null && lead > 0 && working !== null && idle.state !== "unavailable") {
       const waiting = idle.value;
       const q = idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : "";
-      const tail = idle.bound === "unknown" ? " (both the lead time and the working time are partial, so this is not bounded)" : "";
+      const tail = idle.bound === "unknown" ? " (both the lead time and the working time are partial, so this is not bounded)" : saysNoDirection(idle) ? ` (${noDirectionWords(idle, words)})` : "";
       const by = idle.by.filter((x) => x.ms > 0);
       const top = by[0];
       const most = waiting / lead >= 0.5;
@@ -419,7 +476,7 @@
         const why = waitedOnWords(top.key, "long");
         // "All of it" only when it is all of it; 95-99% reads "nearly all".
         const all = waiting - top.ms <= SECOND;
-        const share = `nearly all of it (${Math.min(99, Math.floor((top.ms / waiting) * 100))}%)`;
+        const share = `nearly all of it (${Math.min(99, Math.floor((top.ms / waiting) * 100))}% of the waiting)`;
         if (most && all) add(` Most of the ${leadW} was waiting, not work: for ${q}`, tok("waiting", durationWords(waiting), { q }), ` ${why}${tail}.`);
         else if (most) add(` Most of the ${leadW} was waiting, not work: ${q}`, tok("waiting", durationWords(waiting), { q }), `${tail}, ${share} while ${why}.`);
         else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting), { q }), ` was waiting${tail}, ${all ? "all of it" : share} while ${why}.`);
@@ -463,6 +520,9 @@
     if (n.state !== "partial") return t;
     if (n.bound === "upper") return `at most ${t}`;
     if (n.bound === "lower") return `at least ${t}`;
+    // Desk's bound: null is no direction; only an absent key (older data)
+    // falls back to the site's own rule below.
+    if (n.bound === null) return `${t} (partial, direction not known)`;
     const wb = boundOf(row.working_ms);
     if (has(row.lead_time_ms, "censored")) return `${t} so far`;
     if (has(row.lead_time_ms, "card_dates_shorter_than_work") && wb !== "lower") return `at most ${t}`;
@@ -489,6 +549,7 @@
     long_tool_call: "during a long tool call",
     queue_before_start: "before the first session",
     no_session: "with no session running",
+    other_task: "while the agent was on another task",
     unknown: "with its cause not recorded",
   };
 
@@ -558,7 +619,12 @@
     if (it.type === "wait") {
       const gaps = [...it.gaps].sort((a, b) => a.start_ms - b.start_ms);
       const duration = gaps.reduce((a, g) => a + (g.end_ms - g.start_ms), 0);
-      const causes = [...new Set(gaps.map((g) => g.waited_on || "unknown"))];
+      // What the wait's time waited on: each gap's own split when Desk
+      // states one, else its dominant cause.
+      const by = {};
+      for (const g of gaps) for (const [k, ms] of Object.entries(gapIdleBy(g))) by[k] = (by[k] || 0) + ms;
+      const causes = Object.keys(by).sort((a, b) => by[b] - by[a] || WAIT_KEYS.indexOf(a) - WAIT_KEYS.indexOf(b));
+      if (!causes.length) causes.push(gaps[0].waited_on || "unknown");
       const longest = gaps.reduce((a, g) => (!a || g.end_ms - g.start_ms > a.end_ms - a.start_ms ? g : a), null);
       return {
         type: "wait",
@@ -569,6 +635,7 @@
         duration_ms: duration,
         waited_on: causes.length === 1 ? causes[0] : "mixed",
         causes,
+        by,
         gap_range: [gaps[0].n, gaps[gaps.length - 1].n],
         longest_ms: longest ? longest.end_ms - longest.start_ms : 0,
       };
@@ -588,10 +655,7 @@
     // What the idle time inside the box waited on: its folded gaps, and the
     // idle moments inside its bursts as Desk states them per burst.
     const innerBy = {};
-    for (const g of folded) {
-      const k = WAIT_KEYS.includes(g.waited_on) ? g.waited_on : "unknown";
-      innerBy[k] = (innerBy[k] || 0) + (g.end_ms - g.start_ms);
-    }
+    for (const g of folded) for (const [k, ms] of Object.entries(gapIdleBy(g))) innerBy[k] = (innerBy[k] || 0) + ms;
     for (const b of bs) for (const [k, ms] of Object.entries(burstIdleBy(b))) innerBy[k] = (innerBy[k] || 0) + ms;
     for (const k of Object.keys(innerBy)) if (!(innerBy[k] > 0)) delete innerBy[k];
     const starts = [...bs.map((b) => b.start_ms), ...folded.map((g) => g.start_ms)];
@@ -665,7 +729,10 @@
     const cap = (x, env) => {
       if (!env || env.state === "measured") return x;
       if (env.state === "unavailable") return { state: "unavailable", reasons: env.reasons || [] };
-      return x.state === "unavailable" ? x : { state: "partial", value: x.value, bound: "lower", reasons: [...new Set([...(x.reasons || []), ...(env.reasons || [])])] };
+      // The task-wide figure's direction carries over: Desk's own bound when
+      // it states one (null is no direction), else lower (older data).
+      const bound = Object.prototype.hasOwnProperty.call(env, "bound") ? env.bound : "lower";
+      return x.state === "unavailable" ? x : { state: "partial", value: x.value, bound, reasons: [...new Set([...(x.reasons || []), ...(env.reasons || [])])] };
     };
     for (const b of boxes) {
       b.operator_turns = cap(b.operator_turns, js.operator_turns && stated(js.operator_turns));
@@ -849,11 +916,27 @@
     return w.charAt(0).toUpperCase() + w.slice(1);
   }
 
+  // The working time on a task's bar that carries no evaluator label
+  // (agents working but not labeled, not labeled yet, or working time not
+  // split by label), or null when the bar does not split.
+  function unlabeledMs(bar) {
+    if (!bar || bar.state !== "ok" || !bar.groups || !bar.groups[0]) return null;
+    return bar.groups[0].segments.filter((x) => x.key === "agents_working_unlabeled" || x.key === "not_labeled" || x.key === "working_unsplit").reduce((a, x) => a + x.ms, 0);
+  }
+
   // What a lede number lights up on the map, as a CSS selector over the
   // map's own classes. A cause lights only the waits (and the idle steps of
   // the ladder) that waited on it.
   function highlightSelector(key, opts) {
     const o = opts || {};
+    // A working part of the task's bar lights the boxes whose bursts hold
+    // it: value-adding the boxes with value-adding time, defects the boxes
+    // with defect stretches, any other working part every box.
+    if (key === "class") {
+      if (o.seg === "value") return ".vsm-box.has-value, .sum-value";
+      if (o.seg === "defects") return ".vsm-box.has-defects";
+      return ".vsm-box, .lad-low, .sum-working";
+    }
     if (key === "wait_cause") return WAIT_KEYS.includes(o.cause) ? `.vsm-wait.has-${o.cause}, .lad-high.has-${o.cause}` : ".vsm-wait, .lad-high, .sum-waiting";
     if (key === "longest") return Number.isInteger(o.item) ? `[data-item="${o.item}"]` : ".vsm-wait";
     return {
@@ -1088,7 +1171,7 @@
     if (thing.kind === "stretch") {
       const s = thing.stretch;
       const seg = stretchSegment(s);
-      const cls = isWaitStretch(s) ? "Waste: labeled wait (the evaluator's label; on this page, waiting means idle time)" : s.class === "muda" ? `Waste: ${WASTE_WORDS[s.waste] || "could not classify"}` : CLASS_WORDS[s.class] || "Not labeled";
+      const cls = isWaitStretch(s) ? `${LABELED_PAUSE}: the evaluator labeled this stretch waiting; on this page, waiting means idle time` : s.class === "muda" ? `Waste: ${WASTE_WORDS[s.waste] || "could not classify"}` : CLASS_WORDS[s.class] || "Not labeled";
       const rows = [];
       if (Number.isInteger(thing.index)) rows.push(["Which", `Stretch ${thing.index + 1}${Number.isInteger(thing.total) ? ` of ${thing.total}` : ""} in this session`]);
       rows.push(["What it is", cls], ["Confidence", typeof s.confidence === "string" ? s.confidence : "not recorded"], ["Evaluator version", typeof s.evaluator_version === "string" ? s.evaluator_version : "not recorded"]);
@@ -1132,6 +1215,7 @@
       return {
         title: "Short waits inside a box",
         segment: "waiting",
+        cause: (it.inner_causes && it.inner_causes[0]) || "unknown",
         rows: [
           ["Which", `Inside work box ${it.box_no}${nOf}`],
           ["What it is", "Idle time inside a work box: waits shorter than the map's fold threshold, and idle moments inside bursts"],
@@ -1144,11 +1228,12 @@
     const rows = [
       ["Which", `${range(it.gap_range, "Gap", "Gaps")}${c.model ? `, ${waitPlace(c.model, it)}` : ""}`],
       ["What it is", it.count === 1 ? "A wait: no agent of this task was working" : `${it.count} waits in a row, with no work between them`],
-      ["Waited on", it.waited_on === "mixed" ? it.causes.map((k) => waitedOnWords(k, "short")).join("; ") : waitedOnWords(it.waited_on, "long")],
+      ["Waited on", it.waited_on === "mixed" ? it.causes.map((k) => (it.by && it.by[k] > 0 ? `${waitedOnWords(k, "short")}, ${durationWords(it.by[k])}` : waitedOnWords(k, "short"))).join("; ") : waitedOnWords(it.waited_on, "long")],
       ["Length", `${durationWords(ms)} (${share(ms)})`],
     ];
     if (it.count > 1) rows.push(["Longest of them", durationWords(it.longest_ms)]);
-    return { title: `Wait: ${waitTitle(it)}`, segment: "waiting", rows, evidence: [] };
+    // The drawer's swatch is the cause's own (the largest, for a mixed wait).
+    return { title: `Wait: ${waitTitle(it)}`, segment: "waiting", cause: it.causes[0] || "unknown", rows, evidence: [] };
   }
 
   // The task's name as a prompt says it: "factory task 825084c9 (private)",
@@ -1220,7 +1305,9 @@
   function promptText(p) {
     const what = p.what || "this item";
     const link = p.select ? `${p.route}?${p.select}` : p.route;
-    return `Walk me through ${what} of ${p.taskName || `factory task ${p.name}`}. ${p.where ? `${p.where}. ` : ""}It is open at ${link}, and its data is ${p.locator ? `${p.locator} in ` : ""}${p.dataUrl}. Explain what happened and what we could change.`;
+    // Every prompt ends with the index of every data file, so an agent can
+    // find the files it needs beyond this item's.
+    return `Walk me through ${what} of ${p.taskName || `factory task ${p.name}`}. ${p.where ? `${p.where}. ` : ""}It is open at ${link}, and its data is ${p.locator ? `${p.locator} in ` : ""}${p.dataUrl}. Explain what happened and what we could change.${p.indexUrl ? ` Index of every data file: ${p.indexUrl}` : ""}`;
   }
 
   // ------------------------------------------------- the map file (build time)
@@ -1265,7 +1352,11 @@
         defect_ms: b.defect_ms,
         defect_stretches: b.defect_stretches,
       })),
-      gaps: items(t.gaps).map((g) => ({ start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on })),
+      // A gap keeps Desk's per-gap split when Desk states one.
+      gaps: items(t.gaps).map((g) => {
+        const by = slimCauses(g.idle_by_waited_on_ms);
+        return by && Object.keys(by).length ? { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on, idle_by_waited_on_ms: by } : { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on };
+      }),
       sessions: arr(t.sessions).map((s) => ({ id: s.id, host: s.host, offset_ms: s.offset_ms, end_ms: s.end_ms })),
       agents: arr(t.agents).map((a) => ({ session: a.session, n: a.n, parent: a.parent })),
       transitions: arr(t.transitions).map((x) => ({ offset_ms: x.offset_ms, to: x.to })),
@@ -1286,6 +1377,10 @@
     barPartialNote,
     burstIdleBy,
     WAIT_KEYS,
+    gapIdleBy,
+    gapCauses,
+    unlabeledMs,
+    LABELED_PAUSE,
     idleSplit,
     waitCauseLabel,
     highlightSelector,

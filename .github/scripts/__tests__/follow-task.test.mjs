@@ -63,11 +63,11 @@ test("the lede: partial, counted from the first session, with working and value-
   const model = W.lede(row, F.reasonText, { idle: idle825(row) })
   assert.equal(model.state, "ok")
   const text = W.ledeText(model)
-  assert.match(text, /^This task took at least 54 hours, counted from its first session because the card was created after work began\./)
-  assert.match(text, /Agents were working for 17 hours of it; the evaluator judged under a second of that work value-adding/)
+  assert.match(text, /^This task took at least 54 hours, counted from its first session because its card \(its record on the desk\) was created after work began\./)
+  assert.match(text, /Agents were working for 17 hours of it; the evaluator \(an independent agent that labels the work\) judged under a second of that work value-adding/)
   // One cause covers 95% or more: one sentence, one number (I3).
   // 4 of its minutes have no recorded cause, so it is "nearly all", never "all" (R5).
-  assert.match(text, /Most of the 54 hours was waiting, not work: 36 hours, nearly all of it \(99%\) while the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.match(text, /Most of the 54 hours was waiting, not work: 36 hours, nearly all of it \(99% of the waiting\) while the agent had stopped and was waiting for the operator's next prompt\./)
   // When one cause is all of it, the sentence says so without a share.
   const whole = W.idleSplit(row, { bursts: [{ start_ms: 0, end_ms: 62609950, working_ms: 62609950 }], gaps: [{ start_ms: 62609950, end_ms: 193344986, waited_on: "next_prompt" }] })
   assert.match(W.ledeText(W.lede(row, F.reasonText, { idle: whole })), /Most of the 54 hours was waiting, not work: for 36 hours the agent had stopped and was waiting for the operator's next prompt\./)
@@ -125,7 +125,7 @@ test("the lede: a partial working time prints as at least, and the waiting deriv
 
 test("the lede reads a true zero as none and an unlabeled task without repeating itself", () => {
   const zero = row825({ lead_time_ms: m(100 * H), working_ms: m(36000), value_in_working_ms: m(0), flow_efficiency: m(0.0001) })
-  assert.match(W.ledeText(W.lede(zero, F.reasonText)), /the evaluator judged none of that work value-adding/)
+  assert.match(W.ledeText(W.lede(zero, F.reasonText)), /the evaluator \(an independent agent that labels the work\) judged none of that work value-adding/)
   assert.equal(W.durationWords(0), "none")
   assert.equal(W.durationWords(400), "under a second")
   const unl = row825({ lead_time_ms: m(10 * H), working_ms: m(2 * H), value_in_working_ms: u(["not_labeled"]), flow_efficiency: m(0.2) })
@@ -145,11 +145,11 @@ test("the lede: a measured task, a generic partial, an open task, and labels fro
     longest_gap: m({ start_ms: 0, end_ms: 8101680, duration_ms: 8101680, waited_on: "unknown" }),
   })
   const t = W.ledeText(W.lede(measured, F.reasonText))
-  assert.match(t, /^This task took 6\.5 hours from its card's creation to its end\./)
+  assert.match(t, /^This task took 6\.5 hours from the creation of its card \(its record on the desk\) to its end\./)
   assert.match(t, /Those labels come from a session this task shared with other tasks, so that split is partial\./)
   // The labeled waiting stretches (5 minutes of long tool calls) are not the answer to where 5.6 hours of idle time went (C1).
   assert.doesNotMatch(t, /Long tool calls/)
-  assert.match(t, /Most of the 6\.5 hours was waiting, not work: for 5\.6 hours nothing was running for this task, and what it waited on was not recorded\./)
+  assert.match(t, /Most of the 6\.5 hours was waiting, not work: for 5\.6 hours no agent was working on this task, and the cause was not recorded\./)
   assert.match(t, /The longest single wait was 2\.3 hours, also with its cause not recorded\./)
   assert.match(t, /here it is 15%\./)
 
@@ -508,11 +508,11 @@ const agents = [{ session: "s1", n: 0, parent: null }, { session: "s1", n: 2, pa
 test("the drawer says what a stretch is, which one, its share of lead time and the evidence it rests on; a waiting stretch gets its length, never its clock times", () => {
   const lanes = W.lanes(detail, agents)
   const c = W.drawer({ kind: "stretch", stretch: detail.stretches[1], index: 1, total: 2, intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: 10 * H })
-  assert.equal(c.title, "Labeled wait stretch")
+  assert.equal(c.title, "Evaluator-labeled pause (inside working time) stretch")
   const rows = Object.fromEntries(c.rows)
   assert.equal(rows.Which, "Stretch 2 of 2 in this session")
   // R6: the evaluator's waiting label has its own name, so "waiting" keeps one meaning (idle time).
-  assert.equal(rows["What it is"], "Waste: labeled wait (the evaluator's label; on this page, waiting means idle time)")
+  assert.equal(rows["What it is"], "Evaluator-labeled pause (inside working time): the evaluator labeled this stretch waiting; on this page, waiting means idle time")
   assert.equal(rows.Confidence, "medium")
   assert.equal(rows["Evaluator version"], "3.2.0-alpha.202")
   assert.equal(rows["Waited on"], "the agent had stopped and was waiting for the operator's next prompt")
@@ -581,7 +581,7 @@ test("the prompt names the exact item, its place, a link that opens it, and wher
   assert.equal(W.promptName({ title: "Private task 825084c9", kind: "private", short: "825084c9" }), "factory task 825084c9 (private)")
   assert.equal(W.promptName({ title: "Revocable sessions", kind: "public", short: "fc8b915a" }), 'factory task "Revocable sessions" (fc8b915a)')
   const text = W.promptText({ ...s1, taskName: "factory task 825084c9 (private)", route: "https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb", dataUrl: "https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json" })
-  assert.equal(text, "Walk me through labeled wait stretch 2 of 2 in session s1abcdef (waited on: next prompt (the agent had stopped)) of factory task 825084c9 (private). It lasted 2 hours. It is open at https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2, and its data is stretches[1] in https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json. Explain what happened and what we could change.")
+  assert.equal(text, "Walk me through evaluator-labeled pause (inside working time) stretch 2 of 2 in session s1abcdef (waited on: next prompt (the agent had stopped)) of factory task 825084c9 (private). It lasted 2 hours. It is open at https://ourostack.github.io/factory/#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2, and its data is stretches[1] in https://ourostack.github.io/factory/jobs/825084c9676f1da79f49e868ff950abb/5f4879fb.json. Explain what happened and what we could change.")
   assert.doesNotMatch(text, /factory task Private task/)
   // The link's query opens the item again.
   assert.deepEqual(F.parseRoute("#/task/825084c9676f1da79f49e868ff950abb/session/5f4879fb?stretch=2"), { view: "session", job: "825084c9676f1da79f49e868ff950abb", session: "5f4879fb", select: { kind: "stretch", from: 2, to: 2 } })
@@ -607,8 +607,8 @@ test("failed tool calls are binned to pixel columns, activity merges below a pix
   assert.deepEqual(W.stretchWorkers(detail.stretches[0], detail.intervals), [0, 2])
   assert.equal(W.stretchSegment({ class: "unlabeled", reason: "agents_working" }), "agents_working_unlabeled")
   assert.equal(W.stretchSegment({ class: "muda", waste: "waiting" }), "waiting")
-  assert.equal(W.waitLabel("next_prompt"), "labeled wait: next prompt")
-  assert.equal(W.waitLabel("api_retry"), "labeled wait: API retry")
+  assert.equal(W.waitLabel("next_prompt"), "labeled pause: next prompt")
+  assert.equal(W.waitLabel("api_retry"), "labeled pause: API retry")
   const steps = W.zoomSteps(10 * H, 1000, 32768)
   assert.equal(steps[0], 1)
   assert.ok(1000 * steps[steps.length - 1] <= 32768)
@@ -668,7 +668,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
   mkdirSync(join(emptyRoot, "dist"), { recursive: true })
   const none = publishData({ reports: join(emptyRoot, "reports"), dist: join(emptyRoot, "dist") })
   assert.deepEqual(none.maps, [])
-  assert.deepEqual(readdirSync(join(emptyRoot, "dist")), [])
+  assert.deepEqual(readdirSync(join(emptyRoot, "dist")), ["reasons.json"], "only the reason words, which need no report")
   // The workflow prints the map files' size line and publishes walk.js.
   const wf = read(".github/workflows/pages.yml")
   assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
@@ -839,16 +839,15 @@ test("for every real task, the lede's waiting = the map's triangles plus short w
       if (bursts(map).some((b) => b.idle_by_waited_on_ms)) {
         const mapBy = {}
         for (const it of model.items) {
-          if (it.type === "wait") for (const g of it.gaps) {
-            const k = W.WAIT_KEYS.includes(g.waited_on) ? g.waited_on : "unknown"
-            mapBy[k] = (mapBy[k] || 0) + (g.end_ms - g.start_ms)
-          }
+          if (it.type === "wait") for (const g of it.gaps) for (const [k, ms] of Object.entries(W.gapIdleBy(g))) mapBy[k] = (mapBy[k] || 0) + ms
           else for (const [k, ms] of Object.entries(it.inner_by || {})) mapBy[k] = (mapBy[k] || 0) + ms
         }
-        // A gap names only the cause that holds most of it (Desk's rule), so
-        // a gap with two causes moves a little time between them: within 1%
-        // of the waiting, cause by cause. Box insides match exactly.
-        for (const x of idle.by) assert.ok(Math.abs((mapBy[x.key] || 0) - x.ms) <= 1000 + 0.01 * idle.value, `${row.job.slice(0, 8)}: the map's ${x.key} at ${maxBoxes} boxes: ${mapBy[x.key] || 0} vs ${x.ms}`)
+        // Where Desk splits each gap by cause, the map matches the bar
+        // exactly; before that, a gap names only the cause that holds most
+        // of it, so a gap with two causes moves a little time between them:
+        // within 1% of the waiting, cause by cause. Box insides match exactly.
+        const exact = (Array.isArray(map.gaps) ? map.gaps : []).some((g) => g.idle_by_waited_on_ms)
+        for (const x of idle.by) assert.ok(Math.abs((mapBy[x.key] || 0) - x.ms) <= 1000 + (exact ? 0 : 0.01 * idle.value), `${row.job.slice(0, 8)}: the map's ${x.key} at ${maxBoxes} boxes: ${mapBy[x.key] || 0} vs ${x.ms}`)
         percause += 1
       }
     }
@@ -897,7 +896,7 @@ test("each lede number lights its own part of the map; a cause lights only the w
   assert.equal(W.highlightSelector("nonsense"), null)
   const app = read("site/src/app.js")
   assert.match(app, /has-\$\{k\}/, "waits and ladder steps carry their causes as classes")
-  assert.match(app, /W\.highlightSelector\(key, \{ item, cause \}\)/)
+  assert.match(app, /W\.highlightSelector\(key, \{ item, cause, seg \}\)/)
   // The swimlane's labels row is one tab stop with arrow keys inside (I4).
   assert.match(app, /tabindex: k === current \? 0 : -1/)
   assert.match(app, /ArrowRight: pos \+ 1/)

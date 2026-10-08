@@ -61,7 +61,7 @@
     <p id="task-lede" class="lede task-lede">Loading&hellip;</p>
     <section class="block vsm-block" aria-labelledby="vsm-title">
       <h2 class="block-title" id="vsm-title">The value stream map</h2>
-      <p class="chart-caption">A value stream map draws one piece of work from start to finish. Each box is a burst of agent work (a new burst starts after 15 minutes idle or when an operator turn arrives); each triangle between boxes is a wait, labeled with how long it lasted and what it waited on. The map is not to scale: the ladder under it carries the time. Select any box, triangle or ladder step to see the evidence behind it.</p>
+      <p class="chart-caption">A value stream map draws one piece of work from start to finish. Each box is a burst of agent work inside a session (one run of an agent harness, such as one Claude Code conversation; a new burst starts after 15 minutes idle or when an operator turn arrives); each triangle between boxes is a wait, labeled with how long it lasted and what it waited on. The map is not to scale: the ladder under it carries the time. Select any box, triangle or ladder step to see the evidence behind it.</p>
       <div id="vsm"></div>
     </section>
     <section class="block" aria-labelledby="time-went-title">
@@ -97,6 +97,7 @@
       <div class="mode-toggle" role="group" aria-label="What the bars count">
         <button type="button" class="mode-btn" data-mode="all" aria-pressed="true">All elapsed time</button>
         <button type="button" class="mode-btn" data-mode="working" aria-pressed="false">Agent working time</button>
+        <button type="button" class="mode-btn" data-mode="share" aria-pressed="false">Share of each task</button>
       </div>
       <p class="chart-caption" id="stackup-caption"></p>
       <div id="stackup"></div>
@@ -193,7 +194,7 @@
     <h2 class="block-title">The eight wastes, in agent work</h2>
     <p>Lean names eight kinds of waste: Ohno's original seven, plus non-utilized talent, a later addition (<a href="https://www.lean.org/lexicon-terms/seven-wastes/" target="_blank" rel="noopener">LEI: 7 wastes</a>). The translations into agent work are our own mapping, borrowing the words of <a href="https://www.informit.com/store/implementing-lean-software-development-from-concept-9780321437389" target="_blank" rel="noopener">Poppendieck's wastes of software</a> where they fit and the definitions the factory's <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/skills/factory-evaluator/SKILL.md" target="_blank" rel="noopener">waste evaluator</a> uses. Each waste keeps its color on every chart.</p>
     <dl class="waste-list">
-      <div><dt><span class="swatch" style="--sw: var(--c-waste-waiting)"></span>Waiting</dt><dd>Idle time: the lead time less the working time, when no agent of the task was working. It is split by what it waited on: the next prompt, an API retry, a failed tool call, a long tool call, the queue before the first session, no session running, or a cause not recorded.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-waiting)"></span>Waiting</dt><dd>Idle time: the lead time less the working time, when no agent of the task was working. It is split by what it waited on: the next prompt, the agent working on another task, an API retry, a failed tool call, a long tool call, the queue before the first session, no session running, or a cause not recorded.</dd></div>
       <div><dt><span class="swatch" style="--sw: var(--c-waste-defects)"></span>Defects</dt><dd>Failures and their rework: a failed command, a broken build, a change undone, a delivery sent back.</dd></div>
       <div><dt><span class="swatch" style="--sw: var(--c-waste-extra-processing)"></span>Extra processing</dt><dd>More work than the outcome needs: repeating a check that already passed, polishing past the requirement.</dd></div>
       <div><dt><span class="swatch" style="--sw: var(--c-waste-overproduction)"></span>Overproduction</dt><dd>Work nobody asked for or used: an unrequested feature, a report no one reads.</dd></div>
@@ -205,24 +206,34 @@
 
     <h2 class="block-title">Glossary</h2>
     <dl class="glossary">
-      <dt>Lead time</dt><dd>The time from a task's card being created to the task being done. Some cards were created after work began; there the lead time is counted from the first session and says so.</dd>
-      <dt>Working time</dt><dd>The time any agent on the task was busy: turns, tool calls and subagents. It includes rework and necessary steps, not only value-adding work. The evaluator's labels (value-adding, necessary, each waste other than waiting, agents working but not labeled, and not labeled yet) describe working time only.</dd>
-      <dt>Flow efficiency</dt><dd>Working time divided by lead time, as the <a href="https://kanbanguides.org/english/" target="_blank" rel="noopener">Kanban Guide</a> uses it. A low figure is normal: most lead time in any process is waiting.</dd>
-      <dt><span class="swatch" style="--sw: var(--c-value)"></span>Value-adding</dt><dd>Work that directly changes the outcome the task exists for: writing the change, running the test that proves it, answering the question asked.</dd>
-      <dt><span class="swatch" style="--sw: var(--c-necessary)"></span>Necessary</dt><dd>Work the outcome needs but that does not change it by itself: reading code to understand it, setting up a workspace, a required review.</dd>
-      <dt>Waste</dt><dd>Time that adds no value and that the outcome does not need: one of the eight wastes above. Lean's word is <i>muda</i>. Waste is a property of the system, never a person's or an agent's fault.</dd>
-      <dt><span class="swatch swatch-hatch" style="--sw: var(--c-agents-working)"></span>Agents working, not labeled</dt><dd>Working time when an agent was busy but the evaluator's labels do not say what the work was.</dd>
-      <dt><span class="swatch swatch-outline" style="--sw: var(--c-not-labeled)"></span>Not labeled yet</dt><dd>Working time the waste evaluator has not classified yet. It is shown as its own part, never as zero.</dd>
-      <dt><span class="swatch swatch-hatch" style="--sw: var(--c-no-session)"></span>No session running</dt><dd>Waiting in which no agent session of the task was open at all; the queue before the first session is shown apart.</dd>
-      <dt>Labeled wait</dt><dd>A stretch of a session the evaluator labeled as waiting, with what it waited on. The session swimlane draws it cross-hatched. It is the evaluator's label, not the page's waiting: waiting always means idle time.</dd>
-      <dt>Value stream map</dt><dd>Lean's picture of one item's journey: each step as a box, the waits between steps as triangles, and a timeline underneath (<a href="https://www.lean.org/the-lean-post/articles/understanding-the-fundamentals-of-value-stream-mapping" target="_blank" rel="noopener">LEI</a>). On this site a step is a burst of agent work.</dd>
-      <dt>Timeline ladder</dt><dd>The square wave under a value stream map: one level for waiting, one for working, each segment labeled with its duration, so it is plain how much of the lead time was waiting.</dd>
-      <dt>Inventory triangle</dt><dd>On a value stream map, the triangle between two steps marks work waiting between them. On this map it marks waiting, idle time, with what it waited on; its time is waiting, not the inventory waste.</dd>
-      <dt>Yamazumi (stack-up)</dt><dd>A stacked bar per item. The classic yamazumi stacks each operator's work against takt time to balance a production line (<a href="https://www.lean.org/lexicon-terms/operator-balance-chart/" target="_blank" rel="noopener">LEI</a>); the yamazumi-style chart here stacks each task's time by where it went, so every task's waste is comparable at a glance.</dd>
-      <dt>Pareto chart</dt><dd>Causes as bars in descending order of the time they cost, with a running total, so the vital few stand out (<a href="https://en.wikipedia.org/wiki/Pareto_chart" target="_blank" rel="noopener">Pareto chart</a>).</dd>
-      <dt>A3</dt><dd>One page that tells a problem's story from evidence to countermeasure to check, named for the sheet of paper it fits on (<a href="https://www.lean.org/Search/Documents/229.pdf" target="_blank" rel="noopener">Shook, <i>Managing to Learn</i></a>).</dd>
-      <dt>Kaizen</dt><dd>Continuous improvement: many small changes, each checked against the evidence. Here, an improvement issue with its countermeasure.</dd>
-      <dt>Andon</dt><dd>The signal that stops the line when something is abnormal (<a href="https://www.lean.org/lexicon-terms/andon/" target="_blank" rel="noopener">LEI</a>). Here, an issue raised when a release makes a quality measure clearly worse.</dd>
+      <dt id="g-lead-time">Lead time</dt><dd>The time from a task's card being created to the task being done. Some cards were created after work began; there the lead time is counted from the first session and says so.</dd>
+      <dt id="g-working-time">Working time</dt><dd>The time any agent on the task was busy: turns, tool calls and subagents. It includes rework and necessary steps, not only value-adding work. The evaluator's labels (value-adding, necessary, each waste other than waiting, agents working but not labeled, and not labeled yet) describe working time only.</dd>
+      <dt id="g-waiting">Waiting</dt><dd>Idle time: the lead time less the working time, when no agent was working on the task. It is split by what it waited on. Two causes are easy to confuse: <em>agent on another task</em> means a session of this task was running, but its agent was working on another task; <em>no session running</em> means no session of this task was open at all. <em>Cause not recorded</em> means no agent was working on this task and the store did not record why.</dd>
+      <dt id="g-flow-efficiency">Flow efficiency</dt><dd>Working time divided by lead time, as the <a href="https://kanbanguides.org/english/" target="_blank" rel="noopener">Kanban Guide</a> uses it. A low figure is normal: most lead time in any process is waiting.</dd>
+      <dt id="g-value-adding"><span class="swatch" style="--sw: var(--c-value)"></span>Value-adding</dt><dd>Work that directly changes the outcome the task exists for: writing the change, running the test that proves it, answering the question asked.</dd>
+      <dt id="g-necessary"><span class="swatch" style="--sw: var(--c-necessary)"></span>Necessary</dt><dd>Work the outcome needs but that does not change it by itself: reading code to understand it, setting up a workspace, a required review.</dd>
+      <dt id="g-waste">Waste</dt><dd>Time that adds no value and that the outcome does not need: one of the eight wastes above. Lean's word is <i>muda</i>. Waste is a property of the system, never a person's or an agent's fault.</dd>
+      <dt id="g-agents-working"><span class="swatch swatch-hatch" style="--sw: var(--c-agents-working)"></span>Agents working, not labeled</dt><dd>Working time when an agent was busy but the evaluator's labels do not say what the work was.</dd>
+      <dt id="g-not-labeled"><span class="swatch swatch-outline" style="--sw: var(--c-not-labeled)"></span>Not labeled yet</dt><dd>Working time the waste evaluator has not classified yet. It is shown as its own part, never as zero.</dd>
+      <dt id="g-no-session"><span class="swatch swatch-hatch" style="--sw: var(--c-no-session)"></span>No session running</dt><dd>Waiting in which no agent session of the task was open at all; the queue before the first session is shown apart.</dd>
+      <dt id="g-agent-on-another-task"><span class="swatch swatch-wait wait-other_task"></span>Agent on another task</dt><dd>Waiting in which a session of this task was running, but its agent was working on another task. The other task is never named.</dd>
+      <dt id="g-labeled-pause"><span class="swatch lane-key lane-key-wait"></span>Evaluator-labeled pause (inside working time)</dt><dd>A stretch of a session the evaluator labeled as waiting, with what it waited on. It sits inside the working time the evaluator labels, and the session swimlane draws it cross-hatched. It is not the page's waiting, which always means idle time.</dd>
+      <dt id="g-evaluator">The evaluator</dt><dd>An independent agent that labels each stretch of a task's sessions as value-adding, necessary or one of the wastes, once the task is done, citing the evidence and never grading its own work.</dd>
+      <dt id="g-session">Session</dt><dd>One run of an agent harness, such as one Claude Code conversation, from its first record to its last. A session can work on several tasks; a task can have several sessions.</dd>
+      <dt id="g-card">Card</dt><dd>A task's record on the desk: its title, status (drafting, processing, done, signed off) and dates. The site never shows a card's title.</dd>
+      <dt id="g-operator">The operator</dt><dd>The person the agents work for: the one who asks for the work and accepts it. Public pages say "the operator", never a name.</dd>
+      <dt id="g-sign-off">Sign-off</dt><dd>The operator's recorded answer to a delivery: accepted, or sent back with a reason, recorded by the agent on the operator's word. "No sign-off" means no answer is recorded.</dd>
+      <dt id="g-capture-coverage">Capture coverage</dt><dd>The share of the sessions still on the contributing machines that reached the store as facts. When it falls below 80%, or drops by 15 points or more, the status line raises an alarm: the store may be missing work.</dd>
+      <dt id="g-improvement-loop">Improvement loop</dt><dd>Desk's own loop that turns problems the factory finds into improvement items, fixes them and closes them only when the data confirms the fix. The status line raises an alarm when the loop reports a problem with itself, such as an item open for a week or a step that stopped succeeding.</dd>
+      <dt id="g-job-hours">Job-hours</dt><dd>How Rank causes counts time: each task's hours on a cause, added up over tasks. A moment two tasks share counts once for each task.</dd>
+      <dt id="g-value-stream-map">Value stream map</dt><dd>Lean's picture of one item's journey: each step as a box, the waits between steps as triangles, and a timeline underneath (<a href="https://www.lean.org/the-lean-post/articles/understanding-the-fundamentals-of-value-stream-mapping" target="_blank" rel="noopener">LEI</a>). On this site a step is a burst of agent work.</dd>
+      <dt id="g-timeline-ladder">Timeline ladder</dt><dd>The square wave under a value stream map: one level for waiting, one for working, each step labeled with its duration, so it is plain how much of the lead time was waiting. A step labeled with a plus sign, such as "+5m", is the short waits folded inside the box before it. Each step opens its evidence.</dd>
+      <dt id="g-inventory-triangle">Inventory triangle</dt><dd>On a value stream map, the triangle between two steps marks work waiting between them. On this map it marks waiting, idle time, with what it waited on; its time is waiting, not the inventory waste.</dd>
+      <dt id="g-yamazumi">Yamazumi (stack-up)</dt><dd>A stacked bar per item. The classic yamazumi stacks each operator's work against takt time to balance a production line (<a href="https://www.lean.org/lexicon-terms/operator-balance-chart/" target="_blank" rel="noopener">LEI</a>); the yamazumi-style chart here stacks each task's time by where it went, so every task's waste is comparable at a glance.</dd>
+      <dt id="g-pareto">Pareto chart</dt><dd>Causes as bars in descending order of the time they cost, with a running total, so the vital few stand out (<a href="https://en.wikipedia.org/wiki/Pareto_chart" target="_blank" rel="noopener">Pareto chart</a>).</dd>
+      <dt id="g-a3">A3</dt><dd>One page that tells a problem's story from evidence to countermeasure to check, named for the sheet of paper it fits on (<a href="https://www.lean.org/Search/Documents/229.pdf" target="_blank" rel="noopener">Shook, <i>Managing to Learn</i></a>).</dd>
+      <dt id="g-kaizen">Kaizen</dt><dd>Continuous improvement: many small changes, each checked against the evidence. Here, an improvement issue with its countermeasure.</dd>
+      <dt id="g-andon">Andon</dt><dd>The signal that stops the line when something is abnormal (<a href="https://www.lean.org/lexicon-terms/andon/" target="_blank" rel="noopener">LEI</a>). Here, an issue raised when a release makes a quality measure clearly worse.</dd>
     </dl>
   </div>
 </div>
@@ -254,7 +265,7 @@
     </ul>
 
     <h2 class="block-title">Finish order</h2>
-    <p>Tasks are ordered without dates. A task's waste labels are written when it reaches done, so the order in which each task's first label file landed in the store is the order in which tasks finished. Only the position (1st, 2nd, 3rd) is published, never the date. Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on a done task with at least ten minutes of agent working time from the latest group of tasks to finish, preferring one with a public name.</p>
+    <p>Tasks are ordered without dates. A task's waste labels are written when it reaches done, so the order in which each task's first label file landed in the store is the order in which tasks finished. Only the position (1st, 2nd, 3rd) is published, never the date. Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position. Tasks with no labels yet (open tasks, and done tasks still waiting for the evaluator) follow, in the order their first session was published. "Follow a task" opens on the finished task with the latest finish position, named or private.</p>
 
     <h2 class="block-title">How to read the numbers</h2>
     <ul class="plain-list" id="guide">
@@ -262,7 +273,7 @@
       <li><strong>"No data" is never zero.</strong> A figure shown as <span class="num num-unavailable"><span class="num-value">no data</span></span> was not measured, and its reason is given beside it or once under its table. A zero appears only when zero was measured.</li>
       <li><strong>Every total says what it rests on,</strong> for example "12 of 31 jobs", and a sentence beside a headline says whether its sample is thin or partial.</li>
       <li><strong>"Declared" means taken from the task card,</strong> such as a task's start date written on its card, rather than measured from a session record. A task's "Every measure" table says which figures are declared.</li>
-      <li><strong>Two kinds of waiting.</strong> "Deliveries waiting for an answer" counts finished work the operator has not yet accepted or sent back. "Gaps between the operator's prompts" is idle time inside sessions. The evaluator's "Waiting (any kind)" is all labeled waiting, on CI, tools or the operator.</li>
+      <li><strong>Two kinds of waiting.</strong> "Deliveries waiting for an answer" counts finished work the operator has not yet accepted or sent back. "Gaps between the operator's prompts" is idle time inside sessions. An evaluator-labeled pause (inside working time) is a stretch the evaluator labeled as waiting, on CI, tools or the operator; it is not the page's waiting, which is idle time.</li>
       <li><strong>Accepted means the operator's word,</strong> recorded by the agent through Desk's sign-off tool.</li>
       <li><strong>Bars start at zero on a stated scale.</strong> A share runs from 0 to 100%; any other bar list states its scale in its title.</li>
       <li><strong>The status line under the steps has three states.</strong> Abnormal names each alarm and who is on it, or says no one is. Normal names what was checked. Not monitored says what is not recorded, so missing data never reads as normal.</li>
@@ -306,7 +317,7 @@
 
     <section class="block" aria-labelledby="intake-title">
       <h2 class="block-title" id="intake-title">Sessions published, cumulative</h2>
-      <p class="chart-caption">How much work the store has captured so far: the day each facts file first landed in the store, counted from the first intake and never finer than a day, as a running total. Day 1 was a one-time flush of sessions already on contributing machines, not a burst of work.</p>
+      <p class="chart-caption">How much work the store has captured so far: the day each facts file first landed in the store, counted from the first intake and never finer than a day, as a running total. Every day from the first intake has its own bar, so the spacing is true to time; a day with no intake keeps the total and is drawn lighter. Day 1 was a one-time flush of sessions already on contributing machines, not a burst of work.</p>
       <div id="chart-intake"></div>
     </section>
 
