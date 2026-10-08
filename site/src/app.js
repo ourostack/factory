@@ -1376,7 +1376,7 @@
   // "short" leaves out the sentence's subject and stop.
   function finishSentence(j, form) {
     const f = F.finishDay(j && j.finish_date);
-    const what = f.kind === "open" ? "still open" : f.day ? `finished ${f.words} (UTC)` : `finished, ${f.words}`;
+    const what = f.kind === "open" ? "still open" : f.day ? `finished ${f.words.replace(/ \(direction not known\)$/, "")} (UTC${f.kind === "about" ? "; direction not known" : ""})` : `finished, ${f.words}`;
     return form === "short" ? what : `This task ${f.kind === "open" ? "is still open" : what}. `;
   }
 
@@ -1642,7 +1642,7 @@
       const lead0 = typeof lw0.start_ms === "number" && typeof lw0.end_ms === "number" ? lw0.end_ms - lw0.start_ms : null;
       const c0 = W.clockMarks(map, null);
       const ctx0 = { origin_ms: o, lead_ms: lead0, reasonText: F.reasonText, model: null };
-      const open0 = (opener, thing) => openClock(opener, thing, { j, map, ctxDrawer: ctx0, clock: c0 });
+      const open0 = Object.assign((opener, thing) => openClock(opener, thing, { j, map, ctxDrawer: ctx0, clock: c0 }), { job: j });
       renderHandoffs(container, map, c0, o, lead0, open0);
       renderPrTable(container, map, c0, o, open0);
     };
@@ -1699,7 +1699,7 @@
         more: (box) => stretchesIn(box, j, map, it, ctxDrawer),
       });
     };
-    const openMark = (opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock });
+    const openMark = Object.assign((opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock }), { job: j });
     // Marks outside the lead window go to a margin before or after the
     // map, never to its edge (their positions do not depend on the layout).
     const outside = W.ladderLanes(clock, [], { origin });
@@ -2045,11 +2045,11 @@
       const sid = String(thing.mark.turn.session || "");
       const route = F.safeRoute("task", j.id, "session", sid);
       if (route) links.push({ text: `Open session ${sid.slice(0, 8)} to scale`, href: route });
-    } else if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(thing.pr.repo)) && Number.isInteger(thing.pr.number)) {
+    } else if (W.validPr(thing.pr.repo, thing.pr.number)) {
       links.push({ text: `Pull request ${thing.pr.repo}#${thing.pr.number} on GitHub`, href: `https://github.com/${thing.pr.repo}/pull/${thing.pr.number}`, external: true });
     }
     const route = F.safeRoute("task", j.id) || "#/";
-    openDrawer(opener, content, { links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: mapPath(j.id) } });
+    openDrawer(opener, content, { job: j, links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: mapPath(j.id) } });
   }
 
   // The marker above a box for the prompts that fall in it: one prompt
@@ -2075,6 +2075,7 @@
   // A list of prompts in the drawer, each opening its own evidence.
   function openPromptList(opener, prompts, where, openMark, origin) {
     openDrawer(opener, { title: `${prompts.length} operator prompts`, mark: "prompt", rows: [["What it is", `The operator's prompts in ${where}, in clock order`]], evidence: [] }, {
+      job: openMark.job,
       more: (box) => {
         const ul = el("ul", "stretch-list");
         for (const p of prompts) {
@@ -2221,6 +2222,7 @@
     const o = opts || {};
     const title = g.title ? `${g.title}: ${g.short}` : g.short.charAt(0).toUpperCase() + g.short.slice(1);
     openDrawer(opener, { title, mark: g.lane === "prompt" ? "prompt" : g.marks.every((m) => m.kind === "merged") ? "merged" : "opened", rows: [["On the task clock", g.when]], evidence: [] }, {
+      job: openMark.job,
       more: (box) => {
         if (o.rule !== false) box.appendChild(el("p", "chart-caption", MERGE_RULE));
         const ul = el("ul", "stretch-list");
@@ -2800,7 +2802,7 @@
     const leadMs = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? lw.end_ms - lw.start_ms : null;
     const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText };
     const clock = W.clockMarks(map, null);
-    const openMark = (opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock });
+    const openMark = Object.assign((opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock }), { job: j });
     const intervals = Array.isArray(detail.intervals) ? detail.intervals : [];
     const stretches = Array.isArray(detail.stretches) ? detail.stretches : [];
     const allLanes = W.lanes(detail, map.agents);

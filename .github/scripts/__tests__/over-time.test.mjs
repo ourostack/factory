@@ -266,3 +266,18 @@ test("Compare has the Over time section, its lede, its two toggles and the cause
   const section = html.slice(html.indexOf('id="over-time"'), html.indexOf("</section>", html.indexOf('id="over-time"')))
   assert.doesNotMatch(section, /class="mode-btn"/)
 })
+
+test("every drawer on a task's page states the task's finish day: each openDrawer call passes the task", () => {
+  const src = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const calls = [...src.matchAll(/\bopenDrawer\(opener, ([^\n]*)/g)].map((m) => m[1])
+  assert.ok(calls.length >= 5, `found ${calls.length} calls`)
+  // The next line holds the extras when the call spans lines.
+  const lines = src.split("\n")
+  const missing = []
+  lines.forEach((l, i) => {
+    if (!/\bopenDrawer\(opener, /.test(l) || /function openDrawer/.test(l)) return
+    const span = lines.slice(i, i + 3).join("\n")
+    if (!/\bjob: (j|openMark\.job)\b/.test(span)) missing.push(`line ${i + 1}`)
+  })
+  assert.deepEqual(missing, [])
+})
