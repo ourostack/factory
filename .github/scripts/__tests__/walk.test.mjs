@@ -565,7 +565,9 @@ test("the Pages build copies the job and rollup files, tolerates missing ones, a
 
 test("the Pages workflow publishes the data files and llms.txt, and writes the size line to the step summary", () => {
   const wf = read(".github/workflows/pages.yml")
-  assert.match(wf, /node site\/scripts\/publish-files\.mjs --reports _reports --dist site\/dist --template site\/src\/llms-template\.txt \| tee -a "\$GITHUB_STEP_SUMMARY"/)
+  assert.match(wf, /node site\/scripts\/publish-files\.mjs --reports _reports --dist site\/dist --template site\/src\/llms-template\.txt --pulls "\$RUNNER_TEMP\/pulls\.json" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
+  // The build's GitHub reads for the PR clock go to the runner's temp folder, never into site/dist.
+  assert.match(wf, /node site\/scripts\/build-data\.mjs --reports _reports --main \. --out site\/dist\/data\.json --pulls-out "\$RUNNER_TEMP\/pulls\.json"/)
   // It runs after the data build and before the upload.
   assert.ok(wf.indexOf("Build site data") < wf.indexOf("Publish data files") && wf.indexOf("Publish data files") < wf.indexOf("Upload Pages artifact"))
 })

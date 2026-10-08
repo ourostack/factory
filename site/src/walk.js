@@ -1314,24 +1314,99 @@
     return `Walk me through ${what} of ${p.taskName || `factory task ${p.name}`}. ${p.where ? `${p.where}. ` : ""}It is open at ${link}, and its data is ${p.locator ? `${p.locator} in ` : ""}${p.dataUrl}. Explain what happened and what we could change.${p.indexUrl ? ` Index of every data file: ${p.indexUrl}` : ""}`;
   }
 
+  // The list states of a task's operator prompts and pull requests. Desk's
+  // own envelopes (`human_turns_state`, `prs_state`, reports D4) win. Without
+  // them the store states each list from its sessions' hosts, so a task with
+  // no prompts recorded reads "not recorded", never "no prompts": Claude Code
+  // records every prompt, Copilot only some, Codex none (Desk HOST_FLAGS), and
+  // a Claude Code session with no prompt at all is one whose prompts were not
+  // recorded (older facts). Every host records pull requests only partly.
+  function clockListStates(timeline) {
+    const t = timeline || {};
+    const sessions = Array.isArray(t.sessions) ? t.sessions : [];
+    const turns = Array.isArray(t.human_turns) ? t.human_turns : [];
+    const desk = (e) => {
+      if (!e || typeof e !== "object" || typeof e.state !== "string") return null;
+      const out = { state: e.state, reasons: Array.isArray(e.reasons) ? e.reasons : [] };
+      if (Object.prototype.hasOwnProperty.call(e, "bound")) out.bound = e.bound;
+      if (typeof e.bound_reason === "string") out.bound_reason = e.bound_reason;
+      return { ...out, basis: "desk" };
+    };
+    const fromHosts = (reasons, any) => {
+      const r = [...reasons].sort();
+      if (!any) return { state: "unavailable", reasons: r.length ? r : ["not_recorded"], basis: "store_from_hosts" };
+      return r.length ? { state: "partial", bound: "lower", reasons: r, basis: "store_from_hosts" } : { state: "measured", reasons: [], basis: "store_from_hosts" };
+    };
+    const turnReasons = new Set();
+    const withTurns = new Set(turns.map((x) => x && x.session));
+    for (const s of sessions) {
+      if (s.host === "claude-code") {
+        if (!withTurns.has(s.id)) turnReasons.add("not_recorded");
+      } else if (s.host === "copilot-cli") turnReasons.add("host_records_partly");
+      else if (s.host === "codex-cli") turnReasons.add("host_does_not_record");
+      else turnReasons.add("not_recorded");
+    }
+    const prReasons = new Set(["host_records_partly"]);
+    if (sessions.some((s) => !["claude-code", "copilot-cli", "codex-cli"].includes(s.host))) prReasons.add("not_recorded");
+    return {
+      human_turns_state: desk(t.human_turns_state) || fromHosts(turnReasons, turns.length > 0),
+      prs_state: desk(t.prs_state) || fromHosts(prReasons, true),
+    };
+  }
+
   // ------------------------------------------------- the map file (build time)
 
-  // The slim map file for one task (map/<job>.json), from its full report
-  // jobs/<job>.json. It keeps what the landing view draws and drops the
-  // intervals (up to megabytes) and every per-turn time: pull requests keep
-  // their repository and number only, at task level, with no time and no
-  // burst (a burst's pull request count would place it on the clock).
-  function slimMap(report) {
+  // The map file for one task (map/<job>.json, factory.site.map/2), from its
+  // full report jobs/<job>.json and the store's own fields. It keeps what the
+  // landing view draws and drops the intervals (up to megabytes). Every time
+  // is an offset on the task clock; no epoch value is written.
+  //
+  // `store` is { pr_clock, finish_date }: pr_clock is pr-clock.mjs prClock's
+  // { anchor, prs } (each pull request's opened and merged times placed
+  // through the task's clock anchor from GitHub), and finish_date the
+  // store's resolved finish date. Without pr_clock (a build that read no
+  // GitHub data), a pull request is placed only where the session timed one
+  // it created, and every other time is null with the reason
+  // github_not_read: nothing is invented.
+  //
+  // Each operator prompt keeps Desk's fields and gains `why`, joined from
+  // the wait it ends (Desk's timeline.waits[], by end_ms == at_ms in the
+  // same session); null until Desk states one.
+  function slimMap(report, store) {
     const t = (report && report.timeline) || {};
+    const s = store || {};
     const arr = (x) => (Array.isArray(x) ? x : []);
     const items = (x) => (Array.isArray(x) ? x : x && typeof x === "object" && Array.isArray(x.items) ? x.items : []);
     const envelopeOf = (x, explicit) => {
       const e = explicit && typeof explicit === "object" ? explicit : x && typeof x === "object" && !Array.isArray(x) ? x : null;
       return e && typeof e.state === "string" ? { state: e.state, reasons: arr(e.reasons) } : { state: "measured", reasons: [] };
     };
+    const waits = arr(t.waits).filter((w) => w && typeof w === "object");
+    const waitEnding = new Map(waits.map((w) => [`${w.session}|${w.end_ms}`, w]));
+    const fallbackPrs = () => {
+      const seen = new Map();
+      for (const p of arr(t.prs)) {
+        if (!p || typeof p.repo !== "string" || !Number.isInteger(p.number)) continue;
+        const k = `${p.repo}#${p.number}`;
+        const cur = seen.get(k);
+        const timed = typeof p.at_ms === "number" && Number.isFinite(p.at_ms);
+        const created = typeof p.created === "boolean" ? p.created : null;
+        if (!cur) seen.set(k, { repo: p.repo, number: p.number, created, at: timed ? p.at_ms : null });
+        else {
+          if (timed && (cur.at === null || p.at_ms < cur.at)) cur.at = p.at_ms;
+          if (created === true) cur.created = true;
+        }
+      }
+      return [...seen.values()].map((p) => {
+        const desk = p.created === true && p.at !== null;
+        return { repo: p.repo, number: p.number, created: p.created, opened_at_ms: desk ? p.at : null, opened_basis: desk ? "desk" : "not_placed", merged_at_ms: null, merged_basis: "not_placed", state: null, reasons: ["github_not_read"] };
+      });
+    };
+    const clock = s.pr_clock && typeof s.pr_clock === "object" && Array.isArray(s.pr_clock.prs) ? s.pr_clock : null;
     return {
-      schema: "factory.site.map/1",
+      schema: "factory.site.map/2",
       job: String((report && report.job && report.job.id) || t.job || ""),
+      finish_date: s.finish_date && typeof s.finish_date === "object" ? s.finish_date : null,
       lead_window: t.lead_window || { state: "unavailable", reasons: ["not_recorded"] },
       // Desk may wrap bursts and gaps in an envelope { state, reasons, items }
       // and state the bursts' labels; both are kept so the page can say the
@@ -1352,6 +1427,7 @@
         tool_calls: b.tool_calls,
         tool_failures: b.tool_failures,
         operator_turns: b.operator_turns,
+        prs: b.prs,
         value_ms: b.value_ms,
         defect_ms: b.defect_ms,
         defect_stretches: b.defect_stretches,
@@ -1361,13 +1437,23 @@
         const by = slimCauses(g.idle_by_waited_on_ms);
         return by && Object.keys(by).length ? { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on, idle_by_waited_on_ms: by } : { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on };
       }),
-      sessions: arr(t.sessions).map((s) => ({ id: s.id, host: s.host, offset_ms: s.offset_ms, end_ms: s.end_ms })),
+      sessions: arr(t.sessions).map((x) => ({ id: x.id, host: x.host, offset_ms: x.offset_ms, end_ms: x.end_ms })),
       agents: arr(t.agents).map((a) => ({ session: a.session, n: a.n, parent: a.parent })),
       transitions: arr(t.transitions).map((x) => ({ offset_ms: x.offset_ms, to: x.to })),
       observations: arr(t.observations).map((x) => ({ offset_ms: x.offset_ms, status: x.status })),
       outcome: t.outcome && typeof t.outcome === "object" ? { state: t.outcome.state, deliveries: t.outcome.deliveries } : null,
       detail_files: arr(t.detail_files),
-      prs: arr(t.prs).map((p) => ({ repo: p.repo, number: p.number })),
+      ...clockListStates(t),
+      human_turns: arr(t.human_turns)
+        .filter((h) => h && typeof h === "object")
+        .map((h) => {
+          const w = waitEnding.get(`${h.session}|${h.at_ms}`);
+          return { session: h.session, host: h.host, at_ms: h.at_ms, basis: h.basis, window_ms: h.window_ms, prompt_class: h.prompt_class, output_class: h.output_class, why: w && typeof w.why === "string" ? w.why : null };
+        }),
+      // Desk's waits (reports D4; `why` from D5), as Desk states them.
+      waits: waits.map((w) => ({ session: w.session, start_ms: w.start_ms, end_ms: w.end_ms, next_prompt_ms: w.next_prompt_ms, stop: w.stop, why: w.why, why_source: w.why_source, confidence: w.confidence, reasons: w.reasons })),
+      pr_anchor: clock && clock.anchor ? clock.anchor : { state: "unavailable", reasons: ["github_not_read"] },
+      prs: clock ? clock.prs : fallbackPrs(),
     };
   }
 
@@ -1424,6 +1510,7 @@
     clockTick,
     drawer,
     promptText,
+    clockListStates,
     slimMap,
   };
 });

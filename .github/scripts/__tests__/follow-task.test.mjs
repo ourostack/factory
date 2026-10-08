@@ -616,18 +616,21 @@ test("failed tool calls are binned to pixel columns, activity merges below a pix
 
 // ------------------------------------------------ the map file and publishing
 
-test("the slim map keeps what the landing view draws and drops intervals, per-turn times and pull request times", () => {
+test("the map file (factory.site.map/2) keeps what the landing view draws, every operator prompt, the pull request clock and each burst's pull request count, and drops the intervals", () => {
   const report = {
     job: { id: "j1" },
     timeline: {
       job: "j1",
       intervals: [{ start_ms: 0, end_ms: 1, kind: "turn" }],
-      human_turns: [{ at_ms: 5, session: "s1" }],
+      human_turns: [
+        { at_ms: 0, session: "s1", host: "h", basis: "first", window_ms: null, prompt_class: "m", output_class: "none" },
+        { at_ms: 15, session: "s1", host: "h", basis: "after_stop", window_ms: 6, prompt_class: "s", output_class: "l" },
+      ],
       prs: [{ repo: "o/r", number: 7, at_ms: 1234, session: "s1", worker: 0, host: "h" }],
-      bursts: [{ start_ms: 0, end_ms: 10, working_ms: 9, sessions: ["s1"], agents: 1, tool_calls: 2, tool_failures: 0, operator_turns: 1, prs: 1, value_ms: 3, defect_ms: 0, defect_stretches: 0 }],
+      bursts: [{ start_ms: 0, end_ms: 10, working_ms: 9, sessions: ["s1"], agents: 1, tool_calls: 2, tool_failures: 0, operator_turns: 1, prs: m(1), value_ms: 3, defect_ms: 0, defect_stretches: 0 }],
       gaps: [{ start_ms: 10, end_ms: 20, waited_on: "next_prompt" }],
       lead_window: { start_ms: 0, end_ms: 20, state: "measured", reasons: [] },
-      sessions: [{ id: "s1", host: "h", offset_ms: 0, end_ms: 20, basis: ["x"], ended: true }],
+      sessions: [{ id: "s1", host: "claude-code", offset_ms: 0, end_ms: 20, basis: ["x"], ended: true }],
       agents: [{ host: "h", session: "s1", n: 0, parent: null }],
       transitions: [{ offset_ms: 3, to: "done" }],
       observations: [{ offset_ms: 4, status: "done" }],
@@ -636,14 +639,88 @@ test("the slim map keeps what the landing view draws and drops intervals, per-tu
     },
   }
   const slim = W.slimMap(report)
-  const text = JSON.stringify(slim)
-  assert.doesNotMatch(text, /"intervals"|"human_turns"|"at_ms"|"basis"/)
-  assert.deepEqual(slim.prs, [{ repo: "o/r", number: 7 }])
+  assert.equal(slim.schema, "factory.site.map/2")
+  assert.doesNotMatch(JSON.stringify(slim), /"intervals"/)
+  // Every operator prompt, on the task clock, with its why (none known before Desk's waits).
+  assert.deepEqual(slim.human_turns, [
+    { session: "s1", host: "h", at_ms: 0, basis: "first", window_ms: null, prompt_class: "m", output_class: "none", why: null },
+    { session: "s1", host: "h", at_ms: 15, basis: "after_stop", window_ms: 6, prompt_class: "s", output_class: "l", why: null },
+  ])
+  assert.deepEqual(slim.waits, [])
+  assert.deepEqual(slim.human_turns_state, { state: "measured", reasons: [], basis: "store_from_hosts" })
+  assert.deepEqual(slim.prs_state, { state: "partial", bound: "lower", reasons: ["host_records_partly"], basis: "store_from_hosts" })
+  // A burst keeps Desk's pull request count envelope.
+  assert.deepEqual(slim.bursts[0].prs, m(1))
+  // With no GitHub data, a pull request is not placed and says why: nothing is invented.
+  assert.deepEqual(slim.prs, [{ repo: "o/r", number: 7, created: null, opened_at_ms: null, opened_basis: "not_placed", merged_at_ms: null, merged_basis: "not_placed", state: null, reasons: ["github_not_read"] }])
+  assert.deepEqual(slim.pr_anchor, { state: "unavailable", reasons: ["github_not_read"] })
+  assert.equal(slim.finish_date, null, "no finish date until the store resolves one")
   assert.equal(slim.bursts.length, 1)
-  assert.equal("prs" in slim.bursts[0], false, "no pull request count per burst: it would place a pull request on the task clock (I6)")
   assert.deepEqual(slim.gaps, [{ start_ms: 10, end_ms: 20, waited_on: "next_prompt" }])
   assert.deepEqual(slim.detail_files, ["jobs/j1/s1.json"])
   assert.equal(slim.job, "j1")
+})
+
+test("the map file takes the store's pull request clock and finish date, and joins each prompt to the wait it ends (Desk D4 and D5 fields)", () => {
+  const report = {
+    job: { id: "j1" },
+    timeline: {
+      human_turns: [
+        { at_ms: 0, session: "s1", host: "claude-code", basis: "first", window_ms: null, prompt_class: "m", output_class: "none" },
+        { at_ms: 50, session: "s1", host: "claude-code", basis: "after_stop", window_ms: 30, prompt_class: "s", output_class: "l" },
+        // The same instant in another session ends no wait of this one.
+        { at_ms: 90, session: "s2", host: "claude-code", basis: "after_stop", window_ms: 10, prompt_class: "s", output_class: "s" },
+      ],
+      human_turns_state: { class: "inferred", state: "partial", bound: "lower", reasons: ["log_truncated"] },
+      prs_state: { class: "inferred", state: "partial", bound: "lower", reasons: ["host_records_partly"] },
+      waits: [
+        { session: "s1", start_ms: 20, end_ms: 50, next_prompt_ms: 30, stop: { end: "end_turn", asks: false, pending_agents: false }, why: "acceptance", why_source: "evaluator", confidence: "high", reasons: [] },
+        { session: "s1", start_ms: 80, end_ms: 90, next_prompt_ms: 10, stop: { end: "end_turn", asks: true, pending_agents: null }, why: null, why_source: "none", confidence: null, reasons: ["not_labeled"] },
+      ],
+      prs: [{ repo: "o/r", number: 7, at_ms: 1234, created: true }],
+      bursts: [],
+      gaps: [],
+      sessions: [{ id: "s1", host: "claude-code", offset_ms: 0 }, { id: "s2", host: "claude-code", offset_ms: 60 }],
+    },
+  }
+  const clock = { anchor: { state: "measured", reasons: [], basis: "created", n: 1, dropped: 0, spread_ms: 0 }, prs: [{ repo: "o/r", number: 7, created: true, opened_at_ms: 1234, opened_basis: "desk", merged_at_ms: 5000, merged_basis: "pr_anchor", state: "merged", reasons: [] }] }
+  const finish = { state: "measured", value: "2026-10-07", basis: "desk_transition", reasons: [] }
+  const slim = W.slimMap(report, { pr_clock: clock, finish_date: finish })
+  assert.deepEqual(slim.human_turns.map((t) => t.why), [null, "acceptance", null])
+  assert.deepEqual(slim.waits[0], report.timeline.waits[0])
+  assert.equal(slim.waits.length, 2)
+  assert.deepEqual(slim.human_turns_state, { state: "partial", bound: "lower", reasons: ["log_truncated"], basis: "desk" })
+  assert.deepEqual(slim.prs, clock.prs)
+  assert.deepEqual(slim.pr_anchor, clock.anchor)
+  assert.deepEqual(slim.finish_date, finish)
+  // Offsets only: no epoch value and no ISO time reaches the map file.
+  assert.doesNotMatch(JSON.stringify(slim), /"value_ms"|\d{4}-\d{2}-\d{2}T/)
+})
+
+test("the page still draws a map/2 file exactly as it drew map/1", () => {
+  const timeline = {
+    bursts: [
+      { start_ms: 0, end_ms: 10 * M, working_ms: 9 * M, sessions: ["s1"], agents: 1, tool_calls: 2, tool_failures: 0, operator_turns: m(1), prs: m(1) },
+      { start_ms: 40 * M, end_ms: 60 * M, working_ms: 20 * M, sessions: ["s1"], agents: 1, tool_calls: 5, tool_failures: 1, operator_turns: m(1), prs: m(0) },
+    ],
+    gaps: [{ start_ms: 10 * M, end_ms: 40 * M, waited_on: "next_prompt" }],
+    human_turns: [{ at_ms: 0, session: "s1", basis: "first" }, { at_ms: 40 * M, session: "s1", basis: "after_stop", window_ms: 30 * M }],
+    prs: [{ repo: "o/r", number: 7, at_ms: 5 * M }],
+    sessions: [{ id: "s1", host: "claude-code", offset_ms: 0, end_ms: 60 * M }],
+    transitions: [{ offset_ms: 59 * M, to: "done" }],
+    lead_window: { start_ms: 0, end_ms: 60 * M, state: "measured", reasons: [] },
+  }
+  const v2 = W.slimMap({ job: { id: "j" }, timeline })
+  const v1 = { ...v2, schema: "factory.site.map/1", prs: v2.prs.map((p) => ({ repo: p.repo, number: p.number })), bursts: v2.bursts.map(({ prs, ...b }) => b) }
+  for (const k of ["human_turns", "waits", "human_turns_state", "prs_state", "pr_anchor", "finish_date"]) delete v1[k]
+  const draw = (map) => {
+    const model = W.mapModel(map, { maxBoxes: 7 })
+    // A box keeps its raw bursts; the page draws from the rest.
+    const items = model.items.map(({ bursts, ...it }) => it)
+    return { items, totals: model.totals, ladder: W.ladder(model).map(({ item, ...seg }) => seg), marks: W.statusMarks(map, model) }
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(draw(v2))), JSON.parse(JSON.stringify(draw(v1))))
+  assert.equal(draw(v2).items.filter((x) => x.type === "box").length, 2)
 })
 
 test("the Pages build writes one map file per task, lists it in llms.txt and reports its size; with no task files it writes none", () => {
@@ -662,7 +739,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
   const full = files.find((f) => f.path === "jobs/j1.json").bytes
   assert.ok(slim < full / 5, "the map file is a small part of the full report")
   assert.match(sizeLine(files.filter((f) => f.path.startsWith("map/")), "Task map files (new)"), /^Task map files \(new\): 1 files, 0\.00 MB total, largest map\/j1\.json/)
-  assert.match(llmsText("{{READ_WHOLE}}\n{{FILES}}", files), /## Step 1, follow a task: one task's map\n\n- map\/j1\.json \(\d+ KB, small enough to read whole\): the work bursts, waits, card status changes and pull request numbers of task j1/)
+  assert.match(llmsText("{{READ_WHOLE}}\n{{FILES}}", files), /## Step 1, follow a task: one task's map\n\n- map\/j1\.json \(\d+ KB, small enough to read whole\): the work bursts, waits, card status changes, operator prompts \(each with its why\), the waits before them, and pull requests with their opened and merged times on the task clock, of task j1/)
 
   const emptyRoot = mkdtempSync(join(tmpdir(), "follow-task-empty-"))
   mkdirSync(join(emptyRoot, "dist"), { recursive: true })

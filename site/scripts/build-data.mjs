@@ -59,6 +59,7 @@ import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 import { finishOrder, firstAdded } from "./finish-order.mjs";
 import { taskNames } from "./task-names.mjs";
+import { MAX_PR_LOOKUPS, prKey, pullsDoc } from "./pr-clock.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -418,7 +419,6 @@ const asMeasured = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) 
 // ---------------------------------------------------------------------------
 
 const FEATURED_COUNT = 3;
-const MAX_PR_LOOKUPS = 220;
 
 const candidateSessions = [];
 for (const f of factFiles) {
@@ -453,11 +453,21 @@ async function ghGet(url) {
 }
 
 // One read per pull request per build: merge state for the featured
-// sessions and the kaizen countermeasures, title and visibility for names.
+// sessions and the kaizen countermeasures, title and visibility for names,
+// opened and merged times for the PR clock. At most MAX_PR_LOOKUPS distinct
+// pull requests are read (pr-clock.mjs); a pull request beyond the cap
+// reads as unreadable, and the PR clock names it github_lookup_capped.
 const pullCache = new Map();
+const pullCapped = new Set();
 function pullInfo(repo, number) {
   const key = `${repo}#${number}`;
-  if (!pullCache.has(key)) pullCache.set(key, ghGet(`https://api.github.com/repos/${repo}/pulls/${number}`));
+  if (!pullCache.has(key)) {
+    if (pullCache.size >= MAX_PR_LOOKUPS) {
+      pullCapped.add(key);
+      return Promise.resolve(null);
+    }
+    pullCache.set(key, ghGet(`https://api.github.com/repos/${repo}/pulls/${number}`));
+  }
   return pullCache.get(key);
 }
 
@@ -537,6 +547,25 @@ for (const { d, prs } of featuredCandidates) {
       j.pull_requests = order.map((u) => byUrl.get(u)).filter(Boolean);
     }
     Object.assign(j, name);
+  }
+}
+
+// The PR clock's GitHub reads (pr-clock.mjs): opened time, merged time and
+// state of every pull request on every task's timeline, written to
+// --pulls-out for publish-files.mjs, which places them on each task's clock
+// in its map file. The file stays in the build and is never published.
+// Offline, nothing is read and no file is written.
+{
+  const pullsOut = arg("pulls-out");
+  if (pullsOut && !OFFLINE) {
+    const keys = new Map();
+    for (const f of jobFiles) {
+      for (const p of readJSON(join(jobsDir, f), {})?.timeline?.prs || []) if (p && typeof p.repo === "string" && Number.isInteger(p.number)) keys.set(prKey(p), p);
+    }
+    const bodies = new Map();
+    await mapLimit([...keys.values()], 8, async (p) => bodies.set(prKey(p), await pullInfo(p.repo, p.number)));
+    mkdirSync(dirname(pullsOut), { recursive: true });
+    writeFileSync(pullsOut, JSON.stringify(pullsDoc(bodies, pullCapped, [...keys.keys()])), "utf8");
   }
 }
 
@@ -866,6 +895,7 @@ const data = {
     substantial_active_ms: SUBSTANTIAL_ACTIVE_MS,
     stale_after_hours: STALE_AFTER_HOURS,
     low_coverage_below: LOW_COVERAGE_BELOW,
+    max_pr_lookups: MAX_PR_LOOKUPS,
   },
   coverage: {
     sessions_with_facts: counted(coverageRaw.sessions_with_facts ?? factFiles.length),
