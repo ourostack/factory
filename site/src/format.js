@@ -137,6 +137,14 @@
     over_budget_after_binning: "this session's activity is drawn at its coarsest: even with every short run merged, its swimlane file is larger than its size budget",
     agents_working: "agents were working during this stretch, so it is not counted as waiting; the evaluator had labeled it waiting",
     job_share_unknown: "for some of the job's sessions there is no record of which part was this job's, so their labels are left out and this is at least this much",
+    session_work_unattributed: "a session of this task did work that no task's binding claims, so that time stays under cause not recorded and some of it may have been another task's",
+    // Why Desk gives a partial figure no direction (its `bound_reason`,
+    // beside `bound: null`), in Desk's own words; the page says
+    // "direction not known, because …" where the direction is truly open.
+    bound_reasons_conflict: "its reasons pull it both ways, so the true figure may be higher or lower",
+    bound_not_moved: "its reasons do not change this figure, so it is exact for the task's window as stated",
+    bound_not_one_quantity: "it is a ranking or a status, not one quantity, so it has no single direction",
+    bound_direction_undecided: "one of its reasons has no decided direction yet, so the true figure may be higher or lower",
   };
 
   // Every reason that can reach the page has words. The site build stops on
@@ -225,6 +233,10 @@
       direction = "";
     }
     const unknownDirection = number.bound === "unknown";
+    // Desk's own "no direction" (bound: null) says why, when it says.
+    // bound_not_moved is not an open direction: the figure is exact for its
+    // window, so its words stand alone.
+    const noDirection = number.bound === null && typeof number.bound_reason === "string" ? (number.bound_reason === "bound_not_moved" ? reasonText(number.bound_reason) : `direction not known, because ${reasonText(number.bound_reason)}`) : null;
     // An unknown direction is said in the visible marker too, so a reader
     // does not have to hover to learn the figure could be off either way.
     return {
@@ -232,7 +244,7 @@
       text: direction + body,
       // An unverified host is said as such, visibly, not only in the reason.
       marker: `${Array.isArray(number.reasons) && number.reasons.includes("unverified_host") ? "unverified" : "partial"}${unknownDirection ? `, ${UNKNOWN_DIRECTION}` : ""}`,
-      reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : reason,
+      reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : noDirection ? `${reason}; ${noDirection}` : reason,
       nofn,
       basis,
       unknownDirection,
@@ -582,11 +594,22 @@
       return CAUSE_ID.test(key) ? { view: "cause", cause: key } : { view: "missing" };
     }
     if (parts.length === 1 && PAGES.includes(parts[0])) {
-      // Compare tasks and Rank causes keep their chart mode in the URL.
-      const mode = qi >= 0 && (parts[0] === "compare" || parts[0] === "causes") && full.slice(qi + 1) === "mode=working" ? "working" : null;
-      return mode ? { view: parts[0], mode } : { view: parts[0] };
+      const q = qi >= 0 ? full.slice(qi + 1) : "";
+      // Compare tasks and Rank causes keep their chart mode in the URL; only
+      // Compare tasks has the share mode.
+      const mode = (parts[0] === "compare" || parts[0] === "causes") && q === "mode=working" ? "working" : parts[0] === "compare" && q === "mode=share" ? "share" : null;
+      if (mode) return { view: parts[0], mode };
+      // A glossary entry on Why Lean?: "#/why?term=capture-coverage".
+      const term = parts[0] === "why" ? /^term=([a-z][a-z0-9-]{0,40})$/.exec(q) : null;
+      return term ? { view: "why", term: term[1] } : { view: parts[0] };
     }
     return { view: "missing" };
+  }
+
+  // A link to one glossary entry on Why Lean? ("#/why?term=job-hours"), or
+  // null for anything that is not a plain term.
+  function glossaryRoute(term) {
+    return typeof term === "string" && /^[a-z][a-z0-9-]{0,40}$/.test(term) ? `#/why?term=${term}` : null;
   }
 
   // Which of the four steps a view belongs to, for the tab that shows as current.
@@ -603,24 +626,17 @@
     return `#/${parts.join("/")}`;
   }
 
-  // The task #/ opens: a done, labeled task with at least ten minutes of
-  // working time, from the latest finish group (the tasks first labeled in
-  // the same commit), preferring a task with a public name within that
-  // group, then the latest finish position. Without such a task: the done
-  // task that finished last, then any task with a position, then the first.
-  const LANDING_MIN_WORK_MS = 10 * 60000;
+  // The task #/ opens: the finished task with the latest finish position
+  // (finished means labeled for waste, so its finish is known), named or
+  // private alike, the same task an agent reaches by following llms.txt to
+  // the largest finish_order among labeled tasks. Without one: the done task
+  // with the latest position, then any task with a position, then the first.
   function defaultTask(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
     const pos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
-    const group = (j) => (j && j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : -1);
-    const work = (j) => (j && j.active_time_ms && j.active_time_ms.state !== "unavailable" && typeof j.active_time_ms.value === "number" ? j.active_time_ms.value : -1);
-    const named = (j) => (typeof j.name === "string" && j.name ? 1 : 0);
     const best = (xs) => xs.reduce((a, j) => (a === null || pos(j) > pos(a) ? j : a), null);
-    const done = list.filter((j) => j.status === "done" && pos(j) > 0);
-    const landing = done
-      .filter((j) => j.finish_basis === "labels" && work(j) >= LANDING_MIN_WORK_MS)
-      .sort((a, b) => group(b) - group(a) || named(b) - named(a) || pos(b) - pos(a))[0];
-    return landing || best(done.filter((j) => j.finish_basis === "labels")) || best(done) || best(list.filter((j) => pos(j) > 0)) || list[0] || null;
+    const placed = list.filter((j) => j && pos(j) > 0);
+    return best(placed.filter((j) => j.finish_basis === "labels")) || best(placed.filter((j) => j.status === "done")) || best(placed) || list[0] || null;
   }
 
   // An English ordinal for a finish position: 1st, 2nd, 3rd, 11th, 22nd.
@@ -849,6 +865,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { LANDING_MIN_WORK_MS, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  return { glossaryRoute, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
+    barRow, finishCell, finishWords, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

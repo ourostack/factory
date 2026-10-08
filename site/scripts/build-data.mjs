@@ -48,6 +48,9 @@ import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "
 // The site's own parser for alarm keys in issue titles (format.js), so the
 // build and the page agree on what a key is.
 const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
+// The table that links a kaizen issue to the cause it works on (steps.js),
+// written into data.json so agents read the mapping as data.
+const { kaizenCauseOf } = createRequire(import.meta.url)("../src/steps.js");
 import { checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
@@ -675,7 +678,14 @@ async function fetchAlarmIssues() {
 }
 
 const [kaizenFetch, andonFetch, alarmFetch] = await Promise.all([fetchIssues("kaizen"), fetchIssues("andon"), fetchAlarmIssues()]);
-const kaizenIssues = await mapLimit(kaizenFetch.issues, 4, enrichIssue);
+// Each kaizen issue carries the cause the site maps it to, or null.
+const kaizenIssues = (await mapLimit(kaizenFetch.issues, 4, enrichIssue)).map((i) => {
+  // The cause an issue works on, from the page's own mapping table; an
+  // issue the table does not map carries no cause key (the store's number
+  // check refuses a null).
+  const cause = kaizenCauseOf(i.url);
+  return cause ? { ...i, cause } : i;
+});
 const andonIssues = await mapLimit(andonFetch.issues, 4, enrichIssue);
 
 const kaizenRaised =
