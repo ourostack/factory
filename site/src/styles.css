@@ -47,11 +47,11 @@
   --c-wait-api_retry: #e08a3c;
   --c-wait-tool_failure: #9f4a1c;
   --c-wait-long_tool_call: #d6772a;
-  --c-wait-queue_before_start: #e6a764;
-  --c-wait-no_session: #edc495;
+  --c-wait-queue_before_start: #e9b96a;
+  --c-wait-no_session: #f3dcc0;
   --c-wait-unknown: #d1661f;
   /* The agent was working on another task: the family's rose shade. */
-  --c-wait-other_task: #b8475c;
+  --c-wait-other_task: #b53a6a;
   --c-alarm: #c62f2f;
   --c-accent: #6b4fd8;
 
@@ -105,13 +105,13 @@
     --c-not-labeled: #a8a7a0;
     --c-no-session: #5a5953;
     --c-wait-next_prompt: #f08a3e;
-    --c-wait-api_retry: #f5b06a;
-    --c-wait-tool_failure: #c4612a;
-    --c-wait-long_tool_call: #e39a52;
-    --c-wait-queue_before_start: #a9672f;
-    --c-wait-no_session: #7d5530;
+    --c-wait-api_retry: #f8dcae;
+    --c-wait-tool_failure: #bc4630;
+    --c-wait-long_tool_call: #e2b53a;
+    --c-wait-queue_before_start: #9a8148;
+    --c-wait-no_session: #6a4f36;
     --c-wait-unknown: #e8833c;
-    --c-wait-other_task: #ec8597;
+    --c-wait-other_task: #e57a9a;
     --c-alarm: #ef5a5a;
     --c-accent: #9d88f0;
 

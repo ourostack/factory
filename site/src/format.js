@@ -606,6 +606,16 @@
     return { view: "missing" };
   }
 
+  // Which view's own shell to show while the store's data is still loading:
+  // the routed view's name, or null when the hash is not yet a view (a skip
+  // link, an old anchor to redirect, a page that does not exist), in which
+  // case the page shows only "Loading the store…".
+  function loadingView(hash) {
+    const r = parseRoute(hash, () => null);
+    if (r.view === "skip" || r.view === "redirect") return null;
+    return r.view === "missing" ? null : r.view;
+  }
+
   // A link to one glossary entry on Why Lean? ("#/why?term=job-hours"), or
   // null for anything that is not a plain term.
   function glossaryRoute(term) {
@@ -865,6 +875,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { glossaryRoute, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });
