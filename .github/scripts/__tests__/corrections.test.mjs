@@ -639,3 +639,276 @@ test("the pull request check also refuses a correction the target facts file's v
   assert.deepEqual(checkCorrections({ base, head: base, runGit: run("desk.factory.published/2") }).codes, ["correction_version_mismatch"])
   assert.deepEqual(checkCorrections({ base, head: base, runGit: run("desk.factory.published/3") }).codes, [])
 })
+
+// --- published facts /4: finish day, created pull requests, why the agent stopped ------------
+
+const JOB_X = "2927a4630f97b7869a71f387a4a757f1"
+const JOB_Y = "3a27a4630f97b7869a71f387a4a757f2"
+const STOP = { end: "end_turn", asks: false, pending_agents: null }
+const ZERO_PRIVATE = { prs: 0, commits: 0 }
+
+// A complete, valid `/4` facts file; `over` replaces top-level keys.
+function facts4(over = {}) {
+  return {
+    schema: "desk.factory.published/4",
+    session: { host: "claude-code", id: SESSION, host_version: "2.0.0", entrypoint: "cli", duration_ms: 1000, ended: true, end_reason: "other" },
+    plugins: [],
+    models: [],
+    agents: [{ n: 0, parent: null, model: "claude-opus-4", agent_type: "main", requested_model: "opus" }],
+    intervals: [
+      { kind: "turn", agent: 0, start_ms: 0, end_ms: 5 },
+      { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: STOP },
+      { kind: "human_wait", agent: 0, start_ms: 20, end_ms: 30, stop: { end: "ask_question", asks: true, pending_agents: true } },
+    ],
+    counts: { tool_calls: {}, tool_failures: {}, tool_retries: 0, api_retries: 0, compactions: 0 },
+    refs: {
+      prs: [{ repo: "ourostack/desk", number: 7, created: false }, { repo: "ourostack/desk", number: 8, at_ms: 9, created: false }],
+      commits: [],
+      private: ZERO_PRIVATE,
+    },
+    jobs: [
+      { job: JOB_X, basis: ["desk_commit"], session_offset_ms: null, transitions: [{ to: "done", offset_ms: 5 }], observed: { status: "done", offset_ms: 5 }, finished_on: "2026-10-01", finished_basis: "transition" },
+      { job: JOB_Y, basis: ["desk_commit"], session_offset_ms: null, transitions: [], observed: null, finished_on: null, finished_basis: null },
+    ],
+    unavailable: [],
+    ...over,
+  }
+}
+
+// The same file as `/3` content: no `/4` key anywhere.
+function facts3() {
+  const f = facts4({ schema: "desk.factory.published/3" })
+  f.intervals = f.intervals.map(({ stop, ...rest }) => rest)
+  f.refs = { ...f.refs, prs: f.refs.prs.map(({ created, ...rest }) => rest) }
+  f.jobs = f.jobs.map(({ finished_on, finished_basis, ...rest }) => rest)
+  return f
+}
+
+const rec4 = (fields) => validRecord({ fields })
+const codes4 = (current, record) => checkCorrectionAgainstFacts(current, record).map((e) => e.code)
+const bareJob = (job) => ({ job, basis: ["desk_commit"], session_offset_ms: null, transitions: [], observed: null })
+
+test("a correction record may carry the /4 keys: a PR's created flag, a human wait's stop, a job's finish day", () => {
+  const stopped = { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: STOP }
+  assert.deepEqual(validateCorrectionRecord(rec4({ intervals: [stopped] }), FILE_NAME), { ok: true, errors: [] })
+  assert.deepEqual(validateCorrectionRecord(rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, created: false }], commits: [], private: ZERO_PRIVATE } }), FILE_NAME).errors, [])
+  const jobs = facts4().jobs
+  assert.deepEqual(validateCorrectionRecord(rec4({ jobs }), FILE_NAME).errors, [])
+})
+
+test("the /4 keys are checked for shape: a bad stop, created flag or finish day is refused with its path", () => {
+  const wait = (stop) => rec4({ intervals: [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop }] })
+  const errs = (record) => validateCorrectionRecord(record, FILE_NAME).errors.map((e) => `${e.code}@${e.path}`)
+  assert.deepEqual(errs(wait({ ...STOP, end: "sleeping" })), ["correction_field_enum@fields.intervals.0.stop.end"])
+  assert.deepEqual(errs(wait({ end: "end_turn", asks: false })), ["correction_field_missing@fields.intervals.0.stop.pending_agents"])
+  assert.deepEqual(errs(wait({ ...STOP, asks: "yes" })), ["correction_field_type@fields.intervals.0.stop.asks"])
+  assert.deepEqual(errs(wait({ ...STOP, text: "x" })), ["correction_field_unknown_key@fields.intervals.0.stop"])
+  assert.deepEqual(errs(wait({ end: "end_turn", asks: null, pending_agents: null })), [])
+  const pr = (created) => rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, created }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(errs(pr("no")), ["correction_field_type@fields.refs.prs.0.created"])
+  const job = (extra) => rec4({ jobs: [{ ...bareJob(JOB_X), ...extra }] })
+  assert.deepEqual(errs(job({ finished_on: "2026-13-40", finished_basis: "transition" })), ["correction_field_pattern@fields.jobs.0.finished_on"])
+  assert.deepEqual(errs(job({ finished_on: "2024-12-31", finished_basis: "transition" })), ["correction_field_range@fields.jobs.0.finished_on"])
+  assert.deepEqual(errs(job({ finished_on: "2026-10-01T10:00:00Z", finished_basis: "transition" })), ["correction_field_pattern@fields.jobs.0.finished_on"])
+  assert.deepEqual(errs(job({ finished_on: "2026-10-01", finished_basis: "guess" })), ["correction_field_enum@fields.jobs.0.finished_basis"])
+  assert.deepEqual(errs(job({ finished_on: 5, finished_basis: null })), ["correction_field_type@fields.jobs.0.finished_on"])
+  assert.deepEqual(errs(job({ finished_on: "2026-10-01" })), ["correction_field_missing@fields.jobs.0.finished_basis"])
+  assert.deepEqual(errs(job({ finished_basis: "transition" })), ["correction_field_missing@fields.jobs.0.finished_on"])
+  assert.deepEqual(errs(job({ finished_on: null, finished_basis: null })), [])
+})
+
+test("a stop belongs only on a human wait: on any other interval it is still an unknown key", () => {
+  const record = rec4({ intervals: [{ kind: "turn", agent: 0, start_ms: 0, end_ms: 5, stop: STOP }] })
+  assert.deepEqual(validateCorrectionRecord(record, FILE_NAME).errors, [{ code: "correction_field_unknown_key", path: "fields.intervals.0" }])
+})
+
+test("a correction may not write a /4 key into a file older than /4, and /3 corrections keep working", () => {
+  const withStop = rec4({ intervals: [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: STOP }] })
+  const withCreated = rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, created: false }], commits: [], private: ZERO_PRIVATE } })
+  const withFinish = rec4({ jobs: [{ ...bareJob(JOB_X), finished_on: null, finished_basis: null }] })
+  for (const n of [1, 2, 3]) {
+    const old = { schema: `desk.factory.published/${n}` }
+    assert.deepEqual(codes4(old, withStop), ["correction_version_mismatch"])
+    assert.deepEqual(codes4(old, withCreated), ["correction_version_mismatch"])
+    assert.deepEqual(codes4(old, withFinish), ["correction_version_mismatch", "correction_version_mismatch"])
+  }
+  assert.deepEqual(codes4({}, withStop), ["correction_version_mismatch"], "an unreadable version is not assumed to be new")
+  for (const r of [withStop, withCreated, withFinish]) assert.deepEqual(codes4(facts4(), r), [])
+  // The /3 forms still pass against a /3 file and a /4 file.
+  const old3 = rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, at_ms: 3 }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(codes4(facts3(), old3), [])
+})
+
+test("a /4 file keeps every /4 key through a correction that does not name it", () => {
+  const current = facts4()
+  // A /3-shaped replacement of refs, intervals and the jobs ceiling: the record knows no /4 key.
+  const record = rec4({
+    refs: { prs: [{ repo: "ourostack/desk", number: 8, at_ms: 9 }, { repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE },
+    intervals: [
+      { kind: "human_wait", agent: 0, start_ms: 20, end_ms: 30 },
+      { kind: "turn", agent: 0, start_ms: 0, end_ms: 5 },
+      { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10 },
+    ],
+    jobs: [bareJob(JOB_X)],
+  })
+  assert.deepEqual(validateCorrectionRecord(record, FILE_NAME).errors, [])
+  assert.deepEqual(codes4(current, record), [])
+  const out = applyCorrection(current, record)
+  assert.deepEqual(out.refs.prs, [{ repo: "ourostack/desk", number: 8, at_ms: 9, created: false }, { repo: "ourostack/desk", number: 7, created: false }])
+  assert.deepEqual(out.intervals.map((i) => i.stop), [{ end: "ask_question", asks: true, pending_agents: true }, undefined, STOP])
+  assert.deepEqual(out.jobs, [current.jobs[0]], "the ceiling keeps the current job exactly, finish day included")
+  assert.equal(out.schema, "desk.factory.published/4")
+})
+
+test("a correction that names a /4 key wins over the current value", () => {
+  const current = facts4()
+  const record = rec4({
+    refs: { prs: [{ repo: "ourostack/desk", number: 7, created: true }], commits: [], private: ZERO_PRIVATE },
+    intervals: [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: { end: "interrupted", asks: null, pending_agents: false } }],
+  })
+  const out = applyCorrection(current, record)
+  assert.deepEqual(out.refs.prs, [{ repo: "ourostack/desk", number: 7, created: true }])
+  assert.deepEqual(out.intervals[0].stop, { end: "interrupted", asks: null, pending_agents: false })
+})
+
+test("a jobs correction never rewrites a job's finish day, even when its entry carries another", () => {
+  const current = facts4()
+  const record = rec4({ jobs: [{ ...bareJob(JOB_X), finished_on: "2026-01-02", finished_basis: "card_updated" }, bareJob(JOB_Y)] })
+  const out = applyCorrection(current, record)
+  assert.deepEqual(out.jobs, current.jobs)
+  assert.equal(correctionChanges(current, record), false)
+})
+
+test("a /4 key the correction drops and the file cannot supply is refused, not silently left out", () => {
+  const current = facts4()
+  const newPr = rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 99 }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, newPr), [{ code: "correction_v4_key_missing", path: "fields.refs.prs.0.created" }])
+  const newWait = rec4({ intervals: [{ kind: "human_wait", agent: 0, start_ms: 40, end_ms: 50 }, { kind: "turn", agent: 0, start_ms: 0, end_ms: 5 }] })
+  assert.deepEqual(checkCorrectionAtFacts(newWait), [{ code: "correction_v4_key_missing", path: "fields.intervals.0.stop" }])
+  function checkCorrectionAtFacts(record) { return checkCorrectionAgainstFacts(current, record) }
+  // Naming the key is enough.
+  const named = rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 99, created: false }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, named), [])
+  // /3 files need nothing.
+  assert.deepEqual(checkCorrectionAgainstFacts(facts3(), rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 99 }], commits: [], private: ZERO_PRIVATE } })), [])
+})
+
+test("a public desk never publishes a created pull request, and a correction cannot say otherwise", () => {
+  const pub = facts4({ unavailable: [{ field: "job_offsets", reason: "desk_public" }] })
+  const created = (flag, extra = {}) => rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, created: flag }], commits: [], private: ZERO_PRIVATE }, ...extra })
+  assert.deepEqual(checkCorrectionAgainstFacts(pub, created(true)), [{ code: "correction_inconsistent", path: "fields.refs.prs.0.created" }])
+  assert.deepEqual(checkCorrectionAgainstFacts(pub, created(false)), [])
+  assert.deepEqual(checkCorrectionAgainstFacts(facts4(), created(true)), [], "a desk that is not public may say created")
+  // The record can itself make the file public.
+  assert.deepEqual(checkCorrectionAgainstFacts(facts4(), created(true, { unavailable: [{ field: "job_offsets", reason: "desk_public" }] })).map((e) => e.code), ["correction_inconsistent"])
+  // And it can lift it.
+  assert.deepEqual(checkCorrectionAgainstFacts(pub, created(true, { unavailable: [] })), [])
+})
+
+test("applying and checking corrections handle a /4 file end to end, and Desk accepts the result", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "v4-"))
+  try {
+    mkdirSync(path.join(dir, "facts"), { recursive: true })
+    mkdirSync(path.join(dir, "corrections"), { recursive: true })
+    const current = facts4()
+    writeFileSync(path.join(dir, "facts", FILE_NAME), `${JSON.stringify(current)}\n`)
+    const record = rec4({
+      refs: { prs: [{ repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE },
+      intervals: [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10 }],
+      jobs: [bareJob(JOB_X)],
+    })
+    writeFileSync(path.join(dir, "corrections", FILE_NAME), JSON.stringify(record))
+    const result = applyCorrectionsToStore({ storeDir: dir })
+    assert.deepEqual(result.applied, [FILE_NAME])
+    const written = readFileSync(path.join(dir, "facts", FILE_NAME), "utf8")
+    const out = JSON.parse(written)
+    assert.deepEqual(out.refs.prs, [{ repo: "ourostack/desk", number: 7, created: false }])
+    assert.deepEqual(out.intervals, [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: STOP }])
+    assert.deepEqual(out.jobs, [current.jobs[0]])
+    // A second pass finds nothing to change.
+    assert.deepEqual(applyCorrectionsToStore({ storeDir: dir }).unchanged, [FILE_NAME])
+    if (deskPublished) {
+      const { validatePublishedBytes } = await import(pathToFileURL(deskPublished).href)
+      assert.deepEqual(validatePublishedBytes(written), { ok: true, errors: [] }, "Desk's validator accepts the corrected /4 file")
+      assert.deepEqual(validatePublishedBytes(`${JSON.stringify(current)}\n`), { ok: true, errors: [] }, "the fixture itself is a valid /4 file")
+    } else {
+      assert.ok(process.env.FACTORY_REQUIRE_DESK !== "1", "FACTORY_REQUIRE_DESK is set but DESK_DIR does not hold Desk's published-schema.js")
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+const deskPublished = process.env.DESK_DIR && existsSync(path.join(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/published-schema.js"))
+  ? path.join(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/published-schema.js")
+  : null
+
+test("a /3 file and a /3-shaped correction behave exactly as before", () => {
+  const current = facts3()
+  const record = rec4({
+    refs: { prs: [{ repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE },
+    intervals: [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10 }],
+  })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, record), [])
+  const out = applyCorrection(current, record)
+  assert.deepEqual(out.refs.prs, [{ repo: "ourostack/desk", number: 7 }])
+  assert.deepEqual(out.intervals, [{ kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10 }])
+})
+
+test("the pull request check refuses a /4 correction that drops a /4 key, and passes one that keeps it", () => {
+  const run = (record) => (args) => {
+    if (args[0] === "diff") return `corrections/${FILE_NAME}\0`
+    if (args[1] === "blob" && args[2].includes(":corrections/")) return JSON.stringify(record)
+    if (args[1] === "blob" && args[2].includes(":facts/")) return JSON.stringify(facts4())
+    throw new Error("unexpected")
+  }
+  const base = "a".repeat(40)
+  const drops = rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 99 }], commits: [], private: ZERO_PRIVATE } })
+  const keeps = rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrections({ base, head: base, runGit: run(drops) }).codes, ["correction_v4_key_missing"])
+  assert.deepEqual(checkCorrections({ base, head: base, runGit: run(keeps) }).codes, [])
+})
+
+test("the mirror's /4 vocabulary equals Desk's", { skip: deskSchemaReachable || process.env.FACTORY_REQUIRE_DESK === "1" ? false : "Desk is not reachable: set DESK_DIR to a Desk checkout" }, async () => {
+  assert.ok(deskSchemaReachable, "FACTORY_REQUIRE_DESK is set but DESK_DIR does not hold Desk's schema.js")
+  const { ENUMS } = await import(pathToFileURL(deskSchema).href)
+  assert.deepEqual([...MIRRORED_VOCABULARY.stopEnd], [...ENUMS.stopEnd])
+  assert.deepEqual([...MIRRORED_VOCABULARY.finishedBasis], [...ENUMS.finishedBasis])
+})
+
+test("a correction that makes a file public is refused when any PR in the result says created: true, named or not", () => {
+  const current = facts4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, created: true }, { repo: "ourostack/desk", number: 8, created: false }], commits: [], private: ZERO_PRIVATE } })
+  const publicNow = { unavailable: [{ field: "job_offsets", reason: "desk_public" }] }
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4(publicNow)), [{ code: "correction_inconsistent", path: "refs.prs.0.created" }])
+  // A record that replaces refs without naming the flag: the carried value counts.
+  const replaced = rec4({ ...publicNow, refs: { prs: [{ repo: "ourostack/desk", number: 8 }, { repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, replaced), [{ code: "correction_inconsistent", path: "fields.refs.prs.1.created" }])
+  // Setting it false in the same record is fine; an unrelated correction to a file that is not public is fine.
+  const fixed = rec4({ ...publicNow, refs: { prs: [{ repo: "ourostack/desk", number: 7, created: false }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, fixed), [])
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4({ plugins: [] })), [])
+  // An already-public file with only false flags stays fine.
+  const pub = facts4({ ...publicNow })
+  assert.deepEqual(checkCorrectionAgainstFacts(pub, rec4({ plugins: [] })), [])
+})
+
+test("a correction whose wait or PR key matches more than one entry in the file is refused as ambiguous", () => {
+  const waits = [
+    { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: STOP },
+    { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: { end: "interrupted", asks: null, pending_agents: null } },
+  ]
+  const current = facts4({ intervals: waits })
+  const bare = { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10 }
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4({ intervals: [bare, bare] })), [
+    { code: "correction_v4_key_ambiguous", path: "fields.intervals.0.stop" },
+    { code: "correction_v4_key_ambiguous", path: "fields.intervals.1.stop" },
+  ])
+  // Naming the stop removes the ambiguity.
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4({ intervals: [{ ...bare, stop: STOP }, { ...bare, stop: waits[1].stop }] })), [])
+  const prs = [{ repo: "ourostack/desk", number: 7, created: false }, { repo: "ourostack/desk", number: 7, created: false }]
+  const dup = facts4({ refs: { prs, commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(dup, rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE } })), [{ code: "correction_v4_key_ambiguous", path: "fields.refs.prs.0.created" }])
+  // Applying never writes one value to both.
+  const out = applyCorrection(current, rec4({ intervals: [bare, bare] }))
+  assert.deepEqual(out.intervals, [bare, bare])
+})
