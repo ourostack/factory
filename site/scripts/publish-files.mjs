@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publishes the store's data files beside the page, and the index agents read.
 //
-//   node site/scripts/publish-files.mjs --reports <reports checkout> --dist <site/dist> --template <llms template>
+//   node site/scripts/publish-files.mjs --reports <reports checkout> --dist <site/dist> --template <llms template> [--pulls <build-data --pulls-out file>]
 //
 // Copies the reports branch's jobs/**/*.json and rollups/*.json into the
 // site (whatever exists: a file the pipeline does not write yet is simply
@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const { slimMap } = require("../src/walk.js");
 const { reasonTable } = require("../src/format.js");
+import { prClock } from "./pr-clock.mjs";
 
 // A file at or under this size is small enough for an agent to read whole.
 export const READ_WHOLE_BYTES = 256 * 1024;
@@ -88,8 +89,26 @@ export function reasonsDoc() {
   return { schema: "factory.site.reasons/1", reasons: reasonTable() };
 }
 
+// The pull requests the site build read from GitHub (build-data.mjs
+// --pulls-out, factory.site.pulls/1: { pulls: { "repo#n": { created_at,
+// merged_at, state } | null }, capped: ["repo#n"] }), as { gh, capped } for
+// pr-clock.mjs; null when the file is missing or unreadable, which places
+// no pull request through GitHub (reason github_not_read). The file is the
+// build's own and is never published.
+export function readPulls(path) {
+  try {
+    const doc = JSON.parse(readFileSync(path, "utf8"));
+    if (!doc || doc.schema !== "factory.site.pulls/1" || !doc.pulls || typeof doc.pulls !== "object") return null;
+    return { gh: new Map(Object.entries(doc.pulls)), capped: new Set(Array.isArray(doc.capped) ? doc.capped : []) };
+  } catch {
+    return null;
+  }
+}
+
 // Copies the data files and returns every published JSON file with its size.
-export function publishData({ reports, dist }) {
+// `pulls` is readPulls' result (or null): each task's map file places its
+// pull requests through it.
+export function publishData({ reports, dist, pulls = null }) {
   const copied = [];
   for (const [sub, depth] of [["jobs", 1], ["rollups", 0]]) {
     for (const rel of jsonFiles(join(reports, sub), depth)) {
@@ -114,7 +133,15 @@ export function publishData({ reports, dist }) {
   mkdirSync(dist, { recursive: true });
   writeFileSync(join(dist, "reasons.json"), JSON.stringify(reasonsDoc()), "utf8");
   // Each task's map file: the landing view loads this, not the task's full
-  // report, whose intervals can run to megabytes.
+  // report, whose intervals can run to megabytes. It carries the store's
+  // finish date (data.json jobs[]) and pull request clock.
+  let finishDates = new Map();
+  try {
+    const data = JSON.parse(readFileSync(dataPath, "utf8"));
+    finishDates = new Map((Array.isArray(data.jobs) ? data.jobs : []).filter((j) => j && typeof j.id === "string" && j.finish_date && typeof j.finish_date === "object").map((j) => [j.id, j.finish_date]));
+  } catch {
+    // No data.json: no finish date reaches the map files.
+  }
   const maps = [];
   for (const rel of jsonFiles(join(reports, "jobs"), 0)) {
     let report;
@@ -127,7 +154,9 @@ export function publishData({ reports, dist }) {
     if (!report || typeof report !== "object" || !report.timeline || typeof report.timeline !== "object") continue;
     const to = join(dist, "map", rel);
     mkdirSync(dirname(to), { recursive: true });
-    writeFileSync(to, JSON.stringify(slimMap(report)), "utf8");
+    const job = String((report.job && report.job.id) || report.timeline.job || "");
+    const store = { pr_clock: prClock(report.timeline.prs, pulls ? pulls.gh : null, { capped: pulls ? pulls.capped : undefined }), finish_date: finishDates.get(job) || null };
+    writeFileSync(to, JSON.stringify(slimMap(report, store)), "utf8");
     maps.push(`map/${rel}`);
   }
   const all = [...jsonFiles(dist, 0), ...jsonFiles(join(dist, "rollups"), 0).map((p) => `rollups/${p}`), ...jsonFiles(join(dist, "map"), 0).map((p) => `map/${p}`), ...jsonFiles(join(dist, "jobs"), 1).map((p) => `jobs/${p}`)];
@@ -151,7 +180,7 @@ const GROUPS = [
   { title: "Start here: the whole site in one file", match: (p) => p === "data.json", what: () => "every number on the page, each with its state (measured, partial or no data), reasons and, when partial, its bound; jobs[] holds each task's name and finish order; kaizen_issues (the problems in hand, each with the `cause` key it works on when one is known) and alarm_issues (who owns each alarm) are step 4, Act" },
   { title: "Reading the reasons", match: (p) => p === "reasons.json", what: () => "every reason code a figure can carry (censored, log_truncated, card_dates_shorter_than_work, …) with the plain words the page shows for it" },
   { title: "Step 1, follow a task: each task's answer", match: (p) => p === "rollups/tasks.json", what: () => "one row per task, keyed by `job`: its lead time, working time, idle time and its split by what it waited on (`waiting_by_waited_on_ms`), top causes and longest wait, as stated numbers in milliseconds (keys and codes, not the page's sentences; reasons.json gives the words), plus the store's `name` (null for a private task), `finish_order`, `finish_group` and `finish_basis`" },
-  { title: "Step 1, follow a task: one task's map", match: (p) => /^map\/[^/]+\.json$/.test(p), what: (p) => `the work bursts, waits, card status changes and pull request numbers of task ${p.slice(4, 12)}: what its value stream map draws` },
+  { title: "Step 1, follow a task: one task's map", match: (p) => /^map\/[^/]+\.json$/.test(p), what: (p) => `the work bursts, waits, card status changes, operator prompts (each with its why), the waits before them, and pull requests with their opened and merged times on the task clock, of task ${p.slice(4, 12)}: what its value stream map draws; every time is an offset on the task clock (factory.site.map/2); each pull request time states whether it is measured or partial (and which way), and is not placed when the task's clock anchor may be off by more than 15 minutes, the gap that splits two work bursts, or rests on one pull request nothing confirms (anchor_unconfirmed)` },
   { title: "Step 1, follow a task: one task's timeline", match: (p) => /^jobs\/[^/]+\.json$/.test(p), what: (p) => `the timeline and measures of task ${p.slice(5, 13)}` },
   { title: "Step 1, follow a task: one session in detail", match: (p) => /^jobs\/[^/]+\/[^/]+\.json$/.test(p), what: (p) => `one session of task ${p.slice(5, 13)}` },
   { title: "Step 2, compare tasks", match: (p) => p === "rollups/stackup.json", what: () => "one row per task: its lead time split into working time by the evaluator's labels and waiting (idle time) by what it waited on; what each bar of the stack-up draws" },
@@ -214,7 +243,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error("usage: publish-files.mjs --reports <dir> --dist <dir> --template <llms template>");
     process.exit(2);
   }
-  const { files } = publishData({ reports, dist });
+  const pullsPath = arg("pulls");
+  const { files } = publishData({ reports, dist, pulls: pullsPath ? readPulls(pullsPath) : null });
   const coverage = {};
   for (const path of ["rollups/tasks.json", "rollups/stackup.json", "rollups/causes.json"]) {
     try {

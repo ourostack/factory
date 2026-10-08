@@ -145,6 +145,20 @@
     bound_not_moved: "its reasons do not change this figure, so it is exact for the task's window as stated",
     bound_not_one_quantity: "it is a ranking or a status, not one quantity, so it has no single direction",
     bound_direction_undecided: "one of its reasons has no decided direction yet, so the true figure may be higher or lower",
+    // The PR clock (site/scripts/pr-clock.mjs): pull request times placed on the task clock through GitHub.
+    anchor_spread: "the task's pull requests disagree by more than 2 minutes about when the task started, so their times on the task clock may be off by that much",
+    no_timed_pr: "no session of this task timed a pull request, so GitHub's times cannot be placed on the task clock",
+    no_created_timed_pr: "no session of this task timed a pull request it opened, so GitHub's times cannot be placed on the task clock",
+    github_unreadable: "GitHub could not be read for this pull request (it may be private)",
+    github_lookup_capped: "the build reads a limited number of pull requests from GitHub, and this one was beyond the limit",
+    github_not_read: "this build did not read pull requests from GitHub",
+    merged_time_not_recorded: "GitHub says the pull request merged but gives no merge time",
+    anchor_unconfirmed: "nothing confirms when the task started on the wall clock: no pull request the session is known to have opened sets it, and no majority of its pull requests agrees; its pull request times would be at most these and its finish day at least this, and when one unconfirmed pull request is all there is, its times are not placed",
+    anchor_spread_too_wide: "the task's pull requests disagree by more than 15 minutes about when the task started, so their times are not placed on the task clock",
+    anchor_github_unreadable: "the pull requests that set the task's clock could not be read from GitHub",
+    anchor_github_lookup_capped: "the pull requests that set the task's clock were beyond the build's limit of reads from GitHub",
+    clock_skew: "the session's clock and GitHub's are a few seconds apart, so the merge is drawn at the opening; it happened then or later",
+    not_merged: "the pull request has not merged",
   };
 
   // Every reason that can reach the page has words. The site build stops on

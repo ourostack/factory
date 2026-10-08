@@ -1314,24 +1314,300 @@
     return `Walk me through ${what} of ${p.taskName || `factory task ${p.name}`}. ${p.where ? `${p.where}. ` : ""}It is open at ${link}, and its data is ${p.locator ? `${p.locator} in ` : ""}${p.dataUrl}. Explain what happened and what we could change.${p.indexUrl ? ` Index of every data file: ${p.indexUrl}` : ""}`;
   }
 
+  // ------------------------------------------------ the PR clock (build time)
+
+  // Each pull request's opened and merged times on the task clock, through
+  // the task's clock anchor. Desk times a pull request on the task clock
+  // (`timeline.prs[].at_ms`, the earliest timed mention in a session) and
+  // publishes no wall-clock anchor; GitHub publishes `created_at` and
+  // `merged_at`. For a pull request the task's session opened,
+  // `created_at - at_ms` is the instant the task card was created, to within
+  // seconds. One such value is a sample. Design: v1.1 addendum §2 and §3.
+  //
+  // A mention never comes before the pull request exists, so every sample
+  // is at most the true anchor (give or take seconds of clock skew). That
+  // gives each partial anchor built from mentions a direction: the anchor is
+  // a lower bound, a time placed through it an upper bound ("at most"), and
+  // a finish day derived from it a lower bound.
+  //
+  // The anchor is `measured` only when (a) Desk flags the pull requests
+  // behind it as created by the session (`created`, facts /4), or (b) at
+  // least 2 samples agree within ANCHOR_SPREAD_MS, they are a strict
+  // majority of the readable samples, and no sample lies more than
+  // ANCHOR_SPREAD_MS above them (a sample above the kept ones shows that the
+  // true anchor is later still). Otherwise it is `partial`, with
+  // `anchor_unconfirmed` or `anchor_spread`. A time is placed through a
+  // partial anchor only when its error is known and at most
+  // ANCHOR_PLACE_LIMIT_MS, and it then carries the anchor's reasons and
+  // direction; one unconfirmed sample places nothing until Desk flags it.
+  //
+  // These run in the Pages build (pr-clock.mjs re-exports them); they live
+  // here so the map file has one implementation.
+  const ANCHOR_SPREAD_MS = 2 * MINUTE;
+  // The map's work bursts split at 15 idle minutes, so a time that may be off
+  // by more could sit beside the wrong box or wait.
+  const ANCHOR_PLACE_LIMIT_MS = 15 * MINUTE;
+
+  const prKey = (p) => `${p.repo}#${p.number}`;
+  const finiteMs = (x) => typeof x === "number" && Number.isFinite(x);
+  function timeOf(s) {
+    const t = typeof s === "string" ? Date.parse(s) : NaN;
+    return Number.isFinite(t) ? t : null;
+  }
+  function medianOf(sorted) {
+    const n = sorted.length;
+    return n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  }
+
+  // Why GitHub gave no data for one pull request: the build read none at
+  // all, the cap stopped it, or the read failed (offline, private, limited).
+  function githubReason(p, gh, capped) {
+    if (!gh) return "github_not_read";
+    if (capped && capped.has(prKey(p))) return "github_lookup_capped";
+    return "github_unreadable";
+  }
+  const infoOf = (p, gh, capped) => (gh && !(capped && capped.has(prKey(p))) ? gh.get(prKey(p)) || null : null);
+
+  // One entry per pull request, in Desk's order, keeping the earliest timed
+  // mention; `created` is true if any entry says so, else false if any
+  // says so, else null.
+  function uniquePrs(prs) {
+    const out = new Map();
+    for (const p of Array.isArray(prs) ? prs : []) {
+      if (!p || typeof p.repo !== "string" || !Number.isInteger(p.number)) continue;
+      const k = prKey(p);
+      const cur = out.get(k);
+      const created = typeof p.created === "boolean" ? p.created : null;
+      if (!cur) {
+        out.set(k, { repo: p.repo, number: p.number, at_ms: finiteMs(p.at_ms) ? p.at_ms : null, created });
+        continue;
+      }
+      if (finiteMs(p.at_ms) && (cur.at_ms === null || p.at_ms < cur.at_ms)) cur.at_ms = p.at_ms;
+      if (created === true || (cur.created === null && created === false)) cur.created = created;
+    }
+    return [...out.values()];
+  }
+
+  // The task's clock anchor: { state, reasons, bound?, basis ("created" |
+  // "timed"), n (samples kept), candidates (readable samples), dropped,
+  // spread_ms (over every readable sample), kept_spread_ms, uncertainty_ms
+  // (how far a placed time may be off, as far as the samples show),
+  // value_ms }. `value_ms` is an epoch value for the build's own use; the
+  // map file never holds it (prClock strips it). `gh` is Map "repo#number"
+  // -> pulls API body (null when unreadable), or null when the build read
+  // no GitHub data; `capped` is the set of keys the lookup cap stopped.
+  function prAnchor(prs, gh, opts) {
+    const capped = opts && opts.capped;
+    const list = uniquePrs(prs);
+    const flagged = list.some((p) => p.created !== null);
+    const createdOnes = list.filter((p) => p.created === true);
+    const basis = createdOnes.length || (flagged && list.every((p) => p.created !== null)) ? "created" : "timed";
+    const pool = (basis === "created" ? createdOnes : list.filter((p) => p.created !== false)).filter((p) => p.at_ms !== null);
+    if (!pool.length) return { state: "unavailable", reasons: [basis === "created" ? "no_created_timed_pr" : "no_timed_pr"], basis, n: 0 };
+    const samples = [];
+    const missing = new Set();
+    for (const p of pool) {
+      const t = timeOf(infoOf(p, gh, capped)?.created_at);
+      if (t === null) missing.add(githubReason(p, gh, capped));
+      else samples.push(t - p.at_ms);
+    }
+    if (!samples.length) return { state: "unavailable", reasons: [...missing].sort(), basis, n: 0 };
+    samples.sort((a, b) => a - b);
+    let kept = samples;
+    if (basis === "timed") {
+      const mid = medianOf(samples);
+      const near = samples.filter((a) => Math.abs(a - mid) <= ANCHOR_SPREAD_MS);
+      if (near.length) kept = near;
+    }
+    const keptSpread = kept[kept.length - 1] - kept[0];
+    const top = samples[samples.length - 1];
+    const out = {
+      basis,
+      n: kept.length,
+      candidates: samples.length,
+      dropped: samples.length - kept.length,
+      spread_ms: top - samples[0],
+      kept_spread_ms: keptSpread,
+      // One unconfirmed sample cannot measure its own error: null, unknown.
+      uncertainty_ms: basis === "timed" ? (samples.length < 2 ? null : top - kept[0]) : keptSpread,
+      value_ms: Math.round(medianOf(kept)),
+    };
+    const reasons = [];
+    if (keptSpread > ANCHOR_SPREAD_MS) reasons.push("anchor_spread");
+    else if (basis === "timed") {
+      const majority = kept.length >= 2 && kept.length * 2 > samples.length;
+      const above = top > kept[kept.length - 1] + ANCHOR_SPREAD_MS;
+      if (!majority || above) reasons.push("anchor_unconfirmed");
+    }
+    if (!reasons.length) return { state: "measured", reasons: [], ...out };
+    return { state: "partial", bound: basis === "timed" ? "lower" : null, reasons, ...out };
+  }
+
+  // GitHub's state for a pull request: merged, open or closed; null unread.
+  function prStateOf(info) {
+    if (!info) return null;
+    if (timeOf(info.merged_at) !== null || info.merged === true) return "merged";
+    return info.state === "open" ? "open" : "closed";
+  }
+
+  // Each pull request placed on the task clock:
+  //   { repo, number, created, opened_at_ms, opened_basis, opened_state,
+  //     merged_at_ms, merged_basis, merged_state, state, reasons,
+  //     uncertainty_ms? }
+  // opened_basis: "desk" (the session timed the pull request it created),
+  // "pr_anchor" (GitHub's created_at through the anchor) or "not_placed";
+  // merged_basis: "pr_anchor", "not_merged" or "not_placed". Each time's
+  // `_state` says whether it is measured, partial (with the direction the
+  // true time lies) or unavailable (with why); `reasons` gathers them.
+  // Nothing is invented: a time with no source is null.
+  function placePrs(prs, gh, anchor, opts) {
+    const capped = opts && opts.capped;
+    const a = anchor || { state: "unavailable", reasons: ["no_timed_pr"] };
+    const partialAnchor = a.state === "partial";
+    // A partial anchor places nothing when its error is unknown (one
+    // unconfirmed sample, which may be days off) or above the limit.
+    const unknownError = partialAnchor && !finiteMs(a.uncertainty_ms);
+    const tooWide = partialAnchor && (unknownError || a.uncertainty_ms > ANCHOR_PLACE_LIMIT_MS);
+    const usable = a.state !== "unavailable" && finiteMs(a.value_ms) && !tooWide;
+    // Why nothing was placed through the anchor, said about a pull request
+    // GitHub did read: the anchor's own GitHub trouble is the anchor's.
+    const noAnchor = tooWide
+      ? [unknownError ? "anchor_unconfirmed" : "anchor_spread_too_wide"]
+      : (a.state === "unavailable" ? a.reasons : ["no_timed_pr"]).map((r) => (r === "github_unreadable" || r === "github_lookup_capped" ? `anchor_${r}` : r));
+    // A time placed through a partial anchor: its reasons, and its direction
+    // (an anchor that is a lower bound places times that are upper bounds).
+    const viaAnchor = () => (partialAnchor ? { state: "partial", bound: a.bound === "lower" ? "upper" : null, reasons: [...a.reasons] } : { state: "measured", reasons: [] });
+    const none = (reasons) => ({ state: "unavailable", reasons: [...reasons] });
+    return uniquePrs(prs).map((p) => {
+      const info = infoOf(p, gh, capped);
+      const ghMissing = info ? null : githubReason(p, gh, capped);
+      let opened = null;
+      let openedBasis = "not_placed";
+      let openedState;
+      const createdAt = timeOf(info && info.created_at);
+      if (p.created === true && p.at_ms !== null) {
+        opened = p.at_ms;
+        openedBasis = "desk";
+        openedState = { state: "measured", reasons: [] };
+      } else if (createdAt !== null && usable) {
+        opened = Math.round(createdAt - a.value_ms);
+        openedBasis = "pr_anchor";
+        openedState = viaAnchor();
+      } else openedState = none(ghMissing ? [ghMissing] : noAnchor);
+      const state = prStateOf(info);
+      let merged = null;
+      let mergedBasis = "not_placed";
+      let mergedState;
+      if (state === "open" || state === "closed") {
+        mergedBasis = "not_merged";
+        mergedState = none(["not_merged"]);
+      } else if (state === "merged") {
+        const t = timeOf(info.merged_at);
+        if (t !== null && usable) {
+          merged = Math.round(t - a.value_ms);
+          mergedBasis = "pr_anchor";
+          mergedState = viaAnchor();
+          // The opening from the session and the merge through the anchor
+          // use different clocks a few seconds apart; a merge never lands
+          // before its opening, and the true merge is at least then. The
+          // clamp adds its reason to the anchor's; it never replaces them.
+          if (opened !== null && merged < opened) {
+            merged = opened;
+            mergedState = { state: "partial", bound: "lower", reasons: [...new Set([...mergedState.reasons, "clock_skew"])].sort() };
+          }
+        } else mergedState = none(t === null ? ["merged_time_not_recorded"] : noAnchor);
+      } else mergedState = none([ghMissing]);
+      const reasons = new Set([...openedState.reasons, ...mergedState.reasons].filter((r) => r !== "not_merged"));
+      const out = { repo: p.repo, number: p.number, created: p.created, opened_at_ms: opened, opened_basis: openedBasis, opened_state: openedState, merged_at_ms: merged, merged_basis: mergedBasis, merged_state: mergedState, state, reasons: [...reasons].sort() };
+      if (partialAnchor && (openedBasis === "pr_anchor" || mergedBasis === "pr_anchor")) out.uncertainty_ms = a.uncertainty_ms;
+      return out;
+    });
+  }
+
+  // The anchor as the map file states it (no epoch value) and every pull
+  // request placed through it.
+  function prClock(prs, gh, opts) {
+    const a = prAnchor(prs, gh, opts);
+    const { value_ms, ...anchor } = a;
+    return { anchor, prs: placePrs(prs, gh, a, opts) };
+  }
+
+  // The list states of a task's operator prompts and pull requests. Desk's
+  // own envelopes (`human_turns_state`, `prs_state`, reports D4) win. Without
+  // them the store states each list from its sessions' hosts, so a task with
+  // no prompts recorded reads "not recorded", never "no prompts": Claude Code
+  // records every prompt, Copilot only some, Codex none (Desk HOST_FLAGS), and
+  // a Claude Code session with no prompt at all is one whose prompts were not
+  // recorded (older facts). Every host records pull requests only partly.
+  function clockListStates(timeline) {
+    const t = timeline || {};
+    const sessions = Array.isArray(t.sessions) ? t.sessions : [];
+    const turns = Array.isArray(t.human_turns) ? t.human_turns : [];
+    const desk = (e) => {
+      if (!e || typeof e !== "object" || typeof e.state !== "string") return null;
+      const out = { state: e.state, reasons: Array.isArray(e.reasons) ? e.reasons : [] };
+      if (Object.prototype.hasOwnProperty.call(e, "bound")) out.bound = e.bound;
+      if (typeof e.bound_reason === "string") out.bound_reason = e.bound_reason;
+      return { ...out, basis: "desk" };
+    };
+    const fromHosts = (reasons, any) => {
+      const r = [...reasons].sort();
+      if (!any) return { state: "unavailable", reasons: r.length ? r : ["not_recorded"], basis: "store_from_hosts" };
+      return r.length ? { state: "partial", bound: "lower", reasons: r, basis: "store_from_hosts" } : { state: "measured", reasons: [], basis: "store_from_hosts" };
+    };
+    const turnReasons = new Set();
+    const withTurns = new Set(turns.map((x) => x && x.session));
+    for (const s of sessions) {
+      if (s.host === "claude-code") {
+        if (!withTurns.has(s.id)) turnReasons.add("not_recorded");
+      } else if (s.host === "copilot-cli") turnReasons.add("host_records_partly");
+      else if (s.host === "codex-cli") turnReasons.add("host_does_not_record");
+      else turnReasons.add("not_recorded");
+    }
+    const prReasons = new Set(["host_records_partly"]);
+    if (sessions.some((s) => !["claude-code", "copilot-cli", "codex-cli"].includes(s.host))) prReasons.add("not_recorded");
+    return {
+      human_turns_state: desk(t.human_turns_state) || fromHosts(turnReasons, turns.length > 0),
+      prs_state: desk(t.prs_state) || fromHosts(prReasons, true),
+    };
+  }
+
   // ------------------------------------------------- the map file (build time)
 
-  // The slim map file for one task (map/<job>.json), from its full report
-  // jobs/<job>.json. It keeps what the landing view draws and drops the
-  // intervals (up to megabytes) and every per-turn time: pull requests keep
-  // their repository and number only, at task level, with no time and no
-  // burst (a burst's pull request count would place it on the clock).
-  function slimMap(report) {
+  // The map file for one task (map/<job>.json, factory.site.map/2), from its
+  // full report jobs/<job>.json and the store's own fields. It keeps what the
+  // landing view draws and drops the intervals (up to megabytes). Every time
+  // is an offset on the task clock; no epoch value is written.
+  //
+  // `store` is { pr_clock, finish_date }: pr_clock is pr-clock.mjs prClock's
+  // { anchor, prs } (each pull request's opened and merged times placed
+  // through the task's clock anchor from GitHub), and finish_date the
+  // store's resolved finish date. Without pr_clock (a build that read no
+  // GitHub data), prClock runs with no GitHub data: a pull request is placed
+  // only where the session timed one it created, and every other time is
+  // null with the reason github_not_read: nothing is invented.
+  //
+  // Each operator prompt keeps Desk's fields and gains `why`, joined from
+  // the wait it ends (Desk's timeline.waits[], by end_ms == at_ms in the
+  // same session); null until Desk states one.
+  function slimMap(report, store) {
     const t = (report && report.timeline) || {};
+    const s = store || {};
     const arr = (x) => (Array.isArray(x) ? x : []);
     const items = (x) => (Array.isArray(x) ? x : x && typeof x === "object" && Array.isArray(x.items) ? x.items : []);
     const envelopeOf = (x, explicit) => {
       const e = explicit && typeof explicit === "object" ? explicit : x && typeof x === "object" && !Array.isArray(x) ? x : null;
       return e && typeof e.state === "string" ? { state: e.state, reasons: arr(e.reasons) } : { state: "measured", reasons: [] };
     };
+    const waits = arr(t.waits).filter((w) => w && typeof w === "object");
+    const waitEnding = new Map(waits.map((w) => [`${w.session}|${w.end_ms}`, w]));
+    // Without the build's GitHub reads, the same placement with none:
+    // only a pull request the session timed and created is placed.
+    const clock = s.pr_clock && typeof s.pr_clock === "object" && Array.isArray(s.pr_clock.prs) ? s.pr_clock : prClock(t.prs, null);
     return {
-      schema: "factory.site.map/1",
+      schema: "factory.site.map/2",
       job: String((report && report.job && report.job.id) || t.job || ""),
+      finish_date: s.finish_date && typeof s.finish_date === "object" ? s.finish_date : null,
       lead_window: t.lead_window || { state: "unavailable", reasons: ["not_recorded"] },
       // Desk may wrap bursts and gaps in an envelope { state, reasons, items }
       // and state the bursts' labels; both are kept so the page can say the
@@ -1352,6 +1628,7 @@
         tool_calls: b.tool_calls,
         tool_failures: b.tool_failures,
         operator_turns: b.operator_turns,
+        prs: b.prs,
         value_ms: b.value_ms,
         defect_ms: b.defect_ms,
         defect_stretches: b.defect_stretches,
@@ -1361,13 +1638,23 @@
         const by = slimCauses(g.idle_by_waited_on_ms);
         return by && Object.keys(by).length ? { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on, idle_by_waited_on_ms: by } : { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on };
       }),
-      sessions: arr(t.sessions).map((s) => ({ id: s.id, host: s.host, offset_ms: s.offset_ms, end_ms: s.end_ms })),
+      sessions: arr(t.sessions).map((x) => ({ id: x.id, host: x.host, offset_ms: x.offset_ms, end_ms: x.end_ms })),
       agents: arr(t.agents).map((a) => ({ session: a.session, n: a.n, parent: a.parent })),
       transitions: arr(t.transitions).map((x) => ({ offset_ms: x.offset_ms, to: x.to })),
       observations: arr(t.observations).map((x) => ({ offset_ms: x.offset_ms, status: x.status })),
       outcome: t.outcome && typeof t.outcome === "object" ? { state: t.outcome.state, deliveries: t.outcome.deliveries } : null,
       detail_files: arr(t.detail_files),
-      prs: arr(t.prs).map((p) => ({ repo: p.repo, number: p.number })),
+      ...clockListStates(t),
+      human_turns: arr(t.human_turns)
+        .filter((h) => h && typeof h === "object")
+        .map((h) => {
+          const w = waitEnding.get(`${h.session}|${h.at_ms}`);
+          return { session: h.session, host: h.host, at_ms: h.at_ms, basis: h.basis, window_ms: h.window_ms, prompt_class: h.prompt_class, output_class: h.output_class, why: w && typeof w.why === "string" ? w.why : null };
+        }),
+      // Desk's waits (reports D4; `why` from D5), as Desk states them.
+      waits: waits.map((w) => ({ session: w.session, start_ms: w.start_ms, end_ms: w.end_ms, next_prompt_ms: w.next_prompt_ms, stop: w.stop && typeof w.stop === "object" ? { end: w.stop.end, asks: w.stop.asks, pending_agents: w.stop.pending_agents } : null, why: w.why, why_source: w.why_source, confidence: w.confidence, reasons: w.reasons })),
+      pr_anchor: clock.anchor,
+      prs: clock.prs,
     };
   }
 
@@ -1424,6 +1711,13 @@
     clockTick,
     drawer,
     promptText,
+    clockListStates,
+    ANCHOR_SPREAD_MS,
+    ANCHOR_PLACE_LIMIT_MS,
+    prKey,
+    prAnchor,
+    placePrs,
+    prClock,
     slimMap,
   };
 });

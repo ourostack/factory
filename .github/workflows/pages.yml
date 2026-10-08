@@ -78,24 +78,45 @@ jobs:
           set -euo pipefail
           node .github/scripts/apply-corrections.mjs --store . | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The pull request reads of earlier builds (site/scripts/pr-clock.mjs):
+      # merged pull requests are final and cost no request, and the rest
+      # are asked with their ETag. The cache lives in the runner's
+      # temp folder, never in site/dist, so it is never published.
+      - name: Restore the pull request cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/pulls-cache.json
+          key: pr-pulls-${{ github.run_id }}
+          restore-keys: pr-pulls-
+
       - name: Build site data
+        id: build-data
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p site/dist
-          node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json
+          node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json --pulls-out "$RUNNER_TEMP/pulls.json" --pulls-cache "$RUNNER_TEMP/pulls-cache.json" | tee -a "$GITHUB_STEP_SUMMARY"
           cp site/src/index.html site/src/styles.css site/src/format.js site/src/walk.js site/src/steps.js site/src/app.js site/dist/
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Save the pull request cache
+        if: steps.build-data.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/pulls-cache.json
+          key: pr-pulls-${{ github.run_id }}
+
       # The task, session and rollup files the views load on demand, each
-      # task's slim map file (map/<job>.json, derived here), and
+      # task's map file (map/<job>.json, derived here, with its pull
+      # requests placed on the task clock from the GitHub reads the data
+      # build left in the runner's temp folder), and
       # llms.txt, the index agents read. Whatever the reports branch holds is
       # published; a file the pipeline does not write yet is simply absent.
       - name: Publish data files
         run: |
           set -euo pipefail
-          node site/scripts/publish-files.mjs --reports _reports --dist site/dist --template site/src/llms-template.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          node site/scripts/publish-files.mjs --reports _reports --dist site/dist --template site/src/llms-template.txt --pulls "$RUNNER_TEMP/pulls.json" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
