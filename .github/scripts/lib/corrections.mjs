@@ -109,6 +109,13 @@ const INTERVAL_KINDS = Object.freeze([
   "turn", "tool", "subagent", "human_wait", "permission_wait", "api_retry", "compaction",
 ]);
 const OUTCOMES = Object.freeze(["ok", "error", "denied", "interrupted", "timeout"]);
+// `/4`: how an agent's turn ended before a human wait (`ENUMS.stopEnd` in Desk), and where a job's finish day came from.
+const STOP_ENDS = Object.freeze([
+  "end_turn", "max_tokens", "rate_limit", "api_error", "refusal", "interrupted", "ask_question", "ask_plan", "not_recorded",
+]);
+const FINISHED_BASES = Object.freeze(["transition", "card_updated"]);
+// The earliest finish day a published job may carry (`FINISHED_ON_MIN` in Desk).
+const FINISHED_ON_MIN = "2025-01-01";
 // Published facts (`desk.factory.published/1`, `/2` and `/3`). Desk's validator checks every version against this one
 // vocabulary (the version-only parts are the `human_turns` list, a `/2`
 // field that is not correctable, and the `/3` commit time and `outcomes`
@@ -281,6 +288,25 @@ function nullableRangeIntShapeField(min, max) {
   });
 }
 
+function nullableBooleanShapeField() {
+  return shapeLeaf((value, path, errors) => {
+    if (value === null) return;
+    if (typeof value !== "boolean") shapeFail(errors, "type", path);
+  });
+}
+
+// `jobs[].finished_on` (`/4`): a real UTC calendar day no earlier than `FINISHED_ON_MIN`, or `null`.
+function finishedOnShapeField() {
+  return shapeLeaf((value, path, errors) => {
+    if (value === null) return;
+    if (typeof value !== "string" || !isRealCalendarDate(value)) {
+      shapeFail(errors, typeof value === "string" ? "pattern" : "type", path);
+      return;
+    }
+    if (value < FINISHED_ON_MIN) shapeFail(errors, "range", path);
+  });
+}
+
 function booleanShapeField() {
   return shapeLeaf((value, path, errors) => {
     if (typeof value !== "boolean") shapeFail(errors, "type", path);
@@ -380,9 +406,10 @@ const AGENT_SHAPE = {
   model: patternShapeField(MODEL_ID_PATTERN),
 };
 
-// A pull request may carry the worker that opened it (`agent`) and when it
-// was created (`at_ms`, milliseconds from the session start), both optional
-// as in Desk's `prFields`. A commit may carry `at_ms` too (published facts
+// A pull request may carry the worker that opened it (`agent`), when it was
+// created (`at_ms`, milliseconds from the session start) and, from `/4`,
+// whether the session itself opened it (`created`), all optional as in
+// Desk's `prFields`. A commit may carry `at_ms` too (published facts
 // `/3`; `/1` and `/2` commits have only `repo` and `sha`). Both forms stay
 // accepted, so a correction can restore either.
 function prShape(value) {
@@ -391,6 +418,7 @@ function prShape(value) {
     number: positiveIntShapeField(),
     ...(isPlainObject(value) && Object.hasOwn(value, "agent") ? { agent: rangeIntShapeField(0, 9999) } : {}),
     ...(isPlainObject(value) && Object.hasOwn(value, "at_ms") ? { at_ms: nonNegIntShapeField() } : {}),
+    ...(isPlainObject(value) && Object.hasOwn(value, "created") ? { created: booleanShapeField() } : {}),
   };
 }
 
@@ -435,6 +463,20 @@ const JOB_SHAPE = {
   observed: nullableObjectShapeField(OBSERVED_SHAPE),
 };
 
+// `/4` adds a finish day and its basis, which Desk requires together. A jobs
+// correction is a ceiling (see `applyCorrection`), so an entry's finish day is
+// accepted but never written: the file's own value stays.
+function jobShape(value) {
+  const has = isPlainObject(value) && (Object.hasOwn(value, "finished_on") || Object.hasOwn(value, "finished_basis"));
+  return has ? { ...JOB_SHAPE, finished_on: finishedOnShapeField(), finished_basis: nullableEnumShapeField(FINISHED_BASES) } : JOB_SHAPE;
+}
+
+const STOP_SHAPE = {
+  end: enumShapeField(STOP_ENDS),
+  asks: nullableBooleanShapeField(),
+  pending_agents: nullableBooleanShapeField(),
+};
+
 const UNAVAILABLE_SHAPE = {
   field: enumShapeField(PUBLISHED_UNAVAILABLE_FIELDS),
   reason: enumShapeField(UNAVAILABLE_REASONS),
@@ -451,6 +493,8 @@ function intervalShapeFields(value) {
     fields.tool = enumShapeField(TOOL_KINDS);
     fields.outcome = enumShapeField(OUTCOMES);
   }
+  // `/4`: why the agent stopped, on a human wait only.
+  if (isPlainObject(value) && value.kind === "human_wait" && Object.hasOwn(value, "stop")) fields.stop = objectShapeField(STOP_SHAPE);
   return fields;
 }
 
@@ -472,7 +516,7 @@ const FIELD_VALUE_SHAPES = Object.freeze({
   intervals: arrayShapeField(objectShapeField(intervalShapeFields), SHAPE_LIMITS.intervals),
   counts: objectShapeField(COUNTS_SHAPE),
   refs: objectShapeField(REFS_SHAPE),
-  jobs: arrayShapeField(objectShapeField(JOB_SHAPE), SHAPE_LIMITS.jobs),
+  jobs: arrayShapeField(objectShapeField(jobShape), SHAPE_LIMITS.jobs),
   unavailable: arrayShapeField(objectShapeField(UNAVAILABLE_SHAPE), SHAPE_LIMITS.unavailable),
 });
 
@@ -567,13 +611,48 @@ function schemaVersion(facts) {
   return m ? Number(m[1]) : null;
 }
 
+const hasKey = (value, key) => isPlainObject(value) && Object.hasOwn(value, key);
+
+// A human wait has no identifier: two waits are the same one when they agree on all four.
+const waitKey = (interval) => JSON.stringify([interval.kind, interval.agent, interval.start_ms, interval.end_ms]);
+const prKey = (pr) => JSON.stringify([pr.repo, pr.number]);
+
+/**
+ * The `/4` keys a replaced `refs` or `intervals` list would lose. A `/4` file
+ * requires `created` on every PR and `stop` on every human wait, and a record
+ * that names a PR or a wait without the key says nothing about it, so the
+ * file's own value for the same PR (repo and number) or wait (kind, worker,
+ * start and end) stays. `needed` is each entry's file value, or `undefined`
+ * when the file has none to keep.
+ */
+function carriedV4Keys(current, record) {
+  const fields = isPlainObject(record?.fields) ? record.fields : {};
+  const carried = [];
+  const currentPrs = new Map((Array.isArray(current?.refs?.prs) ? current.refs.prs : []).filter((pr) => hasKey(pr, "created")).map((pr) => [prKey(pr), pr.created]));
+  (Array.isArray(fields.refs?.prs) ? fields.refs.prs : []).forEach((pr, index) => {
+    if (!isPlainObject(pr) || hasKey(pr, "created")) return;
+    carried.push({ path: `fields.refs.prs.${index}.created`, list: "prs", index, key: "created", value: currentPrs.get(prKey(pr)) });
+  });
+  const currentWaits = new Map((Array.isArray(current?.intervals) ? current.intervals : []).filter((interval) => interval?.kind === "human_wait" && hasKey(interval, "stop")).map((interval) => [waitKey(interval), interval.stop]));
+  (Array.isArray(fields.intervals) ? fields.intervals : []).forEach((interval, index) => {
+    if (!isPlainObject(interval) || interval.kind !== "human_wait" || hasKey(interval, "stop")) return;
+    carried.push({ path: `fields.intervals.${index}.stop`, list: "intervals", index, key: "stop", value: currentWaits.get(waitKey(interval)) });
+  });
+  return carried;
+}
+
 /**
  * `checkCorrectionAgainstFacts(current, record) -> errors`: a correction that
  * already passed `validateCorrectionRecord`, checked against the facts file it
  * would change. It may not write what that file's own schema version does not
  * allow: a commit time (`refs.commits[].at_ms`) or an `outcomes` flag needs
- * `/3`; a pull request time (`refs.prs[].at_ms`) needs `/2`. (Desk's rules
- * call each of these `inconsistent` on an older file.) Empty when it is fine.
+ * `/3`; a pull request time (`refs.prs[].at_ms`) needs `/2`; a pull request's
+ * `created`, a human wait's `stop` and a job's finish day need `/4`. (Desk's
+ * rules call each of these `inconsistent` on an older file.) In a `/4` file it
+ * also refuses a record that would drop a `/4` key without the file holding a
+ * value to keep (`correction_v4_key_missing`), and a created pull request in a
+ * file that is, or becomes, a public desk's (`correction_inconsistent`). Empty
+ * when it is fine.
  */
 export function checkCorrectionAgainstFacts(current, record) {
   const errors = [];
@@ -588,15 +667,47 @@ export function checkCorrectionAgainstFacts(current, record) {
   });
   (Array.isArray(refs.prs) ? refs.prs : []).forEach((pr, i) => {
     if (isPlainObject(pr) && Object.hasOwn(pr, "at_ms")) needs(2, `fields.refs.prs.${i}.at_ms`);
+    if (hasKey(pr, "created")) needs(4, `fields.refs.prs.${i}.created`);
+  });
+  (Array.isArray(fields.intervals) ? fields.intervals : []).forEach((interval, i) => {
+    if (hasKey(interval, "stop")) needs(4, `fields.intervals.${i}.stop`);
+  });
+  (Array.isArray(fields.jobs) ? fields.jobs : []).forEach((job, i) => {
+    if (hasKey(job, "finished_on")) needs(4, `fields.jobs.${i}.finished_on`);
+    if (hasKey(job, "finished_basis")) needs(4, `fields.jobs.${i}.finished_basis`);
   });
   (Array.isArray(fields.unavailable) ? fields.unavailable : []).forEach((entry, i) => {
     if (isPlainObject(entry) && entry.field === "outcomes") needs(3, `fields.unavailable.${i}.field`);
   });
+  if (version !== null && version >= 4) {
+    for (const item of carriedV4Keys(current, record)) {
+      if (item.value === undefined) fail(errors, "correction_v4_key_missing", item.path);
+    }
+    // A public desk publishes every PR as `created: false` (the GitHub creation time of a PR the session opened would date the session).
+    const unavailable = Array.isArray(fields.unavailable) ? fields.unavailable : current.unavailable;
+    const isPublic = (Array.isArray(unavailable) ? unavailable : []).some((entry) => isPlainObject(entry) && entry.field === "job_offsets" && entry.reason === "desk_public");
+    if (isPublic) {
+      (Array.isArray(refs.prs) ? refs.prs : []).forEach((pr, i) => {
+        if (isPlainObject(pr) && pr.created === true) fail(errors, "correction_inconsistent", `fields.refs.prs.${i}.created`);
+      });
+    }
+  }
   return errors;
 }
 
 export function applyCorrection(current, record) {
   const corrected = { ...current, ...record.fields };
+  // A `/4` key the record does not name stays as the file has it. (`checkCorrectionAgainstFacts` has already refused a record that leaves one the file cannot supply.)
+  if (schemaVersion(current) >= 4) {
+    const carried = carriedV4Keys(current, record).filter((item) => item.value !== undefined);
+    // New arrays: the record's own lists are never changed.
+    if (carried.some((item) => item.list === "prs")) corrected.refs = { ...corrected.refs, prs: [...corrected.refs.prs] };
+    if (carried.some((item) => item.list === "intervals")) corrected.intervals = [...corrected.intervals];
+    for (const { list, index, key, value } of carried) {
+      const container = list === "prs" ? corrected.refs.prs : corrected.intervals;
+      container[index] = { ...container[index], [key]: value };
+    }
+  }
   if (Object.hasOwn(record.fields, "jobs")) {
     const allowed = new Set(record.fields.jobs.map((entry) => entry.job));
     corrected.jobs = (Array.isArray(current.jobs) ? current.jobs : []).filter((entry) => typeof entry?.job === "string" && allowed.has(entry.job));
@@ -619,6 +730,8 @@ const MIRRORED_VOCABULARY = Object.freeze({
   intervalKind: INTERVAL_KINDS,
   outcome: OUTCOMES,
   jobStatus: JOB_STATUSES,
+  stopEnd: STOP_ENDS,
+  finishedBasis: FINISHED_BASES,
   jobBasis: JOB_BASIS_VALUES,
   publishedUnavailableField: PUBLISHED_UNAVAILABLE_FIELDS,
   unavailableReason: UNAVAILABLE_REASONS,

@@ -59,16 +59,24 @@ The waste table reads Desk's rollup of the evaluator's labels, and it never show
 
 ## What the store guarantees
 
-Every file under `facts/` passes the published schema, `desk.factory.published/1` or `/2`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored `/1` or `/2` file stays valid and is never rewritten. In every version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most every field with every reason once, 21 fields by 11 reasons today, so 231 entries) says which fields were not recorded and why:
+Every file under `facts/` passes the published schema, `desk.factory.published/1`, `/2`, `/3` or `/4`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored file stays valid under every later version and is never rewritten, except by a correction from the same session that only grows. In every version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most every field with every reason once, 22 fields by 11 reasons today, so 242 entries) says which fields were not recorded and why:
 
 - the shape is exact, and any unknown key is rejected;
-- every string matches an enum or a strict pattern, and a string holding a date or a time of day is rejected;
+- every string matches an enum or a strict pattern, and a string holding a date or a time of day is rejected, with one exception: a job's finish day (below);
 - durations and offsets are bounded integers, so no value can be an epoch time;
 - a file's name matches the host and session it describes;
 - an existing file can only grow: the host and session stay the same, and the duration never decreases;
 - validation errors report stable reason codes only and never echo the rejected value.
 
-A `/3` file may carry a commit's `at_ms` (when the session recorded the commit, on the session clock) and the `outcomes` / `capped` flag (a session with more than 256 outcomes cut). Desk's validator accepts both only in a `/3` file, so intake does too. The field list is 22 by 11, so 242 entries, and a correction may write either only into a `/3` file.
+A `/3` file may carry a commit's `at_ms` (when the session recorded the commit, on the session clock) and the `outcomes` / `capped` flag (a session with more than 256 outcomes cut). Desk's validator accepts both only in a `/3` or `/4` file, so intake does too.
+
+A `/4` file adds four keys, which Desk's validator accepts only in `/4` and requires there:
+
+- **Finish day.** `jobs[].finished_on` is the UTC day the task finished, written `YYYY-MM-DD`, or `null`. It is the only date a facts file may hold. It must be a real calendar day no earlier than 2025-01-01, and intake refuses a day after the day the check runs. `jobs[].finished_basis` says where it came from: `transition` (the session moved the card to done or cancelled) or `card_updated` (the card's last edit, so the true day is on or before it). A day sits only on a job whose card was seen done or cancelled, and only with the timed source its basis names. A desk whose remote is public publishes no job timing, so no finish day.
+- **Created pull requests.** `refs.prs[].created` says whether the session itself opened the pull request (`true`) or only mentioned it (`false`). A public desk publishes every pull request as `created: false`, because the public creation time of a pull request the session opened would date the session, and Desk's validator refuses `created: true` in a public desk's file.
+- **Why the agent stopped.** Each `human_wait` interval carries `stop`: how the agent's turn ended (`end_turn`, `max_tokens`, `rate_limit`, `api_error`, `refusal`, `interrupted`, `ask_question`, `ask_plan` or `not_recorded`), whether its last message ended in a question mark (`asks`), and whether its own background agents were still running (`pending_agents`). The last two are `null` when the host does not say. No text and no tool name are published.
+
+A correction under `corrections/` knows all four. It may name only what it could name for a `/3` file (a job entry's finish day is accepted but never written, because a jobs correction only cuts credit). It may write a `/4` key only into a `/4` file. When it replaces `refs` or `intervals`, every `/4` key it does not name stays as the file has it, matched by pull request (repo and number) or by human wait (kind, worker, start and end). The store refuses, rather than drops, a correction that names a pull request or a human wait the file does not hold without that key, and one that says `created: true` in a public desk's file.
 
 The measurement contract, including what is collected locally, what is published and what never leaves the machine, is section 4 of the public [Agentic Engineering V2 RFC](https://github.com/ourostack/desk/blob/main/plugins/desk/docs/agentic-engineering-v2-rfc.md#4-the-factory-measuring-and-designing-the-work).
 
