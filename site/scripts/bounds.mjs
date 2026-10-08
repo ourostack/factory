@@ -20,8 +20,10 @@
 //                     awaited, else unknown
 //   finish_date       a finish day (finish-date.mjs): an upper bound when its
 //                     source is a later record (the card's last update, the
-//                     labels' landing), no direction when the clock anchor
-//                     disagrees with itself or the lead window is partial
+//                     labels' landing, the last recorded work), a lower bound
+//                     when the clock anchor is unconfirmed, no direction when
+//                     the anchor disagrees with itself, the lead window may
+//                     move its end, or the two pull in opposite ways
 //   from_members      a sum over members (sumDirection below), read from the
 //                     members' own directions, never from reasons
 //
@@ -43,6 +45,8 @@ const AWAITING = new Set(["awaiting_signoff"]);
 // A finish day taken from a record written after the task finished is at or
 // after the true day.
 const FINISH_LATER_RECORD = new Set(["finish_from_card_update", "finish_from_labels_landing", "finish_from_last_work"]);
+// The anchor rests on a pull request nothing confirms: it may predate the task, so the true finish is at or after the day shown.
+const FINISH_EARLIER_RECORD = new Set(["anchor_unconfirmed"]);
 const FINISH_NO_DIRECTION = new Set(["anchor_spread", "lead_window_partial", "anchor_after_labels"]);
 
 export const DIRECTIONS = Object.freeze({
@@ -129,7 +133,9 @@ export function directionOf(measure, reasons) {
   if (rule === "upper_if_awaiting") return reasons.length > 0 && reasons.every((r) => AWAITING.has(r)) ? "upper" : "unknown";
   if (rule === "finish_date") {
     if (reasons.some((r) => FINISH_NO_DIRECTION.has(r))) return "unknown";
-    return reasons.some((r) => FINISH_LATER_RECORD.has(r)) ? "upper" : "unknown";
+    const up = reasons.some((r) => FINISH_LATER_RECORD.has(r));
+    const down = reasons.some((r) => FINISH_EARLIER_RECORD.has(r));
+    return up && down ? "unknown" : up ? "upper" : down ? "lower" : "unknown";
   }
   if (rule === "from_members") throw new Error(`the measure ${measure} takes its direction from its members: use sumDirection`);
   if (rule === "lower_if_censored") return reasons.length > 0 && reasons.every((r) => LEAD_FLOORS.has(r)) ? "lower" : "unknown";

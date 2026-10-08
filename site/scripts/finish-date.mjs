@@ -9,10 +9,13 @@
 //      into done or cancelled is measured; the day of the card's last update
 //      is an upper bound, because a card can be edited after it is done.
 //   2. pr_anchor: the day of (the task's clock anchor + the end of its lead
-//      window). The anchor is the median, over the task's timed pull
-//      requests, of GitHub's created_at minus the pull request's time on the
-//      task's clock; that is the instant the task's clock started. Measured
-//      when the anchors span at most 2 minutes, else partial.
+//      window). The anchor is the shared one (prAnchor in pr-clock.mjs, whose
+//      one implementation lives in site/src/walk.js and also places the pull
+//      request markers): GitHub's created_at minus a timed pull request's time
+//      on the task's clock is the instant the clock started. Its state and
+//      direction carry over: a confirmed anchor is measured, an unconfirmed
+//      one (nothing confirms the pull requests it rests on) gives an "at
+//      least" day, and one whose pull requests disagree gives no direction.
 //   3. labels_landed: the UTC day of the commit that first added the task's
 //      labels to main. Labels are written when a task is done, so the task
 //      finished on or before that day: an upper bound.
@@ -27,9 +30,6 @@ import { direct } from "./bounds.mjs";
 import { measured, partial, unavailable } from "./state.mjs";
 
 export const MIN_DAY = "2025-01-01";
-// Anchors this far apart (or less) agree; a pull request further from the
-// median than this is one the session only looked at, and is left out.
-export const ANCHOR_SPREAD_MS = 120000;
 const DAY_MS = 86400000;
 const PR_REPO = /^(?!\.{1,2}\/)[A-Za-z0-9._-]+\/(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
 const FINISHED = new Set(["done", "cancelled"]);
@@ -62,51 +62,14 @@ export function isoWeek(day) {
   return { week: `${year}-W${String(n).padStart(2, "0")}`, starts_on: utcDay(monday) };
 }
 
-function median(values) {
-  const v = [...values].sort((a, b) => a - b);
-  const mid = v.length >> 1;
-  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
-}
-
-// samples: [{ at_ms, created_ms, created? }], a task's timed pull requests
-// with GitHub's created_at (epoch ms). Returns { ms, spread_ms, n, dropped }
-// or null when no pull request can anchor the clock.
-//
-// When Desk says which pull requests the session itself created (`created`
-// is true on at least one), only those anchor: a pull request the session
-// merely looked at was made before the task's clock began. Before Desk says
-// so, every timed pull request counts, and any whose anchor lies more than 2
-// minutes from the median is dropped.
-export function prAnchor(samples) {
-  const usable = (Array.isArray(samples) ? samples : []).filter((s) => s && Number.isFinite(s.at_ms) && s.at_ms >= 0 && Number.isFinite(s.created_ms));
-  const flagged = usable.some((s) => s.created === true);
-  const pool = flagged ? usable.filter((s) => s.created === true) : usable.filter((s) => s.created !== false);
-  if (!pool.length) return null;
-  const anchors = pool.map((s) => s.created_ms - s.at_ms);
-  const mid = median(anchors);
-  const kept = anchors.filter((a) => Math.abs(a - mid) <= ANCHOR_SPREAD_MS);
-  return { ms: median(kept), spread_ms: Math.max(...kept) - Math.min(...kept), n: kept.length, dropped: anchors.length - kept.length };
-}
-
-// prs: a job report's timeline.prs[]. getCreated(repo, number) -> GitHub's
-// created_at as epoch ms, or null when it cannot be read. Each pull request
-// is read once.
-export async function anchorFromPulls(prs, getCreated) {
-  const timed = (Array.isArray(prs) ? prs : []).filter((p) => p && PR_REPO.test(p.repo || "") && Number.isSafeInteger(p.number) && p.number > 0 && Number.isFinite(p.at_ms));
-  const seen = new Set();
-  const once = timed.filter((p) => !seen.has(`${p.repo}#${p.number}`) && seen.add(`${p.repo}#${p.number}`));
-  const created = await Promise.all(once.map((p) => getCreated(p.repo, p.number)));
-  return prAnchor(once.map((p, i) => ({ at_ms: p.at_ms, created_ms: created[i], created: typeof p.created === "boolean" ? p.created : null })));
-}
-
 // What the ladder reads from a job report (jobs/<job>.json): Desk's
 // `timeline.finished_on` envelope, the lead window, and the timed pull
 // requests. A report without them gives nulls and an empty list.
 export function finishInputsOf(report) {
   const t = report && typeof report === "object" && report.timeline && typeof report.timeline === "object" ? report.timeline : {};
   const prs = (Array.isArray(t.prs) ? t.prs : [])
-    .filter((p) => p && typeof p.repo === "string" && PR_REPO.test(p.repo) && Number.isSafeInteger(p.number) && p.number > 0 && Number.isFinite(p.at_ms) && p.at_ms >= 0)
-    .map((p) => ({ repo: p.repo, number: p.number, at_ms: p.at_ms, ...(typeof p.created === "boolean" ? { created: p.created } : {}) }));
+    .filter((p) => p && typeof p.repo === "string" && PR_REPO.test(p.repo) && Number.isSafeInteger(p.number) && p.number > 0)
+    .map((p) => ({ repo: p.repo, number: p.number, at_ms: Number.isFinite(p.at_ms) && p.at_ms >= 0 ? p.at_ms : null, ...(typeof p.created === "boolean" ? { created: p.created } : {}) }));
   return {
     desk: t.finished_on && typeof t.finished_on === "object" ? t.finished_on : null,
     leadWindow: t.lead_window && typeof t.lead_window === "object" ? t.lead_window : null,
@@ -134,14 +97,15 @@ function fromDesk(desk, today) {
   return out;
 }
 
-// Rung 2. The anchor plus the end of the lead window.
+// Rung 2. The shared anchor (prAnchor's result) plus the end of the lead window.
 function fromAnchor(anchor, leadWindow, today) {
-  if (!anchor || !Number.isFinite(anchor.ms) || !leadWindow || (leadWindow.state !== "measured" && leadWindow.state !== "partial")) return null;
+  if (!anchor || (anchor.state !== "measured" && anchor.state !== "partial") || !Number.isFinite(anchor.value_ms)) return null;
+  if (!leadWindow || (leadWindow.state !== "measured" && leadWindow.state !== "partial")) return null;
   if (!Number.isFinite(leadWindow.end_ms) || leadWindow.end_ms < 0) return null;
-  const day = utcDay(anchor.ms + leadWindow.end_ms);
+  const day = utcDay(anchor.value_ms + leadWindow.end_ms);
   if (!validDay(day, today)) return null;
-  const reasons = [];
-  if (anchor.spread_ms > ANCHOR_SPREAD_MS) reasons.push("anchor_spread");
+  // The anchor's own reasons carry over (anchor_spread, anchor_unconfirmed).
+  const reasons = [...(anchor.reasons || [])];
   // A window that is partial only because the card's dates are shorter than the
   // work moves its start; its end is the end of the last recorded work, which is
   // on or after the card's move to done. Any other reason may move the end.
@@ -152,11 +116,17 @@ function fromAnchor(anchor, leadWindow, today) {
   return stated(day, reasons, "pr_anchor");
 }
 
+// Why GitHub could not give the anchor, when that is the reason: the fallback
+// day then says so, so a day does not change basis between builds unexplained.
+function githubReasons(anchor) {
+  return anchor && anchor.state === "unavailable" ? (anchor.reasons || []).filter((r) => r.startsWith("github_")) : [];
+}
+
 // The finish day of one task.
 //   status: the card's status word ("done", "cancelled", ...)
 //   desk: Desk's timeline.finished_on envelope, or null
 //   leadWindow: the job report's timeline.lead_window, or null
-//   anchor: prAnchor's result, or null
+//   anchor: the shared prAnchor's result (with value_ms), or null
 //   labelsDay: the UTC day the task's labels first landed on main, or null
 //   today: the UTC day the build runs on
 export function resolveFinishDate({ status, desk = null, leadWindow = null, anchor = null, labelsDay = null, today }) {
@@ -173,7 +143,7 @@ export function resolveFinishDate({ status, desk = null, leadWindow = null, anch
   // with the conflict: it is not "on or before" when the task was reopened.
   if (anchored && labels && anchored.value > labels) return stated(labels, ["anchor_after_labels"], "labels_landed");
   if (anchored) return anchored;
-  if (labels) return stated(labels, ["finish_from_labels_landing"], "labels_landed");
+  if (labels) return stated(labels, ["finish_from_labels_landing", ...githubReasons(anchor)], "labels_landed");
   return unavailable(["no_finish_source"]);
 }
 

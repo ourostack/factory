@@ -5,7 +5,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { test } from "node:test"
 
-import { anchorFromPulls, finishInputsOf, forRollupFile, isoWeek, prAnchor, resolveFinishDate, utcDay, validDay } from "../../../site/scripts/finish-date.mjs"
+import { finishInputsOf, forRollupFile, isoWeek, resolveFinishDate, utcDay, validDay } from "../../../site/scripts/finish-date.mjs"
+import { prAnchor } from "../../../site/scripts/pr-clock.mjs"
 import { buildByWeek } from "../../../site/scripts/by-week.mjs"
 import { DIRECTIONS, direct, sumDirection } from "../../../site/scripts/bounds.mjs"
 import { checkByWeek, checkNumbers } from "../../../site/scripts/check-numbers.mjs"
@@ -42,53 +43,51 @@ test("a finish day must be a real calendar day, no earlier than 2025-01-01 and n
   assert.equal(validDay(20261007, TODAY), false)
 })
 
-// ---------------------------------------------------------------- the clock anchor
+// ---------------------------------------------------------------- the shared clock anchor
 
-test("the anchor is the median of GitHub's created_at minus the job-clock time, and outliers beyond 2 minutes are dropped", () => {
-  const s = (anchor, at) => ({ at_ms: at, created_ms: anchor + at })
-  const a = prAnchor([s(T0, 1000), s(T0 + 4000, 9000), s(T0 - 3000, 50000)])
-  assert.equal(a.ms, T0)
-  assert.equal(a.n, 3)
-  assert.equal(a.dropped, 0)
-  assert.equal(a.spread_ms, 7000)
-  // A pull request the session only looked at created long before the task: dropped, not averaged in.
-  const b = prAnchor([s(T0, 1000), s(T0 + 1000, 2000), s(T0 - 5 * DAY, 3000)])
-  assert.equal(b.dropped, 1)
-  assert.equal(b.n, 2)
-  assert.ok(b.spread_ms <= 120000)
-  assert.equal(prAnchor([]), null)
-  assert.equal(prAnchor([{ at_ms: "x", created_ms: 1 }, { at_ms: 1, created_ms: NaN }]), null)
+// The finish day uses the PR clock's anchor (pr-clock.mjs prAnchor), never its own.
+const gh = (rows) => new Map(rows.map(([repo, number, created]) => [`${repo}#${number}`, { created_at: new Date(created).toISOString() }]))
+const tp = (number, at_ms, created = null) => ({ repo: "o/a", number, at_ms, created })
+
+test("a finish day rests on the shared anchor: confirmed is measured, one unconfirmed pull request is an 'at least' day", () => {
+  const confirmed = prAnchor([tp(1, 1000, true)], gh([["o/a", 1, T0 + 1000]]))
+  assert.equal(confirmed.state, "measured")
+  const f = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: confirmed })
+  assert.deepEqual(f, { state: "measured", value: "2026-10-03", reasons: [], basis: "pr_anchor" })
+  // One pull request nothing confirms (no created flag, no majority): at least this day.
+  const lone = prAnchor([tp(1, 1000)], gh([["o/a", 1, T0 + 1000]]))
+  assert.equal(lone.state, "partial")
+  const g = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: lone })
+  assert.deepEqual(g, { state: "partial", value: "2026-10-03", reasons: ["anchor_unconfirmed"], basis: "pr_anchor", bound: "lower" })
+  // Three pull requests a day apart: the middle one is not a measured anchor.
+  const apart = prAnchor([tp(1, 1000), tp(2, 1000), tp(3, 1000)], gh([["o/a", 1, T0 + 1000], ["o/a", 2, T0 + 1000 - DAY], ["o/a", 3, T0 + 1000 + DAY]]))
+  const h = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: apart })
+  assert.equal(h.state, "partial")
+  assert.ok(h.reasons.includes("anchor_unconfirmed") || h.reasons.includes("anchor_spread"))
+  // Two that disagree give no direction.
+  const spread = prAnchor([tp(1, 1000, true), tp(2, 1000, true)], gh([["o/a", 1, T0 + 1000], ["o/a", 2, T0 + 1000 + DAY]]))
+  const k = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: spread })
+  assert.deepEqual([k.state, k.bound, k.reasons], ["partial", "unknown", ["anchor_spread"]])
 })
 
-test("when Desk says which pull requests the session created, only those make the anchor", () => {
-  const s = (anchor, at, created) => ({ at_ms: at, created_ms: anchor + at, created })
-  const a = prAnchor([s(T0, 1000, true), s(T0 - 30000, 2000, false), s(T0 + 1000, 3000, true)])
-  assert.equal(a.n, 2)
-  assert.equal(a.spread_ms, 1000)
-  // With none flagged true, a pull request Desk flags as not created is left out; one with no flag (a /3 file) counts.
-  assert.equal(prAnchor([s(T0, 1000, null), s(T0, 2000, null)]).n, 2)
-  assert.equal(prAnchor([s(T0, 1000, null), s(T0, 2000, false)]).n, 1)
-  // Created flagged on only false ones: none was created in the session, so no anchor rests on them.
-  assert.equal(prAnchor([s(T0, 1000, false), s(T0, 2000, false)]), null)
+test("an unconfirmed anchor on a window whose start moved pulls two ways: no direction", () => {
+  const lone = prAnchor([tp(1, 1000)], gh([["o/a", 1, T0 + 1000]]))
+  const f = resolveFinishDate({ ...base, leadWindow: win(2 * DAY, "partial", ["card_dates_shorter_than_work"]), anchor: lone })
+  assert.deepEqual([f.bound, f.reasons], ["unknown", ["anchor_unconfirmed", "finish_from_last_work"]])
 })
 
-test("anchorFromPulls reads each timed pull request's created_at once and skips the ones GitHub cannot give", async () => {
-  const calls = []
-  const getCreated = async (repo, number) => {
-    calls.push(`${repo}#${number}`)
-    return number === 3 ? null : T0 + number * 1000
-  }
-  const prs = [
-    { repo: "o/a", number: 1, at_ms: 0 },
-    { repo: "o/a", number: 2, at_ms: 0 },
-    { repo: "o/a", number: 3, at_ms: 5000 },
-    { repo: "o/a", number: 4 },
-    { repo: "bad repo", number: 5, at_ms: 1 },
-  ]
-  const a = await anchorFromPulls(prs, getCreated)
-  assert.deepEqual(calls.sort(), ["o/a#1", "o/a#2", "o/a#3"])
-  assert.equal(a.n, 2)
-  assert.equal(await anchorFromPulls([], getCreated), null)
+test("when GitHub cannot be read the labels day says why, and without GitHub reads nothing is invented", () => {
+  const unread = prAnchor([tp(1, 1000)], gh([]))
+  assert.equal(unread.state, "unavailable")
+  const f = resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: unread, labelsDay: "2026-10-06" })
+  assert.deepEqual([f.basis, f.reasons], ["labels_landed", ["finish_from_labels_landing", "github_unreadable"]])
+  const none = prAnchor([tp(1, 1000)], null)
+  assert.deepEqual(resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: none, labelsDay: "2026-10-06" }).reasons, ["finish_from_labels_landing", "github_not_read"])
+  const capped = prAnchor([tp(1, 1000)], gh([]), { capped: new Set(["o/a#1"]) })
+  assert.ok(resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: capped, labelsDay: "2026-10-06" }).reasons.includes("github_lookup_capped"))
+  // No timed pull request is no GitHub problem: no extra reason.
+  const notimed = prAnchor([tp(1, null)], gh([["o/a", 1, T0]]))
+  assert.deepEqual(resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: notimed, labelsDay: "2026-10-06" }).reasons, ["finish_from_labels_landing"])
 })
 
 // ---------------------------------------------------------------- the ladder
@@ -131,11 +130,11 @@ test("rung 1 is skipped when Desk gives no usable day: unavailable, malformed, i
   }
 })
 
-test("rung 2: the day is the anchor plus the end of the lead window, measured when the anchors span at most 2 minutes", () => {
-  const anchor = { ms: T0, spread_ms: 6000, n: 2, dropped: 0 }
+test("rung 2: the day is the anchor plus the end of the lead window; a confirmed anchor is measured, a disagreeing one has no direction", () => {
+  const anchor = { state: "measured", reasons: [], value_ms: T0 }
   const f = resolveFinishDate({ ...base, leadWindow: win(2 * DAY + 3600000), anchor })
   assert.deepEqual(f, { state: "measured", value: "2026-10-03", reasons: [], basis: "pr_anchor" })
-  const g = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: { ...anchor, spread_ms: 200000 } })
+  const g = resolveFinishDate({ ...base, leadWindow: win(2 * DAY), anchor: { state: "partial", bound: null, reasons: ["anchor_spread"], value_ms: T0 } })
   assert.deepEqual(g, { state: "partial", value: "2026-10-03", reasons: ["anchor_spread"], basis: "pr_anchor", bound: "unknown" })
   // A window that is partial only because the card's dates are shorter than the work moves its start; its end is the last recorded work, so the day is on or before the true one.
   const h = resolveFinishDate({ ...base, leadWindow: win(2 * DAY, "partial", ["card_dates_shorter_than_work"]), anchor })
@@ -148,7 +147,7 @@ test("rung 2: the day is the anchor plus the end of the lead window, measured wh
 })
 
 test("rung 2 is skipped without a lead window, and when it would put the finish after the labels landed", () => {
-  const anchor = { ms: T0, spread_ms: 0, n: 1, dropped: 0 }
+  const anchor = { state: "measured", reasons: [], value_ms: T0 }
   assert.equal(resolveFinishDate({ ...base, anchor, labelsDay: "2026-10-04" }).basis, "labels_landed")
   assert.equal(resolveFinishDate({ ...base, anchor, leadWindow: { state: "unavailable", reasons: ["x"] }, labelsDay: "2026-10-04" }).basis, "labels_landed")
   // Labels are written when a task is done, so a finish after that day cannot be measured. The labels day is published with the conflict, not as "on or before".
@@ -156,7 +155,7 @@ test("rung 2 is skipped without a lead window, and when it would put the finish 
   assert.deepEqual(conflict, { state: "partial", value: "2026-10-04", reasons: ["anchor_after_labels"], basis: "labels_landed", bound: "unknown" })
   assert.equal(resolveFinishDate({ ...base, anchor, leadWindow: win(6 * DAY) }).basis, "pr_anchor")
   // A day after today is not a finish day.
-  assert.equal(resolveFinishDate({ ...base, anchor: { ...anchor, ms: T0 + 30 * DAY }, leadWindow: win(DAY) }).state, "unavailable")
+  assert.equal(resolveFinishDate({ ...base, anchor: { ...anchor, value_ms: T0 + 30 * DAY }, leadWindow: win(DAY) }).state, "unavailable")
 })
 
 test("rung 3: the day the labels landed is an upper bound, 'finished on or before'", () => {
@@ -177,12 +176,12 @@ test("rung 4: no source is unavailable with its reason, and an open task is open
 })
 
 test("every ladder result passes the numbers check", () => {
-  const anchor = { ms: T0, spread_ms: 0, n: 1, dropped: 0 }
+  const anchor = { state: "measured", reasons: [], value_ms: T0 }
   const rows = [
     resolveFinishDate({ ...base, desk: { state: "measured", value: "2026-10-07", basis: "transition", reasons: [] } }),
     resolveFinishDate({ ...base, desk: { state: "partial", value: "2026-10-07", basis: "card_updated", reasons: ["finish_from_card_update", "reopened"] } }),
     resolveFinishDate({ ...base, leadWindow: win(DAY), anchor }),
-    resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: { ...anchor, spread_ms: 999999 } }),
+    resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: { state: "partial", bound: null, reasons: ["anchor_spread"], value_ms: T0 } }),
     resolveFinishDate({ ...base, labelsDay: "2026-10-06" }),
     resolveFinishDate({ ...base }),
     resolveFinishDate({ status: "processing", today: TODAY }),
@@ -195,11 +194,11 @@ test("every ladder result passes the numbers check", () => {
 })
 
 test("in the rollup and map files a direction the store cannot state is null with its reason, as Desk writes it", () => {
-  const spread = resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: { ms: T0, spread_ms: 999999, n: 2, dropped: 0 } })
+  const spread = resolveFinishDate({ ...base, leadWindow: win(DAY), anchor: { state: "partial", bound: null, reasons: ["anchor_spread"], value_ms: T0 } })
   assert.deepEqual(forRollupFile(spread), { ...spread, bound: null, bound_reason: "anchor_spread" })
-  const noWindow = resolveFinishDate({ ...base, leadWindow: win(DAY, "partial", ["censored"]), anchor: { ms: T0, spread_ms: 0, n: 2, dropped: 0 } })
+  const noWindow = resolveFinishDate({ ...base, leadWindow: win(DAY, "partial", ["censored"]), anchor: { state: "measured", reasons: [], value_ms: T0 } })
   assert.equal(forRollupFile(noWindow).bound_reason, "lead_window_partial")
-  const clash = resolveFinishDate({ ...base, anchor: { ms: T0, spread_ms: 0, n: 2, dropped: 0 }, leadWindow: win(6 * DAY), labelsDay: "2026-10-04" })
+  const clash = resolveFinishDate({ ...base, anchor: { state: "measured", reasons: [], value_ms: T0 }, leadWindow: win(6 * DAY), labelsDay: "2026-10-04" })
   assert.equal(forRollupFile(clash).bound_reason, "anchor_after_labels")
   const upper = resolveFinishDate({ ...base, labelsDay: "2026-10-06" })
   assert.deepEqual(forRollupFile(upper), upper)
@@ -251,7 +250,7 @@ test("a job report's finish inputs are read when Desk has them and are empty whe
   const got = finishInputsOf(withDesk)
   assert.deepEqual(got.desk, withDesk.timeline.finished_on)
   assert.deepEqual(got.leadWindow, withDesk.timeline.lead_window)
-  assert.deepEqual(got.prs, [{ repo: "o/a", number: 4, at_ms: 100, created: true }])
+  assert.deepEqual(got.prs, [{ repo: "o/a", number: 4, at_ms: 100, created: true }, { repo: "o/a", number: 5, at_ms: null }])
   assert.deepEqual(finishInputsOf({ timeline: {} }), { desk: null, leadWindow: null, prs: [] })
   assert.deepEqual(finishInputsOf(null), { desk: null, leadWindow: null, prs: [] })
 })
@@ -522,7 +521,7 @@ test("llms.txt lists by_week.json, drops 'no date', and describes the finish dat
   assert.match(text, /on or before/)
   // The null-with-reason convention covers every file under rollups/ and map/, Desk's and the store's.
   assert.match(text, /every file under `rollups\/` and `map\/`, Desk's and the store's/)
-  for (const code of ["lead_window_partial", "finish_from_last_work", "anchor_after_labels"]) assert.match(text, new RegExp(code))
+  for (const code of ["lead_window_partial", "finish_from_last_work", "anchor_after_labels", "anchor_unconfirmed", "github_lookup_capped"]) assert.match(text, new RegExp(code))
   const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
   assert.doesNotMatch(html, /No who, no when/)
   assert.doesNotMatch(html, /that time is never published/)

@@ -58,10 +58,10 @@ import { WASTE_NAMES, compareVersions, confidenceFigures, confidenceOf, evaluato
 import { CAPTURE_FILE, summarizeCapture } from "./capture-coverage.mjs";
 import { summarizeLoop } from "./loop-health.mjs";
 import { finishOrder, firstAdded, firstAddedDays, labelDays } from "./finish-order.mjs";
-import { anchorFromPulls, finishInputsOf, resolveFinishDate, utcDay } from "./finish-date.mjs";
+import { finishInputsOf, resolveFinishDate, utcDay } from "./finish-date.mjs";
 import { buildByWeek } from "./by-week.mjs";
 import { taskNames } from "./task-names.mjs";
-import { createPullReader, maxLookups, prKey, pullsDoc } from "./pr-clock.mjs";
+import { createPullReader, maxLookups, prAnchor, prKey, pullsDoc } from "./pr-clock.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -596,16 +596,14 @@ if (!OFFLINE) {
   const today = utcDay(Date.now());
   const labelAdded = firstAdded(mainDir, "labels/");
   const labelsDay = labelDays(labelAdded, firstAddedDays(mainDir, "labels/"));
-  const createdMs = async (repo, number) => {
-    const t = Date.parse((await pullInfo(repo, number))?.created_at);
-    return Number.isFinite(t) ? t : null;
-  };
   const finishDates = new Map();
   for (const j of jobs) {
     const inputs = finishInputs.get(j.id) || { desk: null, leadWindow: null, prs: [] };
     const deskDay = inputs.desk && (inputs.desk.state === "measured" || inputs.desk.state === "partial");
-    // The anchor needs GitHub; it is read only when Desk has no day to give.
-    const anchor = deskDay || OFFLINE ? null : await anchorFromPulls(inputs.prs, createdMs);
+    // The shared anchor (the PR clock's), from the reads made above through the
+    // one reader, so the lookup cap and the cache are shared. Needed only when
+    // Desk has no day to give.
+    const anchor = deskDay ? null : prAnchor(inputs.prs, OFFLINE ? null : pullReader.bodies, { capped: pullReader.capped });
     finishDates.set(j.id, resolveFinishDate({ status: j.status, desk: inputs.desk, leadWindow: inputs.leadWindow, anchor, labelsDay: labelsDay.get(j.id) || null, today }));
   }
   const order = finishOrder(jobs, { labelAdded, factsAdded: firstAdded(mainDir, "facts/"), factsFileOf, finishDates });
