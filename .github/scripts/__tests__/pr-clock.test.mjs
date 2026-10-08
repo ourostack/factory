@@ -251,6 +251,27 @@ test("a merge never lands before its opening: a skewed pair is clamped and says 
   assert.deepEqual(skewed.reasons, ["anchor_spread", "clock_skew"])
 })
 
+test("a clamped merge whose anchor said at most has no known direction, and is published as unknown, never as at least", () => {
+  // A merge placed through an anchor that is a lower bound is an upper bound
+  // ("at most"). If it still lands before the session's own opening time,
+  // the two say opposite things, so its direction is not known.
+  const anchor = { state: "partial", bound: "lower", reasons: ["anchor_unconfirmed"], basis: "timed", n: 2, candidates: 3, uncertainty_ms: 90 * S, value_ms: T0 }
+  const prs = [{ repo: "o/r", number: 1, at_ms: 10 * M, created: true }]
+  const g = gh([["o/r#1", pull(T0 + 9 * M, { merged: T0 + 9 * M + 30 * S })]])
+  const one = placePrs(prs, g, anchor)[0]
+  assert.equal(one.opened_basis, "desk")
+  assert.equal(one.merged_at_ms, one.opened_at_ms)
+  assert.deepEqual(one.merged_state, { state: "partial", bound: null, reasons: ["anchor_unconfirmed", "clock_skew_conflict"] })
+  assert.deepEqual(one.reasons, ["anchor_unconfirmed", "clock_skew_conflict"])
+  // Through a measured anchor, or one with no direction, the clamp stays a lower bound with clock_skew.
+  const measured = placePrs(prs, g, { ...anchor, state: "measured", reasons: [], bound: undefined })[0]
+  assert.deepEqual(measured.merged_state, { state: "partial", bound: "lower", reasons: ["clock_skew"] })
+  // prClock itself never builds that case: a created pull request makes the anchor's basis "created", whose partial anchor has no direction.
+  const c = prClock([...prs, { repo: "o/r", number: 2, at_ms: 30 * M, created: true }], gh([["o/r#1", pull(T0 + 10 * M, { merged: T0 + 10 * M + 30 * S })], ["o/r#2", pull(T0 + 30 * M + 200 * S)]]))
+  assert.equal(c.anchor.bound, null)
+  assert.notDeepEqual(c.prs[0].merged_state.reasons, ["anchor_unconfirmed", "clock_skew_conflict"])
+})
+
 test("when the pull requests that set the clock could not be read, a pull request that was read says so, not that it was unreadable", () => {
   const prs = [{ repo: "o/r", number: 1, at_ms: 5 * M }, { repo: "o/r", number: 2 }]
   const c = prClock(prs, gh([["o/r#1", null], ["o/r#2", pull(T0, { merged: T0 + M })]]))
@@ -464,7 +485,7 @@ globalThis.fetch = async (url, init = {}) => {
 test("every reason the PR clock can give has the page's words, and the data index describes the map file's clock", async () => {
   const { createRequire } = await import("node:module")
   const F = createRequire(import.meta.url)("../../../site/src/format.js")
-  for (const r of ["anchor_spread", "anchor_unconfirmed", "anchor_spread_too_wide", "anchor_github_unreadable", "anchor_github_lookup_capped", "clock_skew", "not_merged", "no_timed_pr", "no_created_timed_pr", "github_unreadable", "github_lookup_capped", "github_not_read", "merged_time_not_recorded"]) assert.ok(F.hasReasonText(r), r)
+  for (const r of ["anchor_spread", "anchor_unconfirmed", "anchor_spread_too_wide", "anchor_github_unreadable", "anchor_github_lookup_capped", "clock_skew", "not_merged", "no_timed_pr", "no_created_timed_pr", "github_unreadable", "github_lookup_capped", "github_not_read", "merged_time_not_recorded", "clock_skew_conflict"]) assert.ok(F.hasReasonText(r), r)
   const { llmsText } = await import("../../../site/scripts/publish-files.mjs")
   assert.match(llmsText("{{FILES}}", [{ path: "map/j1.json", bytes: 10 }]), /operator prompts \(each with its why\), the waits before them, and pull requests with their opened and merged times on the task clock/)
   // The placing limit is stated where agents read it.
