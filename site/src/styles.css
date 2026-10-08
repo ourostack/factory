@@ -54,6 +54,10 @@
   --c-wait-other_task: #b53a6a;
   --c-alarm: #c62f2f;
   --c-accent: #6b4fd8;
+  /* The human-agent clock: an operator prompt whose why is not known, and
+     a pull request time. A known why takes the next-prompt waiting color. */
+  --c-op: #3d3c38;
+  --c-pr: #1f63b8;
 
   /* Hatches from the tokens: a stripe of the meaning color over the page. */
   --hatch-agents-working: repeating-linear-gradient(135deg, var(--c-agents-working) 0 2px, transparent 2px 6px);
@@ -112,6 +116,8 @@
     --c-wait-no_session: #6a4f36;
     --c-wait-unknown: #e8833c;
     --c-wait-other_task: #e57a9a;
+    --c-op: #d6d4cc;
+    --c-pr: #6aa7ee;
     --c-alarm: #ef5a5a;
     --c-accent: #9d88f0;
 
@@ -835,17 +841,67 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .vsm-wait-what { font-size: 12px; line-height: 1.3; color: var(--text-secondary); overflow-wrap: anywhere; }
 .vsm-wait.is-longest .vsm-wait-dur::after { content: " \2190 longest"; font-weight: 500; font-size: 11px; color: var(--text-muted); }
 
-.vsm-data { margin: 6px 6px 0; padding: 6px 2px 4px; border-top: 1px solid var(--gridline); font-size: 12px; }
+.vsm-data { min-width: 0; margin: 6px 6px 0; padding: 6px 2px 4px; border-top: 1px solid var(--gridline); font-size: 12px; }
 .vsm-data-list { margin: 0; display: grid; gap: 1px; }
 /* A value never wraps inside a narrow cell: when label and value do not fit
    on one line, the value takes its own line, right-aligned. */
 .vsm-data-list > div { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 6px; line-height: 1.35; }
-.vsm-data-list dt { color: var(--text-muted); white-space: nowrap; }
+.vsm-data-list dt { color: var(--text-muted); flex: 0 1 auto; }
 .vsm-data-list dd { margin: 0 0 0 auto; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 .vsm-data-toggle { display: none; }
 
 /* The ladder: low is working, high is waiting. Each step is a button. */
 .vsm-lad { display: flex; align-items: stretch; height: 46px; margin-top: 14px; }
+/* The ladder's clock marks: a strip above each item's ladder (beside it on a
+   phone), with each mark at its time inside the item. */
+.vsm-ladcol { display: flex; flex-direction: column; min-width: 0; }
+.vsm-ladcol .vsm-lad { margin-top: 0; }
+/* Two thin lanes: prompt ticks (the first), pull request glyphs (the second). */
+.vsm-marks { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.mark-lane { position: relative; height: 14px; }
+.mark-lane-pr { height: 16px; }
+.lad-mark { position: absolute; top: 0; height: 100%; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; min-width: 8px; padding: 0; background: none; border: 0; border-radius: 3px; color: var(--text-secondary); z-index: 1; }
+.lad-mark-multi { z-index: 2; }
+.lad-mark:hover, .lad-mark:focus-visible { background: color-mix(in srgb, var(--focus) 14%, transparent); }
+.lad-tick { display: inline-block; width: 2px; height: 12px; border-radius: 1px; background: var(--c-op); flex: none; }
+.lad-tick.why-decision, .lad-tick.why-approval, .lad-tick.why-acceptance, .lad-tick.why-question, .lad-tick.why-stopped_short, .lad-tick.why-error_limit, .lad-tick.why-interrupted, .lad-tick.why-unknown { background: var(--c-wait-next_prompt); }
+.lad-span { position: absolute; top: 50%; height: 2px; margin-top: -1px; background: color-mix(in srgb, var(--text-secondary) 45%, transparent); border-radius: 1px; }
+.lad-mark-count { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 650; line-height: 1; padding: 1px 4px 1px 3px; border-radius: 7px; border: 1.25px solid var(--c-op); color: var(--text-primary); background: var(--page-plane); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lad-mark-count.count-pr { border-color: var(--c-pr); }
+.lad-mark-count .count-tick { display: inline-block; width: 2px; height: 9px; border-radius: 1px; background: var(--c-op); }
+.lad-mark-count .clock-glyph { width: 9px; height: 9px; }
+.lad-mark-multi.is-partial .lad-mark-count { border-style: dashed; }
+/* The margins for marks outside the lead window. */
+.vsm-margin { align-self: start; margin: 8px 6px 0; padding: 6px 8px; border: 1.25px dashed var(--baseline); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
+.vsm-margin-title { font-weight: 650; color: var(--text-primary); }
+.vsm-margin-marks { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.lad-mark-inline { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 2px; border-radius: 3px; font-size: 12px; color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.lad-mark-inline:hover, .lad-mark-inline:focus-visible { background: color-mix(in srgb, var(--focus) 14%, transparent); }
+.pr-line { font-size: 13px; line-height: 1.6; margin: 4px 0 0; }
+.clock-glyph { flex: none; display: block; overflow: visible; }
+.clock-glyph.glyph-prompt { fill: var(--c-op); }
+.clock-glyph.glyph-prompt.why-decision, .clock-glyph.glyph-prompt.why-approval, .clock-glyph.glyph-prompt.why-acceptance, .clock-glyph.glyph-prompt.why-question, .clock-glyph.glyph-prompt.why-stopped_short, .clock-glyph.glyph-prompt.why-error_limit, .clock-glyph.glyph-prompt.why-interrupted, .clock-glyph.glyph-prompt.why-unknown { fill: var(--c-wait-next_prompt); }
+.clock-glyph.glyph-opened, .clock-glyph.glyph-merged, .clock-glyph.glyph-pr { fill: var(--c-pr); }
+.clock-glyph.glyph-multi { fill: var(--c-op); }
+.clock-glyph.is-partial path, .clock-glyph.is-partial circle, .clock-glyph.is-partial rect { fill: var(--page-plane); stroke: var(--c-pr); stroke-width: 1.4; stroke-dasharray: 2 1.2; }
+.vsm-op { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 2px 4px 2px 0; font-size: 12px; color: var(--link); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent); text-underline-offset: 2px; line-height: 1.3; }
+.vsm-key-glyph, .lane-key-glyph { display: inline-flex; align-items: center; justify-content: center; width: 18px; }
+.lane-key-glyph { width: 14px; }
+.clock-section { margin-top: 14px; }
+table.data-table.handoffs-table td, table.data-table.pr-clock-table td { white-space: normal; }
+table.data-table.handoffs-table td:first-child, table.data-table.pr-clock-table td:first-child { white-space: nowrap; }
+table.data-table.handoffs-table th { white-space: normal; vertical-align: bottom; }
+/* On a narrow screen each row stacks into labeled lines, so the table never
+   scrolls sideways. */
+@media (max-width: 720px) {
+  .handoffs-table thead, .pr-clock-table thead { display: none; }
+  table.handoffs-table, table.pr-clock-table { min-width: 0; }
+  .handoffs-table, .handoffs-table tbody, .handoffs-table tr, .pr-clock-table, .pr-clock-table tbody, .pr-clock-table tr { display: block; width: 100%; }
+  .handoffs-table tr, .pr-clock-table tr { padding: 6px 0; border-bottom: 1px solid var(--gridline); }
+  table.data-table.handoffs-table td, table.data-table.pr-clock-table td { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); column-gap: 8px; padding: 2px 0; border: 0; text-align: left; white-space: normal; }
+  table.data-table.handoffs-table td:first-child, table.data-table.pr-clock-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
+  .handoffs-table td::before, .pr-clock-table td::before { content: attr(data-label); color: var(--text-secondary); font-size: 12px; }
+}
 .lad {
   flex: 1 1 auto;
   min-width: 0;
@@ -881,6 +937,8 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
   font-size: 13px;
   align-self: end;
 }
+.vsm-sum-cell { position: relative; min-width: 0; }
+.vsm-sum-cell > .vsm-summary { position: absolute; top: 0; left: 0; right: 0; }
 .sum-line { display: flex; flex-direction: column; line-height: 1.3; padding: 1px 4px; }
 .sum-label { color: var(--text-secondary); }
 .sum-value-text { font-weight: 650; font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -911,7 +969,19 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
    show two rows and open on tap. */
 .vsm-phone { display: flex; flex-direction: column; }
 .vsm-phone .vsm-customer { padding: 0 0 10px; border-bottom: 1px solid var(--gridline); margin-bottom: 4px; }
-.vsm-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: 10px; }
+.vsm-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 8px; }
+.vsm-phone .vsm-margin-row { display: block; }
+.vsm-phone .vsm-margin { margin: 6px 0; }
+.vsm-phone .vsm-ladcol { flex-direction: row; }
+.vsm-phone .vsm-marks { order: 2; flex-direction: row; gap: 2px; width: 46px; margin: 0; flex: none; }
+.vsm-phone .mark-lane { height: auto; width: 22px; }
+.vsm-phone .mark-lane-pr { width: 22px; }
+/* On a phone a merged mark stacks its glyph over its count, to fit its lane. */
+.vsm-phone .lad-mark-count { flex-direction: column; gap: 1px; padding: 2px 1px; border-radius: 6px; min-width: 18px; }
+.vsm-phone .lad-mark-count .count-tick { width: 9px; height: 2px; }
+.vsm-phone .lad-mark { top: auto; left: 0; width: 100%; height: auto; min-height: 8px; transform: translateY(-50%); }
+.vsm-phone .lad-tick { width: 12px; height: 2px; }
+.vsm-phone .lad-span { top: auto; left: 50%; width: 2px; height: auto; margin: 0 0 0 -1px; }
 .vsm-row-body { padding: 6px 0; min-width: 0; }
 .vsm-phone .vsm-info { padding: 0 0 4px; min-height: 0; }
 .vsm-phone .vsm-box { margin: 0; width: 100%; }
@@ -1048,6 +1118,25 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-outside-label { fill: var(--text-muted); font-size: 11px; font-family: system-ui, sans-serif; }
 .lane-act { fill: var(--text-secondary); }
 .lane-fail { fill: var(--c-alarm); }
+.lane-op { cursor: pointer; outline: none; fill: var(--c-op); }
+.lane-op.why-decision, .lane-op.why-approval, .lane-op.why-acceptance, .lane-op.why-question, .lane-op.why-stopped_short, .lane-op.why-error_limit, .lane-op.why-interrupted, .lane-op.why-unknown { fill: var(--c-wait-next_prompt); }
+.lane-op-band { fill: var(--c-wait-next_prompt); opacity: 0.16; }
+.lane-hit { fill: transparent; }
+.lane-pr { cursor: pointer; outline: none; }
+.lane-pr path { fill: var(--c-pr); }
+.lane-pr.is-partial path { fill: var(--page-plane); stroke: var(--c-pr); stroke-width: 1.4; stroke-dasharray: 2 1.2; }
+.lane-pr-label { fill: var(--text-secondary); font-size: 11px; font-family: system-ui, sans-serif; }
+.lane-key-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 14px; border: 1.25px solid var(--c-pr); border-radius: 7px; font-size: 10.5px; font-weight: 650; color: var(--text-primary); }
+.lane-op-badge { fill: var(--page-plane); stroke: var(--c-op); stroke-width: 1.25; }
+.lane-op-span { stroke: var(--c-op); stroke-width: 2; opacity: 0.5; }
+.lane-op-multi { cursor: pointer; outline: none; }
+.lane-op-multi:focus-visible .lane-op-badge, .lane-op-multi:hover .lane-op-badge { stroke: var(--focus); stroke-width: 2.5; }
+.lane-pr-badge { fill: var(--page-plane); stroke: var(--c-pr); stroke-width: 1.25; }
+.lane-pr-count { fill: var(--text-primary); font-size: 10.5px; font-weight: 650; font-family: system-ui, sans-serif; }
+.lane-pr-span { stroke: var(--c-pr); stroke-width: 2; opacity: 0.5; }
+.lane-pr-multi:focus-visible .lane-pr-badge, .lane-pr-multi:hover .lane-key-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 14px; border: 1.25px solid var(--c-pr); border-radius: 7px; font-size: 10.5px; font-weight: 650; color: var(--text-primary); }
+.lane-pr-badge { stroke: var(--focus); stroke-width: 2.5; }
+.lane-op:focus-visible circle, .lane-op:hover circle, .lane-pr:focus-visible path, .lane-pr:hover path { stroke: var(--focus); stroke-width: 2.5; }
 .lane-stretch { cursor: pointer; outline: none; }
 .lane-stretch:focus-visible .lane-stretch-rect, .lane-stretch:hover .lane-stretch-rect { stroke: var(--focus); stroke-width: 2.5; }
 .lane-stretch-rect.seg-not_labeled { fill: none; stroke: var(--c-not-labeled); stroke-width: 1; }

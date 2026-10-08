@@ -1157,7 +1157,7 @@
     const prs = el("section", "block");
     prs.appendChild(el("h2", "block-title", "Pull requests"));
     const prLine = el("p", "chart-caption");
-    prLine.appendChild(document.createTextNode("Public pull requests the task's sessions referenced: "));
+    prLine.appendChild(document.createTextNode("Public pull requests that first appeared in the task's sessions (opened or mentioned): "));
     prLine.appendChild(cellNum(j.public_prs, "count"));
     prs.appendChild(prLine);
     if (j.pull_requests.length) {
@@ -1377,7 +1377,7 @@
     drawerBody.innerHTML = "";
     const what = el("p", "drawer-what");
     // A wait wears its cause's own swatch, as on the bar, the legend and Rank causes.
-    what.appendChild(content.cause ? waitSwatch(content.cause) : swatch(content.segment));
+    what.appendChild(content.mark ? clockGlyph(content.mark, { why: content.why }) : content.cause ? waitSwatch(content.cause) : swatch(content.segment));
     what.appendChild(document.createTextNode(content.rows.length ? content.rows[0][1] : ""));
     drawerBody.appendChild(what);
     const dl = el("dl", "drawer-facts");
@@ -1601,8 +1601,20 @@
     // not recorded, and a task not labeled, read "not recorded" and "not
     // labeled yet" in every box, never 0.
     const model = W.mapModel(map, { maxBoxes, jobStates: { operator_turns: j.human_turns || null, labels: row ? row.value_in_working_ms : null } });
+    // The prompts and pull requests are still listed when no map is drawn.
+    const clockOnly = (origin0) => {
+      const lw0 = map.lead_window || {};
+      const o = typeof lw0.start_ms === "number" ? lw0.start_ms : origin0;
+      const lead0 = typeof lw0.start_ms === "number" && typeof lw0.end_ms === "number" ? lw0.end_ms - lw0.start_ms : null;
+      const c0 = W.clockMarks(map, null);
+      const ctx0 = { origin_ms: o, lead_ms: lead0, reasonText: F.reasonText, model: null };
+      const open0 = (opener, thing) => openClock(opener, thing, { j, map, ctxDrawer: ctx0, clock: c0 });
+      renderHandoffs(container, map, c0, o, lead0, open0);
+      renderPrTable(container, map, c0, o, open0);
+    };
     if (!model.items.length) {
       emptyState(container, "No work burst or wait was recorded for this task, so there is nothing to draw.");
+      clockOnly(0);
       return null;
     }
     const lw = map.lead_window || {};
@@ -1613,6 +1625,7 @@
       const why = (map.bursts_state.reasons || []).map(F.reasonText).join("; ") || "they were not recorded";
       const lead = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? ` Its lead time is known: ${W.durationWords(lw.end_ms - lw.start_ms)}.` : "";
       emptyState(container, `This task's work bursts are not known, because ${why}, so no box or triangle is drawn: a gap could be a stretch the log does not show, not idle time.${lead} The sessions below still list what each one recorded.`);
+      clockOnly(origin);
       return null;
     }
     const leadMs = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? lw.end_ms - lw.start_ms : null;
@@ -1624,13 +1637,18 @@
 
     const root = el("div", `vsm ${phone ? "vsm-phone" : "vsm-wide"}`);
     root.dataset.hl = "";
-    const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText, fold_ms: model.fold_ms, model };
+    const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText, fold_ms: model.fold_ms, model, open: false };
     const sessionsOf = (it) => {
       if (it.type === "box") return it.sessions;
       return (map.sessions || []).filter((s) => typeof s.offset_ms === "number" && s.offset_ms <= it.end_ms && (typeof s.end_ms !== "number" || s.end_ms >= it.start_ms)).map((s) => s.id);
     };
-    // Pull requests are listed once, for the whole task, under the map:
-    // never beside a box or a wait, which would place them on the clock.
+    // Operator prompts and pull request times on the task clock (walk.js
+    // clockMarks): prompts above the boxes they start and on the ladder,
+    // pull request times on the ladder, both in the Handoffs and pull
+    // request tables under the map. A time the map file does not place is
+    // listed there, never drawn.
+    const clock = W.clockMarks(map, model);
+    ctxDrawer.open = clock.open;
     const linksFor = (it) =>
       sessionsOf(it)
         .map((sid) => ({ sid, route: F.safeRoute("task", j.id, "session", sid) }))
@@ -1646,9 +1664,18 @@
         more: (box) => stretchesIn(box, j, map, it, ctxDrawer),
       });
     };
+    const openMark = (opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock });
+    // Marks outside the lead window go to a margin before or after the
+    // map, never to its edge (their positions do not depend on the layout).
+    const outside = W.ladderLanes(clock, [], { origin });
+    const off = outside.before.count ? 1 : 0;
+    const afterCol = outside.after.count ? 1 : 0;
+    const lastCol = model.items.length + off + afterCol;
 
     // Each item's column (wide) or row (phone).
     const cols = model.items.map((it) => (it.type === "box" ? "minmax(124px, 1.5fr)" : "minmax(84px, 1fr)"));
+    if (off) cols.unshift("minmax(104px, 0.8fr)");
+    if (afterCol) cols.push("minmax(104px, 0.8fr)");
     if (!phone) root.style.gridTemplateColumns = `${cols.join(" ")} minmax(178px, 1.25fr)`;
     const place = (node, col, row, span) => {
       if (phone) return node;
@@ -1664,7 +1691,18 @@
     const oc = el("span", "vsm-customer-outcome");
     oc.appendChild(outcomeNode(j));
     customer.appendChild(oc);
-    root.appendChild(place(customer, model.items.length, 1));
+    root.appendChild(place(customer, lastCol, 1));
+    const margin = (side) => {
+      const m = outside[side];
+      if (!m.count) return;
+      const cell = marginCell(m, side, openMark, origin);
+      if (phone) {
+        const r = el("div", `vsm-row vsm-margin-row`);
+        r.appendChild(cell);
+        root.appendChild(r);
+      } else root.appendChild(place(cell, side === "before" ? 0 : model.items.length + off, 2, 3));
+    };
+    margin("before");
     const markCells = new Map();
     for (const m of marks) {
       if (!markCells.has(m.item)) markCells.set(m.item, []);
@@ -1680,8 +1718,18 @@
       const ms = markCells.get(i);
       const info = el("div", "vsm-info");
       if (ms) for (const m of ms) info.appendChild(el("span", "vsm-status", `card: ${m.status}${m.observed ? " (last seen)" : ""}`));
-      // The ladder for this item.
+      // The operator's prompts that fall in this item, as one marker.
+      const here = (clock.by_item[i] || []).map((k) => clock.prompts[k]);
+      const col = i + off;
+      if (here.length) info.appendChild(operatorMarker(here, it, model, openMark, origin));
+      // The ladder for this item, with a strip for its clock marks.
+      const ladCol = el("div", "vsm-ladcol");
+      const strip = el("div", "vsm-marks");
+      strip.dataset.item = String(i);
+      // Two thin lanes: prompt ticks, then pull request glyphs.
+      strip.append(el("div", "mark-lane mark-lane-prompt"), el("div", "mark-lane mark-lane-pr"));
       const lad = el("div", "vsm-lad");
+      ladCol.append(strip, lad);
       for (; segIndex < segs.length && segs[segIndex].item === i; segIndex++) {
         const sg = segs[segIndex];
         const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}${(sg.causes || []).map((k) => ` has-${k}`).join("")}`);
@@ -1719,12 +1767,19 @@
         main.setAttribute("aria-label", `${W.boxTitle(it)}: ${W.durationWords(it.working_ms)} working${rw ? `; rework: ${rw}` : ""}. Opens the evidence.`);
         main.addEventListener("click", () => open(main, { kind: "box", item: it }));
         data = el("div", "vsm-data");
-        const rows = W.dataBox(it, model.session_count);
+        const rows = W.dataBox(it, model.session_count, Array.isArray(map.prs) ? W.boxPrCount(clock, i, map.prs_state) : undefined);
         const dl = el("dl", "vsm-data-list");
         rows.forEach((r, k) => {
           const d = el("div", k >= 2 ? "vsm-data-more" : "");
           d.appendChild(el("dt", null, r.label));
-          d.appendChild(el("dd", null, r.text));
+          const dd = el("dd", null, r.text);
+          // A figure that is not measured says why, on hover and to screen readers.
+          if (r.reasons && r.reasons.length) {
+            const why = r.reasons.map(F.reasonText).join("; ");
+            dd.title = why;
+            dd.appendChild(el("span", "sr-only", ` (${why})`));
+          }
+          d.appendChild(dd);
           dl.appendChild(d);
         });
         data.appendChild(dl);
@@ -1754,19 +1809,20 @@
       }
       if (phone) {
         const body = el("div", "vsm-row-body");
-        if (ms) body.appendChild(info);
+        if (info.childNodes.length) body.appendChild(info);
         body.appendChild(main);
         if (data) body.appendChild(data);
-        cell.append(lad, body);
+        cell.append(ladCol, body);
         cell.classList.add(it.type === "box" ? "row-box" : "row-wait");
         root.appendChild(cell);
       } else {
-        root.appendChild(place(info, i, 1));
-        root.appendChild(place(main, i, 2));
-        if (data) root.appendChild(place(data, i, 3));
-        root.appendChild(place(lad, i, 4));
+        root.appendChild(place(info, col, 1));
+        root.appendChild(place(main, col, 2));
+        if (data) root.appendChild(place(data, col, 3));
+        root.appendChild(place(ladCol, col, 4));
       }
     }
+    margin("after");
 
     // The summary box: lead time; working time, of which value-adding; flow efficiency.
     const sum = el("div", "vsm-summary");
@@ -1797,9 +1853,23 @@
     line("sum-waiting", "Waiting", idle && idle.state !== "unavailable" && words.has("waiting") ? document.createTextNode(words.get("waiting")) : el("span", "num num-unavailable", "no data"), "idle: lead time − working time");
     line("sum-fe", "Flow efficiency", fig("fe", row && row.flow_efficiency), "working time ÷ lead time");
     if (phone) root.appendChild(sum);
-    else root.appendChild(place(sum, model.items.length, 3, 2));
+    else {
+      // The summary sits beside the boxes and adds no height to any row: it
+      // is taken out of the grid's sizing, so the data boxes keep their own
+      // height and the ladder sits right under them.
+      const cell = el("div", "vsm-sum-cell");
+      cell.appendChild(sum);
+      root.appendChild(place(cell, lastCol, 2, 3));
+    }
 
     container.appendChild(root);
+    // A summary taller than the rows beside it extends the map below, never
+    // the rows.
+    if (!phone) {
+      const over = sum.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom;
+      if (over > 0) root.style.paddingBottom = `${Math.ceil(over)}px`;
+    }
+    drawLadderMarks(root, clock, phone, openMark, origin);
 
     // The legend and how the map was folded.
     const legend = el("div", "vsm-legend");
@@ -1813,6 +1883,24 @@
     lg("key-tri", "A triangle is waiting: idle time between bursts of work, when no agent of this task was working, with what it waited on. Waiting always means idle time here; the evaluator's labels describe working time only.");
     lg("key-ladder", `${phone ? "The ladder runs down the left: a line on the left is working time, a line on the right is waiting." : "The ladder under the map: the low line is working time, the high line is waiting, each step labeled with its length."} A step marked “+” (such as “+5m”) is the short waits folded inside the box before it. Select any step for its evidence.`);
     lg("key-rework", "A loop arrow marks rework: stretches the evaluator labeled as defects inside that box.");
+    const lgGlyph = (kind, text, opts) => {
+      const p = el("p", "vsm-legend-item");
+      const k = el("span", "vsm-key vsm-key-glyph");
+      k.appendChild(clockGlyph(kind, opts));
+      p.append(k, document.createTextNode(text));
+      legend.appendChild(p);
+    };
+    lgGlyph("prompt", `An operator prompt: above the box it falls in, and as a tick on the ladder's first lane at its time. ${W.whyLegend(clock)}`);
+    lgGlyph("opened", "A pull request that first appeared in this task's sessions (opened there or mentioned; Desk does not say which yet), on the ladder's second lane at GitHub's opening time; a diamond is one merged.");
+    lgGlyph("opened", "An outlined mark is a time known only in part: its evidence says which way the true time lies.", { partial: true });
+    if (outside.before.count || outside.after.count) lgGlyph("opened", `A time before the task started${clock.open ? " or after its last recorded work" : " or after its lead time ended"} is listed in a dashed margin beside the map, with how far outside it lies, never drawn at the map's edge.`);
+    {
+      const p = el("p", "vsm-legend-item");
+      const k = el("span", "vsm-key vsm-key-glyph");
+      k.appendChild(markBadge({ lane: "pr", count: 2, marks: [{ kind: "merged" }] }));
+      p.append(k, document.createTextNode(MERGE_RULE));
+      legend.appendChild(p);
+    }
     container.appendChild(legend);
     container.appendChild(el("p", "chart-caption", `${W.foldWords(model)} Lead time ${leadWords || W.durationWords(model.totals.lead_ms)} = working ${W.durationWords(model.totals.working_ms)} + waits inside boxes ${W.durationWords(model.totals.inner_wait_ms)} + waits between boxes ${W.durationWords(model.totals.waiting_ms)}.`));
     // A map Desk states as incomplete (unreadable stretches of a log, or
@@ -1832,7 +1920,7 @@
       const tr = document.createElement("tr");
       const cells = it.type === "box"
         ? [W.boxTitle(it), W.clockWords(it.start_ms, it.end_ms, origin), W.durationShort(it.working_ms), it.inner_wait_ms ? W.durationShort(it.inner_wait_ms) : "—", W.statedText(it.tool_calls), W.statedText(it.tool_failures), W.statedText(it.operator_turns), W.statedText(it.defect_stretches)]
-        : [`Wait: ${W.waitTitle(it)}`, W.waitPlace(model, it), "—", W.durationShort(it.duration_ms), "—", "—", "—", "—"];
+        : [`Wait: ${W.waitTitle(it)}`, `${W.clockWords(it.start_ms, it.end_ms, origin)}, ${W.waitPlace(model, it)}`, "—", W.durationShort(it.duration_ms), "—", "—", "—", "—"];
       cells.forEach((c, k) => tr.appendChild(el("td", k >= 2 ? "num" : "", c)));
       tb.appendChild(tr);
     }
@@ -1842,9 +1930,20 @@
     det.appendChild(tw);
     container.appendChild(det);
 
-    // A deep link (?bursts=4-6, ?gaps=3) opens the item that holds it.
+    // The human-agent clock as text: the Handoffs table and the pull requests.
+    renderHandoffs(container, map, clock, origin, leadMs, openMark);
+    renderPrTable(container, map, clock, origin, openMark, model);
+
+    // A deep link (?bursts=4-6, ?gaps=3, ?prompt=2, ?pr=1) opens the item that holds it.
     const select = (sel) => {
       if (!sel) return false;
+      if (sel.kind === "prompt" || sel.kind === "pr") {
+        const mark = sel.kind === "prompt" ? clock.prompts[sel.from - 1] : null;
+        const pr = sel.kind === "pr" ? (map.prs || [])[sel.from - 1] : null;
+        if (!mark && !pr) return false;
+        openMark(null, mark ? { kind: "prompt", mark } : { kind: "pr", pr, k: sel.from - 1 });
+        return true;
+      }
       const it = model.items.find((x) => (sel.kind === "bursts" && x.type === "box" && x.burst_range[0] <= sel.from && sel.from <= x.burst_range[1]) || (sel.kind === "gaps" && x.type === "wait" && x.gap_range[0] <= sel.from && sel.from <= x.gap_range[1]));
       if (!it) return false;
       const node = root.querySelector(`.vsm-box[data-item="${it.index}"], .vsm-wait[data-item="${it.index}"]`);
@@ -1858,6 +1957,374 @@
       select,
       highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause, tok.seg),
     };
+  }
+
+  // ------------------------------------------- the human-agent clock (page)
+
+  // A clock mark's glyph: an operator prompt (a tick with a head, colored by
+  // why the agent had stopped), a pull request opened (an up-triangle) or
+  // merged (a diamond). A partial time is drawn outlined, never solid.
+  function clockGlyph(kind, opts) {
+    const o = opts || {};
+    const g = svg("svg", { viewBox: "0 0 12 12", width: 12, height: 12, "aria-hidden": "true", class: `clock-glyph glyph-${kind}${o.partial ? " is-partial" : ""}${o.why ? ` why-${o.why}` : ""}` });
+    if (kind === "prompt") {
+      g.appendChild(svg("rect", { x: 5, y: 3, width: 2, height: 9, rx: 1 }));
+      g.appendChild(svg("circle", { cx: 6, cy: 3, r: 2.6 }));
+    } else if (kind === "merged") g.appendChild(svg("path", { d: "M6 0.8 L11.2 6 L6 11.2 L0.8 6 Z" }));
+    else if (kind === "opened" || kind === "pr") g.appendChild(svg("path", { d: "M6 1 L11.4 11 L0.6 11 Z" }));
+    else g.appendChild(svg("circle", { cx: 6, cy: 6, r: 5 }));
+    return g;
+  }
+
+  // One tab stop for a row of marks: the arrow keys move between them,
+  // Home and End jump to the ends, and Enter or Space (a button's own
+  // behavior) opens one.
+  function roving(buttons) {
+    buttons.forEach((b, k) => {
+      b.tabIndex = k === 0 ? 0 : -1;
+      b.addEventListener("keydown", (evt) => {
+        const pos = buttons.indexOf(b);
+        const next = { ArrowRight: pos + 1, ArrowDown: pos + 1, ArrowLeft: pos - 1, ArrowUp: pos - 1, Home: 0, End: buttons.length - 1 }[evt.key];
+        if (next === undefined) return;
+        evt.preventDefault();
+        const to = buttons[Math.max(0, Math.min(buttons.length - 1, next))];
+        for (const x of buttons) x.tabIndex = -1;
+        to.tabIndex = 0;
+        to.focus();
+      });
+      b.addEventListener("focus", () => {
+        for (const x of buttons) x.tabIndex = -1;
+        b.tabIndex = 0;
+      });
+    });
+  }
+
+  // Opens a prompt's or a pull request's evidence: its drawer, a link to
+  // its session (a prompt) or to GitHub (a pull request), and its prompt
+  // for an agent.
+  function openClock(opener, thing, ctx) {
+    const { j, ctxDrawer } = ctx;
+    const content = W.drawer(thing, ctxDrawer);
+    const links = [];
+    if (thing.kind === "prompt") {
+      const sid = String(thing.mark.turn.session || "");
+      const route = F.safeRoute("task", j.id, "session", sid);
+      if (route) links.push({ text: `Open session ${sid.slice(0, 8)} to scale`, href: route });
+    } else if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(thing.pr.repo)) && Number.isInteger(thing.pr.number)) {
+      links.push({ text: `Pull request ${thing.pr.repo}#${thing.pr.number} on GitHub`, href: `https://github.com/${thing.pr.repo}/pull/${thing.pr.number}`, external: true });
+    }
+    const route = F.safeRoute("task", j.id) || "#/";
+    openDrawer(opener, content, { links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: mapPath(j.id) } });
+  }
+
+  // The marker above a box for the prompts that fall in it: one prompt
+  // opens its evidence; several open a list of them.
+  function operatorMarker(prompts, it, model, openMark, origin) {
+    const why = W.groupWhy(prompts);
+    const b = el("button", `vsm-op why-${why}`);
+    b.type = "button";
+    b.appendChild(clockGlyph("prompt", { why }));
+    const where = it.type === "box" ? `work box ${it.box_no}` : "this wait";
+    if (prompts.length === 1) {
+      b.appendChild(el("span", "vsm-op-text", `prompt ${prompts[0].n}`));
+      b.setAttribute("aria-label", `Operator prompt ${prompts[0].n} of ${prompts[0].total}, in ${where}. Opens the evidence.`);
+      b.addEventListener("click", () => openMark(b, { kind: "prompt", mark: prompts[0] }));
+      return b;
+    }
+    b.appendChild(el("span", "vsm-op-text", `${prompts.length} prompts`));
+    b.setAttribute("aria-label", `${prompts.length} operator prompts in ${where}, prompts ${prompts[0].n} to ${prompts[prompts.length - 1].n}. Opens the list.`);
+    b.addEventListener("click", () => openPromptList(b, prompts, where, openMark, origin));
+    return b;
+  }
+
+  // A list of prompts in the drawer, each opening its own evidence.
+  function openPromptList(opener, prompts, where, openMark, origin) {
+    openDrawer(opener, { title: `${prompts.length} operator prompts`, mark: "prompt", rows: [["What it is", `The operator's prompts in ${where}, in clock order`]], evidence: [] }, {
+      more: (box) => {
+        const ul = el("ul", "stretch-list");
+        for (const p of prompts) {
+          const li = document.createElement("li");
+          const b = el("button", "stretch-row");
+          b.type = "button";
+          b.appendChild(clockGlyph("prompt", { why: p.why }));
+          b.appendChild(document.createTextNode(` Prompt ${p.n}, ${W.clockAt(p.ms, origin)}, ${p.turn.basis === "after_stop" ? "after the agent had stopped" : p.turn.basis === "mid_turn" ? "while the agent was still working" : "the session's first prompt"}`));
+          b.addEventListener("click", () => openMark(null, { kind: "prompt", mark: p }));
+          li.appendChild(b);
+          ul.appendChild(li);
+        }
+        box.appendChild(ul);
+      },
+    });
+  }
+
+  // The merge rule, one statement for the legend and the merged marks'
+  // drawers (walk.js groupMarks is its logic).
+  const MERGE_RULE = "Marks that would overlap are shown as one count; select it for the list, each with its time.";
+
+  // A merged mark's badge: its lane's glyph and the count, so a merged
+  // prompt never reads as pull requests or the other way round.
+  function markBadge(g) {
+    const b = el("span", `lad-mark-count count-${g.lane}`);
+    b.appendChild(g.lane === "prompt" ? el("span", "count-tick") : clockGlyph(g.marks.every((x) => x.kind === "merged") ? "merged" : "opened"));
+    b.appendChild(document.createTextNode(String(g.count)));
+    return b;
+  }
+
+  // The ladder's two lanes, placed once the map is laid out: each item's
+  // strip is measured, and walk.js ladderLanes groups only the marks that
+  // collide under MERGE_RULE (prompt ticks and pull request glyphs, never together).
+  // Each lane is one tab stop.
+  function drawLadderMarks(root, clock, phone, openMark, origin) {
+    const strips = [...root.querySelectorAll(".vsm-marks")];
+    // The ladder is the time scale: each item's steps, measured where they
+    // are drawn, so a mark sits over the step that holds its time.
+    const sizes = [];
+    for (const st of strips) {
+      const i = Number(st.dataset.item);
+      const r0 = st.getBoundingClientRect();
+      const steps = [...root.querySelectorAll(`.vsm-lad .lad[data-item="${i}"]`)];
+      const geo = {};
+      steps.forEach((b) => {
+        const r = b.getBoundingClientRect();
+        const range = phone ? [r.top - r0.top, r.bottom - r0.top] : [r.left - r0.left, r.right - r0.left];
+        const name = b.classList.contains("lad-folded") ? "fold" : b.classList.contains("lad-low") ? "work" : "wait";
+        geo[name] = range;
+      });
+      sizes[i] = Object.keys(geo).length ? geo : phone ? st.clientHeight : st.clientWidth;
+    }
+    const L = W.ladderLanes(clock, sizes, { origin });
+    for (const [lane, groups] of [["prompt", L.prompts], ["pr", L.prs]]) {
+      const buttons = [];
+      for (const g of groups) {
+        const st = strips.find((x) => Number(x.dataset.item) === g.item);
+        const ln = st && st.querySelector(`.mark-lane-${lane}`);
+        if (!ln) continue;
+        const first = g.marks[0];
+        const partial = g.marks.some((x) => x.state === "partial");
+        // A merged group's span, so the badge never hides where its marks lie.
+        if (g.count > 1 && g.to - g.from >= 2) {
+          const span = el("span", "lad-span");
+          span.style.setProperty(phone ? "top" : "left", `${g.from}px`);
+          span.style.setProperty(phone ? "height" : "width", `${g.to - g.from}px`);
+          ln.appendChild(span);
+        }
+        const b = el("button", `lad-mark lad-mark-${g.count > 1 ? "multi" : first.kind}${partial ? " is-partial" : ""}`);
+        b.type = "button";
+        b.style.setProperty(phone ? "top" : "left", `${g.pos}px`);
+        b.dataset.item = String(g.item);
+        b.dataset.step = g.step;
+        if (g.count > 1) b.appendChild(markBadge(g));
+        else if (lane === "prompt") b.appendChild(el("span", `lad-tick why-${first.ref.why}`));
+        else b.appendChild(clockGlyph(first.kind, { partial }));
+        const partialWords = partial ? " (a time known only in part)" : "";
+        b.setAttribute("aria-label", `${g.label}${partialWords}. ${g.count > 1 ? "Opens the list." : "Opens the evidence."}`);
+        b.title = `${g.label}${partialWords}`;
+        b.addEventListener("click", () => {
+          if (g.count === 1) openMark(b, first.kind === "prompt" ? { kind: "prompt", mark: first.ref } : { kind: "pr", pr: first.pr, k: first.ref.k });
+          else openMarkList(b, g, openMark, origin);
+        });
+        ln.appendChild(b);
+        // A merged badge stays over its own step (never over a neighbour
+        // whose time excludes its marks).
+        const half = (phone ? b.offsetHeight : b.offsetWidth) / 2;
+        const geo = sizes[g.item];
+        const range = geo && typeof geo === "object" && geo[g.step] ? geo[g.step] : [0, typeof geo === "number" ? geo : 0];
+        if (g.count > 1) b.style.setProperty(phone ? "top" : "left", `${range[1] - range[0] > 2 * half ? Math.min(Math.max(g.pos, range[0] + half), range[1] - half) : (range[0] + range[1]) / 2}px`);
+        buttons.push(b);
+      }
+      roving(buttons);
+    }
+  }
+
+  // A margin beside the map for the marks outside the lead window: what
+  // they are and how far outside they lie, never drawn at the map's edge.
+  function marginCell(m, side, openMark, origin) {
+    const box = el("div", `vsm-margin vsm-margin-${side}`);
+    box.appendChild(el("span", "vsm-margin-title", m.title));
+    box.appendChild(el("span", "vsm-margin-what", `${m.short}, ${m.when}`));
+    const row = el("div", "vsm-margin-marks");
+    const buttons = [];
+    const one = (x) => {
+      const b = el("button", "lad-mark-inline");
+      b.type = "button";
+      if (x.kind === "prompt") b.appendChild(el("span", `lad-tick why-${x.ref.why}`));
+      else b.appendChild(clockGlyph(x.kind, { partial: x.state === "partial" }));
+      b.appendChild(el("span", "lad-mark-text", x.kind === "prompt" ? `prompt ${x.n}` : `#${x.pr.number}`));
+      const line = W.markLine(x, origin);
+      b.setAttribute("aria-label", `${line}. Opens the evidence.`);
+      b.title = line;
+      b.addEventListener("click", () => openMark(b, x.kind === "prompt" ? { kind: "prompt", mark: x.ref } : { kind: "pr", pr: x.pr, k: x.ref.k }));
+      row.appendChild(b);
+      buttons.push(b);
+    };
+    // Prompts and pull request times each get their own marks or badge,
+    // never one count together. A margin's list is grouped because it lies
+    // outside the lead time, not because marks overlap.
+    for (const k of m.kinds) {
+      if (k.count <= 4) {
+        k.marks.forEach(one);
+        continue;
+      }
+      const b = el("button", "lad-mark-inline");
+      b.type = "button";
+      b.appendChild(markBadge(k));
+      const label = `${m.title}: ${k.short}, ${k.when}`;
+      b.setAttribute("aria-label", `${label}. Opens the list.`);
+      b.title = label;
+      b.addEventListener("click", () => openMarkList(b, { ...k, title: m.title }, openMark, origin, { rule: false }));
+      row.appendChild(b);
+      buttons.push(b);
+    }
+    roving(buttons);
+    box.appendChild(row);
+    return box;
+  }
+
+  // A merged mark's drawer: one line saying what it counts and when, then
+  // each mark with its time, each opening its own evidence.
+  function openMarkList(opener, g, openMark, origin, opts) {
+    const o = opts || {};
+    const title = g.title ? `${g.title}: ${g.short}` : g.short.charAt(0).toUpperCase() + g.short.slice(1);
+    openDrawer(opener, { title, mark: g.lane === "prompt" ? "prompt" : g.marks.every((m) => m.kind === "merged") ? "merged" : "opened", rows: [["On the task clock", g.when]], evidence: [] }, {
+      more: (box) => {
+        if (o.rule !== false) box.appendChild(el("p", "chart-caption", MERGE_RULE));
+        const ul = el("ul", "stretch-list");
+        for (const x of g.marks) {
+          const li = document.createElement("li");
+          const b = el("button", "stretch-row");
+          b.type = "button";
+          if (x.kind === "prompt") b.appendChild(el("span", `lad-tick why-${x.ref.why}`));
+          else b.appendChild(clockGlyph(x.kind, { partial: x.state === "partial" }));
+          b.appendChild(document.createTextNode(` ${W.markLine(x, origin)}`));
+          b.addEventListener("click", () => openMark(null, x.kind === "prompt" ? { kind: "prompt", mark: x.ref } : { kind: "pr", pr: x.pr, k: x.ref.k }));
+          li.appendChild(b);
+          ul.appendChild(li);
+        }
+        box.appendChild(ul);
+      },
+    });
+  }
+
+  // The Handoffs table: one row per operator prompt, in clock order, the
+  // text equivalent of the prompt markers (map/<job>.json is its JSON twin).
+  // Columns Desk does not publish yet are left out and said once; on a
+  // phone each row stacks into labeled lines.
+  function renderHandoffs(container, map, clock, origin, leadMs, openMark) {
+    const sec = el("section", "clock-section");
+    sec.appendChild(el("h3", "bars-title", "Handoffs"));
+    const state = W.clockListWords(map.human_turns_state, "Operator prompts", F.reasonText);
+    const t = W.handoffTable(clock, origin, F.reasonText, leadMs);
+    const rows = t.rows;
+    sec.appendChild(el("p", "chart-caption", rows.length ? `Each time the operator prompted an agent of this task, in clock order: ${rows.length} prompt${rows.length === 1 ? "" : "s"}. Each row gives the prompt's time on the task clock, how long the task was idle and the main agent stopped before it, how long the agent then worked, and the size of the prompt and of the output the operator read; never the prompt's text.${state ? ` ${state}.` : ""}` : state ? `${state}, so no prompt is drawn rather than none.` : "No operator prompt is recorded for this task."));
+    if (rows.length) {
+      sec.appendChild(el("p", "chart-caption", `${t.explain}${t.note ? ` ${t.note}` : ""}`));
+      const det = el("details", "more-details handoffs");
+      if (rows.length <= 15) det.open = true;
+      det.appendChild(el("summary", null, `The ${rows.length} prompt${rows.length === 1 ? "" : "s"} as a table`));
+      const table = el("table", "data-table vsm-table handoffs-table");
+      const cols = [["Prompt", null], ["On the task clock", "clock"], ["Task idle before this prompt", "idle"], ["Main agent stopped before this prompt", "stopped"], ["Agent then worked", "worked"]];
+      if (t.show_why) cols.push(["Why the agent stopped", "why"]);
+      cols.push(["Prompt size", "prompt"], ["Output read", "output"]);
+      tableHead(table, cols.map((c) => [c[0], ""]));
+      const tb = document.createElement("tbody");
+      rows.forEach((r, k) => {
+        const tr = document.createElement("tr");
+        const td = el("td");
+        td.dataset.label = "Prompt";
+        const b = el("button", "link-button", `Prompt ${r.n}`);
+        b.type = "button";
+        b.addEventListener("click", () => openMark(b, { kind: "prompt", mark: clock.prompts[k] }));
+        td.appendChild(b);
+        tr.appendChild(td);
+        for (const [label, key] of cols.slice(1)) {
+          const c = el("td", null, r[key]);
+          c.dataset.label = label;
+          tr.appendChild(c);
+        }
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb);
+      const tw = el("div", "table-wrap");
+      tw.appendChild(table);
+      det.appendChild(tw);
+      sec.appendChild(det);
+    }
+    container.appendChild(sec);
+  }
+
+  // The task's pull requests with their times on the task clock; one with
+  // no placed time reads "opened, time not recorded", with its reason, and
+  // has no marker. When none is placed, the list is one line of links with
+  // their states, and the shared reason is said once.
+  function renderPrTable(container, map, clock, origin, openMark, model) {
+    const prs = Array.isArray(map.prs) ? map.prs : [];
+    const sec = el("section", "clock-section");
+    sec.appendChild(el("h3", "bars-title", "Pull requests on the task clock"));
+    const state = W.clockListWords(map.prs_state, "Pull requests", F.reasonText);
+    if (!prs.length) {
+      sec.appendChild(el("p", "chart-caption", state ? `${state}; none is recorded for this task.` : "No pull request is recorded for this task."));
+      container.appendChild(sec);
+      return;
+    }
+    const placed = prs.filter((p) => typeof p.opened_at_ms === "number").length;
+    // When every time not placed has the same reason, it is said once.
+    const missing = prs.flatMap((p) => [typeof p.opened_at_ms === "number" ? null : p.opened_state, p.state === "merged" && typeof p.merged_at_ms !== "number" ? p.merged_state : null]).filter(Boolean);
+    const keys = new Set(missing.map((st) => ((st && st.reasons) || []).slice().sort().join(",")));
+    const shared = missing.length > 1 && keys.size === 1 ? [...keys][0].split(",").filter(Boolean) : null;
+    const why = (st) => (shared ? "" : ` (${((st && st.reasons) || []).map(F.reasonText).join("; ") || "no reason recorded"})`);
+    const stateWord = (pr) => (pr.state === "merged" ? "merged" : pr.state === "open" ? "open" : pr.state === "closed" ? "closed without merging" : "state not read");
+    const link = (pr, k) => {
+      const b = el("button", "link-button", `${pr.repo}#${pr.number}`);
+      b.type = "button";
+      b.addEventListener("click", () => openMark(b, { kind: "pr", pr, k }));
+      return b;
+    };
+    if (!placed) {
+      const reason = shared && shared.length ? ` Why: ${shared.map(F.reasonText).join("; ")}.` : "";
+      sec.appendChild(el("p", "chart-caption", `${prs.length} pull request${prs.length === 1 ? "" : "s"} first appeared in this task's sessions, but none has a time on the task clock, so none is drawn.${reason}${state ? ` ${state}.` : ""}`));
+      const p = el("p", "pr-line");
+      prs.forEach((pr, k) => {
+        if (k) p.appendChild(document.createTextNode(", "));
+        p.appendChild(link(pr, k));
+        p.appendChild(document.createTextNode(` (${stateWord(pr)}${shared ? "" : `; ${why(pr.opened_state).trim()}`})`));
+      });
+      sec.appendChild(p);
+      container.appendChild(sec);
+      return;
+    }
+    const anchor = map.pr_anchor && map.pr_anchor.state === "measured" ? " GitHub's times are placed through the task's clock anchor, to within seconds." : "";
+    sec.appendChild(el("p", "chart-caption", `${placed} of ${prs.length} pull request${prs.length === 1 ? "" : "s"} have an opening time on the task clock.${anchor} One with no placed time is listed as "opened, time not recorded", with why, and is not drawn.${shared && shared.length ? ` Every time not placed here has one reason: ${shared.map(F.reasonText).join("; ")}.` : ""}${state ? ` ${state}.` : ""}`));
+    const det = el("details", "more-details");
+    if (prs.length <= 15) det.open = true;
+    det.appendChild(el("summary", null, `The ${prs.length} pull request${prs.length === 1 ? "" : "s"} as a table`));
+    const table = el("table", "data-table vsm-table pr-clock-table");
+    tableHead(table, [["Pull request", ""], ["Opened", ""], ["Merged", ""], ["State", ""]]);
+    const tb = document.createElement("tbody");
+    const out = (ms) => {
+      const o = model ? W.outsideWords(ms, model, clock.open) : null;
+      return o ? ` (${o})` : "";
+    };
+    prs.forEach((pr, k) => {
+      const tr = document.createElement("tr");
+      const td = el("td");
+      td.dataset.label = "Pull request";
+      td.appendChild(link(pr, k));
+      tr.appendChild(td);
+      const opened = typeof pr.opened_at_ms === "number" ? W.prTimeWords(pr.opened_at_ms, pr.opened_state, origin, F.reasonText) + out(pr.opened_at_ms) : `opened, time not recorded${why(pr.opened_state)}`;
+      const merged = pr.state === "open" ? "not merged" : pr.state === "closed" ? "closed without merging" : typeof pr.merged_at_ms === "number" ? W.prTimeWords(pr.merged_at_ms, pr.merged_state, origin, F.reasonText) + out(pr.merged_at_ms) : `merged, time not recorded${why(pr.merged_state)}`;
+      for (const [label, v] of [["Opened", opened], ["Merged", merged], ["State", pr.state || "not read"]]) {
+        const c = el("td", null, v);
+        c.dataset.label = label;
+        tr.appendChild(c);
+      }
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    const tw = el("div", "table-wrap");
+    tw.appendChild(table);
+    det.appendChild(tw);
+    sec.appendChild(det);
+    container.appendChild(sec);
   }
 
   // The labeled stretches inside one map item, loaded from its sessions'
@@ -2121,6 +2588,137 @@
   const LANE_H = 26;
   const LABEL_ROW_H = 30;
   const AXIS_H = 24;
+  // The Operator and Pull requests lanes, at the top.
+  const OP_H = 22;
+  const TOP_H = AXIS_H + 2 * OP_H;
+
+  // The swimlane's Operator lane (a tick per prompt of this session, with a
+  // band from the agent's stop to the prompt) and Pull requests lane (each
+  // placed opened and merged time inside the session's span, outlined when
+  // partial). Each lane is one tab stop; the arrow keys move along it.
+  function drawClockLanes(s, ctx) {
+    const { clock, sessionId, t0, t1, x, width, openMark, map } = ctx;
+    const yOp = AXIS_H;
+    const yPr = AXIS_H + OP_H;
+    for (const y of [yOp + OP_H, yPr + OP_H]) s.appendChild(svg("line", { x1: 0, x2: width, y1: y, y2: y, class: "lane-rule" }));
+    const note = (y, text) => {
+      const t = svg("text", { x: 6, y: y + OP_H - 7, class: "lane-outside-label" });
+      t.textContent = text;
+      s.appendChild(t);
+    };
+    const keyed = (g, label, open, list) => {
+      g.setAttribute("role", "button");
+      g.setAttribute("aria-label", label);
+      g.setAttribute("tabindex", list.length ? "-1" : "0");
+      const tt = svg("title", {});
+      tt.textContent = label;
+      g.appendChild(tt);
+      g.addEventListener("click", () => open(g));
+      g.addEventListener("keydown", (evt) => {
+        if (evt.key === "Enter" || evt.key === " ") {
+          evt.preventDefault();
+          open(g);
+          return;
+        }
+        const pos = list.indexOf(g);
+        const next = { ArrowRight: pos + 1, ArrowDown: pos + 1, ArrowLeft: pos - 1, ArrowUp: pos - 1, Home: 0, End: list.length - 1 }[evt.key];
+        if (next === undefined) return;
+        evt.preventDefault();
+        const to = list[Math.max(0, Math.min(list.length - 1, next))];
+        for (const q of list) q.setAttribute("tabindex", "-1");
+        to.setAttribute("tabindex", "0");
+        to.focus();
+      });
+      list.push(g);
+    };
+    // Operator lane.
+    const ops = W.operatorLane(clock, sessionId);
+    const opList = [];
+    for (const o of ops) {
+      if (o.band) {
+        const a = Math.max(t0, o.band[0]);
+        const b = Math.min(t1, o.band[1]);
+        // At least 2 pixels, so a short stop still shows.
+        if (b > a) s.appendChild(svg("rect", { x: x(a), y: yOp + 5, width: Math.max(2, x(b) - x(a)), height: OP_H - 10, class: "lane-op-band" }));
+      }
+    }
+    // Pins merge into one count under MERGE_RULE (walk.js groupMarks, the
+    // ladder's rule); a merged pin opens the list.
+    const badgeW = (n) => 16 + 7 * String(n).length;
+    const inLane = (pos, w) => Math.min(Math.max(pos, w / 2), width - w / 2);
+    const opGroups = W.groupMarks(ops.map((o) => ({ ...o, pos: x(o.ms) })), 8, (n) => badgeW(n) + 4);
+    for (const gr of opGroups) {
+      if (gr.marks.length > 1) {
+        const lg = W.ladderLanes({ prompts: gr.marks.map((o) => ({ ...o.mark, item: 0, frac: 0, outside: null })), prs: [] }, [0], { origin: ctx.origin }).prompts[0];
+        const g = svg("g", { class: "lane-op lane-op-multi" });
+        const cy = yOp + OP_H / 2;
+        if (gr.to - gr.from >= 2) g.appendChild(svg("line", { x1: gr.from, x2: gr.to, y1: cy, y2: cy, class: "lane-op-span" }));
+        const wpx = badgeW(gr.marks.length);
+        const xx = inLane(gr.pos, wpx);
+        g.appendChild(svg("rect", { x: xx - wpx / 2, y: cy - 7, width: wpx, height: 14, rx: 7, class: "lane-op-badge" }));
+        const tx = svg("text", { x: xx, y: cy + 4, "text-anchor": "middle", class: "lane-pr-count" });
+        tx.textContent = String(gr.marks.length);
+        g.appendChild(tx);
+        keyed(g, `${lg.label}. Opens the list.`, (n) => openMarkList(n, lg, openMark, ctx.origin), opList);
+        s.appendChild(g);
+        continue;
+      }
+      const o = gr.marks[0];
+      const g = svg("g", { class: `lane-op why-${o.mark.why}` });
+      const xx = x(o.ms);
+      g.appendChild(svg("rect", { x: xx - 1, y: yOp + 6, width: 2, height: OP_H - 8, rx: 1 }));
+      g.appendChild(svg("circle", { cx: xx, cy: yOp + 6, r: 3.5 }));
+      // A wider target than the tick itself.
+      g.appendChild(svg("rect", { x: xx - 6, y: yOp + 1, width: 12, height: OP_H - 2, class: "lane-hit" }));
+      const t = o.mark.turn;
+      keyed(g, `Operator prompt ${o.n} of ${o.mark.total}, ${W.clockAt(o.ms, ctx.origin)}${t.basis === "after_stop" && typeof t.window_ms === "number" ? `, ${W.durationWords(t.window_ms)} after the main agent stopped` : t.basis === "mid_turn" ? ", while the agent was still working" : ", the session's first prompt"}. Opens the evidence.`, (n) => openMark(n, { kind: "prompt", mark: o.mark }), opList);
+      s.appendChild(g);
+    }
+    if (opList.length) opList[0].setAttribute("tabindex", "0");
+    else {
+      const st = W.clockListWords(map.human_turns_state, "operator prompts", F.reasonText);
+      note(yOp, st && map.human_turns_state && map.human_turns_state.state === "unavailable" ? st : "no operator prompt recorded in this session");
+    }
+    // Pull requests lane.
+    const lane = W.prLane(clock, t0, t1);
+    const prList = [];
+    // Glyphs merge under the same rule as the pins (walk.js groupMarks).
+    const groups = W.groupMarks(lane.marks.map((m) => ({ ...m, pos: x(m.ms) })), 12, (n) => badgeW(n) + 12);
+    groups.forEach((gr, k) => {
+      const cy = yPr + OP_H / 2;
+      const xx = gr.pos;
+      if (gr.marks.length > 1) {
+        const lg = W.ladderLanes({ prompts: [], prs: gr.marks.map((m) => ({ ...m, item: 0, frac: 0, outside: null })) }, [0], { origin: ctx.origin }).prs[0];
+        const g = svg("g", { class: "lane-pr lane-pr-multi" });
+        if (gr.to - gr.from >= 2) g.appendChild(svg("line", { x1: gr.from, x2: gr.to, y1: cy, y2: cy, class: "lane-pr-span" }));
+        const wpx = badgeW(gr.marks.length);
+        const bx = inLane(xx, wpx);
+        g.appendChild(svg("rect", { x: bx - wpx / 2, y: cy - 7, width: wpx, height: 14, rx: 7, class: "lane-pr-badge" }));
+        const tx = svg("text", { x: bx, y: cy + 4, "text-anchor": "middle", class: "lane-pr-count" });
+        tx.textContent = String(gr.marks.length);
+        g.appendChild(tx);
+        keyed(g, `${lg.label}. Opens the list.`, (n) => openMarkList(n, lg, openMark, ctx.origin), prList);
+        s.appendChild(g);
+        return;
+      }
+      const m = gr.marks[0];
+      const partial = m.state === "partial";
+      const g = svg("g", { class: `lane-pr lane-pr-${m.kind}${partial ? " is-partial" : ""}` });
+      g.appendChild(svg("path", { d: m.kind === "merged" ? `M${xx} ${cy - 6} L${xx + 6} ${cy} L${xx} ${cy + 6} L${xx - 6} ${cy} Z` : `M${xx} ${cy - 6} L${xx + 6} ${cy + 5} L${xx - 6} ${cy + 5} Z` }));
+      const next = groups[k + 1];
+      if (!next || next.from - xx > 44) {
+        const tx = svg("text", { x: xx + 8, y: cy + 4, class: "lane-pr-label" });
+        tx.textContent = `#${m.pr.number}`;
+        g.appendChild(tx);
+      }
+      const q = partial ? (m.bound === "upper" ? "at most " : m.bound === "lower" ? "at least " : "about ") : "";
+      const what = m.kind === "merged" ? "merged" : m.pr.created === true ? "opened by this task" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
+      keyed(g, `Pull request ${m.pr.repo}#${m.pr.number} ${what}, ${q}${W.clockAt(m.ms, ctx.origin)}${partial ? " (a time known only in part)" : ""}. Opens the evidence, with its link to GitHub.`, (n) => openMark(n, { kind: "pr", pr: m.pr, k: m.k }), prList);
+      s.appendChild(g);
+    });
+    if (prList.length) prList[0].setAttribute("tabindex", "0");
+    else note(yPr, lane.outside ? `no pull request time in this session (${lane.outside} elsewhere on the task's clock)` : "no pull request time placed in this session");
+  }
 
   async function renderSwimlane(container, data, jobId, sessionId, select) {
     const seq = ++walkSeq;
@@ -2155,6 +2753,8 @@
     const origin = typeof lw.start_ms === "number" ? lw.start_ms : detail.offset_ms;
     const leadMs = typeof lw.start_ms === "number" && typeof lw.end_ms === "number" ? lw.end_ms - lw.start_ms : null;
     const ctxDrawer = { origin_ms: origin, lead_ms: leadMs, reasonText: F.reasonText };
+    const clock = W.clockMarks(map, null);
+    const openMark = (opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock });
     const intervals = Array.isArray(detail.intervals) ? detail.intervals : [];
     const stretches = Array.isArray(detail.stretches) ? detail.stretches : [];
     const allLanes = W.lanes(detail, map.agents);
@@ -2163,7 +2763,7 @@
     const t1 = typeof detail.end_ms === "number" ? detail.end_ms : Math.max(...intervals.map((i) => i.end_ms));
     const span = Math.max(1, t1 - t0);
 
-    container.appendChild(el("p", "chart-caption", `This session ran ${W.clockWords(t0, t1, origin)}. Drawn to scale: each lane is one agent, gray marks are its activity, colored bands are the evaluator's labeled stretches and red ticks are failed tool calls.${subs.length ? " Subagent lanes are the subagents seen in this session's evidence, so they can show subagents the session's own count above does not record." : ""}`));
+    container.appendChild(el("p", "chart-caption", `This session ran ${W.clockWords(t0, t1, origin)}. Drawn to scale: the Operator lane marks each prompt, with a band from the main agent's stop to the prompt; the Pull requests lane marks when each pull request first appeared in this task's sessions (a triangle, at GitHub's opening time) or merged (a diamond) in this session's span; below them each lane is one agent, gray marks are its activity, colored bands are the evaluator's labeled stretches and red ticks are failed tool calls.${subs.length ? " Subagent lanes are the subagents seen in this session's evidence, so they can show subagents the session's own count above does not record." : ""}`));
     if (detail.labels_from_shared_session) container.appendChild(el("p", "fix-action", "Labels come from a shared session: this session also worked on other tasks, so its labels were made for the whole session and only partly describe this task."));
     if (detail.intervals_binned) container.appendChild(el("p", "chart-caption", `This session's activity is published binned${typeof detail.resolution_ms === "number" ? ` to ${W.durationWords(detail.resolution_ms)}` : typeof detail.resolution === "number" ? ` to ${W.durationWords(detail.resolution)}` : ""}, so marks closer than that are merged.`));
     if (!detail.labeled) container.appendChild(el("p", "chart-caption", "This session is not labeled yet, so no stretch is drawn."));
@@ -2214,9 +2814,9 @@
       const x = (ms) => ((ms - t0) / span) * width;
       const lanesShown = expanded ? allLanes : [allLanes[0], ...(subs.length ? [{ worker: "subs", depth: 0, label: `Subagents seen (${subs.length})` }] : [])];
       const laneY = new Map();
-      lanesShown.forEach((l, k) => laneY.set(l.worker, AXIS_H + LABEL_ROW_H + k * LANE_H));
+      lanesShown.forEach((l, k) => laneY.set(l.worker, TOP_H + LABEL_ROW_H + k * LANE_H));
       const laneOf = (w) => (expanded || w === 0 ? w : "subs");
-      const height = AXIS_H + LABEL_ROW_H + lanesShown.length * LANE_H + 6;
+      const height = TOP_H + LABEL_ROW_H + lanesShown.length * LANE_H + 6;
 
       // Pinned labels.
       labels.innerHTML = "";
@@ -2228,7 +2828,9 @@
         d.style.paddingLeft = `${6 + 10 * Math.min(3, depth)}px`;
         labels.appendChild(d);
       };
-      lab("Labels", AXIS_H, LABEL_ROW_H, 0, "lane-label-labels");
+      lab("Operator", AXIS_H, OP_H, 0, "lane-label-labels");
+      lab("Pull requests", AXIS_H + OP_H, OP_H, 0, "lane-label-labels");
+      lab("Labels", TOP_H, LABEL_ROW_H, 0, "lane-label-labels");
       for (const l of lanesShown) lab(l.label, laneY.get(l.worker), LANE_H, l.depth);
 
       plot.innerHTML = "";
@@ -2294,7 +2896,7 @@
         }
       }
       // The labels row: every stretch, opening its evidence; one tab stop.
-      const ly = AXIS_H + 3;
+      const ly = TOP_H + 3;
       const row = svg("g", { class: "lane-stretches", role: "group", "aria-label": `${stretches.length} labeled stretches; use the arrow keys to move between them and Enter to open one` });
       const marks = [];
       stretches.forEach((st, k) => {
@@ -2335,6 +2937,7 @@
         row.appendChild(g);
       });
       s.appendChild(row);
+      drawClockLanes(s, { clock, sessionId, t0, t1, x, width, openMark, map, origin });
       plot.appendChild(s);
       focusStretch = (k) => {
         const m = marks[k];
@@ -2403,6 +3006,17 @@
     for (const sg of F.SEGMENTS) if (present.has(sg.key) && sg.key !== "waiting") li(swatch(sg.key), sg.label);
     if (stretches.some((x) => x.class === "muda" && x.waste === "waiting")) li(keyFor("lane-key-wait"), `${W.LABELED_PAUSE} (cross-hatched): a stretch the evaluator labeled waiting, with what it waited on; it is not the page's waiting, which is idle time`);
     if (leadMs !== null && (t0 < origin || t1 > origin + leadMs)) li(keyFor("lane-key-outside"), "Shaded: outside this task's lead time");
+    const glyphKey = (kind, opts) => {
+      const k = el("span", "lane-key lane-key-glyph");
+      k.setAttribute("aria-hidden", "true");
+      k.appendChild(clockGlyph(kind, opts));
+      return k;
+    };
+    li(glyphKey("prompt"), "Operator prompt; the band before it runs from the main agent's stop to the prompt (other agents may have been working)");
+    li(glyphKey("opened"), "Pull request first appeared in this task's sessions (drawn at GitHub's opening time)");
+    li(glyphKey("merged"), "Pull request merged");
+    li(glyphKey("opened", { partial: true }), "Outlined: a time known only in part");
+    li(el("span", "lane-key-count", "2"), MERGE_RULE);
     li(keyFor("lane-key-act"), "Agent activity (turns, tool calls, subagents)");
     li(keyFor("lane-key-fail"), "Failed tool call (wider where several share a pixel)");
     container.appendChild(legend);
@@ -2424,9 +3038,7 @@
       const td = el("td");
       td.appendChild(b);
       tr.appendChild(td);
-      // Idle bands carry no clock time: their length only.
-      const waitSt = st.class === "muda" && st.waste === "waiting";
-      for (const [v, cl] of [[waitSt ? "length only" : W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
+      for (const [v, cl] of [[W.clockWords(st.start_ms, st.end_ms, origin), ""], [W.durationShort(st.end_ms - st.start_ms), "num"], [st.waited_on ? W.waitedOnWords(st.waited_on, "short") : "—", ""], [st.confidence || "—", ""], [String((st.evidence || []).length), "num"]]) tr.appendChild(el("td", cl, v));
       tb.appendChild(tr);
     }
     table.appendChild(tb);
@@ -3173,7 +3785,7 @@
     const ssh = el("h2", "block-title", "Its stretches, longest first");
     ssh.id = "cause-spans-title";
     ss.appendChild(ssh);
-    ss.appendChild(el("p", "chart-caption", `The stretches of time behind this cause${d.spans_cut ? `, the first ${d.spans.length} Desk lists` : ""}. Each opens its task's value stream map at the box or wait that holds it, with that item's evidence. A stretch is given by its length only: placing idle time on the task's clock is not shown on this site.`));
+    ss.appendChild(el("p", "chart-caption", `The stretches of time behind this cause${d.spans_cut ? `, the first ${d.spans.length} Desk lists` : ""}. Each opens its task's value stream map at the box or wait that holds it, with that item's evidence. Its start and end on the task's clock are in that item's evidence.`));
     const ol = el("ol", "cause-spans");
     const links = [];
     for (const s of d.spans) {

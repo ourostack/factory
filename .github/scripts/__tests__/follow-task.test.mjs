@@ -267,8 +267,8 @@ test("the data box keeps the design's order, the rework loop counts defect stret
   const map = synthetic(3, 5)
   const model = W.mapModel(map, { maxBoxes: 10 })
   const box = model.items.find((x) => x.type === "box" && x.defect_stretches)
-  // No pull request count per box: it would place a pull request on the task clock (I6).
-  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Session"])
+  // The pull requests opened in each box are back (v1.1 addendum §3): pull request times are on the task clock.
+  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests first appeared", "Session"])
   assert.equal(W.reworkWords({ defect_stretches: 12, defect_ms: 3 * M }), "12 defect stretches, 3 minutes")
   assert.equal(W.reworkWords({ defect_stretches: 0, defect_ms: 0 }), null)
   assert.equal(W.reworkWords({ defect_stretches: u(["not_labeled"]), defect_ms: u(["not_labeled"]) }), null, "an unlabeled box draws no loop")
@@ -505,7 +505,7 @@ const detail = {
 }
 const agents = [{ session: "s1", n: 0, parent: null }, { session: "s1", n: 2, parent: 0 }, { session: "s1", n: 3, parent: 2 }, { session: "other", n: 9, parent: 0 }]
 
-test("the drawer says what a stretch is, which one, its share of lead time and the evidence it rests on; a waiting stretch gets its length, never its clock times", () => {
+test("the drawer says what a stretch is, which one, its share of lead time and the evidence it rests on; a waiting stretch gets its length and its clock times", () => {
   const lanes = W.lanes(detail, agents)
   const c = W.drawer({ kind: "stretch", stretch: detail.stretches[1], index: 1, total: 2, intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: 10 * H })
   assert.equal(c.title, "Evaluator-labeled pause (inside working time) stretch")
@@ -516,9 +516,9 @@ test("the drawer says what a stretch is, which one, its share of lead time and t
   assert.equal(rows.Confidence, "medium")
   assert.equal(rows["Evaluator version"], "3.2.0-alpha.202")
   assert.equal(rows["Waited on"], "the agent had stopped and was waiting for the operator's next prompt")
-  // I6: an idle band's start and end are never labeled with a clock time.
-  assert.equal(rows["On the task clock"], undefined)
-  assert.equal(rows.Length, "2 hours")
+  // v1.1: an idle band's start and end are on the task clock, like any other time.
+  assert.equal(rows["On the task clock"], "from 3h to 5h after the task's start (2 hours)")
+  assert.equal(rows.Length, undefined)
   assert.equal(rows.Share, "20% of the lead time")
   // A working stretch keeps its place on the clock.
   assert.match(Object.fromEntries(W.drawer({ kind: "stretch", stretch: detail.stretches[0], intervals: detail.intervals, lanes }, { origin_ms: 0, lead_ms: 10 * H }).rows)["On the task clock"], /^from /)
@@ -528,7 +528,7 @@ test("the drawer says what a stretch is, which one, its share of lead time and t
   assert.equal(Object.fromEntries(d.rows).Share, "share of lead time not known (no lead time)")
 })
 
-test("the drawer for a box and a wait names which one it is, its time and its share; a wait gets its place among the boxes, never clock times", () => {
+test("the drawer for a box and a wait names which one it is, its time and its share; a wait gets its place among the boxes and its clock times", () => {
   const model = W.mapModel(synthetic(3, 4), { maxBoxes: 10 })
   const box = model.items.find((x) => x.type === "box")
   const wait = model.items.find((x) => x.type === "wait" && x.waited_on === "queue_before_start")
@@ -542,7 +542,7 @@ test("the drawer for a box and a wait names which one it is, its time and its sh
   const rw = Object.fromEntries(cw.rows)
   assert.equal(rw["Waited on"], "the task was waiting for its first session to start")
   assert.equal(rw.Which, "Gap 1, before the first work box")
-  assert.equal(rw["On the task clock"], undefined, "a wait carries no clock time")
+  assert.match(rw["On the task clock"], /^from 0s to .+ after the task's start/, "a wait carries its clock times")
   // A folded box says how it was folded (M4).
   const folded = W.mapModel(synthetic(40, 9), { maxBoxes: 3 })
   const fb = folded.items.find((x) => x.type === "box" && x.count > 1)
@@ -568,8 +568,7 @@ test("the prompt names the exact item, its place, a link that opens it, and wher
   assert.match(a.select, /^bursts=1(-\d+)?$/)
   const w = W.promptItem({ kind: "wait", item: model.items.find((x) => x.type === "wait") }, ctx)
   assert.match(w.what, /^the wait (before the first work box|between work boxes \d+ and \d+|after the last work box) \(gaps? [\d–]+ of \d+; waited on: .+\)$/)
-  assert.match(w.where, /^It lasted /)
-  assert.doesNotMatch(w.where, /minute/, "a wait gives its length, not its clock times")
+  assert.match(w.where, /^It lasted .+, from minute \d+ to minute \d+ after the task's start$/, "a wait gives its length and its clock times")
   const lanes = W.lanes(detail, agents)
   const s0 = W.promptItem({ kind: "stretch", stretch: detail.stretches[0], index: 0, total: 2, session: "s1abcdef99", intervals: detail.intervals, lanes }, { origin_ms: 0 })
   const s1 = W.promptItem({ kind: "stretch", stretch: detail.stretches[1], index: 1, total: 2, session: "s1abcdef99", intervals: detail.intervals, lanes }, { origin_ms: 0 })
@@ -703,7 +702,7 @@ test("the map file takes the store's pull request clock and finish date, and joi
   assert.doesNotMatch(JSON.stringify(slim), /"value_ms"|\d{4}-\d{2}-\d{2}T/)
 })
 
-test("the page still draws a map/2 file exactly as it drew map/1", () => {
+test("the page still draws a map/2 file as it drew map/1, plus each box's pull requests opened", () => {
   const timeline = {
     bursts: [
       { start_ms: 0, end_ms: 10 * M, working_ms: 9 * M, sessions: ["s1"], agents: 1, tool_calls: 2, tool_failures: 0, operator_turns: m(1), prs: m(1) },
@@ -722,10 +721,14 @@ test("the page still draws a map/2 file exactly as it drew map/1", () => {
   const draw = (map) => {
     const model = W.mapModel(map, { maxBoxes: 7 })
     // A box keeps its raw bursts; the page draws from the rest.
-    const items = model.items.map(({ bursts, ...it }) => it)
+    // S4 adds the box's pull requests opened, which a map/1 file does not hold.
+    const items = model.items.map(({ bursts, prs, ...it }) => it)
     return { items, totals: model.totals, ladder: W.ladder(model).map(({ item, ...seg }) => seg), marks: W.statusMarks(map, model) }
   }
   assert.deepEqual(JSON.parse(JSON.stringify(draw(v2))), JSON.parse(JSON.stringify(draw(v1))))
+  const box = (map) => W.dataBox(W.mapModel(map, { maxBoxes: 7 }).items[0], 1).find((r) => r.key === "prs").text
+  assert.equal(box(v2), "1")
+  assert.equal(box(v1), "not recorded", "a map/1 file holds no pull request count, which reads not recorded, never 0")
   assert.equal(draw(v2).items.filter((x) => x.type === "box").length, 2)
 })
 
@@ -760,7 +763,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
 
 // ------------------------------------------------------------- the page
 
-test("the page loads walk.js, opens evidence in a real dialog, and never draws per-turn operator markers or pull request times", () => {
+test("the page loads walk.js, opens evidence in a real dialog, and places operator prompts and pull request times only through walk.js", () => {
   const html = read("site/src/index.html")
   assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="app\.js"><\/script>/)
   assert.match(html, /<dialog id="evidence-drawer" class="drawer" aria-labelledby="drawer-title">/)
@@ -768,7 +771,9 @@ test("the page loads walk.js, opens evidence in a real dialog, and never draws p
   const app = read("site/src/app.js")
   assert.match(app, /showModal\(\)/)
   assert.match(app, /Copy as a prompt for your agent/)
-  assert.doesNotMatch(app, /\.at_ms\b|human_turns\s*\[|\.human_turns\.(map|forEach|filter|length)|map\.human_turns/, "no per-turn operator markers and no pull request times on the task clock")
+  // v1.1 (addendum §3): prompts and pull request times are on the task clock, placed by walk.js's tested clockMarks.
+  assert.match(app, /W\.clockMarks\(map, model\)/)
+  assert.doesNotMatch(app, /\.at_ms\b|human_turns\s*\[|\.human_turns\.(map|forEach|filter|length)/, "the page reads no prompt time itself")
   // Every chart has a text equivalent.
   assert.match(app, /The map as a table/)
   assert.match(app, /labeled stretches as a table/)

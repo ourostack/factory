@@ -146,7 +146,7 @@
     bound_not_one_quantity: "it is a ranking or a status, not one quantity, so it has no single direction",
     bound_direction_undecided: "one of its reasons has no decided direction yet, so the true figure may be higher or lower",
     // The PR clock (site/scripts/pr-clock.mjs): pull request times placed on the task clock through GitHub.
-    anchor_spread: "the task's pull requests disagree by more than 2 minutes about when the task started, so their times on the task clock may be off by that much",
+    anchor_spread: "the task's pull requests disagree by more than 2 minutes about when the task started, so times placed through them (pull request times and the finish day) may be off by up to that much, either way",
     no_timed_pr: "no session of this task timed a pull request, so GitHub's times cannot be placed on the task clock",
     no_created_timed_pr: "no session of this task timed a pull request it opened, so GitHub's times cannot be placed on the task clock",
     github_unreadable: "GitHub could not be read for this pull request (it may be private)",
@@ -169,6 +169,8 @@
     median_of_subset: "a median of only the tasks that were measured has no direction: the others could move it either way",
     no_finish_source: "no record gives the day this task finished",
     job_offsets_withheld: "the desk withholds this task's timing",
+    pr_time_not_placed: "some of the task's pull requests have no time on the task clock, so they cannot be counted in a box",
+    clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
   };
 
   // Every reason that can reach the page has words. The site build stops on
@@ -571,9 +573,10 @@
   // What a hash asks for. `jobOfSession` (session id to job id) lets an old
   // session link land under its task. A redirect carries the new hash.
   // The item a deep link selects on a task or session view: "?bursts=4-6",
-  // "?gaps=3", "?stretch=17" (1-based numbers in clock order).
+  // "?gaps=3", "?stretch=17", "?prompt=2" (operator prompts in clock
+  // order), "?pr=1" (pull requests in the map file's order); 1-based.
   function parseSelect(q) {
-    const m = /^(bursts|gaps|stretch)=([1-9][0-9]{0,5})(?:-([1-9][0-9]{0,5}))?$/.exec(q);
+    const m = /^(bursts|gaps|stretch|prompt|pr)=([1-9][0-9]{0,5})(?:-([1-9][0-9]{0,5}))?$/.exec(q);
     if (!m) return null;
     const from = Number(m[2]);
     const to = m[3] ? Number(m[3]) : from;
