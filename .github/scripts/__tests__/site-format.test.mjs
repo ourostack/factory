@@ -184,6 +184,13 @@ test("a labels file that contradicts itself has plain text", () => {
   assert.doesNotMatch(F.reasonText("inconsistent"), /_/)
 })
 
+test("every reason Desk gives for why the agent stopped, or why that is not known, has plain text", () => {
+  for (const reason of ["could_not_tell", "stop_not_recorded", "outside_own_share", "stop_partly_classified"]) {
+    assert.equal(F.hasReasonText(reason), true, reason)
+    assert.doesNotMatch(F.reasonText(reason), /_/)
+  }
+})
+
 test("the job table opens a job page that shows each measure's state and reason in words", () => {
   const src = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
   assert.match(src, /function renderJobDetail\(/)
