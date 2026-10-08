@@ -32,3 +32,9 @@ test("the README's store guarantees cover /4, including that a public desk publi
   assert.match(section, /A public desk publishes every pull request as `created: false`/)
   assert.match(section, /A correction under `corrections\/` knows all four/)
 })
+
+test("the README's No content bullet says stop.asks is only a yes/no bit, and the section names finish days and prompt times", () => {
+  const section = README.slice(README.indexOf("## No who, no content, just how"), README.indexOf("## What the store guarantees"))
+  assert.match(section, /`stop\.asks`, a yes\/no bit/)
+  assert.match(section, /UTC day each task finished and the times of the operator's prompts/)
+})

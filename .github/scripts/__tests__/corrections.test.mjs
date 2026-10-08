@@ -875,3 +875,40 @@ test("the mirror's /4 vocabulary equals Desk's", { skip: deskSchemaReachable || 
   assert.deepEqual([...MIRRORED_VOCABULARY.stopEnd], [...ENUMS.stopEnd])
   assert.deepEqual([...MIRRORED_VOCABULARY.finishedBasis], [...ENUMS.finishedBasis])
 })
+
+test("a correction that makes a file public is refused when any PR in the result says created: true, named or not", () => {
+  const current = facts4({ refs: { prs: [{ repo: "ourostack/desk", number: 7, created: true }, { repo: "ourostack/desk", number: 8, created: false }], commits: [], private: ZERO_PRIVATE } })
+  const publicNow = { unavailable: [{ field: "job_offsets", reason: "desk_public" }] }
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4(publicNow)), [{ code: "correction_inconsistent", path: "refs.prs.0.created" }])
+  // A record that replaces refs without naming the flag: the carried value counts.
+  const replaced = rec4({ ...publicNow, refs: { prs: [{ repo: "ourostack/desk", number: 8 }, { repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, replaced), [{ code: "correction_inconsistent", path: "fields.refs.prs.1.created" }])
+  // Setting it false in the same record is fine; an unrelated correction to a file that is not public is fine.
+  const fixed = rec4({ ...publicNow, refs: { prs: [{ repo: "ourostack/desk", number: 7, created: false }], commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(current, fixed), [])
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4({ plugins: [] })), [])
+  // An already-public file with only false flags stays fine.
+  const pub = facts4({ ...publicNow })
+  assert.deepEqual(checkCorrectionAgainstFacts(pub, rec4({ plugins: [] })), [])
+})
+
+test("a correction whose wait or PR key matches more than one entry in the file is refused as ambiguous", () => {
+  const waits = [
+    { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: STOP },
+    { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10, stop: { end: "interrupted", asks: null, pending_agents: null } },
+  ]
+  const current = facts4({ intervals: waits })
+  const bare = { kind: "human_wait", agent: 0, start_ms: 5, end_ms: 10 }
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4({ intervals: [bare, bare] })), [
+    { code: "correction_v4_key_ambiguous", path: "fields.intervals.0.stop" },
+    { code: "correction_v4_key_ambiguous", path: "fields.intervals.1.stop" },
+  ])
+  // Naming the stop removes the ambiguity.
+  assert.deepEqual(checkCorrectionAgainstFacts(current, rec4({ intervals: [{ ...bare, stop: STOP }, { ...bare, stop: waits[1].stop }] })), [])
+  const prs = [{ repo: "ourostack/desk", number: 7, created: false }, { repo: "ourostack/desk", number: 7, created: false }]
+  const dup = facts4({ refs: { prs, commits: [], private: ZERO_PRIVATE } })
+  assert.deepEqual(checkCorrectionAgainstFacts(dup, rec4({ refs: { prs: [{ repo: "ourostack/desk", number: 7 }], commits: [], private: ZERO_PRIVATE } })), [{ code: "correction_v4_key_ambiguous", path: "fields.refs.prs.0.created" }])
+  // Applying never writes one value to both.
+  const out = applyCorrection(current, rec4({ intervals: [bare, bare] }))
+  assert.deepEqual(out.intervals, [bare, bare])
+})

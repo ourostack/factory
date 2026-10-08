@@ -27,11 +27,11 @@ The site names no person: pull requests appear as links with their number, issue
 
 ## No who, no content, just how
 
-A published facts file says how one agent session went: how long it lasted, how its time split between turns, tools, subagents and waits, which tool kinds it used and how often they failed or retried, which plugin and model versions ran, and which public pull requests and commits it touched. It never says who did the work or what was said.
+A published facts file says how one agent session went: how long it lasted, how its time split between turns, tools, subagents and waits, which tool kinds it used and how often they failed or retried, which plugin and model versions ran, and which public pull requests and commits it touched, and the UTC day each task finished and the times of the operator's prompts and of pull requests on each task's own clock (below). It never says who did the work or what was said.
 
 - **No who.** No contributor, operator, account, machine, host name, desk path or branch appears in any facts file.
 - **Dates and times, and how precise they are.** Facts carry durations and offsets from the session start and from the task card's creation. The one calendar fact a task's facts carry is the UTC day the task finished, never a time of day. Times inside a task are on the task's own clock (an offset from its card's creation): the operator's prompts and the pull requests the session mentions. Pull request times come from GitHub, which already shows them. The site orders tasks by finish day and shows that day, with the source it rests on: a day taken from a later record (the card's last update, or the day the task's labels landed) is marked "on or before". Publishing finish days and prompt times makes the operator's working days and hours readable from the public Git history, and a later revert does not erase them. The operator accepted that cost on 2026-10-08, because accuracy and precision outrank privacy for this site.
-- **No content.** No transcript text, prompt, response, tool argument, file content, file path, task title or free text leaves the contributor's machine.
+- **No content.** No transcript text, prompt, response, tool argument, file content, file path, task title or free text leaves the contributor's machine. The only fact taken from a message is `stop.asks`, a yes/no bit for whether the agent's last message ended in a question mark; no text and no tool name are published.
 - **Public references only.** References to private repositories are dropped and only counted.
 
 ## Sign-off and rework: what a human accepted

@@ -617,6 +617,15 @@ const hasKey = (value, key) => isPlainObject(value) && Object.hasOwn(value, key)
 const waitKey = (interval) => JSON.stringify([interval.kind, interval.agent, interval.start_ms, interval.end_ms]);
 const prKey = (pr) => JSON.stringify([pr.repo, pr.number]);
 
+const AMBIGUOUS = Symbol("ambiguous");
+
+// A map from key to value where a key seen more than once maps to `AMBIGUOUS`: one value cannot stand for two entries.
+function uniqueValues(pairs) {
+  const map = new Map();
+  for (const [key, value] of pairs) map.set(key, map.has(key) ? AMBIGUOUS : value);
+  return map;
+}
+
 /**
  * The `/4` keys a replaced `refs` or `intervals` list would lose. A `/4` file
  * requires `created` on every PR and `stop` on every human wait, and a record
@@ -628,12 +637,12 @@ const prKey = (pr) => JSON.stringify([pr.repo, pr.number]);
 function carriedV4Keys(current, record) {
   const fields = isPlainObject(record?.fields) ? record.fields : {};
   const carried = [];
-  const currentPrs = new Map((Array.isArray(current?.refs?.prs) ? current.refs.prs : []).filter((pr) => hasKey(pr, "created")).map((pr) => [prKey(pr), pr.created]));
+  const currentPrs = uniqueValues((Array.isArray(current?.refs?.prs) ? current.refs.prs : []).filter((pr) => hasKey(pr, "created")).map((pr) => [prKey(pr), pr.created]));
   (Array.isArray(fields.refs?.prs) ? fields.refs.prs : []).forEach((pr, index) => {
     if (!isPlainObject(pr) || hasKey(pr, "created")) return;
     carried.push({ path: `fields.refs.prs.${index}.created`, list: "prs", index, key: "created", value: currentPrs.get(prKey(pr)) });
   });
-  const currentWaits = new Map((Array.isArray(current?.intervals) ? current.intervals : []).filter((interval) => interval?.kind === "human_wait" && hasKey(interval, "stop")).map((interval) => [waitKey(interval), interval.stop]));
+  const currentWaits = uniqueValues((Array.isArray(current?.intervals) ? current.intervals : []).filter((interval) => interval?.kind === "human_wait" && hasKey(interval, "stop")).map((interval) => [waitKey(interval), interval.stop]));
   (Array.isArray(fields.intervals) ? fields.intervals : []).forEach((interval, index) => {
     if (!isPlainObject(interval) || interval.kind !== "human_wait" || hasKey(interval, "stop")) return;
     carried.push({ path: `fields.intervals.${index}.stop`, list: "intervals", index, key: "stop", value: currentWaits.get(waitKey(interval)) });
@@ -682,13 +691,19 @@ export function checkCorrectionAgainstFacts(current, record) {
   if (version !== null && version >= 4) {
     for (const item of carriedV4Keys(current, record)) {
       if (item.value === undefined) fail(errors, "correction_v4_key_missing", item.path);
+      else if (item.value === AMBIGUOUS) fail(errors, "correction_v4_key_ambiguous", item.path);
     }
     // A public desk publishes every PR as `created: false` (the GitHub creation time of a PR the session opened would date the session).
     const unavailable = Array.isArray(fields.unavailable) ? fields.unavailable : current.unavailable;
     const isPublic = (Array.isArray(unavailable) ? unavailable : []).some((entry) => isPlainObject(entry) && entry.field === "job_offsets" && entry.reason === "desk_public");
     if (isPublic) {
-      (Array.isArray(refs.prs) ? refs.prs : []).forEach((pr, i) => {
-        if (isPlainObject(pr) && pr.created === true) fail(errors, "correction_inconsistent", `fields.refs.prs.${i}.created`);
+      // The result, not only the named PRs: a PR the record does not name keeps the file's own flag.
+      const carriedValue = new Map(carriedV4Keys(current, record).filter((item) => item.list === "prs").map((item) => [item.index, item.value]));
+      const named = Array.isArray(refs.prs);
+      (named ? refs.prs : Array.isArray(current.refs?.prs) ? current.refs.prs : []).forEach((pr, i) => {
+        if (!isPlainObject(pr)) return;
+        const created = hasKey(pr, "created") ? pr.created : named ? carriedValue.get(i) : undefined;
+        if (created === true) fail(errors, "correction_inconsistent", `${named ? "fields.refs" : "refs"}.prs.${i}.created`);
       });
     }
   }
@@ -699,7 +714,7 @@ export function applyCorrection(current, record) {
   const corrected = { ...current, ...record.fields };
   // A `/4` key the record does not name stays as the file has it. (`checkCorrectionAgainstFacts` has already refused a record that leaves one the file cannot supply.)
   if (schemaVersion(current) >= 4) {
-    const carried = carriedV4Keys(current, record).filter((item) => item.value !== undefined);
+    const carried = carriedV4Keys(current, record).filter((item) => item.value !== undefined && item.value !== AMBIGUOUS);
     // New arrays: the record's own lists are never changed.
     if (carried.some((item) => item.list === "prs")) corrected.refs = { ...corrected.refs, prs: [...corrected.refs.prs] };
     if (carried.some((item) => item.list === "intervals")) corrected.intervals = [...corrected.intervals];
