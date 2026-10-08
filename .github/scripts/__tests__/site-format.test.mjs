@@ -179,6 +179,11 @@ test("every facts reason and every report-only reason has plain text", () => {
   assert.equal(F.hasReasonText("a_reason_with_no_words"), false)
 })
 
+test("a labels file that contradicts itself has plain text", () => {
+  assert.equal(F.hasReasonText("inconsistent"), true)
+  assert.doesNotMatch(F.reasonText("inconsistent"), /_/)
+})
+
 test("the job table opens a job page that shows each measure's state and reason in words", () => {
   const src = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
   assert.match(src, /function renderJobDetail\(/)
