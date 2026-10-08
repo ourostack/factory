@@ -439,3 +439,22 @@ test("the site never turns Desk's bound: null into a direction; only an absent b
   assert.equal(capped({ state: "partial", value: 2, reasons: ["log_truncated"], bound: null, bound_reason: "bound_not_moved" }).bound, null)
   assert.equal(capped({ state: "partial", value: 2, reasons: ["log_truncated"] }).bound, "lower")
 })
+
+test("the final review's fixes: one legend shape, a padded Pareto frame, the picker's single partial, two new glossary entries", () => {
+  const css = read("site/src/styles.css")
+  assert.match(css, /\.tw-legend-buttons li \{ display: grid; grid-template-columns: minmax\(min\(10em, 100%\), 1fr\) auto;/, "the cause link has its own column")
+  assert.match(css, /\.tw-row > \.tw-ms \{ grid-column: 2;/, "every row puts its figure under its name")
+  const app = read("site/src/app.js")
+  assert.match(app, /const plotW = colW \* n \+ \(phone \? 28 : 8\);/)
+  assert.match(app, /share \? \(phone \? "% of lead time" : "% of each task's lead time"\)/)
+  const html = read("site/src/index.html")
+  assert.match(html, /<dt id="g-work-burst">Work burst<\/dt>/)
+  assert.match(html, /<dt id="g-rework">Rework<\/dt>/)
+  // The picker says "partial" once.
+  const pn = { state: "partial", value: 1, reasons: ["log_truncated"], bound: null, bound_reason: "bound_reasons_conflict" }
+  const rows = W.pickerRows([{ id: "a1", finish_basis: "labels", finish_order: m(1), status: "done" }, { id: "b2", finish_basis: "labels", finish_order: m(2), status: "done" }], [{ job: "a1", lead_time_ms: m(H), flow_efficiency: pn }, { job: "b2", lead_time_ms: p(H, ["log_truncated"], { bound: "lower" }), flow_efficiency: p(0.5, ["log_truncated"], { bound: "upper" }) }], (j) => j.id)
+  const a = rows.find((r) => r.id === "a1")
+  assert.equal(a.feText, "100% (partial, direction not known)")
+  assert.equal(a.badge, null)
+  assert.equal(rows.find((r) => r.id === "b2").badge, "partial", "a bounded partial keeps its badge")
+})

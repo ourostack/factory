@@ -969,7 +969,11 @@
         const r = byJob.get(j.id) || null;
         const name = nameOf(j);
         const figs = r ? [r.lead_time_ms, r.flow_efficiency] : [];
-        const badge = !r ? "no data" : figs.some((n) => !n || n.state === "unavailable") ? "no data" : figs.some((n) => n.state === "partial") || r.labels_from_shared_session ? "partial" : null;
+        const feText = r ? feWords(r) : null;
+        const partial = !!r && (figs.some((n) => n && n.state === "partial") || !!r.labels_from_shared_session);
+        // "partial" is said once: not again as a badge when the flow
+        // efficiency's own words already say it.
+        const badge = !r ? "no data" : figs.some((n) => !n || n.state === "unavailable") ? "no data" : partial && !/\(partial/.test(feText || "") ? "partial" : null;
         return {
           id: j.id,
           name,
@@ -977,7 +981,7 @@
           status: r && r.status && r.status.state !== "unavailable" ? r.status.value : j.status,
           lead: r ? r.lead_time_ms : null,
           fe: r ? r.flow_efficiency : null,
-          feText: r ? feWords(r) : null,
+          feText,
           badge,
           group: finished(j) ? "finished" : "open",
         };

@@ -959,16 +959,19 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .wait-unknown { --sw: var(--c-wait-unknown); background: repeating-linear-gradient(135deg, var(--sw) 0 2px, transparent 2px 6px); box-shadow: inset 0 0 0 1px var(--sw); }
 .tw-legend { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 4px 24px; font-size: 14px; }
 .tw-legend li { display: flex; align-items: baseline; gap: 8px; }
-/* The task bar's legend rows are buttons that light the map. */
-.tw-legend-buttons li { flex-wrap: wrap; align-items: center; gap: 2px 10px; }
-.tw-row { flex: 1 1 14em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font: inherit; color: inherit; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; cursor: pointer; }
+/* The task bar's legend rows are buttons that light the map. Every row
+   has one shape at every width: the swatch, then the name, then the figure
+   under the name; a waiting cause's "Rank this cause" link has its own
+   column, so nothing in one row can run into the next. */
+.tw-legend-buttons { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+.tw-legend-buttons li { display: grid; grid-template-columns: minmax(min(10em, 100%), 1fr) auto; align-items: start; gap: 0 12px; }
+.tw-row { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0 8px; font: inherit; color: inherit; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; cursor: pointer; }
+.tw-row > .swatch { align-self: start; margin-top: 0.3em; }
+.tw-row > .tw-ms { grid-column: 2; white-space: normal; }
 .tw-row:hover { background: var(--surface-1); border-color: var(--border); }
 .tw-row[aria-pressed="true"] { background: color-mix(in srgb, var(--focus) 12%, transparent); border-color: var(--focus); }
-.tw-cause-link { font-size: 13px; white-space: nowrap; }
-.tw-name { flex: 0 1 auto; }
-/* A legend row keeps its name whole: the figure moves to its own line before the name is squeezed. */
-.tw-legend-buttons .tw-name { min-width: 7em; }
-.tw-legend-buttons { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.tw-cause-link { font-size: 13px; white-space: nowrap; padding-top: 4px; }
+.tw-name { min-width: 0; }
 .tw-ms { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cause-list { margin: 6px 0 4px; padding-left: 22px; }
 .cause-list li { margin: 4px 0; }

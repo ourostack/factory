@@ -1782,9 +1782,9 @@
     // The same words as the lede, so the two never disagree.
     const words = new Map();
     for (const p of W.lede(row, F.reasonText, { published: tasksPublished, idle, unlabeled_ms: unlabeled }).parts) if (p && typeof p === "object" && !p.term) words.set(p.key, `${p.q || ""}${p.text}`);
-    const leadWords = (words.has("lead") && row && row.lead_time_ms && row.lead_time_ms.state === "partial" && !/^at /.test(words.get("lead")) ? "at least " : "") + (words.get("lead") || "");
+    const leadWords = (words.has("lead") && row && row.lead_time_ms && row.lead_time_ms.state === "partial" && row.lead_time_ms.bound !== null && !/^at /.test(words.get("lead")) ? "at least " : "") + (words.get("lead") || "");
     const fig = (key, n) => {
-      if (words.has(key)) return document.createTextNode((key === "lead" && n && n.state === "partial" && !/^at /.test(words.get(key)) ? "at least " : "") + words.get(key));
+      if (words.has(key)) return document.createTextNode((key === "lead" && n && n.state === "partial" && n.bound !== null && !/^at /.test(words.get(key)) ? "at least " : "") + words.get(key));
       const nd = el("span", "num num-unavailable", "no data");
       if (!(n && n.state === "unavailable" && n.reasons && n.reasons.length)) return nd;
       const wrap = el("span");
@@ -1927,7 +1927,7 @@
     if (bar.state === "lead_only") {
       // What is known (the lead time) is drawn; what is not (its split) is said.
       const why = (bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded";
-      const at = bar.lead_state === "partial" ? "at least " : "";
+      const at = bar.lead_state === "partial" && stackRow.lead_time_ms && stackRow.lead_time_ms.bound !== null ? "at least " : "";
       container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar: ${at}${W.durationWords(bar.total_ms)}. How it splits into working and waiting is not known, because ${why}.`));
       const track = el("div", "tw-bar");
       track.setAttribute("role", "img");
@@ -2589,7 +2589,7 @@
     const row = el("div", "sb-row");
     // The axis stays put while the bars scroll inside their frame.
     const axis = svg("svg", { class: "sb-axis", width: SB.axisW, height: totalH, "aria-hidden": "true" });
-    axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? "% of each task's lead time" : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
+    axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone ? "% of lead time" : "% of each task's lead time") : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
     for (const t of scale.ticks) {
       const ty = y(t);
       const tx = svg("text", { x: SB.axisW - 6, y: ty + 4, class: "axis-tick", "text-anchor": "end" });
@@ -2912,7 +2912,9 @@
     const phone = container.clientWidth < 600;
     const width = Math.max(300, container.clientWidth);
     const colW = Math.min(120, Math.max(phone ? 70 : 78, Math.floor((width - leftW - rightW) / Math.max(n, 3))));
-    const plotW = colW * n;
+    // The frame's end is padded so the last bar's label shows whole when
+    // the frame is scrolled fully right.
+    const plotW = colW * n + (phone ? 28 : 8);
     const H = phone ? 220 : 260;
     const top = 26;
     const labelH = 62;
