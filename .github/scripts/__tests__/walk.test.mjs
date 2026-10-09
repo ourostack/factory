@@ -72,33 +72,31 @@ test("route links built from data are plain segments only", () => {
   for (const bad of [["task", "../x"], ["task", "a b"], ["task", ""], ["task", 5], ["javascript:alert(1)"]]) assert.equal(F.safeRoute(...bad), null, String(bad))
 })
 
-test("#/ opens the labeled done task that finished last, and falls back without one", () => {
+test("#/ falls back by finish position when no task has a finish day: the finished task (done or cancelled) with the latest position, then any task with one", () => {
   const j = (id, status, order, basis) => ({ id, status, finish_order: order === null ? unavailable(["no_facts"]) : measured(order), finish_basis: basis })
-  assert.equal(F.defaultTask([j("a", "done", 1, "labels"), j("b", "done", 3, "labels"), j("c", "processing", 4, "facts"), j("d", "done", 5, "facts")]).id, "b")
-  assert.equal(F.defaultTask([j("c", "processing", 2, "facts"), j("d", "done", 1, "facts")]).id, "d", "a done task without labels when none has labels")
+  assert.equal(F.defaultTask([j("a", "done", 1, "labels"), j("b", "done", 3, "labels"), j("c", "processing", 4, "facts"), j("d", "done", 5, "facts")]).id, "d", "a done task not labeled yet is finished too (A1 B2)")
+  assert.equal(F.defaultTask([j("c", "processing", 2, "facts"), j("d", "done", 1, "facts")]).id, "d")
   assert.equal(F.defaultTask([j("c", "processing", 2, "facts"), j("e", "drafting", 1, "facts")]).id, "c")
   assert.equal(F.defaultTask([j("x", "drafting", null, "none")]).id, "x")
   assert.equal(F.defaultTask([]), null)
 })
 
-test("#/ lands on the finished task with the latest finish position, named or private, as llms.txt and About say", () => {
-  const j = (id, order, group, workMs, name, status = "done", basis = "labels") => ({ id, status, finish_order: measured(order), finish_group: measured(group), finish_basis: basis, active_time_ms: workMs === null ? unavailable(["source_unreadable"]) : measured(workMs), ...(name ? { name } : {}) })
-  const MIN = 60000
-  // The latest position wins, however short its work and whether or not it has a public name (S5 review I-1).
-  const jobs = [j("old", 1, 1, 50 * MIN, "Old named"), j("tiny", 6, 2, 30000), j("unnamed", 5, 2, 40 * MIN), j("named", 4, 2, 12 * MIN, "Fix the build"), j("unread", 3, 2, null, "No working time")]
-  assert.equal(F.defaultTask(jobs).id, "tiny")
-  assert.equal(F.defaultTask(jobs.filter((x) => x.id !== "tiny")).id, "unnamed")
-  // Today's store: 825084c9 (position 9, private) over fc8b915a (position 6, named).
-  assert.equal(F.defaultTask([j("fc8b915a", 6, 2, 54 * MIN, "Revocable sessions"), j("825084c9", 9, 2, 17 * 60 * MIN)]).id, "825084c9")
-  // An open or unlabeled task never lands while a labeled one exists, however late its position.
-  assert.equal(F.defaultTask([j("open", 30, 3, 90 * MIN, "Open", "processing", "facts"), j("old", 1, 1, 50 * MIN)]).id, "old")
-  assert.equal(F.LANDING_MIN_WORK_MS, undefined, "no minimum working time")
+test("#/ lands on the latest-finished task of at least an hour, named or private, as llms.txt and About say", () => {
+  const H = 3600000
+  const j = (id, order, day, leadMs, name, status = "done", basis = "labels") => ({ id, status, finish_order: measured(order), finish_basis: basis, finish_date: { state: "partial", value: day, basis: "desk_card_updated", bound: "upper", reasons: [] }, lead_time_ms: measured(leadMs), ...(name ? { name } : {}) })
+  // The latest day wins, whether or not it has a public name or labels; a task under an hour does not.
+  const jobs = [j("old", 1, "2026-09-26", 50 * H, "Old named"), j("tiny", 6, "2026-10-06", 30000), j("unnamed", 5, "2026-10-05", 40 * H), j("named", 4, "2026-10-04", 2 * H, "Fix the build", "done", "date")]
+  assert.equal(F.defaultTask(jobs).id, "unnamed")
+  assert.equal(F.LANDING_MIN_LEAD_MS, H)
+  // An open task never lands while a finished one exists, however late its position.
+  assert.equal(F.defaultTask([{ id: "open", status: "processing", finish_order: measured(30), finish_basis: "facts", lead_time_ms: measured(90 * H) }, j("old", 1, "2026-09-26", 50 * H)]).id, "old")
   // About and llms.txt state the same rule.
   const about = read("site/src/index.html")
   assert.match(about, /Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position\./)
   assert.match(about, /Tasks are ordered by the UTC day they finished, earliest first\./)
-  assert.match(about, /"Follow a task" opens on the finished task with the latest finish position, named or private\./)
-  assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the finished task with the latest finish position \(`finish_order`\), named or private: the labeled task \(`finish_basis: "labels"`\) with the largest `finish_order` in `rollups\/tasks\.json`\./)
+  assert.match(about, /"Follow a task" opens on the latest-finished task that has something to teach, named or private, labeled for waste or not/)
+  assert.match(about, /If no task has all four, it opens on the latest-finished task whose lead time is at least an hour/)
+  assert.match(read("site/src/llms-template.txt"), /a tie goes to the larger `lead_time_ms\.value`/)
 })
 
 test("tasks first labeled in the same commit share a finish group and are ordered by lead time, the longest latest", () => {
@@ -627,20 +625,19 @@ test("the store page renders each outcome section once, and the headline figure 
   assert.equal((app.match(/renderOutcomes\(document/g) || []).length, 1)
 })
 
-test("the task table shows a finish position only for a labeled task, and the task page tells a batch from a finishing sequence", () => {
-  const lab = (id, pos, group) => ({ id, status: "done", finish_basis: "labels", finish_order: measured(pos), finish_group: measured(group) })
+test("the task table shows a finish position for every finished task, and the task page places it among the dated tasks by day (A1 B2)", () => {
+  const lab = (id, pos, group, status = "done") => ({ id, status, finish_basis: "labels", finish_order: measured(pos), finish_group: measured(group), finish_date: { state: "measured", value: `2026-10-0${pos}`, basis: "desk_transition", reasons: [] } })
   const jobs = [lab("a", 1, 1), lab("b", 2, 2), lab("c", 3, 2), lab("d", 4, 2), { id: "o", status: "processing", finish_basis: "facts", finish_order: measured(5) }, { id: "u", status: "done", finish_basis: "facts", finish_order: measured(6) }, { id: "n", status: "processing", finish_basis: "none", finish_order: unavailable(["no_facts"]) }]
   const by = Object.fromEntries(jobs.map((j) => [j.id, j]))
   assert.equal(F.finishCell(by.c), "3rd")
   assert.equal(F.finishCell(by.o), "open")
-  assert.equal(F.finishCell(by.u), "not labeled")
+  assert.equal(F.finishCell(by.u), "6th")
   assert.equal(F.finishCell(by.n), "no session")
-  // A task alone in its group finished in that order.
-  assert.equal(F.finishWords(by.a, jobs), "It was the 1st of 4 labeled tasks to finish.")
-  // A task labeled in a batch is not said to have finished in a sequence.
-  assert.equal(F.finishWords(by.c, jobs), "It was labeled together with 2 other tasks, the latest batch; within a batch, tasks are ordered by lead time, so it is 3rd of 4 labeled tasks.")
+  assert.equal(F.finishWords(by.a, jobs, { year: 2026 }), "It finished on 1 Oct (UTC), the 1st of 4 dated tasks.")
+  // A labeling batch is never named: the order is by day.
+  assert.equal(F.finishWords(by.c, jobs, { year: 2026 }), "It finished on 3 Oct (UTC), the 3rd of 4 dated tasks.")
   assert.match(F.finishWords(by.o, jobs), /still open/)
-  assert.match(F.finishWords(by.u, jobs), /not labeled for waste yet/)
+  assert.match(F.finishWords(by.u, jobs), /no source gives its finish day .* It is not labeled for waste yet\./)
   assert.match(F.finishWords(by.n, jobs), /no place in finish order/)
 })
 

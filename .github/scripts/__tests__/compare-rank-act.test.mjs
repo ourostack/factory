@@ -55,10 +55,10 @@ function rows(id, opts) {
 
 // ------------------------------------------------------------ the order
 
-test("the walk's order: finished tasks in finish order, the latest on the right, then the rest by when work began, then tasks with no place", () => {
-  const order = S.walkOrder([job("open2", 12, "facts", "processing"), job("f2", 2, "labels"), job("none", null, "none", "drafting"), job("f1", 1, "labels"), job("open1", 10, "facts")])
-  assert.deepEqual(order.map((x) => x.j.id), ["f1", "f2", "open1", "open2", "none"])
-  assert.deepEqual(order.map((x) => x.group), ["finished", "finished", "open", "open", "open"])
+test("the walk's order: finished tasks (done or cancelled, labeled or not) in finish order, the latest on the right, then the rest by when work began, then tasks with no place", () => {
+  const order = S.walkOrder([job("open2", 12, "facts", "processing"), job("f2", 2, "labels"), job("none", null, "none", "drafting"), job("f1", 1, "labels"), job("open1", 10, "facts", "processing"), job("f3", 3, "date", "cancelled")])
+  assert.deepEqual(order.map((x) => x.j.id), ["f1", "f2", "f3", "open1", "open2", "none"])
+  assert.deepEqual(order.map((x) => x.group), ["finished", "finished", "finished", "open", "open", "open"])
 })
 
 // ------------------------------------------------------- the stack-up
@@ -98,7 +98,7 @@ test("the chart labels the finished task that waited longest (idle time only) in
   const { tasks, stackup, jobs } = snap()
   const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => `Task ${j.id.slice(0, 8)}` })
   const all = S.mostWaste(S.stackBars(jobs, stackup, tasks, opts("all")), "all")
-  assert.equal(all.job.slice(0, 8), "c9235d85")
+  assert.equal(all.job.slice(0, 8), "01a32fde")
   assert.match(all.label, /^Waited longest: \d+h$/)
   const work = S.mostWaste(S.workingView(S.stackBars(jobs, stackup, tasks, opts("working"))).bars, "working")
   assert.equal(work.job.slice(0, 8), "690331dd")
@@ -208,7 +208,8 @@ test("Compare tasks' lede gives the real share of elapsed time agents worked, wh
   assert.match(l.text, /^Across the 2 finished tasks whose time splits into working and waiting, agents were working 13% of the elapsed time \(3\.5 of 28 hours\)\./)
   assert.match(l.text, / The rest, 25 hours, was waiting, mostly for the next prompt \(the agent had stopped\) \(24 hours\)\./)
   assert.match(l.text, /The finished task that waited longest is “Task b”: 18 hours of waiting in a lead time of 20 hours\./)
-  assert.match(l.text, /The 1 task not finished in the store's sense/)
+  assert.match(l.text, / 1 task still open follows on the right\./)
+  assert.doesNotMatch(l.text, /store's sense/)
 })
 
 test("the lede's share carries a bound: at most when lead times start at the first session, about when the bounds disagree", () => {
@@ -240,8 +241,9 @@ test("on the real store the lede names the finished tasks, a bound, and the caus
   const bars = S.stackBars(jobs, stackup, tasks, { mode: "all", segments: F.SEGMENTS, nameOf })
   const l = S.compareLede(bars, tasks, F.reasonText)
   assert.equal(l.state, "ok")
-  assert.match(l.text, /^Across the 8 finished tasks whose time splits into working and waiting, agents were working about \d+% of the elapsed time/)
-  assert.equal(l.facts.top.key, "no_session")
+  // Every done or cancelled task is finished, labeled or not (A1 I1).
+  assert.match(l.text, /^Across the 9 finished tasks whose time splits into working and waiting, agents were working about \d+% of the elapsed time/)
+  assert.equal(l.facts.top.key, "unknown")
   assert.ok(Math.abs(l.facts.lead_ms - l.facts.working_ms - l.facts.waiting_ms) < 1)
 })
 
@@ -509,7 +511,7 @@ test("the evidence drawer gives a labeled wait the swimlane's cross-hatch, not t
   assert.match(walk, /source \} with `by` largest first\.\n  function idleSplit\(row, map\) \{/)
   assert.match(walk, /Returns \{ key: ms \}\.\n  function burstIdleBy\(b\) \{/)
   // The picker's open group says its order.
-  assert.match(app, /"Still open or not labeled yet, the latest to start first"/)
+  assert.match(app, /"Still open, the latest to start first"/)
 })
 
 // ------------------------------------------------------------- the page

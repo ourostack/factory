@@ -39,7 +39,7 @@
     not_delivered: "the job has not been delivered",
     returns_not_fully_recorded: "some of the job's returns could not be read, so the count is a lower bound",
     awaiting_signoff: "the delivery still awaits the human's answer, so it counts as a pass so far",
-    no_delivered_jobs: "no job with a sign-off record has been delivered yet",
+    no_delivered_jobs: "no delivered job has a first-pass result yet",
     no_refusals: "no delivery has been sent back",
     no_labels: "no job is labeled for waste yet",
     confidence_not_recorded: "the evaluator's confidence in these labels was not recorded",
@@ -174,6 +174,7 @@
     anchor_after_labels: "the task's pull requests put its finish after the day its labels landed, so the two disagree; the labels' day is shown and may be too early",
     median_of_subset: "a median of only the tasks that were measured has no direction: the others could move it either way",
     no_finish_source: "no record gives the day this task finished",
+    finish_before_last_work: "the recorded finish time is earlier than the task's last work, so it is not a bound",
     job_offsets_withheld: "the desk withholds this task's timing",
     pr_time_not_placed: "some of the task's pull requests have no time on the task clock, so they cannot be counted in a box",
     clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
@@ -226,6 +227,62 @@
     );
   }
 
+  // A reason's words without the direction they claim ("so this is a lower
+  // bound", "so the task finished on or before it"): for a figure whose
+  // combined direction is not known, or that has no value at all, where a
+  // bound named by one reason would be false.
+  const DIRECTION_CLAUSES = [/, so (?:the count|this|the figure) is an? (?:lower|upper) bound$/, /, so this is at least this much$/, /, so the task finished on or (?:before|after) it$/];
+  function reasonCore(code) {
+    let t = reasonText(code);
+    for (const re of DIRECTION_CLAUSES) t = t.replace(re, "");
+    return t;
+  }
+  const PULL_BOTH = "some of these reasons pull the figure up and others down, so which way the true figure lies is not known";
+
+  // The Store's sign-off section in words (A1 I5): what its jobs are beside
+  // the site's tasks, and, while first-pass yield has no value, why every
+  // delivered job is out of its scope. `o` is data.json `outcomes`;
+  // `tasks` the number of tasks the other pages show. Returns
+  // { scope, yieldNote }, each a sentence or null.
+  function signoffWords(o, tasks) {
+    const so = (o && o.signoff) || {};
+    const v = (n) => (n && n.state === "measured" && Number.isInteger(n.value) ? n.value : null);
+    const jobs = v(so.jobs);
+    const noRecord = v(so.no_record);
+    const without = v(so.jobs_without_work_record);
+    let scope = null;
+    if (jobs !== null && noRecord !== null) {
+      const total = jobs + noRecord;
+      scope =
+        without !== null && jobs - without + noRecord === tasks
+          ? `These figures count ${total} jobs: the ${tasks} tasks the other pages show, and ${without} task card${without === 1 ? "" : "s"} that ${without === 1 ? "has" : "have"} a sign-off record but no published session, so no time to show.`
+          : `These figures count ${total} jobs, each a task card with a sign-off record or a published session.`;
+    }
+    const y = (o && o.first_pass_yield) || {};
+    const by = y.excluded && typeof y.excluded === "object" ? Object.entries(y.excluded).filter(([, n]) => Number.isInteger(n) && n > 0).map(([reason, jobs]) => ({ reason, jobs })) : [];
+    // Delivered jobs, as the section counts them: the jobs with a sign-off
+    // record less those not delivered (awaiting an answer, accepted, sent
+    // back, and delivered before sign-off was recorded). Desk counts the
+    // yield's exclusions over every job, so the note names their reasons,
+    // never those counts, beside the delivered count.
+    const notDelivered = v(so.not_delivered);
+    const before = v(so.not_recorded);
+    const unsigned = v(so.delivered_unsigned);
+    const delivered = jobs !== null && notDelivered !== null ? jobs - notDelivered : null;
+    const why = by.filter((e) => e.reason !== "not_delivered");
+    let yieldNote = null;
+    if (y.state === "unavailable" && y.N === 0 && delivered > 0 && why.length) {
+      const parts = [unsigned ? `the ${unsigned} awaiting an answer` : null, before ? `the ${before} delivered before sign-off was recorded` : null].filter(Boolean);
+      // Desk's counts are over every job, so they are said as such, apart
+      // from the delivered count.
+      const all = by.reduce((s, e) => s + e.jobs, 0);
+      const each = why.map((e, i) => `${e.jobs}${i === 0 ? ` ${e.jobs === 1 ? "is" : "are"} out of scope` : ""} because ${reasonText(e.reason)}`);
+      const list = each.length > 1 ? `${each.slice(0, -1).join(", ")}, and ${each[each.length - 1]}` : each[0];
+      yieldNote = `All ${delivered} delivered job${delivered === 1 ? " is" : "s are"} out of scope for first-pass yield${parts.length ? ` (${parts.join(" and ")})` : ""}. Across all ${all} jobs, ${list}.`;
+    }
+    return { scope, yieldNote };
+  }
+
   // The parts of one number, as plain data. `text` is what the figure reads;
   // `marker` is the visible word for a partial number; `reason` is the
   // reasons in words; `nofn` is "n of N <what>" for a rollup.
@@ -236,7 +293,10 @@
     if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) {
       throw new TypeError("FactoryFormat: unknown kind " + kind);
     }
-    const reason = number.reasons.map(reasonText).join("; ");
+    // A figure with no value, or with no known direction, never names a
+    // bound in its reasons.
+    const directionless = number.state === "unavailable" || (number.state === "partial" && (number.bound === "unknown" || (number.bound === null && number.bound_reason !== "bound_not_moved")));
+    const reason = number.reasons.map(directionless ? reasonCore : reasonText).join("; ");
     const nofn =
       Number.isInteger(number.n) && Number.isInteger(number.N) && typeof number.of === "string"
         ? `${number.n} of ${number.N} ${number.of}` +
@@ -276,7 +336,7 @@
       text: direction + body,
       // An unverified host is said as such, visibly, not only in the reason.
       marker: `${Array.isArray(number.reasons) && number.reasons.includes("unverified_host") ? "unverified" : "partial"}${unknownDirection ? `, ${UNKNOWN_DIRECTION}` : ""}`,
-      reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : noDirection ? `${reason}; ${noDirection}` : reason,
+      reason: unknownDirection ? `${reason}; ${PULL_BOTH}` : noDirection ? `${reason}; ${noDirection}` : number.bound === null ? `${reason}; ${PULL_BOTH}` : reason,
       nofn,
       basis,
       unknownDirection,
@@ -684,17 +744,70 @@
     return `#/${parts.join("/")}`;
   }
 
-  // The task #/ opens: the finished task with the latest finish position
-  // (finished means labeled for waste, so its finish is known), named or
-  // private alike, the same task an agent reaches by following llms.txt to
-  // the largest finish_order among labeled tasks. Without one: the done task
-  // with the latest position, then any task with a position, then the first.
-  function defaultTask(jobs) {
+  // A task is finished when its status says done or cancelled and it has a
+  // place in finish order, labeled for waste or not.
+  const CLOSED_STATUS = new Set(["done", "cancelled"]);
+  const finishPos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
+  function isFinished(j) {
+    return !!j && CLOSED_STATUS.has(j.status) && finishPos(j) > 0;
+  }
+  const finishKey = (j) => (j && j.finish_date && (j.finish_date.state === "measured" || j.finish_date.state === "partial") && typeof j.finish_date.value === "string" ? j.finish_date.value : null);
+
+  // The task #/ opens: the latest-finished task (by finish day, every done
+  // or cancelled task, labeled or not) that has something to teach (below);
+  // when none has, the latest-finished one whose lead time is at least an
+  // hour, and the page says why. Days are the only order the
+  // store knows, so two tasks on the same day are a tie, and a tie goes to
+  // the larger lead time. A lead time counts when it is measured or an "at
+  // least" figure of an hour or more. Without one: the latest dated finished
+  // task (the larger lead time on a tie), then the finished task with the
+  // latest position, then any task with a position, then the first.
+  const LANDING_MIN_LEAD_MS = 3600000;
+  function leadValue(j) {
+    const n = j && j.lead_time_ms;
+    return n && n.state !== "unavailable" && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : -1;
+  }
+  function leadAtLeast(j, ms) {
+    const n = j && j.lead_time_ms;
+    if (!n || leadValue(j) < ms) return false;
+    return n.state === "measured" || (n.state === "partial" && n.bound === "lower");
+  }
+  // A task with something to teach: a lead time of at least an hour, at
+  // least 5 minutes of known working time (measured, or partial with a
+  // value), at least one work burst on its map and at least one recorded
+  // operator prompt.
+  const LANDING_MIN_WORK_MS = 300000;
+  const LANDING_FALLBACK_WHY = "No finished task has all of a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt, so this page opens on the latest-finished task whose lead time is at least an hour instead.";
+  const valueOf = (n) => (n && (n.state === "measured" || n.state === "partial") && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
+  function teaches(j) {
+    if (!leadAtLeast(j, LANDING_MIN_LEAD_MS)) return false;
+    const work = valueOf(j.active_time_ms);
+    const bursts = valueOf(j.map_bursts);
+    const prompts = valueOf(j.human_turns);
+    return work !== null && work >= LANDING_MIN_WORK_MS && bursts !== null && bursts >= 1 && prompts !== null && prompts >= 1;
+  }
+  // { job, teaches, why }: the task #/ opens, whether it has something to
+  // teach, and, when none has, why the page opens on another.
+  function landingChoice(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
-    const pos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
-    const best = (xs) => xs.reduce((a, j) => (a === null || pos(j) > pos(a) ? j : a), null);
-    const placed = list.filter((j) => j && pos(j) > 0);
-    return best(placed.filter((j) => j.finish_basis === "labels")) || best(placed.filter((j) => j.status === "done")) || best(placed) || list[0] || null;
+    const latest = (xs) =>
+      xs.reduce((a, j) => {
+        if (a === null) return j;
+        const ka = finishKey(a);
+        const kj = finishKey(j);
+        if (ka !== kj) return kj > ka ? j : a;
+        if (leadValue(j) !== leadValue(a)) return leadValue(j) > leadValue(a) ? j : a;
+        return finishPos(j) > finishPos(a) ? j : a;
+      }, null);
+    const byPos = (xs) => xs.reduce((a, j) => (a === null || finishPos(j) > finishPos(a) ? j : a), null);
+    const dated = list.filter((j) => isFinished(j) && finishKey(j) !== null);
+    const teaching = latest(dated.filter(teaches));
+    if (teaching) return { job: teaching, teaches: true, why: null };
+    const job = latest(dated.filter((j) => leadAtLeast(j, LANDING_MIN_LEAD_MS))) || latest(dated) || byPos(list.filter(isFinished)) || byPos(list.filter((j) => finishPos(j) > 0)) || list[0] || null;
+    return { job, teaches: false, why: job ? LANDING_FALLBACK_WHY : null };
+  }
+  function defaultTask(jobs) {
+    return landingChoice(jobs).job;
   }
 
   // The Compare route for its choices, defaults left out: the stack-up's
@@ -716,38 +829,39 @@
     return s + ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
   }
 
-  // A task's place in finish order, as the task table and picker show it.
-  // Only a labeled task has finished in the store's sense; the rest are
-  // listed after it, so their cell says why instead of showing a position.
+  // A task's place in finish order, as the task table and picker show it:
+  // a position for every finished task (done or cancelled), labeled or not.
   function finishCell(j) {
     const placed = !!(j && j.finish_order && j.finish_order.state === "measured");
     if (!placed) return "no session";
-    if (j.finish_basis === "labels") return ordinal(j.finish_order.value);
-    return j.status === "done" ? "not labeled" : "open";
+    return isFinished(j) ? ordinal(j.finish_order.value) : "open";
   }
 
-  // The task page's sentence about finish order. Tasks first labeled in the
-  // same commit finished together, as far as the store can tell; their
-  // positions inside that batch are lead-time order, and the sentence says so
-  // rather than claiming a finishing sequence.
-  function finishWords(j, jobs) {
+  // The task page's sentence about where a task sits in finish order: by
+  // its finish day (UTC) among the dated finished tasks ("It finished on or
+  // before 6 Oct (UTC), the 12th of 20 dated tasks."), with whether it is
+  // labeled for waste yet. A finished task with no day says why and that it
+  // is listed after the dated ones.
+  function finishWords(j, jobs, opts) {
     const list = Array.isArray(jobs) ? jobs : [];
-    const labeled = list.filter((x) => x && x.finish_basis === "labels");
     if (!j || !j.finish_order || j.finish_order.state !== "measured") return "It has no place in finish order: no session of it is published.";
-    if (j.finish_basis !== "labels") {
-      if (j.status === "done") return "It is done but not labeled for waste yet, so it is listed after the labeled tasks, by its first session.";
-      return "It is still open, so it is listed after the finished tasks, by its first session.";
-    }
-    const pos = `${ordinal(j.finish_order.value)} of ${labeled.length}`;
-    const g = j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : null;
-    const batch = g === null ? [] : labeled.filter((x) => x.finish_group && x.finish_group.state === "measured" && x.finish_group.value === g);
-    if (batch.length > 1) {
-      const groups = new Set(labeled.map((x) => (x.finish_group && x.finish_group.state === "measured" ? x.finish_group.value : null)).filter((x) => x !== null));
-      const latest = g === Math.max(...groups);
-      const others = batch.length - 1;
-      return `It was labeled together with ${others} other task${others === 1 ? "" : "s"}${latest ? ", the latest batch" : ""}; within a batch, tasks are ordered by lead time, so it is ${pos} labeled tasks.`;
-    }
-    return `It was the ${pos} labeled tasks to finish.`;
+    if (!isFinished(j)) return "It is still open, so it is listed after the finished tasks, by its first session.";
+    const unlabeled = j.finish_basis === "labels" ? "" : " It is not labeled for waste yet.";
+    const dated = list.filter((x) => isFinished(x) && finishKey(x) !== null).sort((a, b) => finishPos(a) - finishPos(b));
+    const f = finishDay(j.finish_date, opts);
+    if (!f.day) return `It is finished, but no source gives its finish day (${f.reasons.map(reasonText).join("; ")}), so it is listed after the ${dated.length} dated task${dated.length === 1 ? "" : "s"}.${unlabeled}`;
+    const rank = dated.findIndex((x) => x.id === j.id) + 1;
+    const sameDay = dated.filter((x) => finishKey(x) === finishKey(j)).length;
+    const where = rank > 0 ? `, the ${ordinal(rank)} of ${dated.length} dated task${dated.length === 1 ? "" : "s"}${sameDay > 1 ? ` in the store's order; ${sameDay} tasks share this day` : ""}` : "";
+    const why = f.kind === "about" && f.reasons.length ? ` The day is no bound: ${f.reasons.map(reasonCore).join("; ")}.` : "";
+    return `It finished ${finishLabel(f)}${where}.${why}${unlabeled}`;
+  }
+
+  // A finish day as a chart label says it: "on or before 29 Sep (UTC)", or
+  // "about 29 Sep (UTC; direction not known)", the direction said once.
+  function finishLabel(f) {
+    if (!f || !f.day) return f && f.words ? f.words : "";
+    return `${f.words.replace(/ \(direction not known\)$/, "")} (UTC${f.kind === "about" ? "; direction not known" : ""})`;
   }
 
   // A task's finish day in words, with its state and bound: "on 26 Sep"
@@ -967,6 +1081,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
+    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

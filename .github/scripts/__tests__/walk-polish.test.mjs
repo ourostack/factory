@@ -159,17 +159,16 @@ test("each part of a task's bar lights its evidence on the map: working parts th
 
 // ------------------------------------------------- the landing view (I-1)
 
-test("#/ opens today's latest task, 825084c9, from the real snapshot", () => {
+test("#/ opens the latest finished task from the real snapshot, which has no finish days, by finish position (A1 B2 fallback)", () => {
   const snap = JSON.parse(read(".github/fixtures/walk/snapshot.json"))
   const jobs = snap.jobs
   assert.ok(Array.isArray(jobs) && jobs.length > 0)
-  const labeled = jobs.filter((j) => j.finish_basis === "labels" && j.finish_order && j.finish_order.state === "measured")
-  const latest = labeled.reduce((a, j) => (!a || j.finish_order.value > a.finish_order.value ? j : a), null)
+  const finished = jobs.filter((j) => (j.status === "done" || j.status === "cancelled") && j.finish_order && j.finish_order.state === "measured")
+  const latest = finished.reduce((a, j) => (!a || j.finish_order.value > a.finish_order.value ? j : a), null)
   assert.equal(F.defaultTask(jobs).id, latest.id)
-  assert.equal(latest.id.slice(0, 8), "825084c9")
   // The rule is said the same way to people and to agents.
-  assert.match(read("site/src/index.html"), /opens on the finished task with the latest finish position, named or private/)
-  assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the finished task with the latest finish position \(`finish_order`\), named or private/)
+  assert.match(read("site/src/index.html"), /opens on the latest-finished task that has something to teach, named or private, labeled for waste or not/)
+  assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the latest-finished task that has something to teach, named or private, labeled or not\./)
 })
 
 // ------------------------------------------------- share of each task (I-4)

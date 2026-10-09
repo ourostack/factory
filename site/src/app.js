@@ -535,7 +535,7 @@
     row(dl, label, num(number, kind || "count"));
   }
 
-  function renderOutcomes(container, o) {
+  function renderOutcomes(container, o, taskCount) {
     container.innerHTML = "";
     if (!o || !o.signoff) {
       emptyState(container, "Sign-off is not part of this build's data.");
@@ -543,6 +543,9 @@
     }
     // The cost per accepted outcome is the page's headline, shown once, above;
     // this section holds what it rests on.
+    // What the jobs counted here are, beside the site's tasks (A1 I5).
+    const words = F.signoffWords(o, taskCount);
+    if (words.scope) container.appendChild(el("p", "stat-note", words.scope));
     const grid = el("div", "outcome-tiles");
     container.appendChild(grid);
 
@@ -579,6 +582,7 @@
     const fv = el("p", "big-figure");
     fv.appendChild(num(o.first_pass_yield, "pct"));
     fp.appendChild(fv);
+    if (words.yieldNote) fp.appendChild(el("p", "stat-note", words.yieldNote));
     // The counts the percentage is computed from, so a reader can rebuild it.
     const c = o.first_pass_counts;
     if (c.passed.state === "measured" && c.counted.state === "measured" && c.final.state === "measured") {
@@ -1554,7 +1558,7 @@
       for (const r of rows) {
         if (r.group !== group) {
           group = r.group;
-          list.appendChild(el("li", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open or not labeled yet, the latest to start first"));
+          list.appendChild(el("li", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open, the latest to start first"));
         }
         const li = document.createElement("li");
         const a = el("a", "picker-row");
@@ -1569,6 +1573,7 @@
         if (r.finish && r.finish.kind !== "open") meta.appendChild(el("span", "picker-finish", r.finish.day ? `finished ${r.finish.words}` : r.finish.words));
         meta.appendChild(el("span", null, `lead ${fig(r.lead, "duration")}`));
         meta.appendChild(el("span", null, `flow ${r.feText || "no data"}`));
+        if (r.unlabeled) meta.appendChild(el("span", "picker-badge picker-badge-none", "not labeled yet"));
         if (r.badge) meta.appendChild(el("span", `picker-badge picker-badge-${r.badge === "partial" ? "partial" : "none"}`, r.badge));
         a.appendChild(meta);
         li.appendChild(a);
@@ -1914,6 +1919,9 @@
     line("sum-value", "of which value-adding", fig("value", row && row.value_in_working_ms), "as the evaluator labeled it");
     line("sum-waiting", "Waiting", idle && idle.state !== "unavailable" && words.has("waiting") ? document.createTextNode(words.get("waiting")) : el("span", "num num-unavailable", "no data"), "idle: lead time − working time");
     line("sum-fe", "Flow efficiency", fig("fe", row && row.flow_efficiency), "working time ÷ lead time");
+    // The operator's own time: the Store's attention estimate, for this task.
+    const op = W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore);
+    line("sum-attention", "Operator attention", op.attention ? document.createTextNode(op.attention) : el("span", "num num-unavailable", "no data"), "reading and answering, estimated");
     if (phone) root.appendChild(sum);
     else {
       // The summary sits beside the boxes and adds no height to any row: it
@@ -1963,7 +1971,7 @@
     } else if (model.items.some((x) => x.type === "wait" && x.by && x.by.next_prompt > 0)) {
       legend.appendChild(el("p", "vsm-legend-item", "Why the agent stopped before each wait for the next prompt is not known yet: Desk does not publish it for this task, so the triangles say only that the agent had stopped."));
     }
-    lgGlyph("opened", "A pull request that first appeared in this task's sessions (opened there or mentioned; Desk does not say which yet), on the ladder's second lane at GitHub's opening time; a diamond is one merged.");
+    lgGlyph("opened", W.prLegendWords(map && map.prs));
     lgGlyph("opened", "An outlined mark is a time known only in part: its evidence says which way the true time lies.", { partial: true });
     if (outside.before.count || outside.after.count) lgGlyph("opened", `A time before the task started${clock.open ? " or after its last recorded work" : " or after its lead time ended"} is listed in a dashed margin beside the map, with how far outside it lies, never drawn at the map's edge.`);
     {
@@ -2288,7 +2296,7 @@
   function renderHandoffs(container, map, clock, origin, leadMs, openMark) {
     const sec = el("section", "clock-section");
     sec.appendChild(el("h3", "bars-title", "Handoffs"));
-    const state = W.clockListWords(map.human_turns_state, "Operator prompts", F.reasonText);
+    const state = W.clockListWords(map.human_turns_state, "Operator prompts", F.reasonText, F.reasonCore);
     const t = W.handoffTable(clock, origin, F.reasonText, leadMs);
     const rows = t.rows;
     sec.appendChild(el("p", "chart-caption", rows.length ? `Each time the operator prompted an agent of this task, in clock order: ${rows.length} prompt${rows.length === 1 ? "" : "s"}. Each row gives the prompt's time on the task clock, how long the task was idle and the main agent stopped before it, how long the agent then worked, and the size of the prompt and of the output the operator read; never the prompt's text.${state ? ` ${state}.` : ""}` : state ? `${state}, so no prompt is drawn rather than none.` : "No operator prompt is recorded for this task."));
@@ -2336,7 +2344,7 @@
     const prs = Array.isArray(map.prs) ? map.prs : [];
     const sec = el("section", "clock-section");
     sec.appendChild(el("h3", "bars-title", "Pull requests on the task clock"));
-    const state = W.clockListWords(map.prs_state, "Pull requests", F.reasonText);
+    const state = W.clockListWords(map.prs_state, "Pull requests", F.reasonText, F.reasonCore);
     if (!prs.length) {
       sec.appendChild(el("p", "chart-caption", state ? `${state}; none is recorded for this task.` : "No pull request is recorded for this task."));
       container.appendChild(sec);
@@ -2357,7 +2365,7 @@
     };
     if (!placed) {
       const reason = shared && shared.length ? ` Why: ${shared.map(F.reasonText).join("; ")}.` : "";
-      sec.appendChild(el("p", "chart-caption", `${prs.length} pull request${prs.length === 1 ? "" : "s"} first appeared in this task's sessions, but none has a time on the task clock, so none is drawn.${reason}${state ? ` ${state}.` : ""}`));
+      sec.appendChild(el("p", "chart-caption", `${prs.length} pull request${prs.length === 1 ? "" : "s"} opened or mentioned in this task's sessions, but none has a time on the task clock, so none is drawn.${reason}${state ? ` ${state}.` : ""}`));
       const p = el("p", "pr-line");
       prs.forEach((pr, k) => {
         if (k) p.appendChild(document.createTextNode(", "));
@@ -2368,8 +2376,8 @@
       container.appendChild(sec);
       return;
     }
-    const anchor = map.pr_anchor && map.pr_anchor.state === "measured" ? " GitHub's times are placed through the task's clock anchor, to within seconds." : "";
-    sec.appendChild(el("p", "chart-caption", `${placed} of ${prs.length} pull request${prs.length === 1 ? "" : "s"} have an opening time on the task clock.${anchor} One with no placed time is listed as "opened, time not recorded", with why, and is not drawn.${shared && shared.length ? ` Every time not placed here has one reason: ${shared.map(F.reasonText).join("; ")}.` : ""}${state ? ` ${state}.` : ""}`));
+    const caption = W.prCaption({ placed, total: prs.length, anchorMeasured: !!(map.pr_anchor && map.pr_anchor.state === "measured") });
+    sec.appendChild(el("p", "chart-caption", `${caption}${shared && shared.length ? ` Every time not placed here has one reason: ${shared.map(F.reasonText).join("; ")}.` : ""}${state ? ` ${state}.` : ""}`));
     const det = el("details", "more-details");
     if (prs.length <= 15) det.open = true;
     det.appendChild(el("summary", null, `The ${prs.length} pull request${prs.length === 1 ? "" : "s"} as a table`));
@@ -2638,7 +2646,7 @@
       // The finish day leads; the next sentence then starts "It took" (M3).
       ledeEl.prepend(el("span", "lede-finish", finishSentence(j)));
       const next = ledeEl.childNodes[1];
-      if (next && next.nodeType === 3 && next.textContent.startsWith("This task took")) next.textContent = next.textContent.replace(/^This task took/, "It took");
+      if (next && next.nodeType === 3) next.textContent = W.afterFinish(next.textContent);
       // The map's header names the day too.
       const vt = document.getElementById("vsm-title");
       if (vt) {
@@ -2646,6 +2654,8 @@
         if (old) old.remove();
         vt.appendChild(el("span", "vsm-finish", ` · ${finishSentence(j, "short")}`));
       }
+      // The operator's own time on this task (A1 I2).
+      ledeEl.appendChild(el("span", "lede-operator", ` ${W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore).text}`));
       tokens.push(...ledeEl.querySelectorAll(".lede-num"));
     });
     safely("time-went", () => {
@@ -2768,7 +2778,7 @@
     }
     if (opList.length) opList[0].setAttribute("tabindex", "0");
     else {
-      const st = W.clockListWords(map.human_turns_state, "operator prompts", F.reasonText);
+      const st = W.clockListWords(map.human_turns_state, "operator prompts", F.reasonText, F.reasonCore);
       note(yOp, st && map.human_turns_state && map.human_turns_state.state === "unavailable" ? st : "no operator prompt recorded in this session");
     }
     // Pull requests lane.
@@ -2804,7 +2814,7 @@
         g.appendChild(tx);
       }
       const q = partial ? (m.bound === "upper" ? "at most " : m.bound === "lower" ? "at least " : "about ") : "";
-      const what = m.kind === "merged" ? "merged" : m.pr.created === true ? "opened by this task" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
+      const what = m.kind === "merged" ? "merged" : m.pr.created === true ? "opened by this task" : m.pr.created === false ? "mentioned in this task's sessions (drawn at GitHub's opening time)" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
       keyed(g, `Pull request ${m.pr.repo}#${m.pr.number} ${what}, ${q}${W.clockAt(m.ms, ctx.origin)}${partial ? " (a time known only in part)" : ""}. Opens the evidence, with its link to GitHub.`, (n) => openMark(n, { kind: "pr", pr: m.pr, k: m.k }), prList);
       s.appendChild(g);
     });
@@ -3105,7 +3115,7 @@
       return k;
     };
     li(glyphKey("prompt"), "Operator prompt; the band before it runs from the main agent's stop to the prompt (other agents may have been working)");
-    li(glyphKey("opened"), "Pull request first appeared in this task's sessions (drawn at GitHub's opening time)");
+    li(glyphKey("opened"), "Pull request opened or mentioned in this task's sessions (drawn at GitHub's opening time)");
     li(glyphKey("merged"), "Pull request merged");
     li(glyphKey("opened", { partial: true }), "Outlined: a time known only in part");
     li(el("span", "lane-key-count", "2"), MERGE_RULE);
@@ -3316,14 +3326,14 @@
       t.textContent = text;
       plot.appendChild(t);
     };
-    if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, in finish order →");
+    if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, by finish day (UTC) →");
     if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: T + H, class: "sb-divider" }));
-    if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Not finished →" : "Still open or not labeled yet, by when work began →");
+    if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Still open →" : "Still open, by when work began →");
 
     const barW = colW - 8;
     bars.forEach((b, i) => {
       const x0 = i * colW + 4 + 4;
-      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${b.finish.words} (UTC)` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
+      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${F.finishLabel(b.finish)}` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.unlabeled ? ", not labeled yet" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
       const a = svgLink(b.href, `${label}. Follow this task.`);
       a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
       a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
@@ -3486,7 +3496,9 @@
     const drawn = bars.filter((b) => !b.empty && typeof b.total === "number");
     const scale = share ? { unit: "share", max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total)) * 1.1);
     const y = (v) => T + H - (v / scale.max_ms) * H;
-    const totalH = T + H + 46;
+    // A line under the week labels when any week has tasks with no split.
+    const anyUnsplit = bars.some((b) => b.unsplit && b.unsplit.n > 0);
+    const totalH = T + H + 46 + (anyUnsplit ? 16 : 0);
     const row = el("div", "sb-row");
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
     axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? "% of the week's lead time" : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
@@ -3505,7 +3517,7 @@
       const bx = x0 + (ax.colW - barW) / 2;
       const g = svg("g", { tabindex: "0", role: "img", class: "ot-week" });
       const parts = b.segments.map((s) => `${s.label} ${share ? S.overTimeCell({ state: s.state, value: s.share, reasons: ["x"], bound: s.bound }, false, "share").words : S.overTimeCell({ state: s.state, value: s.ms, reasons: ["x"], bound: s.bound }, false, "hours").words}`);
-      g.setAttribute("aria-label", b.empty ? `Week of ${b.label}: no task finished.` : `Week of ${b.label}: ${b.count}; ${b.days.words}. ${b.totalWords}. ${parts.join("; ")}.`);
+      g.setAttribute("aria-label", b.empty ? `Week of ${b.label}: no task finished.` : `Week of ${b.label}: ${b.count}; ${b.days.words}.${b.unsplit && b.unsplit.n ? ` ${b.unsplit.words}.` : ""} ${b.totalWords}. ${parts.join("; ")}.`);
       if (b.empty) {
         g.appendChild(svg("rect", { x: x0 + 2, y: T, width: Math.max(2, ax.colW - 4), height: H, class: "ot-empty" }));
         if (ax.showValues) {
@@ -3538,7 +3550,13 @@
         t.textContent = b.label;
         g.appendChild(t);
       }
-      markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
+      // Under the bar: how many of its tasks have no working/waiting split yet (A1 I7).
+      if (b.unsplit && b.unsplit.n && ax.showValues) {
+        const t = svg("text", { x: x0 + ax.colW / 2, y: T + H + 42, class: "axis-tick ot-unsplit", "text-anchor": "middle" });
+        t.textContent = `${b.unsplit.n}/${b.unsplit.of} not split`;
+        g.appendChild(t);
+      }
+      markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, ...(b.unsplit && b.unsplit.n ? [{ label: "No split yet", value: b.unsplit.words }] : []), { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
       plot.appendChild(g);
     });
     frame.appendChild(plot);
@@ -3555,6 +3573,12 @@
       ul.appendChild(li);
     }
     container.appendChild(ul);
+    // Each week whose split is mostly or partly not known says so in words.
+    const unsplitWeeks = bars.filter((b) => b.unsplit && b.unsplit.n);
+    if (unsplitWeeks.length) {
+      const p = el("p", "chart-caption ot-unsplit-note", `Not measured yet: ${unsplitWeeks.map((b) => `week of ${b.label}, ${b.unsplit.words}`).join("; ")}. Their hours count in the week's lead time as "split not known", and in no cause; "n/m not split" under a bar says the same.`);
+      container.appendChild(p);
+    }
     container.appendChild(el("p", "chart-caption", `The number above a bar is how many tasks finished that week; * marks a thin week (fewer than 3). A dashed slot is a week with no finished task, never a zero bar. Hatched parts are partial. Weeks are labeled by the Monday they start on${ax.every > 1 ? `, every ${ax.every} weeks` : ""}.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here; the table below gives each week's days."}`));
   }
 
@@ -3658,7 +3682,7 @@
       const L = S.feLayout(ax.colW, w.marks.length, { labelPx: hasMedian && ax.showValues ? Math.max(30, 7 * String(w.median.short || "").length + 6) : ax.colW });
       w.marks.forEach((p, k) => {
         const cx = x0 + L.xs[k];
-        const a = svgLink(p.href, `${p.name}: finished ${p.finish.words} (UTC); flow efficiency ${p.words}. Follow this task.`);
+        const a = svgLink(p.href, `${p.name}: finished ${F.finishLabel(p.finish)}; flow efficiency ${p.words}. Follow this task.`);
         a.appendChild(svg("rect", { x: cx - 5, y: top, width: 10, height: H, class: "hit" }));
         if (p.kind === "unknown") {
           a.appendChild(svg("line", { x1: cx, x2: cx, y1: y(1), y2: y(0), class: "ot-range-unknown" }));
@@ -3843,7 +3867,7 @@
       const name = document.createElement("td");
       name.appendChild(jobLink(b.job, b.name));
       tr.appendChild(name);
-      tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish` : b.open ? "open" : b.status === "done" ? "done, not labeled" : b.status || "no data"));
+      tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish${b.unlabeled ? ", not labeled yet" : ""}` : b.open ? "open" : b.status || "no data"));
       tr.appendChild(el("td", null, b.finish ? (b.finish.kind === "open" ? "open" : b.finish.words) : "—"));
       tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
       const g = (k) => b.groups.find((x) => x.key === k);
@@ -3882,7 +3906,7 @@
           ? "Agent working time only, for the tasks whose working time the evaluator has labeled, in finish order, linear from zero at their own scale. Waiting is left out, so defects, rework and necessary steps, where agent-side fixes live, show. Select a bar to follow its task."
           : mode === "share"
             ? "Each task's own lead time as 100%, on a 0 to 100% axis, with the same parts in the same order, so a 20-minute task's make-up compares with a 200-hour one's. Each bar is labeled with the share agents were working. A task whose split is not known is one hatched bar, never 100% of one part. Select a bar to follow its task."
-            : "The whole lead time of each task, linear from zero. Left to right: finished tasks in finish order, the latest on the right; then tasks still open or not labeled yet, by when work began. Select a bar to follow its task.";
+            : "The whole lead time of each task, linear from zero. Left to right: every finished task (done or cancelled) by finish day (UTC), the latest on the right, with any finished task that has no finish day after the dated ones; then tasks still open, by when work began. Select a bar to follow its task.";
       const view = !all.length || mode !== "working" ? null : S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working")));
       const bars = !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
       const leftOut = document.getElementById("stackup-left-out");
@@ -4036,7 +4060,7 @@
       left.appendChild(tx);
     }
     const lt = svg("text", { x: 12, y: top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${top + H / 2})`, "text-anchor": "middle" });
-    lt.textContent = `${scale.unit === "hours" ? "Hours" : "Minutes"} (per task)`;
+    lt.textContent = S.paretoAxisTitle(scale.unit);
     left.appendChild(lt);
     const right = svg("svg", { class: "sb-axis", width: rightW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
@@ -4087,8 +4111,9 @@
       const v = svg("text", { x: cx, y: y(b.ms) - 6, class: "sb-value", "text-anchor": "middle" });
       v.textContent = S.hoursShort(b.ms);
       a.appendChild(v);
-      wrapWords(b.label, Math.max(9, Math.floor(colW / 6.6)), 4).forEach((line, k) => {
-        const t = svg("text", { x: cx, y: top + H + 15 + k * 13, class: "pareto-name", "text-anchor": "middle" });
+      // A phone's narrow columns take the bar's number; the names follow as a list.
+      (phone ? [String(i + 1)] : wrapWords(b.label, Math.max(9, Math.floor(colW / 6.6)), 4)).forEach((line, k) => {
+        const t = svg("text", { x: cx, y: top + H + 15 + k * 13, class: phone ? "pareto-name pareto-num" : "pareto-name", "text-anchor": "middle" });
         t.textContent = line;
         a.appendChild(t);
       });
@@ -4108,6 +4133,22 @@
     frame.appendChild(root);
     row.append(left, frame, right);
     container.appendChild(row);
+    if (phone) {
+      // The bars' names, numbered as under the bars.
+      const ol = el("ol", "pareto-names");
+      for (const x of S.paretoNames(model)) {
+        const li = document.createElement("li");
+        const safe = x.href && /^#\/causes(\/[A-Za-z0-9_:-]+)?$/.test(x.href) ? x.href : null;
+        if (safe) {
+          const link = el("a", null, x.label);
+          link.href = safe;
+          li.appendChild(link);
+        } else li.appendChild(document.createTextNode(x.label));
+        li.appendChild(document.createTextNode(`: ${x.hours}`));
+        ol.appendChild(li);
+      }
+      container.appendChild(ol);
+    }
     // A fade at the frame's right edge while more bars lie beyond it.
     const edge = () => frame.classList.toggle("more-right", frame.scrollLeft + frame.clientWidth < frame.scrollWidth - 2);
     frame.addEventListener("scroll", edge, { passive: true });
@@ -4675,8 +4716,15 @@
     let title = VIEW_TITLE[r.view];
     if (drawerEl && drawerEl.open) drawerEl.close();
     if (r.view === "task") {
-      const fallback = F.defaultTask(data.jobs);
-      const id = r.job || (fallback ? fallback.id : null);
+      // #/ opens on a task with something to teach; when none has, the
+      // page says why it opens on another.
+      const landing = F.landingChoice(data.jobs);
+      const id = r.job || (landing.job ? landing.job.id : null);
+      const note = document.getElementById("landing-note");
+      if (note) {
+        note.textContent = !r.job && landing.why ? landing.why : "";
+        note.hidden = !(!r.job && landing.why);
+      }
       renderTaskWalk(data, id, r.select).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
       const j = data.jobs.find((x) => x.id === id);
       if (j) title = jobLabel(j);
@@ -5232,7 +5280,7 @@
       rowEl.after(line);
     });
 
-    safely("outcomes-panel", () => renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes));
+    safely("outcomes-panel", () => renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes, Array.isArray(data.jobs) ? data.jobs.length : null));
 
     // 3. Detail views
     safely("chart-intake", () => renderIntakeChart(document.getElementById("chart-intake"), data.intake_over_time));

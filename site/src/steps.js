@@ -36,15 +36,15 @@
   // ------------------------------------------------------------ the order
 
   // Every chart on Compare tasks reads left to right in the walk's order:
-  // finished tasks (labeled for waste, so their finish is known) in finish
-  // order, the latest on the right; then tasks still open or not labeled
-  // yet, by when work began, the latest on the right; then any task with no
-  // place at all (no session published). No date is used: finish_order is a
-  // position.
+  // finished tasks (done or cancelled, labeled for waste or not) in finish
+  // order, which is finish-day order with the undated ones after the dated,
+  // the latest on the right; then tasks still open, by when work began, the
+  // latest on the right; then any task with no place at all (no session
+  // published). Over time counts the same finished tasks.
   function walkOrder(jobs) {
     const list = arr(jobs).filter((j) => j && typeof j.id === "string");
     const pos = (j) => (j.finish_order && j.finish_order.state === "measured" && typeof j.finish_order.value === "number" ? j.finish_order.value : null);
-    const finished = (j) => j.finish_basis === "labels" && pos(j) > 0;
+    const finished = (j) => F.isFinished(j);
     const asc = (a, b) => pos(a) - pos(b);
     const placed = list.filter((j) => pos(j) !== null);
     return [
@@ -134,6 +134,7 @@
         short: String(j.id).slice(0, 8),
         group,
         pos,
+        unlabeled: group === "finished" && j.finish_basis !== "labels",
         status: typeof status === "string" ? status : null,
         open,
         shared: !!(task && task.labels_from_shared_session),
@@ -340,12 +341,18 @@
     if (!list.length || list.every((b) => b.state === "no_data" && arr(b.reasons).includes("not_published"))) return { state: "absent", text: "The walk's data is not published yet, so no task can be compared. No bar is drawn rather than a zero.", facts: null };
     const fin = list.filter((b) => b.group === "finished");
     const rest = list.length - fin.length;
-    const restText = rest ? ` The ${plural(rest, "task")} not finished in the store's sense (still open, or done but not labeled for waste yet) follow on the right.` : "";
+    // Finished tasks are in finish-day order; one with no day sits after the
+    // dated ones, and the lede says why.
+    const undated = fin.filter((b) => !(b.finish && b.finish.day));
+    const undatedText = undated.length
+      ? ` ${undated.length === 1 ? "1 finished task has" : `${undated.length} finished tasks have`} no finish day (${[...new Set(undated.flatMap((b) => arr(b.finish && b.finish.reasons)))].map(words).join("; ") || "not recorded"}), so ${undated.length === 1 ? "it sits" : "they sit"} after the dated ones.`
+      : "";
+    const restText = `${undatedText}${rest ? ` ${rest === 1 ? "1 task still open follows" : `${rest} tasks still open follow`} on the right.` : ""}`;
     const split = fin.filter((b) => b.state === "ok" && b.groups.length === 2);
     if (!split.length) {
       return {
         state: "none_finished",
-        text: `${fin.length ? `None of the ${plural(fin.length, "finished task")} splits into working and waiting yet` : "No task has finished in the store's sense yet (finished means labeled for waste)"}, so there is no share to give across finished tasks.${restText}`,
+        text: `${fin.length ? `None of the ${plural(fin.length, "finished task")} splits into working and waiting yet` : "No task has finished yet"}, so there is no share to give across finished tasks.${restText}`,
         facts: null,
       };
     }
@@ -501,6 +508,15 @@
     return { counts: c, earlier, later, bracket: earlier && later ? "both" : earlier ? "left" : later ? "right" : null, words: n ? `${lean}${may ? `: ${may}` : ""}` : "" };
   }
 
+  // A week's tasks whose time does not split into working and waiting yet
+  // (by_week.json `n_unsplit`, `unsplit_reasons`), in words (A1 I7).
+  function unsplitOf(w) {
+    const k = Number.isInteger(w.n_unsplit) ? w.n_unsplit : 0;
+    if (!(k > 0) || !(w.n > 0)) return { n: 0, words: "" };
+    const why = arr(w.unsplit_reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded");
+    return { n: k, of: w.n, short: `${k} of ${w.n} not split`, words: `${k} of ${plural(w.n, "task")} ${k === 1 ? "has" : "have"} no working/waiting split yet (${why})` };
+  }
+
   function overTime(doc, opts) {
     const o = opts || {};
     const fdOpts = Number.isInteger(o.year) ? { year: o.year } : undefined;
@@ -524,6 +540,7 @@
         thin: w.n > 0 && w.n < THIN_WEEK,
         count: w.n === 0 ? "no task finished" : `${plural(w.n, "task")}${w.n_partial > 0 ? `, ${w.n_partial} partial` : ""}`,
         days,
+        unsplit: unsplitOf(w),
         jobs: arr(w.jobs),
         raw: w,
       };
@@ -730,7 +747,15 @@
         const total = ns.reduce((a, n) => a + (val(n) || 0), 0);
         const cells = ot.weeks.map((w, i) => {
           const n = w.empty ? null : m === "share" ? shareOf(ns[i], w.raw.lead_ms) : ns[i];
-          return { week: w.week, ...cellOf(n, w.empty, kind) };
+          const c = cellOf(n, w.empty, kind);
+          // A zero that is only "at least" because some of the week's tasks
+          // have no split says so, never "≥0" (A1 I7).
+          const u = w.unsplit || { n: 0 };
+          if (u.n > 0 && c.value === 0 && c.bound === "lower") {
+            const rest = w.n - u.n;
+            return { week: w.week, ...c, short: `not measured for ${u.n}`, words: `none recorded in the ${plural(rest, "task")} with a split; not measured for the other ${u.n}` };
+          }
+          return { week: w.week, ...c };
         });
         return { key, label: W.causeWords(key), segment: W.causeSegment(key), wait: key.startsWith("waiting:") ? key.slice(8) : null, href: causeRoute(key), total_ms: total, totalWords: hoursWords(total), cells };
       })
@@ -864,6 +889,18 @@
   // Bars are in strictly descending order of time; beyond `maxBars` the
   // smallest causes fold into one "Other" bar, last. The cumulative share is
   // computed over the bars shown, so it ends at 100% in either mode.
+  // The Pareto chart's axis title: job time summed over tasks, in the
+  // chart's unit (A1 M6).
+  function paretoAxisTitle(unit) {
+    return `${unit === "hours" ? "Job-hours" : "Job-minutes"}, summed over tasks`;
+  }
+
+  // The Pareto bars' names as a numbered list, for a phone, where each bar
+  // carries only its number so no two labels overlap (A1 M8).
+  function paretoNames(model) {
+    return arr(model && model.bars).map((b, i) => ({ n: i + 1, label: b.label, hours: hoursShort(b.ms), href: b.href || null }));
+  }
+
   function paretoModel(doc, mode, opts) {
     const o = opts || {};
     const maxBars = Number.isInteger(o.maxBars) && o.maxBars > 1 ? o.maxBars : 10;
@@ -1510,6 +1547,8 @@
 
   return {
     walkOrder,
+    paretoNames,
+    paretoAxisTitle,
     isOpen,
     hoursWords,
     hoursShort,

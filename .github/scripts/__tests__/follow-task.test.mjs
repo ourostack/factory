@@ -257,10 +257,10 @@ test("with no fold, every burst has its own box and every gap its own triangle; 
   const model = W.mapModel(map, { maxBoxes: 10 })
   assert.equal(model.fold_ms, 0)
   assert.equal(model.items.filter((x) => x.type === "box").length, 4)
-  assert.match(W.foldWords(model), /Every work burst has its own box/)
+  assert.match(W.foldWords(model), /every work burst has its own box/)
   const folded = W.mapModel(synthetic(40, 9), { maxBoxes: 3 })
   assert.ok(folded.fold_ms > 0)
-  assert.match(W.foldWords(folded), /^Waits shorter than .+ are folded into the box beside them/)
+  assert.match(W.foldWords(folded), /^At this width the map folds waits shorter than .+ into the box beside them/)
 })
 
 test("the data box keeps the design's order, the rework loop counts defect stretches, and sessions read k of n", () => {
@@ -268,7 +268,7 @@ test("the data box keeps the design's order, the rework loop counts defect stret
   const model = W.mapModel(map, { maxBoxes: 10 })
   const box = model.items.find((x) => x.type === "box" && x.defect_stretches)
   // The pull requests opened in each box are back (v1.1 addendum §3): pull request times are on the task clock.
-  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests first appeared", "Session"])
+  assert.deepEqual(W.dataBox(box, model.session_count).map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests opened or mentioned", "Session"])
   assert.equal(W.reworkWords({ defect_stretches: 12, defect_ms: 3 * M }), "12 defect stretches, 3 minutes")
   assert.equal(W.reworkWords({ defect_stretches: 0, defect_ms: 0 }), null)
   assert.equal(W.reworkWords({ defect_stretches: u(["not_labeled"]), defect_ms: u(["not_labeled"]) }), null, "an unlabeled box draws no loop")
@@ -461,7 +461,7 @@ test("the picker lists every task, the latest to finish first, with badges for p
   assert.ok(W.pickerRows(jobs, null, name, "").every((r) => r.badge === "no data"))
 })
 
-test("the picker's row 1 is the latest finished task: open and unlabeled tasks follow in their own group, however late their facts arrived (I-R1)", () => {
+test("the picker's row 1 is the latest finished task: open tasks follow in their own group, however late their facts arrived (I-R1); a finished task not labeled yet stays in the finished group (A1 I1)", () => {
   const jobs = [
     { id: "open0030", finish_order: m(30), finish_basis: "facts", status: "processing" },
     { id: "done0009", finish_order: m(9), finish_basis: "labels", status: "done" },
@@ -471,13 +471,14 @@ test("the picker's row 1 is the latest finished task: open and unlabeled tasks f
     { id: "done0010", finish_order: m(10), finish_basis: "facts", status: "done" },
   ]
   const out = W.pickerRows(jobs, [], (j) => j.id, "")
-  assert.equal(out[0].id, "done0009")
-  assert.deepEqual(out.map((r) => r.id), ["done0009", "done0002", "open0030", "open0012", "done0010", "nofacts0"])
-  assert.deepEqual(out.map((r) => r.group), ["finished", "finished", "open", "open", "open", "open"])
-  // On the real snapshot too: row 1 is the labeled task with the highest finish position.
+  assert.equal(out[0].id, "done0010")
+  assert.deepEqual(out.map((r) => r.id), ["done0010", "done0009", "done0002", "open0030", "open0012", "nofacts0"])
+  assert.deepEqual(out.map((r) => r.group), ["finished", "finished", "finished", "open", "open", "open"])
+  assert.deepEqual(out.map((r) => !!r.unlabeled), [true, false, false, false, false, false])
+  // On the real snapshot too: row 1 is the finished task with the highest finish position.
   const snap = JSON.parse(read(".github/fixtures/walk/snapshot.json"))
   if (Array.isArray(snap.jobs) && snap.jobs.length) {
-    const best = snap.jobs.filter((j) => j.finish_basis === "labels").sort((a, b) => b.finish_order.value - a.finish_order.value)[0]
+    const best = snap.jobs.filter((j) => (j.status === "done" || j.status === "cancelled") && j.finish_order.state === "measured").sort((a, b) => b.finish_order.value - a.finish_order.value)[0]
     assert.equal(W.pickerRows(snap.jobs, snap.tasks || [], (j) => j.id, "")[0].id, best.id)
   }
 })
@@ -642,8 +643,8 @@ test("the map file (factory.site.map/2) keeps what the landing view draws, every
   assert.doesNotMatch(JSON.stringify(slim), /"intervals"/)
   // Every operator prompt, on the task clock, with its why (none known before Desk's waits).
   assert.deepEqual(slim.human_turns, [
-    { session: "s1", host: "h", at_ms: 0, basis: "first", window_ms: null, prompt_class: "m", output_class: "none", why: null },
-    { session: "s1", host: "h", at_ms: 15, basis: "after_stop", window_ms: 6, prompt_class: "s", output_class: "l", why: null },
+    { session: "s1", host: "h", at_ms: 0, day: null, basis: "first", window_ms: null, prompt_class: "m", output_class: "none", why: null },
+    { session: "s1", host: "h", at_ms: 15, day: null, basis: "after_stop", window_ms: 6, prompt_class: "s", output_class: "l", why: null },
   ])
   assert.deepEqual(slim.waits, [])
   assert.deepEqual(slim.human_turns_state, { state: "measured", reasons: [], basis: "store_from_hosts" })

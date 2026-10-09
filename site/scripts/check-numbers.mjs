@@ -63,7 +63,7 @@ const NUMBER_PATHS = [
   /^outcomes\.(oldest_unsigned_wait|first_pass_counts\.[a-z_]+)$/,
   /^outcomes\.rework\.reason_check\.(compared|disagree)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
-  /^jobs\[\d+\]\.(attention_ms|human_turns)$/,
+  /^jobs\[\d+\]\.(attention_ms|human_turns|map_bursts)$/,
   /^jobs\[\d+\]\.(finish_order|finish_group|more_prs|finish_date)$/,
   /^jobs\[\d+\]\.waste\.(sessions_labeled|sessions_on_timeline|foreign_sessions|rows\[\d+\]\.total_ms)$/,
   /^labeled_waste\.(jobs_with_labels|jobs_finished|rows\[\d+\]\.(total_ms|jobs))$/,
@@ -270,6 +270,9 @@ export function checkByWeek(doc) {
     if (typeof node.state === "string" || "reasons" in node) return envelope(node, path);
     for (const [k, v] of Object.entries(node)) {
       if (k === "median" && v && typeof v === "object") walk(v, `${path}.${k}`);
+      else if (k === "unsplit_reasons") {
+        if (!Array.isArray(v) || v.some((r) => typeof r !== "string" || !hasReasonText(r))) bad(`${path}.${k}`, "reason_without_text");
+      }
       else if (BY_WEEK_COUNT_KEYS.has(k)) {
         if (!Number.isInteger(v) || v < 0) bad(`${path}.${k}`, "bad_count");
       } else walk(v, path ? `${path}.${k}` : k);
@@ -310,7 +313,7 @@ export function checkByWeek(doc) {
 }
 const BY_WEEK_FINISH_PATH = /^tasks\[\d+\]\.finish_date$/;
 const DAY_KEYS = ["n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about"];
-const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial", "n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about"]);
+const BY_WEEK_COUNT_KEYS = new Set(["n", "N", "n_partial", "n_unsplit", "n_day_measured", "n_day_on_or_before", "n_day_on_or_after", "n_day_about"]);
 
 // The check also runs on the serialized file: JSON.stringify turns NaN and
 // Infinity into null, so a null in the file is a number that went bad.

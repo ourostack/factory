@@ -45,7 +45,7 @@
      the operator's next prompt; "cause not recorded" is hatched. */
   --c-wait-next_prompt: #c25a17;
   --c-wait-api_retry: #e08a3c;
-  --c-wait-tool_failure: #9f4a1c;
+  --c-wait-tool_failure: #7a2e2e;
   --c-wait-long_tool_call: #d6772a;
   --c-wait-queue_before_start: #e9b96a;
   --c-wait-no_session: #f3dcc0;
@@ -123,8 +123,8 @@
     --c-no-session: #5a5953;
     --c-wait-next_prompt: #f08a3e;
     --c-wait-api_retry: #f8dcae;
-    --c-wait-tool_failure: #bc4630;
-    --c-wait-long_tool_call: #e2b53a;
+    --c-wait-tool_failure: #a64a2c;
+    --c-wait-long_tool_call: #a86a8a;
     --c-wait-queue_before_start: #9a8148;
     --c-wait-no_session: #6a4f36;
     --c-wait-unknown: #e8833c;
@@ -1425,3 +1425,9 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 .why-waits { margin: 8px 0 0; padding-left: 1.4em; }
 .why-waits li { margin: 0 0 8px; line-height: 1.5; }
 .why-waits .why-wait-facts { display: block; font-size: 13px; color: var(--text-secondary); }
+
+/* On a phone the Pareto bars carry numbers; their names are this list. */
+.pareto-num { font-weight: 600; }
+.pareto-names { margin: 4px 0 8px; padding-left: 1.6em; font-size: 0.85rem; color: var(--text-secondary); }
+.pareto-names li { margin: 2px 0; }
+.ot-unsplit { font-size: 10px; }
