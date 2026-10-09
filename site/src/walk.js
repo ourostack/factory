@@ -1383,7 +1383,12 @@
     ss.forEach((w, k) => {
       const tag = ss.length > 1 ? `Stop ${k + 1} of ${ss.length}: ` : "Stop: ";
       const why = w.why && w.why !== "not_known" && WHY_WORDS[w.why] ? WHY_WORDS[w.why] : `not known (${(Array.isArray(w.reasons) && w.reasons.length ? w.reasons : ["stop_not_recorded"]).map(whyReasonWords).join("; ")})`;
-      rows.push([`${tag}why`, why]);
+      // One stop whose class is the whole split says it once, in the row
+      // above, with the class's meaning (A1 M10).
+      const classes = WHY_KEYS.filter((x) => whyOf[x] > 0);
+      const same = ss.length === 1 && classes.length === 1 && classes[0] === (w.why && WHY_WORDS[w.why] ? w.why : "not_known");
+      if (!same) rows.push([`${tag}why`, why]);
+      else if (classes[0] !== "not_known") rows[0] = [rows[0][0], `${rows[0][1]} (${why})`];
       rows.push([`${tag}decided by`, whySourceWords(w.why_source)]);
       rows.push([`${tag}confidence`, w.why_source === "none" ? "none: not classified" : confidenceText(w.confidence)]);
       rows.push([`${tag}how the turn ended`, stopWords(w) || "not recorded: these facts carry no stop"]);
@@ -2885,6 +2890,7 @@
     sizeWords,
     operatorTime,
     prLegendWords,
+    whyRows,
     promptDayWords,
     afterFinish,
     prCaption,

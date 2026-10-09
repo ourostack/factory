@@ -432,3 +432,17 @@ test("M8: on a phone, Pareto bars carry numbers and their names are a list under
   assert.match(app, /S\.paretoNames\(model\)/)
   assert.match(app, /phone \? \[String\(i \+ 1\)\] : wrapWords\(b\.label/)
 })
+
+// ------------------------------------------------------------------ M10
+
+test("M10: the wait drawer says why the agent stopped once when the wait holds one stop", () => {
+  const stop = { session: "s", start_ms: 0, end_ms: 19 * H, next_prompt_ms: 19 * H, stop: { end: "end_turn", asks: false, pending_agents: false }, why: "not_known", why_source: "none", confidence: null, reasons: ["not_labeled"] }
+  const rows = W.whyRows({ not_known: 19 * H }, [stop], ["not_labeled"], 54 * H)
+  const labels = rows.map((r) => r[0])
+  assert.equal(labels.filter((l) => /why/i.test(l)).length, 1, labels.join(" | "))
+  assert.deepEqual(rows[0], ["Why the agent stopped", "why not known (not labeled yet), 19 hours"])
+  // Two stops, or a stop whose class differs from the split, keep their own rows.
+  const two = W.whyRows({ not_known: 19 * H, acceptance: H }, [stop, { ...stop, why: "acceptance", why_source: "evaluator", confidence: "high", reasons: [] }], ["not_labeled"], 54 * H)
+  assert.ok(two.some((r) => r[0] === "Stop 1 of 2: why"))
+  assert.ok(two.some((r) => r[0] === "Stop 2 of 2: why"))
+})
