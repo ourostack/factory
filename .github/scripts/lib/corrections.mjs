@@ -139,8 +139,7 @@ const UNAVAILABLE_REASONS = Object.freeze([
   "field_absent", "host_records_partly", "withheld_public",
   // An interval Desk's publishing transform dropped because it ran outside the
   // published session clock (a subagent still working after the main log's
-  // last line). The store lists it before Desk does (store first, the
-  // version-skew rule); see STORE_AHEAD_OF_DESK.
+  // last line).
   "interval_outside_session_clock",
 ]);
 
@@ -762,8 +761,6 @@ const MIRRORED_VOCABULARY = Object.freeze({
 // the store's list holds a value Desk's does not. The comparison with Desk
 // allows exactly these and nothing else; a value Desk lacks and that is not
 // listed here is a drift. Remove an entry once Desk main has the value.
-const STORE_AHEAD_OF_DESK = Object.freeze({
-  unavailableReason: Object.freeze(["interval_outside_session_clock"]),
-});
+const STORE_AHEAD_OF_DESK = Object.freeze({});
 
 export { MIRRORED_VOCABULARY, STORE_AHEAD_OF_DESK, CORRECTABLE_FIELDS, CORRECTION_SCHEMA, FACTS_FILE_NAME, PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_LIMIT, UNAVAILABLE_REASONS };
