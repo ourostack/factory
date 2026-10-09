@@ -4111,8 +4111,9 @@
       const v = svg("text", { x: cx, y: y(b.ms) - 6, class: "sb-value", "text-anchor": "middle" });
       v.textContent = S.hoursShort(b.ms);
       a.appendChild(v);
-      wrapWords(b.label, Math.max(9, Math.floor(colW / 6.6)), 4).forEach((line, k) => {
-        const t = svg("text", { x: cx, y: top + H + 15 + k * 13, class: "pareto-name", "text-anchor": "middle" });
+      // A phone's narrow columns take the bar's number; the names follow as a list.
+      (phone ? [String(i + 1)] : wrapWords(b.label, Math.max(9, Math.floor(colW / 6.6)), 4)).forEach((line, k) => {
+        const t = svg("text", { x: cx, y: top + H + 15 + k * 13, class: phone ? "pareto-name pareto-num" : "pareto-name", "text-anchor": "middle" });
         t.textContent = line;
         a.appendChild(t);
       });
@@ -4132,6 +4133,22 @@
     frame.appendChild(root);
     row.append(left, frame, right);
     container.appendChild(row);
+    if (phone) {
+      // The bars' names, numbered as under the bars.
+      const ol = el("ol", "pareto-names");
+      for (const x of S.paretoNames(model)) {
+        const li = document.createElement("li");
+        const safe = x.href && /^#\/causes(\/[A-Za-z0-9_:-]+)?$/.test(x.href) ? x.href : null;
+        if (safe) {
+          const link = el("a", null, x.label);
+          link.href = safe;
+          li.appendChild(link);
+        } else li.appendChild(document.createTextNode(x.label));
+        li.appendChild(document.createTextNode(`: ${x.hours}`));
+        ol.appendChild(li);
+      }
+      container.appendChild(ol);
+    }
     // A fade at the frame's right edge while more bars lie beyond it.
     const edge = () => frame.classList.toggle("more-right", frame.scrollLeft + frame.clientWidth < frame.scrollWidth - 2);
     frame.addEventListener("scroll", edge, { passive: true });

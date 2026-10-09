@@ -889,6 +889,12 @@
   // Bars are in strictly descending order of time; beyond `maxBars` the
   // smallest causes fold into one "Other" bar, last. The cumulative share is
   // computed over the bars shown, so it ends at 100% in either mode.
+  // The Pareto bars' names as a numbered list, for a phone, where each bar
+  // carries only its number so no two labels overlap (A1 M8).
+  function paretoNames(model) {
+    return arr(model && model.bars).map((b, i) => ({ n: i + 1, label: b.label, hours: hoursShort(b.ms), href: b.href || null }));
+  }
+
   function paretoModel(doc, mode, opts) {
     const o = opts || {};
     const maxBars = Number.isInteger(o.maxBars) && o.maxBars > 1 ? o.maxBars : 10;
@@ -1535,6 +1541,7 @@
 
   return {
     walkOrder,
+    paretoNames,
     isOpen,
     hoursWords,
     hoursShort,

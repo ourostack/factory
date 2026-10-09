@@ -421,3 +421,14 @@ test("M7: in both themes, extra processing and long tool call, and defects and a
     assert.ok(de2000(tok(src, "c-waste-defects"), tok(src, "c-wait-tool_failure")) >= 12)
   }
 })
+
+test("M8: on a phone, Pareto bars carry numbers and their names are a list under the chart, so no label overlaps", () => {
+  const model = { bars: [{ label: "Waiting · no session running", ms: 117 * H, href: "#/causes/waiting:no_session" }, { label: "Waiting · agent on another task", ms: 5.6 * H, href: null }] }
+  assert.deepEqual(S.paretoNames(model), [
+    { n: 1, label: "Waiting · no session running", hours: "117h", href: "#/causes/waiting:no_session" },
+    { n: 2, label: "Waiting · agent on another task", hours: "5.6h", href: null },
+  ])
+  const app = read("site/src/app.js")
+  assert.match(app, /S\.paretoNames\(model\)/)
+  assert.match(app, /phone \? \[String\(i \+ 1\)\] : wrapWords\(b\.label/)
+})
