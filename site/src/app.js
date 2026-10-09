@@ -2376,8 +2376,8 @@
       container.appendChild(sec);
       return;
     }
-    const anchor = map.pr_anchor && map.pr_anchor.state === "measured" ? " GitHub's times are placed through the task's clock anchor, to within seconds." : "";
-    sec.appendChild(el("p", "chart-caption", `${placed} of ${prs.length} pull request${prs.length === 1 ? "" : "s"} have an opening time on the task clock.${anchor} One with no placed time is listed as "opened, time not recorded", with why, and is not drawn.${shared && shared.length ? ` Every time not placed here has one reason: ${shared.map(F.reasonText).join("; ")}.` : ""}${state ? ` ${state}.` : ""}`));
+    const caption = W.prCaption({ placed, total: prs.length, anchorMeasured: !!(map.pr_anchor && map.pr_anchor.state === "measured") });
+    sec.appendChild(el("p", "chart-caption", `${caption}${shared && shared.length ? ` Every time not placed here has one reason: ${shared.map(F.reasonText).join("; ")}.` : ""}${state ? ` ${state}.` : ""}`));
     const det = el("details", "more-details");
     if (prs.length <= 15) det.open = true;
     det.appendChild(el("summary", null, `The ${prs.length} pull request${prs.length === 1 ? "" : "s"} as a table`));

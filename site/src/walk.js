@@ -2205,6 +2205,18 @@
     if (!unknown) return `A pull request this task opened or only mentioned (its drawer says which)${tail}`;
     return `A pull request that first appeared in this task's sessions (opened there or mentioned; Desk does not say which for some older records, and the drawer says so)${tail}`;
   }
+  // The caption over a task's pull request table: how many have a time on
+  // the task clock, and a sentence about the unplaced ones only when there
+  // are any (A1 M2).
+  function prCaption(o) {
+    const placed = o.placed;
+    const total = o.total;
+    const rest = total - placed;
+    const head = `${placed} of ${total} pull request${total === 1 ? "" : "s"} ${total === 1 ? "has" : "have"} an opening time on the task clock.`;
+    const anchor = o.anchorMeasured ? " GitHub's times are placed through the task's clock anchor, to within seconds." : "";
+    const unplaced = rest > 0 ? ` The ${rest} with no placed time ${rest === 1 ? "is" : "are"} listed as "opened, time not recorded", with why, and ${rest === 1 ? "is" : "are"} not drawn.` : "";
+    return `${head}${anchor}${unplaced}`;
+  }
   function prStateWords(pr) {
     const who = pr.created === true ? "A pull request this task opened" : pr.created === false ? "A pull request this task's sessions mentioned but did not open" : "A pull request that first appeared in this task's sessions (opened or mentioned; this older record does not say which)";
     const what = pr.state === "merged" ? "it merged" : pr.state === "open" ? "it is open" : pr.state === "closed" ? "it was closed without merging" : "its state could not be read from GitHub";
@@ -2839,6 +2851,7 @@
     sizeWords,
     operatorTime,
     prLegendWords,
+    prCaption,
     prStateWords,
     ANCHOR_SPREAD_MS,
     ANCHOR_PLACE_LIMIT_MS,

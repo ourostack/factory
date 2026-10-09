@@ -309,3 +309,13 @@ test("M1: a pull request's words drop 'Desk does not say which yet' wherever Des
   assert.doesNotMatch(about, /Desk does not say which yet/)
   assert.doesNotMatch(read("site/src/app.js"), /Desk does not say which yet/)
 })
+
+// ------------------------------------------------------------------ M2
+
+test("M2: the pull request section mentions unplaced pull requests only when one exists", () => {
+  const all = W.prCaption({ placed: 35, total: 35, anchorMeasured: true })
+  assert.equal(all, "35 of 35 pull requests have an opening time on the task clock. GitHub's times are placed through the task's clock anchor, to within seconds.")
+  assert.equal(W.prCaption({ placed: 33, total: 35 }), "33 of 35 pull requests have an opening time on the task clock. The 2 with no placed time are listed as \"opened, time not recorded\", with why, and are not drawn.")
+  assert.equal(W.prCaption({ placed: 0, total: 1 }), "0 of 1 pull request has an opening time on the task clock. The 1 with no placed time is listed as \"opened, time not recorded\", with why, and is not drawn.")
+  assert.match(read("site/src/app.js"), /W\.prCaption\(/)
+})
