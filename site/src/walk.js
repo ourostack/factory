@@ -2217,6 +2217,15 @@
     const unplaced = rest > 0 ? ` The ${rest} with no placed time ${rest === 1 ? "is" : "are"} listed as "opened, time not recorded", with why, and ${rest === 1 ? "is" : "are"} not drawn.` : "";
     return `${head}${anchor}${unplaced}`;
   }
+  // The lede's first words once the finish sentence leads it ("This task
+  // finished on 6 Oct (UTC)." or "This task is still open."): "It took"
+  // instead of "This task took", and an open task is not said to be open
+  // twice (A1 M3).
+  function afterFinish(text) {
+    const t = String(text);
+    if (t.startsWith("This task is still open. ")) return t.slice("This task is still open. ".length);
+    return t.replace(/^This task took/, "It took");
+  }
   function prStateWords(pr) {
     const who = pr.created === true ? "A pull request this task opened" : pr.created === false ? "A pull request this task's sessions mentioned but did not open" : "A pull request that first appeared in this task's sessions (opened or mentioned; this older record does not say which)";
     const what = pr.state === "merged" ? "it merged" : pr.state === "open" ? "it is open" : pr.state === "closed" ? "it was closed without merging" : "its state could not be read from GitHub";
@@ -2851,6 +2860,7 @@
     sizeWords,
     operatorTime,
     prLegendWords,
+    afterFinish,
     prCaption,
     prStateWords,
     ANCHOR_SPREAD_MS,

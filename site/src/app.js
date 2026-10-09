@@ -2646,7 +2646,7 @@
       // The finish day leads; the next sentence then starts "It took" (M3).
       ledeEl.prepend(el("span", "lede-finish", finishSentence(j)));
       const next = ledeEl.childNodes[1];
-      if (next && next.nodeType === 3 && next.textContent.startsWith("This task took")) next.textContent = next.textContent.replace(/^This task took/, "It took");
+      if (next && next.nodeType === 3) next.textContent = W.afterFinish(next.textContent);
       // The map's header names the day too.
       const vt = document.getElementById("vsm-title");
       if (vt) {

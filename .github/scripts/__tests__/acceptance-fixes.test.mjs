@@ -319,3 +319,13 @@ test("M2: the pull request section mentions unplaced pull requests only when one
   assert.equal(W.prCaption({ placed: 0, total: 1 }), "0 of 1 pull request has an opening time on the task clock. The 1 with no placed time is listed as \"opened, time not recorded\", with why, and is not drawn.")
   assert.match(read("site/src/app.js"), /W\.prCaption\(/)
 })
+
+// ------------------------------------------------------------------ M3
+
+test("M3: an open task's lede says it is still open once", () => {
+  assert.equal(W.afterFinish("This task is still open. So far it has taken at least "), "So far it has taken at least ")
+  assert.equal(W.afterFinish("This task took 5 hours"), "It took 5 hours")
+  assert.equal(W.afterFinish("Other text"), "Other text")
+  const app = read("site/src/app.js")
+  assert.match(app, /W\.afterFinish\(next\.textContent\)/)
+})
