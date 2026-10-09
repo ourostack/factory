@@ -302,7 +302,7 @@ test("the drawer for a pull request gives its opened and merged times with their
   assert.equal(r["Merged, from"], "GitHub's merge time, placed through the task's clock anchor (to within seconds)")
   assert.equal(r["Opening to merge"], "3 hours")
   const p = Object.fromEntries(W.drawer({ kind: "pr", pr: map.prs[1], k: 1 }, ctx).rows)
-  assert.equal(p["What it is"], "A pull request that first appeared in this task's sessions (opened or mentioned; Desk does not say which yet); it is open")
+  assert.equal(p["What it is"], "A pull request that first appeared in this task's sessions (opened or mentioned; this older record does not say which); it is open")
   assert.equal(p.Opened, "at most 3.3 hours after the task's start: it happened then or earlier")
   assert.equal(p["Opened, from"], "GitHub's opening time, placed through the task's clock anchor")
   assert.equal(p.Merged, "not merged")

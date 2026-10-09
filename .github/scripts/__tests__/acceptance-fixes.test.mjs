@@ -297,3 +297,15 @@ test("M9: a weekly sum stays at least when its no-direction members are exact (b
   // llms.txt says so.
   assert.match(read("site/src/llms-template.txt"), /a member whose `bound_reason` is `bound_not_moved` is exact and adds no direction to a sum/)
 })
+
+// ------------------------------------------------------------------ M1
+
+test("M1: a pull request's words drop 'Desk does not say which yet' wherever Desk says whether the session opened it", () => {
+  assert.equal(W.prLegendWords([{ created: true }, { created: true }]), "A pull request this task opened, on the ladder's second lane at its opening time; a diamond is one merged.")
+  assert.equal(W.prLegendWords([{ created: true }, { created: false }]), "A pull request this task opened or only mentioned (its drawer says which), on the ladder's second lane at its opening time; a diamond is one merged.")
+  assert.match(W.prLegendWords([{ created: true }, { created: null }]), /Desk does not say which for some/)
+  assert.match(W.prStateWords({ created: false, state: "merged" }), /^A pull request this task's sessions mentioned but did not open; it merged$/)
+  const about = read("site/src/index.html")
+  assert.doesNotMatch(about, /Desk does not say which yet/)
+  assert.doesNotMatch(read("site/src/app.js"), /Desk does not say which yet/)
+})

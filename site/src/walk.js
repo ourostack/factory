@@ -2191,8 +2191,22 @@
     if (basis === "not_merged") return null;
     return null;
   }
+  // The map legend's line for the pull request marks, from the map's pull
+  // requests: it names what Desk says of them (opened by the task, or only
+  // mentioned) and admits not knowing only for records that do not say.
+  function prLegendWords(prs) {
+    const list = Array.isArray(prs) ? prs.filter((p) => p && typeof p === "object") : [];
+    const opened = list.some((p) => p.created === true);
+    const mentioned = list.some((p) => p.created === false);
+    const unknown = list.some((p) => p.created !== true && p.created !== false);
+    const tail = ", on the ladder's second lane at its opening time; a diamond is one merged.";
+    if (!unknown && opened && !mentioned) return `A pull request this task opened${tail}`;
+    if (!unknown && mentioned && !opened) return `A pull request this task's sessions mentioned${tail}`;
+    if (!unknown) return `A pull request this task opened or only mentioned (its drawer says which)${tail}`;
+    return `A pull request that first appeared in this task's sessions (opened there or mentioned; Desk does not say which for some older records, and the drawer says so)${tail}`;
+  }
   function prStateWords(pr) {
-    const who = pr.created === true ? "A pull request this task opened" : "A pull request that first appeared in this task's sessions (opened or mentioned; Desk does not say which yet)";
+    const who = pr.created === true ? "A pull request this task opened" : pr.created === false ? "A pull request this task's sessions mentioned but did not open" : "A pull request that first appeared in this task's sessions (opened or mentioned; this older record does not say which)";
     const what = pr.state === "merged" ? "it merged" : pr.state === "open" ? "it is open" : pr.state === "closed" ? "it was closed without merging" : "its state could not be read from GitHub";
     return `${who}; ${what}`;
   }
@@ -2824,6 +2838,8 @@
     prLane,
     sizeWords,
     operatorTime,
+    prLegendWords,
+    prStateWords,
     ANCHOR_SPREAD_MS,
     ANCHOR_PLACE_LIMIT_MS,
     prKey,

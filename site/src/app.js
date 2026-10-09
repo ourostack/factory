@@ -1971,7 +1971,7 @@
     } else if (model.items.some((x) => x.type === "wait" && x.by && x.by.next_prompt > 0)) {
       legend.appendChild(el("p", "vsm-legend-item", "Why the agent stopped before each wait for the next prompt is not known yet: Desk does not publish it for this task, so the triangles say only that the agent had stopped."));
     }
-    lgGlyph("opened", "A pull request that first appeared in this task's sessions (opened there or mentioned; Desk does not say which yet), on the ladder's second lane at GitHub's opening time; a diamond is one merged.");
+    lgGlyph("opened", W.prLegendWords(map && map.prs));
     lgGlyph("opened", "An outlined mark is a time known only in part: its evidence says which way the true time lies.", { partial: true });
     if (outside.before.count || outside.after.count) lgGlyph("opened", `A time before the task started${clock.open ? " or after its last recorded work" : " or after its lead time ended"} is listed in a dashed margin beside the map, with how far outside it lies, never drawn at the map's edge.`);
     {
