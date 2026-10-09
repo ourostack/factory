@@ -446,3 +446,10 @@ test("M10: the wait drawer says why the agent stopped once when the wait holds o
   assert.ok(two.some((r) => r[0] === "Stop 1 of 2: why"))
   assert.ok(two.some((r) => r[0] === "Stop 2 of 2: why"))
 })
+
+test("I2: an 'at least zero' prompt count or estimate reads as none recorded, never 'at least 0' or 'at least none'", () => {
+  const o = W.operatorTime({ attention_ms: partial(0, ["host_records_partly"], "lower"), human_turns: partial(0, ["host_records_partly"], "lower") }, [], null, F.reasonText, F.reasonCore)
+  assert.equal(o.attention, "none recorded")
+  assert.equal(o.text, "No prompt from the operator is recorded for this task (the host records only part of this, so the figure is a lower bound). The store's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.")
+  assert.doesNotMatch(o.text, /at least (0|none)/)
+})

@@ -1446,6 +1446,7 @@
     const count = stated(job && job.human_turns);
     let promptText;
     if (count.state === "unavailable") promptText = null;
+    else if (count.value === 0 && count.state === "partial" && count.bound !== "upper") promptText = `No prompt from the operator is recorded for this task (${why(count, say)}).`;
     else {
       const n = count.value;
       const sizes = list.length === n ? sizeList(list.map((t) => t.prompt_class)) : "";
@@ -1457,6 +1458,10 @@
     if (att.state === "unavailable") {
       const tail = promptText ? ` ${promptText}` : "; the prompts the operator sent are not recorded either.";
       return { state: "none", attention: null, text: `The store has no estimate of the operator's attention on this task, because ${why(att, plain)}${promptText ? "." : ""}${tail}` };
+    }
+    if (att.value === 0 && att.state === "partial" && att.bound !== "upper") {
+      const head0 = promptText ? `${promptText} ` : "";
+      return { state: "ok", attention: "none recorded", text: `${head0}The store's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.` };
     }
     const value = `${dir(att)}${durationWords(att.value)}`;
     const known = att.state === "partial" && (att.bound === "lower" || att.bound === "upper");
