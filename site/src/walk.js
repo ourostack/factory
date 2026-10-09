@@ -527,15 +527,19 @@
         if (top) {
           add(" The largest part, ", tok("wait_cause", durationWords(top.ms), { cause: top.key }), `, was while ${waitedOnWords(top.key, "long")}.`);
           const unknown = by.find((x) => x.key === "unknown");
-          if (unknown && top.key !== "unknown") add(` What ${durationWords(unknown.ms)} of it waited on was not recorded.`);
+          if (unknown && top.key !== "unknown") add(` What ${durationWords(unknown.ms)} of all the waiting waited on was not recorded.`);
         }
       }
       // Why the agent stopped before its waiting for the next prompt (§4).
       const next = by.find((x) => x.key === "next_prompt");
-      add(...whyLedeParts(nextPromptWhy(row), next ? next.ms : 0, tok));
+      const whyParts = whyLedeParts(nextPromptWhy(row), next ? next.ms : 0, tok);
+      add(...whyParts);
       const gap = row.longest_gap && row.longest_gap.state !== "unavailable" ? row.longest_gap.value : null;
       if (waiting > 0 && gap && typeof gap.duration_ms === "number" && gap.duration_ms > 0) {
-        const same = top && top.key === gap.waited_on;
+        // "also" refers back to the sentence before it: only when that
+        // sentence was about the same kind of wait (M-4). The split by why
+        // is about the next prompt, so it keeps "also" only for that.
+        const same = top && top.key === gap.waited_on && (!whyParts.length || gap.waited_on === "next_prompt");
         // Desk names the why of a longest wait for the next prompt (D5).
         const after = gap.waited_on === "next_prompt" && WHY_AFTER[gap.why] ? `, ${WHY_AFTER[gap.why]}` : "";
         add(" The longest single wait was ", tok("longest", durationWords(gap.duration_ms)), same ? `, also ${ALSO[gap.waited_on] || "with its cause not recorded"}${after}.` : `, when ${waitedOnWords(gap.waited_on, "long")}${after}.`);
@@ -598,6 +602,19 @@
     other_task: "while the agent was on another task",
     unknown: "with its cause not recorded",
   };
+
+  // The box a gap is folded into at the model's fold, and the gap itself,
+  // or null when the gap is drawn as a wait (or does not exist): a deep
+  // link to a short wait (?gaps=4) opens the box's short waits (M-1).
+  function foldedGapAt(model, n) {
+    const items = (model && model.items) || [];
+    for (const it of items) {
+      if (it.type !== "box") continue;
+      const g = (it.folded || []).find((x) => x && x.n === n);
+      if (g) return { item: it, gap: g };
+    }
+    return null;
+  }
 
   // The lede as one string (for tests, titles and screen readers).
   function ledeText(model) {
@@ -1344,6 +1361,7 @@
         cause: (it.inner_causes && it.inner_causes[0]) || "unknown",
         rows: [
           ["Which", `Inside work box ${it.box_no}${nOf}`],
+          ...(thing.gap ? [["The wait you opened", `Gap ${thing.gap.n}, ${clockWords(thing.gap.start_ms, thing.gap.end_ms, c.origin_ms)}: shorter than the map's fold threshold, so it is drawn inside this box`]] : []),
           ["What it is", "Idle time inside a work box: waits shorter than the map's fold threshold, and idle moments inside bursts"],
           ["Waited on", (it.inner_causes && it.inner_causes.length ? it.inner_causes : ["unknown"]).map((k) => (it.inner_by && it.inner_by[k] > 0 ? `${waitedOnWords(k, "short")}, ${durationWords(it.inner_by[k])}` : waitedOnWords(k, "short"))).join("; ")],
           ["Length", `${durationWords(ms)} (${share(ms)})`],
@@ -1659,8 +1677,20 @@
     if (s.template === "not_recorded") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known: ${notKnownWords(s.not_known)}.`];
     if (s.template === "not_known") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known (why: ${notKnownWords(s.not_known)}).`];
     const out = [` Of the ${totalW} it waited for the operator's next prompt, `];
-    const shown = s.top.slice(0, 3);
-    const rest = s.top.slice(3);
+    // Stopped short is the first class agents can act on (addendum §4), so
+    // it is always named when it holds time, never summed into the rest;
+    // a rest of one class is named too (M-2).
+    let shown = s.top.slice(0, 3);
+    let rest = s.top.slice(3);
+    const short = rest.find((x) => x.why === "stopped_short");
+    if (short) {
+      shown = [...shown, short];
+      rest = rest.filter((x) => x !== short);
+    }
+    if (rest.length === 1) {
+      shown = [...shown, rest[0]];
+      rest = [];
+    }
     // While some of it has no known why, each class is at least its figure
     // and at most its figure plus the time not known (addendum §4, Bounds).
     const nkMs = s.not_known.ms > 0 ? s.not_known.ms : 0;
@@ -2835,6 +2865,7 @@
     idleSplit,
     waitCauseLabel,
     highlightSelector,
+    foldedGapAt,
     waitPlace,
     promptName,
     promptItem,

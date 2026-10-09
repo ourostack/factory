@@ -1026,8 +1026,11 @@
     if (!(typeof c.ceiling_share === "number" && c.ceiling_ms - c.ms > SECOND)) return f(c.share_of_parent);
     // A floor under 1% already says so: "under 1% (up to 52%)", never "at least under 1%".
     const floor = f(c.share_of_parent);
+    const ceil = f(c.ceiling_share);
+    // Both ends under 1% say it once: "under 1%", never "under 1% (up to under 1%)".
+    if (/^(under |<)/.test(floor) && ceil === floor) return floor;
     const lo = /^(under |<)/.test(floor) ? floor : `${short ? "≥" : "at least "}${floor}`;
-    return `${lo} (${short ? "≤" : "up to "}${f(c.ceiling_share)})`;
+    return `${lo} (${short ? "≤" : "up to "}${ceil})`;
   }
 
   // The "Split by why" toggle's state for a Pareto model: pressed when the
@@ -1278,6 +1281,11 @@
       working: null,
       total_ms: total,
       tasks,
+      // The tasks whose map files may hold a stop of this class: those with
+      // counted time in it, then every other task that waited for the next
+      // prompt. A stop overlapped by its task's own work counts no waiting,
+      // so its task can be missing from the class's own row (I-1).
+      scan_jobs: [...new Set([...tasks.map((t) => t.job), ...arr(parent.jobs).filter((j) => typeof j === "string")])],
       spans,
       spans_cut: typeof doc.references_per_cause === "number" && arr(row.spans).length >= doc.references_per_cause,
       child: { why, parent: NEXT_PROMPT, parent_ms: parent.total_ms, share_of_parent: kid.share_of_parent, ceiling_ms: kid.ceiling_ms, ceiling_share: kid.ceiling_share, bound: kid.bound, rank, of: kids.length, reasons: kid.reasons, not_known_ms: why === "not_known" ? 0 : nkMs },
@@ -1322,44 +1330,79 @@
     return whyCauseLedeParts(d).map((x) => (typeof x === "string" ? x : "waiting for the next prompt")).join("");
   }
 
-  // Every wait of the finished tasks a why sub-cause counts, from their map
-  // files (Desk's `waits`, map/2), longest first: each with its task, its
-  // next-prompt time, how the turn ended, who decided its why and with what
-  // confidence, and the map item that holds it. `maps` is { job: map }.
-  // `held_ms` is their sum; any rest of the sub-cause is time no recorded
-  // wait holds (stop not recorded).
+  // Every stop of a why sub-cause's class in the finished tasks, from their
+  // map files (Desk's `waits`, map/2): first those that hold counted
+  // next-prompt time, longest first, then those its task's own work
+  // overlapped (counted time 0: an agent of the task was working, often the
+  // agent's own background agents), longest span first. A stop's class is
+  // about the stop, so every classified stop is listed (I-1). Each row has
+  // its task, its counted time, how the turn ended, who decided its why and
+  // with what confidence, and the map item that holds it. `maps` is
+  // { job: map }. `held_ms` is the counted time's sum; any rest of the
+  // sub-cause is time no recorded wait holds (stop not recorded).
   function whyWaitRows(d, maps, nameOf) {
-    if (!d || d.state !== "ok") return { rows: [], held_ms: 0, rest_ms: 0, missing: [] };
+    if (!d || d.state !== "ok") return { rows: [], held_ms: 0, rest_ms: 0, missing: [], counted: 0, overlapped: 0, uncounted_jobs: [] };
     const name = typeof nameOf === "function" ? nameOf : (job) => `Task ${String(job).slice(0, 8)}`;
     const rows = [];
     const missing = [];
-    for (const t of d.tasks) {
-      const map = maps ? maps[t.job] : null;
+    const jobs = Array.isArray(d.scan_jobs) ? d.scan_jobs : d.tasks.map((t) => t.job);
+    const counts = new Set(d.tasks.map((t) => t.job));
+    for (const job of jobs) {
+      const map = maps ? maps[job] : null;
       if (!map || !Array.isArray(map.waits)) {
-        missing.push(t.job);
+        // A task with counted time whose map is missing is named; another
+        // task's missing map hides nothing this page counts.
+        if (counts.has(job)) missing.push(job);
         continue;
       }
       map.waits.forEach((w, k) => {
-        if (!w || typeof w !== "object" || w.why !== d.why || typeof w.next_prompt_ms !== "number" || !(w.next_prompt_ms > 0)) return;
+        if (!w || typeof w !== "object" || w.why !== d.why || typeof w.next_prompt_ms !== "number" || !(w.next_prompt_ms >= 0)) return;
+        if (typeof w.start_ms !== "number" || typeof w.end_ms !== "number") return;
+        const counted = w.next_prompt_ms > 0;
+        const bg = w.stop && w.stop.pending_agents === true;
         rows.push({
-          job: t.job,
-          name: name(t.job),
+          job,
+          name: name(job),
           k,
           session: String(w.session || "").slice(0, 8),
           start_ms: w.start_ms,
           end_ms: w.end_ms,
           ms: w.next_prompt_ms,
+          span_ms: Math.max(0, w.end_ms - w.start_ms),
+          counted,
+          overlap: counted ? null : bg ? "overlapped by the agent's own background work: its background agents were still running, so this time counts as working, not waiting" : "overlapped by the task's own work: an agent of this task was working, so this time counts as working, not waiting",
           stop: W.stopWords(w) || "not recorded: these facts carry no stop",
           source: W.whySourceWords(w.why_source),
           confidence: w.why_source === "none" ? "none: not classified" : W.confidenceText(w.confidence),
           reasons: arr(w.reasons),
-          item: spanItem(map, { start_ms: w.start_ms, end_ms: w.end_ms }),
+          // A stop the task's work overlapped sits inside a work burst.
+          item: spanItem(map, { start_ms: w.start_ms, end_ms: w.end_ms }, counted ? "gaps" : "bursts"),
         });
       });
     }
-    rows.sort((a, b) => b.ms - a.ms || (a.job < b.job ? -1 : a.job > b.job ? 1 : a.k - b.k));
+    const order = (a, b) => (a.job < b.job ? -1 : a.job > b.job ? 1 : a.k - b.k);
+    rows.sort((a, b) => (a.counted === b.counted ? (a.counted ? b.ms - a.ms : b.span_ms - a.span_ms) || order(a, b) : a.counted ? -1 : 1));
     const held = rows.reduce((a, r) => a + r.ms, 0);
-    return { rows, held_ms: held, rest_ms: Math.max(0, d.ms - held), missing };
+    const counted = rows.filter((r) => r.counted);
+    const uncounted = [...new Set(rows.filter((r) => !r.counted).map((r) => r.job))].filter((j) => !counts.has(j));
+    return { rows, held_ms: held, rest_ms: Math.max(0, d.ms - held), missing, counted: counted.length, overlapped: rows.length - counted.length, uncounted_jobs: uncounted };
+  }
+
+  // The sentence above a class page's stops: how many there are, how many
+  // hold the time the page and the Pareto count, and why the rest add none.
+  function whyWaitsSummary(out, d) {
+    if (!out || !out.rows.length) return "";
+    const n = out.rows.length;
+    const c = out.counted;
+    const o = out.overlapped;
+    const held = `the ${hoursWords(out.held_ms)} counted as waiting on this page and in the Pareto`;
+    if (!o) return n === 1 ? `1 stop has this why, and it holds ${held}.` : `${n} stops have this why, and they hold ${held}.`;
+    const head = `${n} stop${n === 1 ? " has" : "s have"} this why.`;
+    const cPart = c ? ` ${c} hold${c === 1 ? "s" : ""} ${held};` : ` None of them holds time counted as waiting;`;
+    const oPart = ` ${o} ${o === 1 ? "was" : "were"} overlapped by the agent's own work, so none of ${o === 1 ? "its" : "their"} time counts as waiting, and ${o === 1 ? "it is" : "they are"} listed after the counted ones.`;
+    const k = out.uncounted_jobs.length;
+    const tasks = k ? ` ${k === 1 ? "One task" : `${k} tasks`} whose only stops of this class were overlapped ${k === 1 ? "is" : "are"} not in the tasks table above, which lists counted time.` : "";
+    return `${head}${cPart}${oPart}${tasks}`;
   }
 
   // The A3 question each why raises (addendum §4: "why do agents stop short?").
@@ -1378,7 +1421,7 @@
   // most, or else the work burst it overlaps most (idle moments inside a
   // burst, or labeled working time). Returns { kind: "gaps"|"bursts", n }
   // with n 1-based in clock order, as the map's deep links count, or null.
-  function spanItem(map, span) {
+  function spanItem(map, span, prefer) {
     const items = (x) => (Array.isArray(x) ? x : x && Array.isArray(x.items) ? x.items : []);
     if (!map || !span) return null;
     const over = (it) => Math.min(it.end_ms, span.end_ms) - Math.max(it.start_ms, span.start_ms);
@@ -1395,9 +1438,12 @@
       });
       return at;
     };
+    // `prefer` "bursts" looks in the work bursts first: a stop the task's
+    // own work overlapped sits inside one, beside at most a sliver of a gap.
     const g = best(items(map.gaps));
-    if (g >= 0) return { kind: "gaps", n: g + 1 };
     const b = best(items(map.bursts));
+    if (prefer === "bursts" && b >= 0) return { kind: "bursts", n: b + 1 };
+    if (g >= 0) return { kind: "gaps", n: g + 1 };
     return b >= 0 ? { kind: "bursts", n: b + 1 } : null;
   }
 
@@ -1612,6 +1658,7 @@
     causeMeaning,
     causeDetail,
     whyWaitRows,
+    whyWaitsSummary,
     whyChildren,
     WHY_A3,
     whyAmountWords,

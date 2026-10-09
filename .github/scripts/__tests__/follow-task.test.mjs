@@ -90,8 +90,8 @@ test("the lede: waiting with several causes gives the total, then its largest pa
   assert.deepEqual(idle.by.map((x) => [x.key, x.ms]), [["queue_before_start", 4 * H], ["next_prompt", 3.5 * H], ["unknown", 30 * M]])
   const model = W.lede(row, F.reasonText, { idle })
   const t = W.ledeText(model)
-  assert.match(t, /Most of the 10 hours was waiting, not work: 8 hours in all\. The largest part, 4 hours, was while the task was waiting for its first session to start\. What 30 minutes of it waited on was not recorded\./)
-  assert.match(t, /The longest single wait was 4 hours, also before the first session\./)
+  assert.match(t, /Most of the 10 hours was waiting, not work: 8 hours in all\. The largest part, 4 hours, was while the task was waiting for its first session to start\. What 30 minutes of all the waiting waited on was not recorded\./)
+  assert.match(t, /The longest single wait was 4 hours, when the task was waiting for its first session to start\./)
   const cause = model.parts.find((x) => x.key === "wait_cause")
   assert.equal(cause.cause, "queue_before_start", "the cause's number lights only that cause")
   // Under half the lead time: "Of the N, M was waiting" (M1), and no "a low number is normal" above one half (M2).
