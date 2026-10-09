@@ -2211,6 +2211,7 @@
     const mentioned = list.some((p) => p.created === false);
     const unknown = list.some((p) => p.created !== true && p.created !== false);
     const tail = ", on the ladder's second lane at its opening time; a diamond is one merged.";
+    if (!list.length) return `A pull request this task opened or mentioned${tail}`;
     if (!unknown && opened && !mentioned) return `A pull request this task opened${tail}`;
     if (!unknown && mentioned && !opened) return `A pull request this task's sessions mentioned${tail}`;
     if (!unknown) return `A pull request this task opened or only mentioned (its drawer says which)${tail}`;

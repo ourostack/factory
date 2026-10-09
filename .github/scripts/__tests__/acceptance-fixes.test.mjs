@@ -304,6 +304,7 @@ test("M1: a pull request's words drop 'Desk does not say which yet' wherever Des
   assert.equal(W.prLegendWords([{ created: true }, { created: true }]), "A pull request this task opened, on the ladder's second lane at its opening time; a diamond is one merged.")
   assert.equal(W.prLegendWords([{ created: true }, { created: false }]), "A pull request this task opened or only mentioned (its drawer says which), on the ladder's second lane at its opening time; a diamond is one merged.")
   assert.match(W.prLegendWords([{ created: true }, { created: null }]), /Desk does not say which for some/)
+  assert.equal(W.prLegendWords([]), "A pull request this task opened or mentioned, on the ladder's second lane at its opening time; a diamond is one merged.")
   assert.match(W.prStateWords({ created: false, state: "merged" }), /^A pull request this task's sessions mentioned but did not open; it merged$/)
   const about = read("site/src/index.html")
   assert.doesNotMatch(about, /Desk does not say which yet/)
