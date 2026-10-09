@@ -89,7 +89,7 @@
     mixed: "more than one cause",
     no_sessions: "no session was recorded",
     open_job: "the job is still open",
-    not_labeled: "not labeled for waste yet",
+    not_labeled: "the independent evaluator has not labeled this yet",
     cancelled: "the job was cancelled",
     status_unavailable: "the job's status could not be read",
     wait_fields_unavailable: "the waits could not be measured",
@@ -117,6 +117,11 @@
     share_unknown: "the facts do not record which part of the session was the job's",
     outside_share: "the labels cover none of the job's own part of the session",
     inconsistent: "the labels contradict themselves (for example, they list stops or stretches of waste while marking those facts as missing, or a stop was judged by a newer version of the evaluator than the labels file), so they are left unused",
+    // Why the agent stopped before a wait for the next prompt (Desk's timeline.waits[] and the next-prompt split by why).
+    could_not_tell: "the evaluator read this wait's evidence and could not tell why the agent stopped",
+    stop_not_recorded: "no recorded wait for the operator covers this time, so there is no record of why the agent stopped (some hosts do not record stops)",
+    outside_own_share: "the facts do not say which part of the session was this task's, so the evaluator does not judge this wait for it",
+    stop_partly_classified: "why the agent stopped is not known for some of this waiting, and some of that may belong here, so this is at least this much",
     // Capture coverage (the machines' content-free capture records).
     no_records: "no machine has published a capture record yet",
     record_stale: "some machines' capture records are older than 45 days and are left out",
