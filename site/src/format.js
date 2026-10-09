@@ -246,43 +246,55 @@
   // delivered job is out of its scope. `o` is data.json `outcomes`;
   // `tasks` the number of tasks the other pages show. Returns
   // { scope, yieldNote }, each a sentence or null.
-  function signoffWords(o, tasks) {
+  // The Store's sign-off words. The scope is stated once, in jobs, with
+  // one base: what the jobs are, then how many were delivered, not
+  // delivered or have no record, and how many of the site's tasks are
+  // delivered (a task is the published part of a job, so the two units stay
+  // apart). The captions under the figures then carry no out-of-scope
+  // counts of their own (`withoutScope`). `deliveredTasks` is the delivered
+  // tasks the attention figure rests on (A1 pass 2 M-n4).
+  function signoffWords(o, tasks, deliveredTasks) {
     const so = (o && o.signoff) || {};
     const v = (n) => (n && n.state === "measured" && Number.isInteger(n.value) ? n.value : null);
     const jobs = v(so.jobs);
     const noRecord = v(so.no_record);
     const without = v(so.jobs_without_work_record);
-    let scope = null;
-    if (jobs !== null && noRecord !== null) {
-      const total = jobs + noRecord;
-      scope =
-        without !== null && jobs - without + noRecord === tasks
-          ? `These figures count ${total} jobs: the ${tasks} tasks the other pages show, and ${without} task card${without === 1 ? "" : "s"} that ${without === 1 ? "has" : "have"} a sign-off record but no published session, so no time to show.`
-          : `These figures count ${total} jobs, each a task card with a sign-off record or a published session.`;
-    }
-    const y = (o && o.first_pass_yield) || {};
-    const by = y.excluded && typeof y.excluded === "object" ? Object.entries(y.excluded).filter(([, n]) => Number.isInteger(n) && n > 0).map(([reason, jobs]) => ({ reason, jobs })) : [];
-    // Delivered jobs, as the section counts them: the jobs with a sign-off
-    // record less those not delivered (awaiting an answer, accepted, sent
-    // back, and delivered before sign-off was recorded). Desk counts the
-    // yield's exclusions over every job, so the note names their reasons,
-    // never those counts, beside the delivered count.
     const notDelivered = v(so.not_delivered);
     const before = v(so.not_recorded);
     const unsigned = v(so.delivered_unsigned);
+    // Delivered jobs: the jobs with a sign-off record less those not delivered.
     const delivered = jobs !== null && notDelivered !== null ? jobs - notDelivered : null;
+    let scope = null;
+    if (jobs !== null && noRecord !== null) {
+      const total = jobs + noRecord;
+      const what =
+        without !== null && jobs - without + noRecord === tasks
+          ? `These figures count ${total} jobs: the ${tasks} tasks the other pages show, and ${without} task card${without === 1 ? "" : "s"} that ${without === 1 ? "has" : "have"} a sign-off record but no published session, so no time to show.`
+          : `These figures count ${total} jobs, each a task card with a sign-off record or a published session.`;
+      const split = delivered !== null ? ` Of the ${total} jobs, ${delivered} ${delivered === 1 ? "was" : "were"} delivered, ${notDelivered} ${notDelivered === 1 ? "is" : "are"} not delivered yet and ${noRecord} ${noRecord === 1 ? "has" : "have"} no sign-off record.` : "";
+      const t = Number.isInteger(deliveredTasks) && Number.isInteger(tasks) ? ` ${deliveredTasks} of the ${tasks} tasks ${deliveredTasks === 1 ? "is" : "are"} delivered; a task is the published part of a job.` : "";
+      scope = `${what}${split}${t}`;
+    }
+    const y = (o && o.first_pass_yield) || {};
+    const by = y.excluded && typeof y.excluded === "object" ? Object.entries(y.excluded).filter(([, n]) => Number.isInteger(n) && n > 0).map(([reason, jobs]) => ({ reason, jobs })) : [];
     const why = by.filter((e) => e.reason !== "not_delivered");
     let yieldNote = null;
     if (y.state === "unavailable" && y.N === 0 && delivered > 0 && why.length) {
       const parts = [unsigned ? `the ${unsigned} awaiting an answer` : null, before ? `the ${before} delivered before sign-off was recorded` : null].filter(Boolean);
       // Desk's counts are over every job, so they are said as such, apart
-      // from the delivered count.
+      // from the delivered count, and never as a second out-of-scope count.
       const all = by.reduce((s, e) => s + e.jobs, 0);
-      const each = why.map((e, i) => `${e.jobs}${i === 0 ? ` ${e.jobs === 1 ? "is" : "are"} out of scope` : ""} because ${reasonText(e.reason)}`);
+      const each = why.map((e) => `${e.jobs} because ${reasonText(e.reason)}`);
       const list = each.length > 1 ? `${each.slice(0, -1).join(", ")}, and ${each[each.length - 1]}` : each[0];
-      yieldNote = `All ${delivered} delivered job${delivered === 1 ? " is" : "s are"} out of scope for first-pass yield${parts.length ? ` (${parts.join(" and ")})` : ""}. Across all ${all} jobs, ${list}.`;
+      yieldNote = `None of the ${delivered} delivered job${delivered === 1 ? "" : "s"} has a first-pass result${parts.length ? ` (${parts.join(" and ")})` : ""}. Desk gives its reasons over all ${all} jobs: ${list}.`;
     }
     return { scope, yieldNote };
+  }
+
+  // A figure without its out-of-scope count, for a caption whose scope is
+  // stated once beside it.
+  function withoutScope(n) {
+    return n && typeof n === "object" && Number.isInteger(n.out_of_scope) ? { ...n, out_of_scope: 0 } : n;
   }
 
   // The parts of one number, as plain data. `text` is what the figure reads;
@@ -756,9 +768,10 @@
   const finishKey = (j) => (j && j.finish_date && (j.finish_date.state === "measured" || j.finish_date.state === "partial") && typeof j.finish_date.value === "string" ? j.finish_date.value : null);
 
   // The task #/ opens: the latest-finished task (by finish day, every done
-  // or cancelled task, labeled or not) that has something to teach (below);
-  // when none has, the latest-finished one whose lead time is at least an
-  // hour, and the page says why. Days are the only order the
+  // or cancelled task) that has something to teach and waste labels
+  // (below); without labels when none has them; when none teaches, the
+  // latest-finished one whose lead time is at least an hour; the page says
+  // which. Days are the only order the
   // store knows, so two tasks on the same day are a tie, and a tie goes to
   // the larger lead time. A lead time counts when it is measured or an "at
   // least" figure of an hour or more. Without one: the latest dated finished
@@ -777,19 +790,46 @@
   // A task with something to teach: a lead time of at least an hour, at
   // least 5 minutes of known working time (measured, or partial with a
   // value), at least one work burst on its map and at least one recorded
-  // operator prompt.
+  // operator prompt; first among them, one with evaluator waste labels, so
+  // the value-adding and waste split and the lede's Lean lesson can show.
   const LANDING_MIN_WORK_MS = 300000;
-  const LANDING_FALLBACK_WHY = "No finished task has all of a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt, so this page opens on the latest-finished task whose lead time is at least an hour instead.";
+  const LANDING_ALL = "a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt";
+  const LANDING_LABELED = `This page opens on the latest-finished task with waste labels, ${LANDING_ALL}.`;
+  const LANDING_UNLABELED = `No finished task has waste labels and all of ${LANDING_ALL}, so this page opens on the latest-finished task with all of these but the labels; it has no waste labels yet.`;
+  const LANDING_FALLBACK_WHY = `No finished task has all of ${LANDING_ALL}, so this page opens on the latest-finished task whose lead time is at least an hour instead.`;
   const valueOf = (n) => (n && (n.state === "measured" || n.state === "partial") && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
-  function teaches(j) {
-    if (!leadAtLeast(j, LANDING_MIN_LEAD_MS)) return false;
+  // What a task lacks for the landing, in the order the rule names them.
+  const LANDING_MISSES = [
+    ["lead", "a lead time under an hour or not known"],
+    ["work", "under 5 minutes of known working time"],
+    ["burst", "no work burst on its map"],
+    ["prompt", "no recorded operator prompt"],
+    ["labels", "no waste labels yet"],
+  ];
+  function landingMisses(j) {
+    const out = [];
+    if (!leadAtLeast(j, LANDING_MIN_LEAD_MS)) out.push("lead");
     const work = valueOf(j.active_time_ms);
+    if (work === null || work < LANDING_MIN_WORK_MS) out.push("work");
     const bursts = valueOf(j.map_bursts);
+    if (bursts === null || bursts < 1) out.push("burst");
     const prompts = valueOf(j.human_turns);
-    return work !== null && work >= LANDING_MIN_WORK_MS && bursts !== null && bursts >= 1 && prompts !== null && prompts >= 1;
+    if (prompts === null || prompts < 1) out.push("prompt");
+    if (!hasLabels(j)) out.push("labels");
+    return out;
   }
-  // { job, teaches, why }: the task #/ opens, whether it has something to
-  // teach, and, when none has, why the page opens on another.
+  function hasLabels(j) {
+    const n = valueOf(j && j.waste && j.waste.sessions_labeled);
+    return n !== null && n >= 1;
+  }
+  function teaches(j) {
+    return landingMisses(j).every((k) => k === "labels");
+  }
+  // { job, level, teaches, why, note }: the task #/ opens; `level` says
+  // which rule chose it ("labeled", "unlabeled" once the label condition is
+  // dropped, or "fallback"); `why` says why a lesser rule was used (null for
+  // "labeled"); `note` is what the page shows above the task: the rule used
+  // and why the finished tasks listed above the chosen one were skipped.
   function landingChoice(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
     const latest = (xs) =>
@@ -803,10 +843,39 @@
       }, null);
     const byPos = (xs) => xs.reduce((a, j) => (a === null || finishPos(j) > finishPos(a) ? j : a), null);
     const dated = list.filter((j) => isFinished(j) && finishKey(j) !== null);
-    const teaching = latest(dated.filter(teaches));
-    if (teaching) return { job: teaching, teaches: true, why: null };
-    const job = latest(dated.filter((j) => leadAtLeast(j, LANDING_MIN_LEAD_MS))) || latest(dated) || byPos(list.filter(isFinished)) || byPos(list.filter((j) => finishPos(j) > 0)) || list[0] || null;
-    return { job, teaches: false, why: job ? LANDING_FALLBACK_WHY : null };
+    let job = latest(dated.filter((j) => teaches(j) && hasLabels(j)));
+    let level = "labeled";
+    if (!job) {
+      job = latest(dated.filter(teaches));
+      level = "unlabeled";
+    }
+    if (!job) {
+      job = latest(dated.filter((j) => leadAtLeast(j, LANDING_MIN_LEAD_MS))) || latest(dated) || byPos(list.filter(isFinished)) || byPos(list.filter((j) => finishPos(j) > 0)) || list[0] || null;
+      level = "fallback";
+    }
+    if (!job) return { job: null, level: null, teaches: false, why: null, note: null };
+    const why = level === "labeled" ? null : level === "unlabeled" ? LANDING_UNLABELED : LANDING_FALLBACK_WHY;
+    const head = level === "labeled" ? LANDING_LABELED : why;
+    // The finished tasks the picker lists above the chosen one: a later day,
+    // or the same day and a later place in finish order.
+    const key = finishKey(job);
+    const above = key === null ? [] : dated.filter((j) => j !== job && (finishKey(j) > key || (finishKey(j) === key && finishPos(j) > finishPos(job))));
+    const counts = {};
+    let tie = 0;
+    for (const j of above) {
+      const miss = landingMisses(j).filter((k) => level === "labeled" || k !== "labels");
+      if (level === "fallback") {
+        if (!leadAtLeast(j, LANDING_MIN_LEAD_MS)) counts.lead = (counts.lead || 0) + 1;
+        else tie++;
+        continue;
+      }
+      if (!miss.length) tie++;
+      for (const k of miss) counts[k] = (counts[k] || 0) + 1;
+    }
+    const parts = LANDING_MISSES.filter(([k]) => counts[k]).map(([k, w]) => `${counts[k]} with ${w}`);
+    if (tie) parts.push(`${tie} that finished the same day with a shorter lead time`);
+    const skipped = above.length ? ` The ${above.length} finished task${above.length === 1 ? "" : "s"} listed above it ${above.length === 1 ? "is" : "are"} skipped (a task can miss several): ${parts.join(", ")}.` : "";
+    return { job, level, teaches: level !== "fallback", why, note: `${head}${skipped}` };
   }
   function defaultTask(jobs) {
     return landingChoice(jobs).job;
@@ -1083,6 +1152,20 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
+  // How a stacked part is drawn, the same in the stack-up and Over time:
+  // its class (`seg-<key>`, or `seg-wait-<cause>` for a waiting part) and
+  // its outline, or null for none. An "outline" part (Not labeled yet), a
+  // working part with no split, and a task with no split at all are drawn
+  // as an outline, never as a blank band (A1 pass 2 I-n1).
+  function segmentLook(s) {
+    const x = s || {};
+    const cls = `sb-seg seg-${x.cause ? `wait-${x.cause}` : x.key}`;
+    if (x.key === "unsplit") return { cls, stroke: "var(--baseline)" };
+    const seg = SEGMENTS.find((y) => y.key === x.key);
+    if ((seg && seg.fill === "outline") || x.key === "working_unsplit") return { cls, stroke: `var(${seg ? seg.token : "--c-not-labeled"})` };
+    return { cls, stroke: null };
+  }
+
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

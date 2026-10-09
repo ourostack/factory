@@ -230,10 +230,10 @@ test("I5: the Store's sign-off section agrees with itself, and says what its job
   // Desk's own words for the yield's reason: no claim that nothing was delivered.
   assert.equal(F.reasonText("no_delivered_jobs"), "no delivered job has a first-pass result yet")
   const w = F.signoffWords(o, 31)
-  assert.equal(w.scope, "These figures count 42 jobs: the 31 tasks the other pages show, and 11 task cards that have a sign-off record but no published session, so no time to show.")
-  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Across all 42 jobs, 41 are out of scope because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
+  assert.equal(w.scope, "These figures count 42 jobs: the 31 tasks the other pages show, and 11 task cards that have a sign-off record but no published session, so no time to show. Of the 42 jobs, 21 were delivered, 20 are not delivered yet and 1 has no sign-off record.")
+  assert.equal(w.yieldNote, "None of the 21 delivered jobs has a first-pass result (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Desk gives its reasons over all 42 jobs: 41 because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
   // When the counts do not add up to the site's tasks, no claim is made about them.
-  assert.equal(F.signoffWords(o, 30).scope, "These figures count 42 jobs, each a task card with a sign-off record or a published session.")
+  assert.equal(F.signoffWords(o, 30).scope, "These figures count 42 jobs, each a task card with a sign-off record or a published session. Of the 42 jobs, 21 were delivered, 20 are not delivered yet and 1 has no sign-off record.")
   const app = read("site/src/app.js")
   assert.match(app, /F\.signoffWords\(o, /)
 })
@@ -482,6 +482,7 @@ const teach = (id, order, d, lead, opts = {}) => ({
   active_time_ms: opts.work === undefined ? measured(30 * M) : opts.work,
   map_bursts: opts.bursts === undefined ? measured(4) : opts.bursts,
   human_turns: opts.prompts === undefined ? measured(3) : opts.prompts,
+  waste: { sessions_labeled: measured(1) },
 })
 
 test("Fix 1 I-1: #/ lands on the latest-finished task that has something to teach", () => {
@@ -515,8 +516,8 @@ test("Fix 1 I-1: #/ lands on the latest-finished task that has something to teac
   assert.equal(F.landingChoice([]).job, null)
   // The page shows the reason, and llms.txt and About state the rule.
   assert.match(read("site/src/app.js"), /F\.landingChoice\(data\.jobs\)/)
-  assert.match(read("site/src/llms-template.txt"), /`active_time_ms` is measured, or partial with a value, at 300000 ms or more; `map_bursts` has a value of 1 or more and is not `unavailable`; and `human_turns` has a value of 1 or more/)
-  assert.match(read("site/src/index.html"), /at least 5 minutes of known working time, at least one work burst on its map and at least one recorded operator prompt/)
+  assert.match(read("site/src/llms-template.txt"), /`active_time_ms` is measured, or partial with a value, at 300000 ms or more; `map_bursts` has a value of 1 or more and is not `unavailable`; `human_turns` has a value of 1 or more/)
+  assert.match(read("site/src/index.html"), /at least 5 minutes of known working time, at least one work burst on its map, at least one recorded operator prompt and evaluator waste labels/)
 })
 
 test("Fix 1 I-1: each task row says how many work bursts its map draws", async () => {
@@ -540,10 +541,10 @@ test("Fix 1 I-2: the Store's yield note counts only delivered jobs and agrees wi
   const w = F.signoffWords(outcomesSummary(file), 31)
   // 21 = 5 awaiting an answer + 16 delivered before sign-off was recorded, the
   // section's own figures; the excluded total (42) is larger and never shown as delivered.
-  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Across all 42 jobs, 41 are out of scope because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
+  assert.equal(w.yieldNote, "None of the 21 delivered jobs has a first-pass result (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Desk gives its reasons over all 42 jobs: 41 because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
   // One reason reads alone; with no delivered count, no note.
   const one = outcomesSummary({ ...file, first_pass_yield: { ...file.first_pass_yield, excluded: [{ jobs: 42, reason: "history_not_recorded" }] } })
-  assert.match(F.signoffWords(one, 31).yieldNote, /\. Across all 42 jobs, 42 are out of scope because the job's history was not recorded from the start \(an adopted card\)\.$/)
+  assert.match(F.signoffWords(one, 31).yieldNote, /\. Desk gives its reasons over all 42 jobs: 42 because the job's history was not recorded from the start \(an adopted card\)\.$/)
   const noCount = outcomesSummary({ ...file, signoff: { ...file.signoff, not_delivered: undefined } })
   assert.equal(F.signoffWords(noCount, 31).yieldNote, null)
 })

@@ -155,6 +155,22 @@ export function directionOf(measure, reasons) {
   return rule;
 }
 
+// The direction of a ratio (part over whole, as flow efficiency is working
+// over lead time) from its parts' own: a part that is at least, over a whole
+// that is exact or at most, is at least; the reverse is at most; parts that
+// pull the same way, or carry no direction, leave the ratio with none.
+// Each argument is a stated number with its `bound` when partial.
+export function ratioDirection(part, whole) {
+  const dir = (n) => (!n || n.state === "measured" ? "exact" : n.state === "partial" && (n.bound === "lower" || n.bound === "upper") ? n.bound : "unknown");
+  const a = dir(part);
+  const b = dir(whole);
+  if (a === "unknown" || b === "unknown") return "unknown";
+  const up = a === "lower" || b === "upper";
+  const down = a === "upper" || b === "lower";
+  if (up && down) return "unknown";
+  return up ? "lower" : down ? "upper" : "unknown";
+}
+
 // The number with its direction when partial, and without any bound
 // otherwise. The measure must have a row even when the number is whole.
 export function direct(number, measure) {

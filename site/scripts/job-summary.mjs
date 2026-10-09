@@ -5,7 +5,7 @@
 // null, and a formula the report lacks is unavailable (`not_recorded`),
 // never zero.
 
-import { direct } from "./bounds.mjs";
+import { direct, ratioDirection } from "./bounds.mjs";
 import { fromFormula, measured, unavailable } from "./state.mjs";
 import { waitWords } from "./outcomes.mjs";
 
@@ -35,7 +35,7 @@ const DETAILS = [
   ["queue_before_start_ms", "Queue before the first session", "duration", (F) => bounded(F.queue_before_start_ms, "queue_before_start_ms")],
   ["active_time_ms", "Active time", "duration", (F) => bounded(F.active_time_ms, "active_time_ms")],
   ["busy_time_ms", "Busy time, all workers", "duration", (F) => bounded(F.busy_time_ms, "busy_time_ms")],
-  ["flow_efficiency", "Flow efficiency", "pct", (F) => bounded(F.flow_efficiency, "flow_efficiency")],
+  ["flow_efficiency", "Flow efficiency", "pct", (F) => flowOf(F)],
   ["human_wait_ms", "Waiting on a human", "duration", (F) => bounded(F.waits?.human_wait_ms, "human_wait_ms")],
   ["permission_wait_ms", "Waiting on a permission prompt", "duration", (F) => bounded(F.waits?.permission_wait_ms, "permission_wait_ms")],
   ["api_retry_ms", "Waiting on API retries", "duration", (F) => bounded(F.waits?.api_retry_ms, "api_retry_ms")],
@@ -159,6 +159,15 @@ function returnsOf(F) {
   return bounded({ ...r, value: parts.reduce((a, b) => a + b, 0) }, "returns");
 }
 
+// Flow efficiency is working over lead time, so a partial one takes its
+// direction from those two (as Desk's rollups do), not a fixed "unknown"
+// (A1 pass 2 M-n2).
+function flowOf(F) {
+  const fe = bounded(F.flow_efficiency, "flow_efficiency");
+  if (!fe || fe.state !== "partial") return fe;
+  return { ...fe, bound: ratioDirection(bounded(F.active_time_ms, "active_time_ms"), bounded(F.lead_time_ms, "lead_time_ms")) };
+}
+
 export function jobDetails(F) {
   return DETAILS.map(([key, label, kind, read]) => ({ key, label, kind, number: read(F || {}) }));
 }
@@ -178,7 +187,7 @@ export function jobSummary(d, f) {
     status_class: F.status?.class ?? "unavailable",
     lead_time_ms: bounded(F.lead_time_ms, "lead_time_ms"),
     active_time_ms: bounded(F.active_time_ms, "active_time_ms"),
-    flow_efficiency: bounded(F.flow_efficiency, "flow_efficiency"),
+    flow_efficiency: flowOf(F),
     queue_before_start_ms: bounded(F.queue_before_start_ms, "queue_before_start_ms"),
     human_wait_ms: bounded(waits.human_wait_ms, "human_wait_ms"),
     api_retry_ms: bounded(waits.api_retry_ms, "api_retry_ms"),

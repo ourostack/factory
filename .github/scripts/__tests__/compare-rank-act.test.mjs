@@ -242,7 +242,7 @@ test("on the real store the lede names the finished tasks, a bound, and the caus
   const l = S.compareLede(bars, tasks, F.reasonText)
   assert.equal(l.state, "ok")
   // Every done or cancelled task is finished, labeled or not (A1 I1).
-  assert.match(l.text, /^Across the 9 finished tasks whose time splits into working and waiting, agents were working about \d+% of the elapsed time/)
+  assert.match(l.text, /^Across the 9 finished tasks whose time splits into working and waiting, agents were working about \d+% \(direction not known\) of the elapsed time \(about \d+ of at least \d+ hours\)/)
   assert.equal(l.facts.top.key, "unknown")
   assert.ok(Math.abs(l.facts.lead_ms - l.facts.working_ms - l.facts.waiting_ms) < 1)
 })

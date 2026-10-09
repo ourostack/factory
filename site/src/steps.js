@@ -369,13 +369,28 @@
     }
     const waiting = Math.max(0, lead - work);
     const share = lead > 0 ? work / lead : 0;
-    const bound = groupBound(bounds);
+    // The sums carry their members' direction, in the marks Over time uses,
+    // and the share has none when its parts pull the same way (A1 pass 2
+    // M-n6, as I6 ruled).
+    const pdir = (n, b) => (!n || n.state !== "partial" || (n.bound === null && n.bound_reason === "bound_not_moved") ? null : b === "lower" || b === "upper" ? b : "unknown");
+    const sumDir = (ds) => {
+      const set = new Set(ds.filter(Boolean));
+      return !set.size ? null : set.size === 1 ? [...set][0] : "unknown";
+    };
+    const rowsOf = split.map((b) => tasks.get(b.job)).filter(Boolean);
+    const workDir = sumDir(rowsOf.map((r) => pdir(r.working_ms, W.boundOf(r.working_ms))));
+    const leadDir = sumDir(rowsOf.map((r) => pdir(r.lead_time_ms, totalBound(r.lead_time_ms))));
+    const conflict = workDir === "unknown" || leadDir === "unknown" || (workDir && workDir === leadDir);
+    const ratio = workDir === "lower" || leadDir === "upper" ? "lower" : workDir === "upper" || leadDir === "lower" ? "upper" : null;
+    const bound = conflict ? "unknown" : groupBound(bounds) || ratio;
+    const waitDir = !workDir && !leadDir ? null : workDir && leadDir ? "unknown" : leadDir ? leadDir : workDir === "lower" ? "upper" : "lower";
     const top = Object.entries(waitBy).sort((a, b) => b[1] - a[1])[0];
     const parts = [];
-    parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${Q[bound] || ""}${W.pctWords(share)} of the elapsed time (${hoursWords(work).replace(/ hours?$/, "")} of ${hoursWords(lead)}).`);
+    const shareWords = bound === "unknown" ? `about ${W.pctWords(share)} (direction not known)` : `${Q[bound] || ""}${W.pctWords(share)}`;
+    parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${shareWords} of the elapsed time (${Q[workDir] || ""}${hoursWords(work).replace(/ hours?$/, "")} of ${Q[leadDir] || ""}${hoursWords(lead)}).`);
     if (waiting > 0 && top) {
       const most = top[1] >= 0.5 * waiting;
-      parts.push(` The rest, ${hoursWords(waiting)}, was waiting, ${most ? "mostly" : "the largest part"} ${MOSTLY[top[0]] || MOSTLY.unknown} (${hoursWords(top[1])}).`);
+      parts.push(` The rest, ${Q[waitDir] || ""}${hoursWords(waiting)}, was waiting, ${most ? "mostly" : "the largest part"} ${MOSTLY[top[0]] || MOSTLY.unknown} (${hoursWords(top[1])}).`);
     } else parts.push(" None of it was waiting.");
     const longest = split.slice().sort((a, b) => b.groups[1].ms - a.groups[1].ms)[0];
     if (longest && longest.groups[1].ms > 0) parts.push(` The finished task that waited longest is “${longest.name}”: ${longest.groups[1].qualifier || ""}${hoursWords(longest.groups[1].ms)} of waiting in a lead time of ${longest.words}.`);
@@ -514,7 +529,20 @@
     const k = Number.isInteger(w.n_unsplit) ? w.n_unsplit : 0;
     if (!(k > 0) || !(w.n > 0)) return { n: 0, words: "" };
     const why = arr(w.unsplit_reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded");
-    return { n: k, of: w.n, short: `${k} of ${w.n} not split`, words: `${k} of ${plural(w.n, "task")} ${k === 1 ? "has" : "have"} no working/waiting split yet (${why})` };
+    // A cancelled task will never split, so a week whose unsplit tasks were
+    // all cancelled promises nothing (A1 pass 2 M-n5).
+    const final = arr(w.unsplit_reasons).length > 0 && arr(w.unsplit_reasons).every((r) => r === "cancelled");
+    return { n: k, of: w.n, final, short: `${k} of ${w.n} not split`, words: `${k} of ${plural(w.n, "task")} ${k === 1 ? "has" : "have"} no working/waiting split${final ? "" : " yet"} (${why})` };
+  }
+
+  // The caption under Over time for the weeks with unsplit tasks: "Not
+  // measured yet" unless every such task will never split. `weeks` are the
+  // drawn weeks, each with `label` and `unsplit` (unsplitOf).
+  function unsplitNote(weeks) {
+    const ws = arr(weeks).filter((b) => b && b.unsplit && b.unsplit.n);
+    if (!ws.length) return null;
+    const final = ws.every((b) => b.unsplit.final);
+    return `Not measured${final ? "" : " yet"}: ${ws.map((b) => `week of ${b.label}, ${b.unsplit.words}`).join("; ")}. Their hours count in the week's lead time as "split not known", and in no cause; "n/m not split" under a bar says the same.`;
   }
 
   function overTime(doc, opts) {
@@ -1548,6 +1576,8 @@
   return {
     walkOrder,
     paretoNames,
+    unsplitOf,
+    unsplitNote,
     paretoAxisTitle,
     isOpen,
     hoursWords,

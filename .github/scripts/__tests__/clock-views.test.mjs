@@ -203,7 +203,8 @@ test("the Handoffs table has one row per prompt, in clock order: when it came, t
   // The agent then worked: to its next stop (the next after-stop prompt's time minus its wait), still working at a mid-turn prompt, or no later prompt.
   assert.equal(rows[0].worked, "1 hour, then it stopped")
   assert.equal(rows[1].worked, "still working at the next prompt, 30 minutes later")
-  assert.equal(rows[2].worked, "no later prompt in this session; it ended 1.5 hours later")
+  // The session runs on past the task's window (4 hours), so the cell stops there (A1 pass 2 M-n3).
+  assert.equal(rows[2].worked, "no later prompt while this task was open; the task ended 30 minutes later, and the session went on to other work")
   assert.equal(rows[1].prompt, "short (21 to 200 characters)")
   assert.equal(rows[1].output, "long (1,001 to 5,000 characters)")
   // Columns with no data in any row are dropped, and the table says so once.
