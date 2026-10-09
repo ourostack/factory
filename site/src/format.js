@@ -260,10 +260,22 @@
     }
     const y = (o && o.first_pass_yield) || {};
     const by = y.excluded && typeof y.excluded === "object" ? Object.entries(y.excluded).filter(([, n]) => Number.isInteger(n) && n > 0).map(([reason, jobs]) => ({ reason, jobs })) : [];
-    const unsigned = v(o && o.unsigned);
+    // Delivered jobs, as the section counts them: the jobs with a sign-off
+    // record less those not delivered (awaiting an answer, accepted, sent
+    // back, and delivered before sign-off was recorded). Desk counts the
+    // yield's exclusions over every job, so the note names their reasons,
+    // never those counts, beside the delivered count.
+    const notDelivered = v(so.not_delivered);
+    const before = v(so.not_recorded);
+    const unsigned = v(so.delivered_unsigned);
+    const delivered = jobs !== null && notDelivered !== null ? jobs - notDelivered : null;
+    const why = by.map((e) => e.reason).filter((r) => r !== "not_delivered");
     let yieldNote = null;
-    if (y.state === "unavailable" && y.N === 0 && by.length) {
-      yieldNote = `Every delivered job is out of scope for first-pass yield${unsigned ? `, including the ${unsigned} awaiting an answer` : ""}: ${by.map((e) => `${e.jobs} because ${reasonText(e.reason)}`).join(", ")}.`;
+    if (y.state === "unavailable" && y.N === 0 && delivered > 0 && why.length) {
+      const parts = [unsigned ? `the ${unsigned} awaiting an answer` : null, before ? `the ${before} delivered before sign-off was recorded` : null].filter(Boolean);
+      const words = why.map(reasonText);
+      const because = words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}` : words[0];
+      yieldNote = `All ${delivered} delivered job${delivered === 1 ? " is" : "s are"} out of scope for first-pass yield${parts.length ? ` (${parts.join(" and ")})` : ""}, because ${because}.`;
     }
     return { scope, yieldNote };
   }
@@ -739,8 +751,9 @@
   const finishKey = (j) => (j && j.finish_date && (j.finish_date.state === "measured" || j.finish_date.state === "partial") && typeof j.finish_date.value === "string" ? j.finish_date.value : null);
 
   // The task #/ opens: the latest-finished task (by finish day, every done
-  // or cancelled task, labeled or not) whose lead time is at least an hour,
-  // so the first screen has a walk to show. Days are the only order the
+  // or cancelled task, labeled or not) that has something to teach (below);
+  // when none has, the latest-finished one whose lead time is at least an
+  // hour, and the page says why. Days are the only order the
   // store knows, so two tasks on the same day are a tie, and a tie goes to
   // the larger lead time. A lead time counts when it is measured or an "at
   // least" figure of an hour or more. Without one: the latest dated finished
@@ -756,7 +769,23 @@
     if (!n || leadValue(j) < ms) return false;
     return n.state === "measured" || (n.state === "partial" && n.bound === "lower");
   }
-  function defaultTask(jobs) {
+  // A task with something to teach: a lead time of at least an hour, at
+  // least 5 minutes of known working time (measured, or partial with a
+  // value), at least one work burst on its map and at least one recorded
+  // operator prompt.
+  const LANDING_MIN_WORK_MS = 300000;
+  const LANDING_FALLBACK_WHY = "No finished task has all of a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt, so this page opens on the latest-finished task whose lead time is at least an hour instead.";
+  const valueOf = (n) => (n && (n.state === "measured" || n.state === "partial") && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
+  function teaches(j) {
+    if (!leadAtLeast(j, LANDING_MIN_LEAD_MS)) return false;
+    const work = valueOf(j.active_time_ms);
+    const bursts = valueOf(j.map_bursts);
+    const prompts = valueOf(j.human_turns);
+    return work !== null && work >= LANDING_MIN_WORK_MS && bursts !== null && bursts >= 1 && prompts !== null && prompts >= 1;
+  }
+  // { job, teaches, why }: the task #/ opens, whether it has something to
+  // teach, and, when none has, why the page opens on another.
+  function landingChoice(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
     const latest = (xs) =>
       xs.reduce((a, j) => {
@@ -769,7 +798,13 @@
       }, null);
     const byPos = (xs) => xs.reduce((a, j) => (a === null || finishPos(j) > finishPos(a) ? j : a), null);
     const dated = list.filter((j) => isFinished(j) && finishKey(j) !== null);
-    return latest(dated.filter((j) => leadAtLeast(j, LANDING_MIN_LEAD_MS))) || latest(dated) || byPos(list.filter(isFinished)) || byPos(list.filter((j) => finishPos(j) > 0)) || list[0] || null;
+    const teaching = latest(dated.filter(teaches));
+    if (teaching) return { job: teaching, teaches: true, why: null };
+    const job = latest(dated.filter((j) => leadAtLeast(j, LANDING_MIN_LEAD_MS))) || latest(dated) || byPos(list.filter(isFinished)) || byPos(list.filter((j) => finishPos(j) > 0)) || list[0] || null;
+    return { job, teaches: false, why: job ? LANDING_FALLBACK_WHY : null };
+  }
+  function defaultTask(jobs) {
+    return landingChoice(jobs).job;
   }
 
   // The Compare route for its choices, defaults left out: the stack-up's
@@ -813,9 +848,17 @@
     const f = finishDay(j.finish_date, opts);
     if (!f.day) return `It is finished, but no source gives its finish day (${f.reasons.map(reasonText).join("; ")}), so it is listed after the ${dated.length} dated task${dated.length === 1 ? "" : "s"}.${unlabeled}`;
     const rank = dated.findIndex((x) => x.id === j.id) + 1;
-    const where = rank > 0 ? `, the ${ordinal(rank)} of ${dated.length} dated task${dated.length === 1 ? "" : "s"}` : "";
+    const sameDay = dated.filter((x) => finishKey(x) === finishKey(j)).length;
+    const where = rank > 0 ? `, the ${ordinal(rank)} of ${dated.length} dated task${dated.length === 1 ? "" : "s"}${sameDay > 1 ? ` in the store's order; ${sameDay} tasks share this day` : ""}` : "";
     const why = f.kind === "about" && f.reasons.length ? ` The day is no bound: ${f.reasons.map(reasonCore).join("; ")}.` : "";
-    return `It finished ${f.words.replace(/ \(direction not known\)$/, "")} (UTC${f.kind === "about" ? "; direction not known" : ""})${where}.${why}${unlabeled}`;
+    return `It finished ${finishLabel(f)}${where}.${why}${unlabeled}`;
+  }
+
+  // A finish day as a chart label says it: "on or before 29 Sep (UTC)", or
+  // "about 29 Sep (UTC; direction not known)", the direction said once.
+  function finishLabel(f) {
+    if (!f || !f.day) return f && f.words ? f.words : "";
+    return `${f.words.replace(/ \(direction not known\)$/, "")} (UTC${f.kind === "about" ? "; direction not known" : ""})`;
   }
 
   // A task's finish day in words, with its state and bound: "on 26 Sep"
@@ -1035,6 +1078,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

@@ -1457,17 +1457,17 @@
     const att = stated(job && job.attention_ms);
     if (att.state === "unavailable") {
       const tail = promptText ? ` ${promptText}` : "; the prompts the operator sent are not recorded either.";
-      return { state: "none", attention: null, text: `The store has no estimate of the operator's attention on this task, because ${why(att, plain)}${promptText ? "." : ""}${tail}` };
+      return { state: "none", attention: null, text: `Desk has no estimate of the operator's attention on this task, because ${why(att, plain)}${promptText ? "." : ""}${tail}` };
     }
     if (att.value === 0 && att.state === "partial" && att.bound !== "upper") {
       const head0 = promptText ? `${promptText} ` : "";
-      return { state: "ok", attention: "none recorded", text: `${head0}The store's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.` };
+      return { state: "ok", attention: "none recorded", text: `${head0}Desk's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.` };
     }
     const value = `${dir(att)}${durationWords(att.value)}`;
     const known = att.state === "partial" && (att.bound === "lower" || att.bound === "upper");
     const note = att.state === "partial" ? ` (partial: ${known ? why(att, say) : `${why(att, plain)}; which way the true figure lies is not known`})` : "";
     const head = promptText ? `${promptText} ` : "";
-    return { state: "ok", attention: value, text: `${head}The store's estimate of the operator's attention on this task, their reading and answering time, is ${value}${note}; it is the same estimate the Store page averages over delivered tasks.` };
+    return { state: "ok", attention: value, text: `${head}Desk's estimate of the operator's attention on this task, their reading and answering time, is ${value}${note}; it is the same estimate the Store page averages over delivered tasks.` };
   }
 
   // Why the agent stopped before a prompt (addendum §4's classes).
@@ -2153,11 +2153,19 @@
 
   // A list state (human_turns_state, prs_state) in words, or null when the
   // list is whole: a list that was not recorded never reads as empty.
-  function clockListWords(st, noun, reasonText) {
+  function clockListWords(st, noun, reasonText, reasonCore) {
     const words = typeof reasonText === "function" ? reasonText : (r) => String(r).replace(/_/g, " ");
+    const core = typeof reasonCore === "function" ? reasonCore : words;
     const s = st && typeof st === "object" ? st : { state: "unavailable", reasons: ["not_recorded"] };
     if (s.state === "measured") return null;
-    const rs = (Array.isArray(s.reasons) && s.reasons.length ? s.reasons : ["not_recorded"]).map((r) => (r === "host_does_not_record" ? "the host does not record them" : words(r)));
+    const raw = Array.isArray(s.reasons) && s.reasons.length ? s.reasons : ["not_recorded"];
+    // A shared worker's items are listed for every job that shares it, so
+    // `worker_shared` pulls the list up while every other reason pulls it
+    // down: with both, no direction is named (bounds.mjs fromReasons).
+    if (s.state === "partial" && raw.includes("worker_shared") && raw.some((r) => r !== "worker_shared")) {
+      return `${noun} only partly recorded, and some may belong to other jobs that share a worker, so there may be more or fewer than these (${raw.map(core).join("; ")}; some of these reasons pull the figure up and others down, so which way the true figure lies is not known)`;
+    }
+    const rs = raw.map((r) => (r === "host_does_not_record" ? "the host does not record them" : words(r)));
     if (s.state === "partial") return `${noun} only partly recorded, so there may be more than these (${rs.join("; ")})`;
     return `${noun} not recorded (${rs.join("; ")})`;
   }

@@ -108,6 +108,22 @@ function humanTurnsOf(F) {
   return bounded({ ...a, value: a.turns }, "human_turns");
 }
 
+// How many work bursts the task's map draws: the timeline's bursts, with
+// the state Desk gives them (an envelope { state, reasons, items } or
+// `bursts_state`). A map whose bursts are unavailable draws none, whatever
+// its list holds; a partly recorded one draws at least these.
+function mapBurstsOf(t) {
+  if (!t || typeof t !== "object") return unavailable(["not_recorded"]);
+  const b = t.bursts;
+  const env = t.bursts_state && typeof t.bursts_state === "object" ? t.bursts_state : b && typeof b === "object" && !Array.isArray(b) ? b : null;
+  const items = Array.isArray(b) ? b : b && Array.isArray(b.items) ? b.items : [];
+  const reasons = env && Array.isArray(env.reasons) ? env.reasons : [];
+  const state = env && typeof env.state === "string" ? env.state : "measured";
+  if (state === "unavailable") return unavailable(reasons.length ? reasons : ["not_recorded"]);
+  if (state === "partial") return { state: "partial", value: items.length, reasons: reasons.length ? reasons : ["partial"], bound: "lower" };
+  return measured(items.length);
+}
+
 // The job's public pull requests, as links with their number only (never
 // the repository owner on the page text).
 function pullRequestsOf(F) {
@@ -177,6 +193,7 @@ export function jobSummary(d, f) {
     outcome: outcomeOf(statusValue, F),
     attention_ms: attentionOf(F),
     human_turns: humanTurnsOf(F),
+    map_bursts: mapBurstsOf(d?.timeline),
     pull_requests: pullRequestsOf(F),
     sessions: sessionsOf(d),
     details: jobDetails(F),

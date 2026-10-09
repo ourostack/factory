@@ -2296,7 +2296,7 @@
   function renderHandoffs(container, map, clock, origin, leadMs, openMark) {
     const sec = el("section", "clock-section");
     sec.appendChild(el("h3", "bars-title", "Handoffs"));
-    const state = W.clockListWords(map.human_turns_state, "Operator prompts", F.reasonText);
+    const state = W.clockListWords(map.human_turns_state, "Operator prompts", F.reasonText, F.reasonCore);
     const t = W.handoffTable(clock, origin, F.reasonText, leadMs);
     const rows = t.rows;
     sec.appendChild(el("p", "chart-caption", rows.length ? `Each time the operator prompted an agent of this task, in clock order: ${rows.length} prompt${rows.length === 1 ? "" : "s"}. Each row gives the prompt's time on the task clock, how long the task was idle and the main agent stopped before it, how long the agent then worked, and the size of the prompt and of the output the operator read; never the prompt's text.${state ? ` ${state}.` : ""}` : state ? `${state}, so no prompt is drawn rather than none.` : "No operator prompt is recorded for this task."));
@@ -2344,7 +2344,7 @@
     const prs = Array.isArray(map.prs) ? map.prs : [];
     const sec = el("section", "clock-section");
     sec.appendChild(el("h3", "bars-title", "Pull requests on the task clock"));
-    const state = W.clockListWords(map.prs_state, "Pull requests", F.reasonText);
+    const state = W.clockListWords(map.prs_state, "Pull requests", F.reasonText, F.reasonCore);
     if (!prs.length) {
       sec.appendChild(el("p", "chart-caption", state ? `${state}; none is recorded for this task.` : "No pull request is recorded for this task."));
       container.appendChild(sec);
@@ -2778,7 +2778,7 @@
     }
     if (opList.length) opList[0].setAttribute("tabindex", "0");
     else {
-      const st = W.clockListWords(map.human_turns_state, "operator prompts", F.reasonText);
+      const st = W.clockListWords(map.human_turns_state, "operator prompts", F.reasonText, F.reasonCore);
       note(yOp, st && map.human_turns_state && map.human_turns_state.state === "unavailable" ? st : "no operator prompt recorded in this session");
     }
     // Pull requests lane.
@@ -3333,7 +3333,7 @@
     const barW = colW - 8;
     bars.forEach((b, i) => {
       const x0 = i * colW + 4 + 4;
-      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${b.finish.words} (UTC)` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.unlabeled ? ", not labeled yet" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
+      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${F.finishLabel(b.finish)}` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.unlabeled ? ", not labeled yet" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
       const a = svgLink(b.href, `${label}. Follow this task.`);
       a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
       a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
@@ -3682,7 +3682,7 @@
       const L = S.feLayout(ax.colW, w.marks.length, { labelPx: hasMedian && ax.showValues ? Math.max(30, 7 * String(w.median.short || "").length + 6) : ax.colW });
       w.marks.forEach((p, k) => {
         const cx = x0 + L.xs[k];
-        const a = svgLink(p.href, `${p.name}: finished ${p.finish.words} (UTC); flow efficiency ${p.words}. Follow this task.`);
+        const a = svgLink(p.href, `${p.name}: finished ${F.finishLabel(p.finish)}; flow efficiency ${p.words}. Follow this task.`);
         a.appendChild(svg("rect", { x: cx - 5, y: top, width: 10, height: H, class: "hit" }));
         if (p.kind === "unknown") {
           a.appendChild(svg("line", { x1: cx, x2: cx, y1: y(1), y2: y(0), class: "ot-range-unknown" }));
@@ -4060,7 +4060,7 @@
       left.appendChild(tx);
     }
     const lt = svg("text", { x: 12, y: top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${top + H / 2})`, "text-anchor": "middle" });
-    lt.textContent = `${scale.unit === "hours" ? "Job-hours" : "Job-minutes"}, summed over tasks`;
+    lt.textContent = S.paretoAxisTitle(scale.unit);
     left.appendChild(lt);
     const right = svg("svg", { class: "sb-axis", width: rightW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
@@ -4716,8 +4716,15 @@
     let title = VIEW_TITLE[r.view];
     if (drawerEl && drawerEl.open) drawerEl.close();
     if (r.view === "task") {
-      const fallback = F.defaultTask(data.jobs);
-      const id = r.job || (fallback ? fallback.id : null);
+      // #/ opens on a task with something to teach; when none has, the
+      // page says why it opens on another.
+      const landing = F.landingChoice(data.jobs);
+      const id = r.job || (landing.job ? landing.job.id : null);
+      const note = document.getElementById("landing-note");
+      if (note) {
+        note.textContent = !r.job && landing.why ? landing.why : "";
+        note.hidden = !(!r.job && landing.why);
+      }
       renderTaskWalk(data, id, r.select).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
       const j = data.jobs.find((x) => x.id === id);
       if (j) title = jobLabel(j);

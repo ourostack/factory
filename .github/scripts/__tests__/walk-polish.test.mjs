@@ -167,8 +167,8 @@ test("#/ opens the latest finished task from the real snapshot, which has no fin
   const latest = finished.reduce((a, j) => (!a || j.finish_order.value > a.finish_order.value ? j : a), null)
   assert.equal(F.defaultTask(jobs).id, latest.id)
   // The rule is said the same way to people and to agents.
-  assert.match(read("site/src/index.html"), /opens on the latest-finished task whose lead time is at least an hour, named or private, labeled for waste or not/)
-  assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the latest-finished task whose lead time is at least an hour, named or private, labeled or not\./)
+  assert.match(read("site/src/index.html"), /opens on the latest-finished task that has something to teach, named or private, labeled for waste or not/)
+  assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the latest-finished task that has something to teach, named or private, labeled or not\./)
 })
 
 // ------------------------------------------------- share of each task (I-4)

@@ -889,6 +889,12 @@
   // Bars are in strictly descending order of time; beyond `maxBars` the
   // smallest causes fold into one "Other" bar, last. The cumulative share is
   // computed over the bars shown, so it ends at 100% in either mode.
+  // The Pareto chart's axis title: job time summed over tasks, in the
+  // chart's unit (A1 M6).
+  function paretoAxisTitle(unit) {
+    return `${unit === "hours" ? "Job-hours" : "Job-minutes"}, summed over tasks`;
+  }
+
   // The Pareto bars' names as a numbered list, for a phone, where each bar
   // carries only its number so no two labels overlap (A1 M8).
   function paretoNames(model) {
@@ -1542,6 +1548,7 @@
   return {
     walkOrder,
     paretoNames,
+    paretoAxisTitle,
     isOpen,
     hoursWords,
     hoursShort,

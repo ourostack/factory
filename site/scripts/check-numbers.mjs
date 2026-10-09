@@ -63,7 +63,7 @@ const NUMBER_PATHS = [
   /^outcomes\.(oldest_unsigned_wait|first_pass_counts\.[a-z_]+)$/,
   /^outcomes\.rework\.reason_check\.(compared|disagree)$/,
   /^jobs\[\d+\]\.details\[\d+\]\.number$/,
-  /^jobs\[\d+\]\.(attention_ms|human_turns)$/,
+  /^jobs\[\d+\]\.(attention_ms|human_turns|map_bursts)$/,
   /^jobs\[\d+\]\.(finish_order|finish_group|more_prs|finish_date)$/,
   /^jobs\[\d+\]\.waste\.(sessions_labeled|sessions_on_timeline|foreign_sessions|rows\[\d+\]\.total_ms)$/,
   /^labeled_waste\.(jobs_with_labels|jobs_finished|rows\[\d+\]\.(total_ms|jobs))$/,

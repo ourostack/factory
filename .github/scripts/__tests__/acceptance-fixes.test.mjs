@@ -85,8 +85,8 @@ test("B2: the task header places a task among the dated tasks by date, never amo
     job("n", "drafting", null),
   ]
   const by = Object.fromEntries(jobs.map((j) => [j.id, j]))
-  assert.equal(F.finishWords(by.b, jobs, { year: 2026 }), "It finished on 6 Oct (UTC), the 2nd of 3 dated tasks. It is not labeled for waste yet.")
-  assert.equal(F.finishWords(by.c, jobs, { year: 2026 }), "It finished on or before 6 Oct (UTC), the 3rd of 3 dated tasks.")
+  assert.equal(F.finishWords(by.b, jobs, { year: 2026 }), "It finished on 6 Oct (UTC), the 2nd of 3 dated tasks in the store's order; 2 tasks share this day. It is not labeled for waste yet.")
+  assert.equal(F.finishWords(by.c, jobs, { year: 2026 }), "It finished on or before 6 Oct (UTC), the 3rd of 3 dated tasks in the store's order; 2 tasks share this day.")
   assert.equal(F.finishWords(by.u, jobs, { year: 2026 }), "It is finished, but no source gives its finish day (no record gives the day this task finished), so it is listed after the 3 dated tasks.")
   assert.match(F.finishWords(by.o, jobs), /still open/)
   assert.match(F.finishWords(by.n, jobs), /no place in finish order/)
@@ -174,18 +174,18 @@ test("I2: a task page states the operator's own time: the Store's attention esti
   const o = W.operatorTime({ attention_ms: measured(2209789), human_turns: measured(13) }, turns, { state: "measured", reasons: [] }, F.reasonText)
   assert.equal(o.state, "ok")
   assert.equal(o.attention, "37 minutes")
-  assert.equal(o.text, "The operator sent 13 prompts (7 short, 4 medium and 2 very short) and read the agent's output before 12 of them (7 long, 4 medium and 1 very long). The store's estimate of the operator's attention on this task, their reading and answering time, is 37 minutes; it is the same estimate the Store page averages over delivered tasks.")
+  assert.equal(o.text, "The operator sent 13 prompts (7 short, 4 medium and 2 very short) and read the agent's output before 12 of them (7 long, 4 medium and 1 very long). Desk's estimate of the operator's attention on this task, their reading and answering time, is 37 minutes; it is the same estimate the Store page averages over delivered tasks.")
   // Waiting is never called attention.
   assert.doesNotMatch(o.text, /wait/i)
   // A partial estimate keeps its bound and reason; one with no direction names no bound.
   const p = W.operatorTime({ attention_ms: partial(769527, ["host_records_partly"], "lower"), human_turns: partial(3, ["host_records_partly"], "lower") }, [], { state: "partial", reasons: ["host_records_partly"] }, F.reasonText)
   assert.equal(p.attention, "at least 13 minutes")
-  assert.match(p.text, /^The operator sent at least 3 prompts\. The store's estimate of the operator's attention on this task, their reading and answering time, is at least 13 minutes \(partial: the host records only part of this, so the figure is a lower bound\);/)
+  assert.match(p.text, /^The operator sent at least 3 prompts\. Desk's estimate of the operator's attention on this task, their reading and answering time, is at least 13 minutes \(partial: the host records only part of this, so the figure is a lower bound\);/)
   // No estimate: says so, with the reason, and never a zero.
   const u = W.operatorTime({ attention_ms: unavailable(["not_recorded"]), human_turns: unavailable(["not_recorded"]) }, [], null, F.reasonText)
   assert.equal(u.state, "none")
   assert.equal(u.attention, null)
-  assert.equal(u.text, "The store has no estimate of the operator's attention on this task, because the store has no record of this; the prompts the operator sent are not recorded either.")
+  assert.equal(u.text, "Desk has no estimate of the operator's attention on this task, because the store has no record of this; the prompts the operator sent are not recorded either.")
   // The page shows it in the lede and in the map's summary box.
   const app = read("site/src/app.js")
   assert.match(app, /W\.operatorTime\(/)
@@ -229,7 +229,7 @@ test("I5: the Store's sign-off section agrees with itself, and says what its job
   assert.equal(F.reasonText("no_delivered_jobs"), "no delivered job has a first-pass result yet")
   const w = F.signoffWords(o, 31)
   assert.equal(w.scope, "These figures count 42 jobs: the 31 tasks the other pages show, and 11 task cards that have a sign-off record but no published session, so no time to show.")
-  assert.equal(w.yieldNote, "Every delivered job is out of scope for first-pass yield, including the 5 awaiting an answer: 41 because the job's history was not recorded from the start (an adopted card), 1 because the store has no record of this.")
+  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded), because the job's history was not recorded from the start (an adopted card) or the store has no record of this.")
   // When the counts do not add up to the site's tasks, no claim is made about them.
   assert.equal(F.signoffWords(o, 30).scope, "These figures count 42 jobs, each a task card with a sign-off record or a published session.")
   const app = read("site/src/app.js")
@@ -370,7 +370,7 @@ test("M5: a prompt carries its UTC day where the task's clock has a measured anc
 
 test("M6: the Pareto axis says its bars are job-hours summed over tasks", () => {
   const app = read("site/src/app.js")
-  assert.match(app, /\$\{scale\.unit === "hours" \? "Job-hours" : "Job-minutes"\}, summed over tasks/)
+  assert.equal(S.paretoAxisTitle("hours"), "Job-hours, summed over tasks")
   assert.doesNotMatch(app, /\(per task\)`/)
 })
 
@@ -451,7 +451,7 @@ test("M10: the wait drawer says why the agent stopped once when the wait holds o
 test("I2: an 'at least zero' prompt count or estimate reads as none recorded, never 'at least 0' or 'at least none'", () => {
   const o = W.operatorTime({ attention_ms: partial(0, ["host_records_partly"], "lower"), human_turns: partial(0, ["host_records_partly"], "lower") }, [], null, F.reasonText, F.reasonCore)
   assert.equal(o.attention, "none recorded")
-  assert.equal(o.text, "No prompt from the operator is recorded for this task (the host records only part of this, so the figure is a lower bound). The store's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.")
+  assert.equal(o.text, "No prompt from the operator is recorded for this task (the host records only part of this, so the figure is a lower bound). Desk's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.")
   assert.doesNotMatch(o.text, /at least (0|none)/)
 })
 
@@ -466,4 +466,127 @@ test("M1: a pull request the sessions only mentioned is never called 'first appe
   const app = read("site/src/app.js")
   assert.doesNotMatch(app, /"Pull request first appeared in this task's sessions/)
   assert.doesNotMatch(walk, /"Pull requests first appeared"/)
+})
+
+// ================================================================ Fix round 1
+// The review of PR #220 (s7-v11-review.md): the landing task teaches (I-1),
+// the Store's yield note counts delivered jobs only (I-2), and m-1 to m-5.
+
+const M = 60000
+// A finished job with what the landing rule reads: working time, the map's
+// drawn bursts and the recorded prompts.
+const teach = (id, order, d, lead, opts = {}) => ({
+  ...job(id, "done", order, { date: day(d), lead: measured(lead * H) }),
+  active_time_ms: opts.work === undefined ? measured(30 * M) : opts.work,
+  map_bursts: opts.bursts === undefined ? measured(4) : opts.bursts,
+  human_turns: opts.prompts === undefined ? measured(3) : opts.prompts,
+})
+
+test("Fix 1 I-1: #/ lands on the latest-finished task that has something to teach", () => {
+  const thin = job("thin", "done", 9, { date: day("2026-10-07"), lead: measured(126 * H) })
+  const a = teach("a", 5, "2026-09-30", 26)
+  const b = teach("b", 4, "2026-09-29", 54)
+  assert.equal(F.defaultTask([thin, a, b]).id, "a")
+  const c = F.landingChoice([thin, a, b])
+  assert.equal(c.job.id, "a")
+  assert.equal(c.teaches, true)
+  assert.equal(c.why, null)
+  // A same-day tie goes to the larger lead time.
+  assert.equal(F.defaultTask([teach("x", 1, "2026-09-30", 30), teach("y", 2, "2026-09-30", 20)]).id, "x")
+  // Each condition on its own keeps a task out.
+  const out = (o, lead = 26) => F.defaultTask([b, teach("z", 7, "2026-10-05", lead, o)]).id
+  assert.equal(out({}), "z")
+  assert.equal(out({}, 0.5), "b", "lead under an hour")
+  assert.equal(out({ work: measured(4 * M) }), "b", "under 5 minutes of working time")
+  assert.equal(out({ work: partial(6 * M, ["host_records_partly"], "lower") }), "z", "partial working time with a value counts")
+  assert.equal(out({ work: unavailable(["source_unreadable"]) }), "b", "working time not known")
+  assert.equal(out({ bursts: unavailable(["no_segments"]) }), "b", "no burst drawn")
+  assert.equal(out({ bursts: measured(0) }), "b", "no burst")
+  assert.equal(out({ bursts: partial(2, ["field_absent"], "lower") }), "z", "a partly recorded map with bursts draws them")
+  assert.equal(out({ prompts: partial(0, ["host_records_partly"], "lower") }), "b", "no recorded prompt")
+  assert.equal(out({ prompts: unavailable(["field_absent"]) }), "b", "prompts not recorded")
+  // No task qualifies: the earlier rule, and the page says why.
+  const none = F.landingChoice([thin, job("short", "done", 3, { date: day("2026-10-06"), lead: measured(2 * H) })])
+  assert.equal(none.job.id, "thin")
+  assert.equal(none.teaches, false)
+  assert.equal(none.why, "No finished task has all of a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt, so this page opens on the latest-finished task whose lead time is at least an hour instead.")
+  assert.equal(F.landingChoice([]).job, null)
+  // The page shows the reason, and llms.txt and About state the rule.
+  assert.match(read("site/src/app.js"), /F\.landingChoice\(data\.jobs\)/)
+  assert.match(read("site/src/llms-template.txt"), /`active_time_ms` is measured, or partial with a value, at 300000 ms or more; `map_bursts` has a value of 1 or more and is not `unavailable`; and `human_turns` has a value of 1 or more/)
+  assert.match(read("site/src/index.html"), /at least 5 minutes of known working time, at least one work burst on its map and at least one recorded operator prompt/)
+})
+
+test("Fix 1 I-1: each task row says how many work bursts its map draws", async () => {
+  const { jobSummary } = await import("../../../site/scripts/job-summary.mjs")
+  const { checkNumbers } = await import("../../../site/scripts/check-numbers.mjs")
+  const items = [{ start_ms: 0, end_ms: 1 }, { start_ms: 2, end_ms: 3 }]
+  assert.deepEqual(jobSummary({ job: "a", timeline: { bursts: items } }, "a.json").map_bursts, { state: "measured", value: 2, reasons: [] })
+  assert.deepEqual(jobSummary({ job: "a", timeline: { bursts: { state: "partial", reasons: ["field_absent"], items } } }, "a.json").map_bursts, { state: "partial", value: 2, reasons: ["field_absent"], bound: "lower" })
+  assert.deepEqual(jobSummary({ job: "a", timeline: { bursts: items, bursts_state: { state: "unavailable", reasons: ["no_segments"] } } }, "a.json").map_bursts, { state: "unavailable", reasons: ["no_segments"] })
+  assert.deepEqual(jobSummary({ job: "a" }, "a.json").map_bursts, { state: "unavailable", reasons: ["not_recorded"] })
+  const bad = checkNumbers({ jobs: [{ map_bursts: { state: "measured", value: 2, reasons: [] } }] }).filter((v) => /map_bursts/.test(v.path))
+  assert.deepEqual(bad, [])
+})
+
+test("Fix 1 I-2: the Store's yield note counts only delivered jobs and agrees with the section", async () => {
+  const { outcomesSummary } = await import("../../../site/scripts/outcomes.mjs")
+  const file = {
+    signoff: { recorded: true, accepted: 0, delivered_unsigned: 5, jobs: 41, jobs_without_work_record: 11, no_record: 1, not_delivered: 20, not_recorded: 16, refused: 0, reopened: 0, refusal_reasons: {}, waits: { signed: {}, unsigned: { lt_1d: 5 } } },
+    first_pass_yield: { N: 0, awaiting_signoff: 0, changed_ask_only: 0, excluded: [{ jobs: 41, reason: "history_not_recorded" }, { jobs: 1, reason: "not_recorded" }], n: 0, passed: 0, reasons: ["no_delivered_jobs"], returned: 0, state: "unavailable" },
+  }
+  const w = F.signoffWords(outcomesSummary(file), 31)
+  // 21 = 5 awaiting an answer + 16 delivered before sign-off was recorded, the
+  // section's own figures; the excluded total (42) is larger and never shown as delivered.
+  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded), because the job's history was not recorded from the start (an adopted card) or the store has no record of this.")
+  assert.doesNotMatch(w.yieldNote, /\b4[12]\b/)
+  // One reason reads without "or"; with no delivered count, no note.
+  const one = outcomesSummary({ ...file, first_pass_yield: { ...file.first_pass_yield, excluded: [{ jobs: 42, reason: "history_not_recorded" }] } })
+  assert.match(F.signoffWords(one, 31).yieldNote, /recorded\), because the job's history was not recorded from the start \(an adopted card\)\.$/)
+  const noCount = outcomesSummary({ ...file, signoff: { ...file.signoff, not_delivered: undefined } })
+  assert.equal(F.signoffWords(noCount, 31).yieldNote, null)
+})
+
+test("Fix 1 m-1: the task page calls the attention estimate Desk's, as the glossary does", () => {
+  const j = { human_turns: measured(2), attention_ms: measured(5 * M) }
+  const t = W.operatorTime(j, [], "measured", F.reasonText, F.reasonCore).text
+  assert.match(t, /Desk's estimate of the operator's attention on this task/)
+  assert.doesNotMatch(t, /store's estimate/)
+  const zero = W.operatorTime({ human_turns: partial(0, ["host_records_partly"], "lower"), attention_ms: partial(0, ["host_records_partly"], "lower") }, [], null, F.reasonText, F.reasonCore).text
+  assert.match(zero, /Desk's estimate/)
+  assert.match(W.operatorTime({ attention_ms: unavailable(["field_absent"]), human_turns: unavailable(["field_absent"]) }, [], null, F.reasonText, F.reasonCore).text, /^Desk has no estimate/)
+})
+
+test("Fix 1 m-2: a rank inside a shared day says the order is the store's and how many share the day", () => {
+  const jobs = [
+    job("a", "done", 1, { date: day("2026-10-06") }),
+    job("b", "done", 2, { date: day("2026-10-07") }),
+    job("c", "done", 3, { date: day("2026-10-07") }),
+  ]
+  assert.match(F.finishWords(jobs[2], jobs), /, the 3rd of 3 dated tasks in the store's order; 2 tasks share this day\./)
+  assert.match(F.finishWords(jobs[0], jobs), /, the 1st of 3 dated tasks\./)
+})
+
+test("Fix 1 m-3: a list state with reasons that pull both ways names no direction", () => {
+  const words = (s) => W.clockListWords(s, "Pull requests", F.reasonText, F.reasonCore)
+  const both = words({ state: "partial", bound: "lower", reasons: ["host_records_partly", "worker_shared"] })
+  assert.equal(both, "Pull requests only partly recorded, and some may belong to other jobs that share a worker, so there may be more or fewer than these (the host records only part of this; includes a worker shared with other jobs; some of these reasons pull the figure up and others down, so which way the true figure lies is not known)")
+  assert.doesNotMatch(both, /lower bound/)
+  assert.match(words({ state: "partial", bound: "lower", reasons: ["host_records_partly"] }), /may be more than these \(the host records only part of this, so the figure is a lower bound\)$/)
+  assert.match(read("site/src/app.js"), /W\.clockListWords\(map\.prs_state, "Pull requests", F\.reasonText, F\.reasonCore\)/)
+})
+
+test("Fix 1 m-4: the Pareto axis title comes from a function the page calls", () => {
+  assert.equal(S.paretoAxisTitle("hours"), "Job-hours, summed over tasks")
+  assert.equal(S.paretoAxisTitle("minutes"), "Job-minutes, summed over tasks")
+  assert.match(read("site/src/app.js"), /S\.paretoAxisTitle\(scale\.unit\)/)
+})
+
+test("Fix 1 m-5: a finish day with no direction reads once in chart labels", () => {
+  const fd = { state: "partial", value: "2026-09-29", basis: "desk_card_updated", bound: null, reasons: ["finish_before_last_work"] }
+  assert.equal(F.finishLabel(F.finishDay(fd, { year: 2026 })), "about 29 Sep (UTC; direction not known)")
+  assert.equal(F.finishLabel(F.finishDay(day("2026-09-29"), { year: 2026 })), "on or before 29 Sep (UTC)")
+  const app = read("site/src/app.js")
+  assert.doesNotMatch(app, /finish\.words\} \(UTC\)/)
+  assert.match(app, /F\.finishLabel\(/)
 })

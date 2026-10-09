@@ -94,7 +94,8 @@ test("#/ lands on the latest-finished task of at least an hour, named or private
   const about = read("site/src/index.html")
   assert.match(about, /Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position\./)
   assert.match(about, /Tasks are ordered by the UTC day they finished, earliest first\./)
-  assert.match(about, /"Follow a task" opens on the latest-finished task whose lead time is at least an hour, named or private, labeled for waste or not/)
+  assert.match(about, /"Follow a task" opens on the latest-finished task that has something to teach, named or private, labeled for waste or not/)
+  assert.match(about, /If no task has all four, it opens on the latest-finished task whose lead time is at least an hour/)
   assert.match(read("site/src/llms-template.txt"), /a tie goes to the larger `lead_time_ms\.value`/)
 })
 
