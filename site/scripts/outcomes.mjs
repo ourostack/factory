@@ -35,7 +35,7 @@ export function waitWords(wait) {
   return wait.censored === true ? WAITING_WORDS[wait.class] : SIGNED_WORDS[wait.class]
 }
 
-const SIGNOFF_KEYS = ["accepted", "delivered_unsigned", "refused", "reopened", "not_recorded", "not_delivered", "no_record", "jobs"]
+const SIGNOFF_KEYS = ["accepted", "delivered_unsigned", "refused", "reopened", "not_recorded", "not_delivered", "no_record", "jobs", "jobs_without_work_record"]
 const REFUSALS = ["not_what_was_asked", "defect", "changed_ask", "incomplete", "other"]
 const CATCH_POINTS = ["in_task", "at_review", "after_delivery"]
 const RETURN_REASONS = ["agent_error", "changed_ask", "new_information", "external"]
@@ -97,11 +97,14 @@ function yieldOf(y) {
   if (!isCount(y.N) || !isCount(y.awaiting_signoff)) return none(["not_recorded"], DELIVERED)
   const N = y.N + lostJobs
   const reasons = [...new Set([...(Array.isArray(y.reasons) ? y.reasons : []), ...lost.map((e) => e.reason)])].sort()
+  // How many jobs each out-of-scope reason holds, so the page can say why.
+  const scoped = excluded.filter((e) => OUT_OF_SCOPE.has(e.reason) && e.jobs > 0)
+  const by = scoped.length ? { excluded: Object.fromEntries(scoped.map((e) => [e.reason, e.jobs])) } : {}
   if (y.state === "unavailable" || y.N === 0 || typeof y.value !== "number") {
-    return none(reasons.length ? reasons : ["no_delivered_jobs"], DELIVERED, N, outOfScope)
+    return { ...none(reasons.length ? reasons : ["no_delivered_jobs"], DELIVERED, N, outOfScope), ...by }
   }
   const n = Math.max(0, y.N - y.awaiting_signoff)
-  const base = { kind: "rollup", n, N, of: DELIVERED, out_of_scope: outOfScope }
+  const base = { kind: "rollup", n, N, of: DELIVERED, out_of_scope: outOfScope, ...by }
   if (n === N && reasons.length === 0) return { ...measured(y.value), ...base }
   return direct({ ...partial(y.value, reasons.length ? reasons : ["unmeasured_members"]), ...base }, "first_pass_yield")
 }

@@ -39,7 +39,7 @@
     not_delivered: "the job has not been delivered",
     returns_not_fully_recorded: "some of the job's returns could not be read, so the count is a lower bound",
     awaiting_signoff: "the delivery still awaits the human's answer, so it counts as a pass so far",
-    no_delivered_jobs: "no job with a sign-off record has been delivered yet",
+    no_delivered_jobs: "no delivered job has a first-pass result yet",
     no_refusals: "no delivery has been sent back",
     no_labels: "no job is labeled for waste yet",
     confidence_not_recorded: "the evaluator's confidence in these labels was not recorded",
@@ -238,6 +238,35 @@
     return t;
   }
   const PULL_BOTH = "some of these reasons pull the figure up and others down, so which way the true figure lies is not known";
+
+  // The Store's sign-off section in words (A1 I5): what its jobs are beside
+  // the site's tasks, and, while first-pass yield has no value, why every
+  // delivered job is out of its scope. `o` is data.json `outcomes`;
+  // `tasks` the number of tasks the other pages show. Returns
+  // { scope, yieldNote }, each a sentence or null.
+  function signoffWords(o, tasks) {
+    const so = (o && o.signoff) || {};
+    const v = (n) => (n && n.state === "measured" && Number.isInteger(n.value) ? n.value : null);
+    const jobs = v(so.jobs);
+    const noRecord = v(so.no_record);
+    const without = v(so.jobs_without_work_record);
+    let scope = null;
+    if (jobs !== null && noRecord !== null) {
+      const total = jobs + noRecord;
+      scope =
+        without !== null && jobs - without + noRecord === tasks
+          ? `These figures count ${total} jobs: the ${tasks} tasks the other pages show, and ${without} task card${without === 1 ? "" : "s"} that ${without === 1 ? "has" : "have"} a sign-off record but no published session, so no time to show.`
+          : `These figures count ${total} jobs, each a task card with a sign-off record or a published session.`;
+    }
+    const y = (o && o.first_pass_yield) || {};
+    const by = y.excluded && typeof y.excluded === "object" ? Object.entries(y.excluded).filter(([, n]) => Number.isInteger(n) && n > 0).map(([reason, jobs]) => ({ reason, jobs })) : [];
+    const unsigned = v(o && o.unsigned);
+    let yieldNote = null;
+    if (y.state === "unavailable" && y.N === 0 && by.length) {
+      yieldNote = `Every delivered job is out of scope for first-pass yield${unsigned ? `, including the ${unsigned} awaiting an answer` : ""}: ${by.map((e) => `${e.jobs} because ${reasonText(e.reason)}`).join(", ")}.`;
+    }
+    return { scope, yieldNote };
+  }
 
   // The parts of one number, as plain data. `text` is what the figure reads;
   // `marker` is the visible word for a partial number; `reason` is the
@@ -1007,5 +1036,5 @@
   ];
 
   return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

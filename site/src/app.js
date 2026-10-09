@@ -535,7 +535,7 @@
     row(dl, label, num(number, kind || "count"));
   }
 
-  function renderOutcomes(container, o) {
+  function renderOutcomes(container, o, taskCount) {
     container.innerHTML = "";
     if (!o || !o.signoff) {
       emptyState(container, "Sign-off is not part of this build's data.");
@@ -543,6 +543,9 @@
     }
     // The cost per accepted outcome is the page's headline, shown once, above;
     // this section holds what it rests on.
+    // What the jobs counted here are, beside the site's tasks (A1 I5).
+    const words = F.signoffWords(o, taskCount);
+    if (words.scope) container.appendChild(el("p", "stat-note", words.scope));
     const grid = el("div", "outcome-tiles");
     container.appendChild(grid);
 
@@ -579,6 +582,7 @@
     const fv = el("p", "big-figure");
     fv.appendChild(num(o.first_pass_yield, "pct"));
     fp.appendChild(fv);
+    if (words.yieldNote) fp.appendChild(el("p", "stat-note", words.yieldNote));
     // The counts the percentage is computed from, so a reader can rebuild it.
     const c = o.first_pass_counts;
     if (c.passed.state === "measured" && c.counted.state === "measured" && c.final.state === "measured") {
@@ -5238,7 +5242,7 @@
       rowEl.after(line);
     });
 
-    safely("outcomes-panel", () => renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes));
+    safely("outcomes-panel", () => renderOutcomes(document.getElementById("outcomes-panel"), data.outcomes, Array.isArray(data.jobs) ? data.jobs.length : null));
 
     // 3. Detail views
     safely("chart-intake", () => renderIntakeChart(document.getElementById("chart-intake"), data.intake_over_time));

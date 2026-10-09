@@ -212,3 +212,26 @@ test("I4: the glossary defines the v1.1 words: finish day (UTC) and its marks, H
   // Attention is not waiting.
   assert.match(dd("operator-attention"), /not the time the task waited/)
 })
+
+// ------------------------------------------------------------------ I5
+
+test("I5: the Store's sign-off section agrees with itself, and says what its jobs are beside the site's tasks", async () => {
+  const { outcomesSummary } = await import("../../../site/scripts/outcomes.mjs")
+  // Today's rollups/outcomes.json, trimmed to what the section reads.
+  const file = {
+    signoff: { recorded: true, accepted: 0, delivered_unsigned: 5, jobs: 41, jobs_without_work_record: 11, no_record: 1, not_delivered: 20, not_recorded: 16, refused: 0, reopened: 0, refusal_reasons: {}, waits: { signed: {}, unsigned: { lt_1d: 5 } } },
+    first_pass_yield: { N: 0, awaiting_signoff: 0, changed_ask_only: 0, excluded: [{ jobs: 41, reason: "history_not_recorded" }, { jobs: 1, reason: "not_recorded" }], n: 0, passed: 0, reasons: ["no_delivered_jobs"], returned: 0, state: "unavailable" },
+  }
+  const o = outcomesSummary(file)
+  assert.deepEqual(o.signoff.jobs_without_work_record, measured(11))
+  assert.deepEqual(o.first_pass_yield.excluded, { history_not_recorded: 41, not_recorded: 1 })
+  // Desk's own words for the yield's reason: no claim that nothing was delivered.
+  assert.equal(F.reasonText("no_delivered_jobs"), "no delivered job has a first-pass result yet")
+  const w = F.signoffWords(o, 31)
+  assert.equal(w.scope, "These figures count 42 jobs: the 31 tasks the other pages show, and 11 task cards that have a sign-off record but no published session, so no time to show.")
+  assert.equal(w.yieldNote, "Every delivered job is out of scope for first-pass yield, including the 5 awaiting an answer: 41 because the job's history was not recorded from the start (an adopted card), 1 because the store has no record of this.")
+  // When the counts do not add up to the site's tasks, no claim is made about them.
+  assert.equal(F.signoffWords(o, 30).scope, "These figures count 42 jobs, each a task card with a sign-off record or a published session.")
+  const app = read("site/src/app.js")
+  assert.match(app, /F\.signoffWords\(o, /)
+})
