@@ -269,13 +269,16 @@
     const before = v(so.not_recorded);
     const unsigned = v(so.delivered_unsigned);
     const delivered = jobs !== null && notDelivered !== null ? jobs - notDelivered : null;
-    const why = by.map((e) => e.reason).filter((r) => r !== "not_delivered");
+    const why = by.filter((e) => e.reason !== "not_delivered");
     let yieldNote = null;
     if (y.state === "unavailable" && y.N === 0 && delivered > 0 && why.length) {
       const parts = [unsigned ? `the ${unsigned} awaiting an answer` : null, before ? `the ${before} delivered before sign-off was recorded` : null].filter(Boolean);
-      const words = why.map(reasonText);
-      const because = words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}` : words[0];
-      yieldNote = `All ${delivered} delivered job${delivered === 1 ? " is" : "s are"} out of scope for first-pass yield${parts.length ? ` (${parts.join(" and ")})` : ""}, because ${because}.`;
+      // Desk's counts are over every job, so they are said as such, apart
+      // from the delivered count.
+      const all = by.reduce((s, e) => s + e.jobs, 0);
+      const each = why.map((e, i) => `${e.jobs}${i === 0 ? ` ${e.jobs === 1 ? "is" : "are"} out of scope` : ""} because ${reasonText(e.reason)}`);
+      const list = each.length > 1 ? `${each.slice(0, -1).join(", ")}, and ${each[each.length - 1]}` : each[0];
+      yieldNote = `All ${delivered} delivered job${delivered === 1 ? " is" : "s are"} out of scope for first-pass yield${parts.length ? ` (${parts.join(" and ")})` : ""}. Across all ${all} jobs, ${list}.`;
     }
     return { scope, yieldNote };
   }

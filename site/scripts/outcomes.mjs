@@ -88,14 +88,21 @@ function oldestUnsigned(raw, published) {
 // sign-off) and N the jobs with a verdict plus jobs whose returns were
 // lost. A verdict that awaits sign-off counts as a pass so far, so the
 // figure is an upper bound.
-function yieldOf(y) {
+//
+// Its caption counts delivered jobs only: `out_of_scope` is the delivered
+// jobs (those with a sign-off record less those not delivered) with no
+// verdict in N. Desk counts its exclusions over every job, so those counts
+// stay in `excluded`, by reason, apart from the caption; with no delivered
+// count, the caption claims none.
+function yieldOf(y, signoff) {
   if (!isObject(y)) return none(NOT_YET, DELIVERED)
   const excluded = Array.isArray(y.excluded) ? y.excluded.filter((e) => isObject(e) && typeof e.reason === "string" && isCount(e.jobs)) : []
-  const outOfScope = excluded.filter((e) => OUT_OF_SCOPE.has(e.reason)).reduce((s, e) => s + e.jobs, 0)
+  const delivered = isObject(signoff) && isCount(signoff.jobs) && isCount(signoff.not_delivered) ? Math.max(0, signoff.jobs - signoff.not_delivered) : null
   const lost = excluded.filter((e) => !OUT_OF_SCOPE.has(e.reason))
   const lostJobs = lost.reduce((s, e) => s + e.jobs, 0)
   if (!isCount(y.N) || !isCount(y.awaiting_signoff)) return none(["not_recorded"], DELIVERED)
   const N = y.N + lostJobs
+  const outOfScope = delivered === null ? 0 : Math.max(0, delivered - N)
   const reasons = [...new Set([...(Array.isArray(y.reasons) ? y.reasons : []), ...lost.map((e) => e.reason)])].sort()
   // How many jobs each out-of-scope reason holds, so the page can say why.
   const scoped = excluded.filter((e) => OUT_OF_SCOPE.has(e.reason) && e.jobs > 0)
@@ -180,7 +187,7 @@ export function outcomesSummary(file, { coverage = null } = {}) {
     waits,
     unsigned: unsignedOf(raw, published),
     oldest_unsigned_wait: oldestUnsigned(raw, published),
-    first_pass_yield: yieldOf(f?.first_pass_yield),
+    first_pass_yield: yieldOf(f?.first_pass_yield, f?.signoff),
     // The counts the yield is computed from (passed over counted), so the
     // percentage can be rebuilt; `final` is the site's n, the verdicts that
     // no longer await a sign-off.

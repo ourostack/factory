@@ -119,7 +119,10 @@ test("an awaiting-sign-off yield is an upper bound, with jobs that predate sign-
   assert.equal(y.bound, "upper")
   assert.equal(y.n, 3)
   assert.equal(y.N, 4)
-  assert.equal(y.out_of_scope, 5)
+  // Only delivered jobs are counted beside it: 6 with a sign-off record, none
+  // not delivered, 4 in N, so 2 delivered jobs are out of scope (A1 I5 review).
+  assert.equal(y.out_of_scope, 2)
+  assert.deepEqual(y.excluded, { history_not_recorded: 4, not_recorded: 1 })
   // The shown percentage can be rebuilt from counts shown beside it.
   const c = outcomesSummary(file()).first_pass_counts
   assert.equal(c.passed.value / c.counted.value, y.value)

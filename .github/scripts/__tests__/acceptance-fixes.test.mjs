@@ -229,7 +229,7 @@ test("I5: the Store's sign-off section agrees with itself, and says what its job
   assert.equal(F.reasonText("no_delivered_jobs"), "no delivered job has a first-pass result yet")
   const w = F.signoffWords(o, 31)
   assert.equal(w.scope, "These figures count 42 jobs: the 31 tasks the other pages show, and 11 task cards that have a sign-off record but no published session, so no time to show.")
-  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded), because the job's history was not recorded from the start (an adopted card) or the store has no record of this.")
+  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Across all 42 jobs, 41 are out of scope because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
   // When the counts do not add up to the site's tasks, no claim is made about them.
   assert.equal(F.signoffWords(o, 30).scope, "These figures count 42 jobs, each a task card with a sign-off record or a published session.")
   const app = read("site/src/app.js")
@@ -538,11 +538,10 @@ test("Fix 1 I-2: the Store's yield note counts only delivered jobs and agrees wi
   const w = F.signoffWords(outcomesSummary(file), 31)
   // 21 = 5 awaiting an answer + 16 delivered before sign-off was recorded, the
   // section's own figures; the excluded total (42) is larger and never shown as delivered.
-  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded), because the job's history was not recorded from the start (an adopted card) or the store has no record of this.")
-  assert.doesNotMatch(w.yieldNote, /\b4[12]\b/)
-  // One reason reads without "or"; with no delivered count, no note.
+  assert.equal(w.yieldNote, "All 21 delivered jobs are out of scope for first-pass yield (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Across all 42 jobs, 41 are out of scope because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
+  // One reason reads alone; with no delivered count, no note.
   const one = outcomesSummary({ ...file, first_pass_yield: { ...file.first_pass_yield, excluded: [{ jobs: 42, reason: "history_not_recorded" }] } })
-  assert.match(F.signoffWords(one, 31).yieldNote, /recorded\), because the job's history was not recorded from the start \(an adopted card\)\.$/)
+  assert.match(F.signoffWords(one, 31).yieldNote, /\. Across all 42 jobs, 42 are out of scope because the job's history was not recorded from the start \(an adopted card\)\.$/)
   const noCount = outcomesSummary({ ...file, signoff: { ...file.signoff, not_delivered: undefined } })
   assert.equal(F.signoffWords(noCount, 31).yieldNote, null)
 })
@@ -589,4 +588,27 @@ test("Fix 1 m-5: a finish day with no direction reads once in chart labels", () 
   const app = read("site/src/app.js")
   assert.doesNotMatch(app, /finish\.words\} \(UTC\)/)
   assert.match(app, /F\.finishLabel\(/)
+})
+
+// ================================================================ Fix round 2
+
+test("Fix 2: the first-pass-yield caption counts only delivered jobs, as the note beneath it does", async () => {
+  const { outcomesSummary } = await import("../../../site/scripts/outcomes.mjs")
+  const file = {
+    signoff: { recorded: true, accepted: 0, delivered_unsigned: 5, jobs: 41, jobs_without_work_record: 11, no_record: 1, not_delivered: 20, not_recorded: 16, refused: 0, reopened: 0, refusal_reasons: {}, waits: { signed: {}, unsigned: { lt_1d: 5 } } },
+    first_pass_yield: { N: 0, awaiting_signoff: 0, changed_ask_only: 0, excluded: [{ jobs: 41, reason: "history_not_recorded" }, { jobs: 1, reason: "not_recorded" }], n: 0, passed: 0, reasons: ["no_delivered_jobs"], returned: 0, state: "unavailable" },
+  }
+  const y = outcomesSummary(file).first_pass_yield
+  // 21 delivered (41 with a sign-off record less 20 not delivered), none with a verdict.
+  assert.equal(y.out_of_scope, 21)
+  assert.equal(F.describe(y, "pct").nofn, "0 of 0 verdicts on delivered jobs are final \u00b7 21 out of scope")
+  // Why, over every job, is kept apart from the caption.
+  assert.deepEqual(y.excluded, { history_not_recorded: 41, not_recorded: 1 })
+  // With verdicts, the delivered jobs without one are out of scope.
+  const some = outcomesSummary({ ...file, first_pass_yield: { ...file.first_pass_yield, N: 4, awaiting_signoff: 1, state: "partial", value: 0.75, reasons: [] } }).first_pass_yield
+  assert.equal(some.N, 4)
+  assert.equal(some.out_of_scope, 17)
+  // With no delivered count, the caption makes no out-of-scope claim.
+  const unknown = outcomesSummary({ ...file, signoff: { ...file.signoff, not_delivered: undefined } }).first_pass_yield
+  assert.equal(unknown.out_of_scope, 0)
 })
