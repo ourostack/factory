@@ -441,7 +441,7 @@ test("m3: a why's page ranks only the known classes, and not known is the unclas
   const d = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:stopped_short", {})
   assert.equal(d.child.rank, 2)
   assert.equal(d.child.of, 3)
-  assert.match(S.whyCauseLede(d), /the 2nd of 3 known reasons the agent stopped, by time/)
+  assert.match(S.whyCauseLede(d), /the 2nd of 3 known reasons the agent stopped, ranked by classified time/)
   const n = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:not_known", {})
   assert.equal(n.child.rank, null)
   const t = S.whyCauseLede(n)
@@ -499,4 +499,41 @@ test("I1: Desk's own bound on a class row is used where it is stated", () => {
   assert.equal(S.paretoModel(causesDoc(exact), "all").bars[0].children[0].bound, null)
   // A lower bound with no known ceiling still says at least.
   assert.equal(S.whyAmountWords({ ms: 5 * H, bound: "lower" }), "at least 5 hours")
+})
+
+// ------------------------------------------ re-review follow-up (n1–n3)
+
+test("n1: the A3 prompt bounds a class's share of all the time ranked", () => {
+  const d = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:stopped_short", {})
+  const t = S.a3Prompt(d, { route: "r", dataUrl: "u" })
+  // 5 of 50 ranked hours, up to 17 of 50.
+  assert.match(t, /counted per task, at least 10% \(up to 34%\) of all the time ranked\./)
+  // A class with nothing not known keeps its exact share.
+  const exact = S.causeDetail(causesDoc([child("stopped_short", 10, ["j1"]), child("acceptance", 30, ["j1"])]), "waiting:next_prompt:stopped_short", {})
+  assert.match(S.a3Prompt(exact, { route: "r", dataUrl: "u" }), /counted per task, 20% of all the time ranked\./)
+})
+
+test("n2: a floor under 1% never reads 'at least under 1%'", () => {
+  const c = { ms: 0.1 * H, ceiling_ms: 20.1 * H, share_of_parent: 0.1 / 40, ceiling_share: 20.1 / 40 }
+  assert.equal(S.whyShareWords(c), "under 1% (up to 50%)")
+  assert.equal(S.whyShareWords(c, true), "<1% (≤50%)")
+  assert.equal(S.whyShareWords({ ms: 5 * H, ceiling_ms: 17 * H, share_of_parent: 5 / 40, ceiling_share: 17 / 40 }, true), "≥13% (≤43%)")
+  const small = S.causeDetail(causesDoc([child("stopped_short", 0.1, ["j1"]), child("acceptance", 27.9, ["j1"]), child("not_known", 12, ["j1"], { reasons: ["not_labeled"] })]), "waiting:next_prompt:stopped_short", {})
+  for (const t of [S.whyCauseLede(small), S.a3Prompt(small, { route: "r", dataUrl: "u" })]) {
+    assert.doesNotMatch(t, /at least under|≥</)
+    assert.match(t, /under 1% \(up to/)
+  }
+})
+
+test("n3: while some time is not known, a class page ranks by classified time and counts tasks with classified time", () => {
+  const d = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:stopped_short", {})
+  const t = S.whyCauseLede(d)
+  assert.match(t, /the 2nd of 3 known reasons the agent stopped, ranked by classified time\./)
+  assert.match(t, /One task has classified time with this why\./)
+  assert.doesNotMatch(t, /One task has it\./)
+  assert.match(S.a3Prompt(d, { route: "r", dataUrl: "u" }), /the 2nd of 3 known reasons the agent stopped, ranked by classified time/)
+  // Everything classified: the plain rank and count.
+  const exact = S.causeDetail(causesDoc([child("stopped_short", 10, ["j1"]), child("acceptance", 30, ["j1", "j2"])]), "waiting:next_prompt:acceptance", {})
+  const e = S.whyCauseLede(exact)
+  assert.match(e, /the 1st of 2 known reasons the agent stopped, by time\. 2 tasks have it\./)
 })

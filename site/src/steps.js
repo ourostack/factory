@@ -953,7 +953,11 @@
   function whyShareWords(c, short) {
     if (!c) return "";
     const f = short ? pctShort : W.pctWords;
-    return typeof c.ceiling_share === "number" && c.ceiling_ms - c.ms > SECOND ? `${short ? "≥" : "at least "}${f(c.share_of_parent)} (${short ? "≤" : "up to "}${f(c.ceiling_share)})` : f(c.share_of_parent);
+    if (!(typeof c.ceiling_share === "number" && c.ceiling_ms - c.ms > SECOND)) return f(c.share_of_parent);
+    // A floor under 1% already says so: "under 1% (up to 52%)", never "at least under 1%".
+    const floor = f(c.share_of_parent);
+    const lo = /^(under |<)/.test(floor) ? floor : `${short ? "≥" : "at least "}${floor}`;
+    return `${lo} (${short ? "≤" : "up to "}${f(c.ceiling_share)})`;
   }
 
   // The "Split by why" toggle's state for a Pareto model: pressed when the
@@ -1235,8 +1239,11 @@
     const c = d.child;
     const amount = whyAmountWords({ ms: d.ms, ceiling_ms: c.ceiling_ms });
     const share = whyShareWords({ ms: d.ms, ceiling_ms: c.ceiling_ms, share_of_parent: c.share_of_parent, ceiling_share: c.ceiling_share });
-    const place = c.rank ? `, the ${ordinal(c.rank)} of ${c.of} known reasons the agent stopped, by time.` : ": the part of the waiting whose why is not classified.";
-    const jobs = d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`;
+    // While some time is not known, the rank and the task count are of
+    // classified time only: the class may hold more, in more tasks.
+    const partly = typeof c.ceiling_ms === "number";
+    const place = c.rank ? `, the ${ordinal(c.rank)} of ${c.of} known reasons the agent stopped, ${partly ? "ranked by classified time" : "by time"}.` : ": the part of the waiting whose why is not classified.";
+    const jobs = partly ? (d.jobs === 1 ? "One task has classified time with this why." : `${d.jobs} tasks have classified time with this why.`) : d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`;
     const nk = d.why === "not_known" && c.reasons.length ? ` Why it is not known: ${c.reasons.map(W.whyReasonWords).join("; ")}.` : "";
     const floor = d.why !== "not_known" && c.ceiling_ms ? ` While ${hoursWords(c.not_known_ms)} of the waiting has no known why, this class's time is a floor: some of that time may be this class too.` : "";
     return [`Across the ${d.n} tasks the ranking counts, it cost ${amount} (counted per task): ${share} of the ${hoursWords(c.parent_ms)} of `, P, `${place} ${jobs}${nk}${floor}`];
@@ -1334,11 +1341,13 @@
     const top = arr(d.tasks).filter((t) => t.ms !== null).slice(0, 3);
     const named = top.map((t) => `${t.promptName || `factory task ${String(t.job).slice(0, 8)}`}, ${typeof t.ceiling_ms === "number" ? W.boundedWords(t.ms, t.ceiling_ms, hoursWords) : `${t.bound === "lower" ? "at least " : ""}${hoursWords(t.ms)}`}`);
     const tasksText = named.length ? ` Its largest ${named.length === 1 ? "task is" : "tasks are"} ${named.join("; ")}${d.jobs > named.length ? `; of ${d.jobs} tasks in all` : ""}.` : "";
-    const share = d.all && typeof d.all.share === "number" ? `, ${W.pctWords(d.all.share)} of all the time ranked` : "";
-    const rank = d.all && d.all.rank ? ` It ranks ${ordinal(d.all.rank)} of ${d.all.of} causes by time.` : "";
     const child = d.child || null;
+    // A class's share of all the time ranked carries its bound too.
+    const allShare = child && typeof child.ceiling_ms === "number" && d.total_ms > 0 && d.all && typeof d.all.share === "number" ? whyShareWords({ ms: d.ms, ceiling_ms: child.ceiling_ms, share_of_parent: d.all.share, ceiling_share: child.ceiling_ms / d.total_ms }) : d.all && typeof d.all.share === "number" ? W.pctWords(d.all.share) : null;
+    const share = allShare ? `, ${allShare} of all the time ranked` : "";
+    const rank = d.all && d.all.rank ? ` It ranks ${ordinal(d.all.rank)} of ${d.all.of} causes by time.` : "";
     const childShare = child ? whyShareWords({ ms: d.ms, ceiling_ms: child.ceiling_ms, share_of_parent: child.share_of_parent, ceiling_share: child.ceiling_share }) : "";
-    const rankText = child ? ` It is ${childShare} of the ${hoursWords(child.parent_ms)} of waiting for the next prompt${child.rank ? `, the ${ordinal(child.rank)} of ${child.of} known reasons the agent stopped, by time` : ": the part whose why is not classified"}.${child.ceiling_ms ? ` While ${hoursWords(child.not_known_ms)} of that waiting has no known why, this class's time is a floor.` : ""}` : rank;
+    const rankText = child ? ` It is ${childShare} of the ${hoursWords(child.parent_ms)} of waiting for the next prompt${child.rank ? `, the ${ordinal(child.rank)} of ${child.of} known reasons the agent stopped, ${child.ceiling_ms ? "ranked by classified time" : "by time"}` : ": the part whose why is not classified"}.${child.ceiling_ms ? ` While ${hoursWords(child.not_known_ms)} of that waiting has no known why, this class's time is a floor.` : ""}` : rank;
     const where = child ? `the entry with cause "${d.key}" in the children of the entry with cause "${child.parent}"` : `the entry with cause "${d.key}"`;
     const facts = `It cost ${child ? whyAmountWords({ ms: d.ms, ceiling_ms: child.ceiling_ms }) : hoursWords(d.ms)}, counted per task${share}.${rankText}${tasksText} Its page is ${l.route}, and its data is ${where} in ${l.dataUrl}.${child ? " Each wait's stop facts, who decided its why and with what confidence are in each task's map file, under waits." : ""}`;
     // An A3 already open for this cause: check or extend it, never start a duplicate.
