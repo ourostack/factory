@@ -482,9 +482,9 @@ test("the unavailable list limit is every field with every reason once, computed
   assert.ok(PUBLISHED_UNAVAILABLE_FIELDS.includes("human_turns"))
   assert.ok(PUBLISHED_UNAVAILABLE_FIELDS.includes("outcomes"))
   assert.deepEqual([...PUBLISHED_UNAVAILABLE_FIELDS].sort(), [...V2_FIELDS, "human_turns", "outcomes"].sort())
-  assert.deepEqual([...UNAVAILABLE_REASONS].sort(), [...V2_REASONS].sort())
+  assert.deepEqual([...UNAVAILABLE_REASONS].sort(), [...V2_REASONS, "interval_outside_session_clock"].sort())
   assert.equal(UNAVAILABLE_LIMIT, PUBLISHED_UNAVAILABLE_FIELDS.length * UNAVAILABLE_REASONS.length)
-  assert.equal(UNAVAILABLE_LIMIT, 242)
+  assert.equal(UNAVAILABLE_LIMIT, 264)
 })
 
 test("a correction may carry every /2 unavailable field and reason, every pair at once", () => {

@@ -58,6 +58,7 @@
     censored: "the job is still open, so this is a lower bound",
     job_offsets_unavailable: "the job's start could not be placed",
     source_unreadable: "a session's log could not be read",
+    interval_outside_session_clock: "some intervals ran outside the span of the session's main log, so they are left out",
     log_truncated: "a session's log was cut short",
     session_open: "the session had not ended",
     partial: "only partly measured",
