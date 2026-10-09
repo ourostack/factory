@@ -2365,7 +2365,7 @@
     };
     if (!placed) {
       const reason = shared && shared.length ? ` Why: ${shared.map(F.reasonText).join("; ")}.` : "";
-      sec.appendChild(el("p", "chart-caption", `${prs.length} pull request${prs.length === 1 ? "" : "s"} first appeared in this task's sessions, but none has a time on the task clock, so none is drawn.${reason}${state ? ` ${state}.` : ""}`));
+      sec.appendChild(el("p", "chart-caption", `${prs.length} pull request${prs.length === 1 ? "" : "s"} opened or mentioned in this task's sessions, but none has a time on the task clock, so none is drawn.${reason}${state ? ` ${state}.` : ""}`));
       const p = el("p", "pr-line");
       prs.forEach((pr, k) => {
         if (k) p.appendChild(document.createTextNode(", "));
@@ -2814,7 +2814,7 @@
         g.appendChild(tx);
       }
       const q = partial ? (m.bound === "upper" ? "at most " : m.bound === "lower" ? "at least " : "about ") : "";
-      const what = m.kind === "merged" ? "merged" : m.pr.created === true ? "opened by this task" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
+      const what = m.kind === "merged" ? "merged" : m.pr.created === true ? "opened by this task" : m.pr.created === false ? "mentioned in this task's sessions (drawn at GitHub's opening time)" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
       keyed(g, `Pull request ${m.pr.repo}#${m.pr.number} ${what}, ${q}${W.clockAt(m.ms, ctx.origin)}${partial ? " (a time known only in part)" : ""}. Opens the evidence, with its link to GitHub.`, (n) => openMark(n, { kind: "pr", pr: m.pr, k: m.k }), prList);
       s.appendChild(g);
     });
@@ -3115,7 +3115,7 @@
       return k;
     };
     li(glyphKey("prompt"), "Operator prompt; the band before it runs from the main agent's stop to the prompt (other agents may have been working)");
-    li(glyphKey("opened"), "Pull request first appeared in this task's sessions (drawn at GitHub's opening time)");
+    li(glyphKey("opened"), "Pull request opened or mentioned in this task's sessions (drawn at GitHub's opening time)");
     li(glyphKey("merged"), "Pull request merged");
     li(glyphKey("opened", { partial: true }), "Outlined: a time known only in part");
     li(el("span", "lane-key-count", "2"), MERGE_RULE);

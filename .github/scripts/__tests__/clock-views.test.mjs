@@ -342,7 +342,7 @@ test("the data box counts the pull requests that first appeared in each box, the
   assert.deepEqual([n0.state, n0.value, n0.bound], ["partial", 1, "lower"], "the list is partly recorded, and #9 and #10 are not placed")
   assert.equal(W.boxPrCount(c, 2, { state: "measured", reasons: [] }).value, 1)
   const rows = W.dataBox(model.items[0], model.session_count, n0)
-  assert.deepEqual(rows.map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests first appeared", "Session"])
+  assert.deepEqual(rows.map((r) => r.label), ["Working time", "Agents", "Tool calls", "Failed tool calls", "Operator turns", "Pull requests opened or mentioned", "Session"])
   assert.equal(rows.find((r) => r.key === "prs").text, "at least 1")
   // Without the clock (a map/1 file), Desk's burst count stands in; no count reads not recorded.
   assert.equal(W.dataBox(model.items[0], 1).find((r) => r.key === "prs").text, "1")

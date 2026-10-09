@@ -454,3 +454,16 @@ test("I2: an 'at least zero' prompt count or estimate reads as none recorded, ne
   assert.equal(o.text, "No prompt from the operator is recorded for this task (the host records only part of this, so the figure is a lower bound). The store's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.")
   assert.doesNotMatch(o.text, /at least (0|none)/)
 })
+
+test("M1: a pull request the sessions only mentioned is never called 'first appeared' in its own words", () => {
+  const pr = (created) => ({ repo: "o/r", number: 7, created, opened_at_ms: 600000, opened_state: "measured" })
+  assert.match(W.promptItem({ kind: "pr", pr: pr(false) }, { origin_ms: 0 }).where, /^It was mentioned at minute 10 after the task's start$/)
+  assert.match(W.promptItem({ kind: "pr", pr: pr(true) }, { origin_ms: 0 }).where, /^It was opened at minute 10/)
+  assert.match(W.promptItem({ kind: "pr", pr: pr(null) }, { origin_ms: 0 }).where, /^It first appeared at minute 10/)
+  assert.match(W.promptItem({ kind: "pr", pr: pr(false) }, { origin_ms: 1200000 }).where, /^It was mentioned 10 minutes before the task's start$/)
+  const walk = read("site/src/walk.js")
+  assert.match(walk, /x\.pr\.created === false \? "mentioned"/)
+  const app = read("site/src/app.js")
+  assert.doesNotMatch(app, /"Pull request first appeared in this task's sessions/)
+  assert.doesNotMatch(walk, /"Pull requests first appeared"/)
+})

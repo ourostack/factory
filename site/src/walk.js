@@ -845,7 +845,7 @@
       row("operator_turns", "Operator turns", box.operator_turns, "not recorded"),
       // The clock's count (boxPrCount) when there is one, so the box and the
       // ladder's pull request lane agree; else Desk's burst count.
-      row("prs", "Pull requests first appeared", prs, "not recorded"),
+      row("prs", "Pull requests opened or mentioned", prs, "not recorded"),
       { key: "session", label: "Session", text: sessionWords(box.session_numbers, sessionCount), reasons: [] },
     ];
   }
@@ -1858,9 +1858,9 @@
   // appeared in this task's sessions: opened there or only mentioned.
   function prEventWords(x) {
     if (x.kind === "merged") return "merged";
-    return x.pr && x.pr.created === true ? "opened by this task" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
+    return x.pr && x.pr.created === true ? "opened by this task" : x.pr && x.pr.created === false ? "mentioned in this task's sessions (drawn at GitHub's opening time)" : "first appeared in this task's sessions (drawn at GitHub's opening time)";
   }
-  const prKindShort = (x) => (x.kind === "merged" ? "merged" : x.pr && x.pr.created === true ? "opened" : "first appeared");
+  const prKindShort = (x) => (x.kind === "merged" ? "merged" : x.pr && x.pr.created === true ? "opened" : x.pr && x.pr.created === false ? "mentioned" : "first appeared");
   const qualifier = (x) => (x.state === "partial" ? (x.bound === "upper" ? "at most " : x.bound === "lower" ? "at least " : "about ") : "");
 
   // From the first to the last time of a span, in words.
@@ -2315,7 +2315,7 @@
     }
     const pr = thing.pr;
     const q = (st) => (st && st.state === "partial" ? (st.bound === "upper" ? "at most " : st.bound === "lower" ? "at least " : "about ") : "");
-    const verb = pr.created === true ? "opened" : "first appeared";
+    const verb = pr.created === true ? "opened" : pr.created === false ? "was mentioned" : "first appeared";
     const times = [];
     if (isMs(pr.opened_at_ms)) times.push([verb, q(pr.opened_state), minuteAt(pr.opened_at_ms, c.origin_ms)]);
     if (isMs(pr.merged_at_ms)) times.push(["merged", q(pr.merged_state), minuteAt(pr.merged_at_ms, c.origin_ms)]);
@@ -2323,7 +2323,7 @@
     // negative minute.
     const at = ([v, qq, m]) => (m < 0 ? `${v} ${qq}${Math.abs(m).toLocaleString("en-US")} minutes before the task's start` : `${v} at ${qq}minute ${m.toLocaleString("en-US")} after the task's start`);
     let where = "Its times are not placed on the task clock";
-    if (times.length && times.every((t) => t[2] >= 0)) where = `It was ${times.map(([v, qq, m]) => `${v} at ${qq}minute ${m.toLocaleString("en-US")}`).join(" and ")} after the task's start`.replace("It was first appeared", "It first appeared");
+    if (times.length && times.every((t) => t[2] >= 0)) where = `It was ${times.map(([v, qq, m]) => `${v} at ${qq}minute ${m.toLocaleString("en-US")}`).join(" and ")} after the task's start`.replace("It was first appeared", "It first appeared").replace("It was was mentioned", "It was mentioned");
     else if (times.length) where = `It ${times.map(at).join(", and ")}`;
     return {
       what: `pull request ${prName(pr)}`,
