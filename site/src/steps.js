@@ -382,8 +382,13 @@
     const leadDir = sumDir(rowsOf.map((r) => pdir(r.lead_time_ms, totalBound(r.lead_time_ms))));
     const conflict = workDir === "unknown" || leadDir === "unknown" || (workDir && workDir === leadDir);
     const ratio = workDir === "lower" || leadDir === "upper" ? "lower" : workDir === "upper" || leadDir === "lower" ? "upper" : null;
-    const bound = conflict ? "unknown" : groupBound(bounds) || ratio;
-    const waitDir = !workDir && !leadDir ? null : workDir && leadDir ? "unknown" : leadDir ? leadDir : workDir === "lower" ? "upper" : "lower";
+    // The share follows its parts; only when both are exact does it fall
+    // back to the tasks' own flow-efficiency bounds (review M-4).
+    const bound = conflict ? "unknown" : ratio || groupBound(bounds);
+    // Waiting is lead minus working: lead "at most" with working "at least"
+    // is at most, the reverse at least; one exact part takes the other's.
+    const flip = { lower: "upper", upper: "lower" };
+    const waitDir = !workDir && !leadDir ? null : !workDir ? leadDir : !leadDir ? flip[workDir] || "unknown" : leadDir === "upper" && workDir === "lower" ? "upper" : leadDir === "lower" && workDir === "upper" ? "lower" : "unknown";
     const top = Object.entries(waitBy).sort((a, b) => b[1] - a[1])[0];
     const parts = [];
     const shareWords = bound === "unknown" ? `about ${W.pctWords(share)} (direction not known)` : `${Q[bound] || ""}${W.pctWords(share)}`;

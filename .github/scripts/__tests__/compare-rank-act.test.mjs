@@ -220,7 +220,8 @@ test("the lede's share carries a bound: at most when lead times start at the fir
   assert.match(S.compareLede(bars, [a.task, b.task]).text, /agents were working at most 22%/)
   const c = rows("b", { workN: p(1.75 * H, ["log_truncated"]), fe: p(0.1, ["log_truncated"]) })
   const bars2 = S.stackBars(jobs, [a.stack, c.stack], [a.task, c.task], { mode: "all", segments: F.SEGMENTS, nameOf })
-  assert.match(S.compareLede(bars2, [a.task, c.task]).text, /agents were working about 22%/)
+  // Working at least over an exact lead time: the parts prove "at least", whatever the tasks' own bounds say (S8 review M-4).
+  assert.match(S.compareLede(bars2, [a.task, c.task]).text, /agents were working at least 22%/)
 })
 
 test("the lede says what it leaves out, and degrades when nothing is published or nothing has finished", () => {

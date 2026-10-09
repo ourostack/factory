@@ -279,16 +279,32 @@
     const by = y.excluded && typeof y.excluded === "object" ? Object.entries(y.excluded).filter(([, n]) => Number.isInteger(n) && n > 0).map(([reason, jobs]) => ({ reason, jobs })) : [];
     const why = by.filter((e) => e.reason !== "not_delivered");
     let yieldNote = null;
+    // Desk's counts are over every job, so they are said as such.
+    const desk = () => {
+      if (!why.length) return "";
+      // No total is given: Desk's own count of jobs not delivered uses
+      // another base than the sign-off counts above, so only the reasons
+      // that apply to delivered jobs are listed, with Desk's counts.
+      const each = why.map((e) => `${e.jobs} because ${reasonText(e.reason)}`);
+      return ` Desk counts its reasons over all jobs, not only delivered ones: ${each.length > 1 ? `${each.slice(0, -1).join(", ")}, and ${each[each.length - 1]}` : each[0]}.`;
+    };
+    // A yield with a value rests on the delivered jobs with a verdict; the
+    // note says how many, and why the others are left out (review I-2).
+    if (y.state !== "unavailable" && Number.isInteger(y.N) && y.N > 0 && delivered !== null && delivered > y.N) {
+      const rest = delivered - y.N;
+      yieldNote = `${y.N} of the ${delivered} delivered jobs ${y.N === 1 ? "has" : "have"} a first-pass verdict; the other ${rest} ${rest === 1 ? "has" : "have"} none.${desk()}`;
+    }
     if (y.state === "unavailable" && y.N === 0 && delivered > 0 && why.length) {
       const parts = [unsigned ? `the ${unsigned} awaiting an answer` : null, before ? `the ${before} delivered before sign-off was recorded` : null].filter(Boolean);
-      // Desk's counts are over every job, so they are said as such, apart
-      // from the delivered count, and never as a second out-of-scope count.
-      const all = by.reduce((s, e) => s + e.jobs, 0);
-      const each = why.map((e) => `${e.jobs} because ${reasonText(e.reason)}`);
-      const list = each.length > 1 ? `${each.slice(0, -1).join(", ")}, and ${each[each.length - 1]}` : each[0];
-      yieldNote = `None of the ${delivered} delivered job${delivered === 1 ? "" : "s"} has a first-pass result${parts.length ? ` (${parts.join(" and ")})` : ""}. Desk gives its reasons over all ${all} jobs: ${list}.`;
+      yieldNote = `None of the ${delivered} delivered job${delivered === 1 ? "" : "s"} has a first-pass result${parts.length ? ` (${parts.join(" and ")})` : ""}.${desk()}`;
     }
     return { scope, yieldNote };
+  }
+
+  // First-pass yield's caption: without its out-of-scope count only when the
+  // note beside it gives that count in its place (review I-2).
+  function yieldCaption(n, words) {
+    return words && words.yieldNote ? withoutScope(n) : n;
   }
 
   // A figure without its out-of-scope count, for a caption whose scope is
@@ -829,7 +845,8 @@
   // which rule chose it ("labeled", "unlabeled" once the label condition is
   // dropped, or "fallback"); `why` says why a lesser rule was used (null for
   // "labeled"); `note` is what the page shows above the task: the rule used
-  // and why the finished tasks listed above the chosen one were skipped.
+  // and why the finished tasks after the chosen one in finish order were
+  // skipped.
   function landingChoice(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
     const latest = (xs) =>
@@ -874,7 +891,8 @@
     }
     const parts = LANDING_MISSES.filter(([k]) => counts[k]).map(([k, w]) => `${counts[k]} with ${w}`);
     if (tie) parts.push(`${tie} that finished the same day with a shorter lead time`);
-    const skipped = above.length ? ` The ${above.length} finished task${above.length === 1 ? "" : "s"} listed above it ${above.length === 1 ? "is" : "are"} skipped (a task can miss several): ${parts.join(", ")}.` : "";
+    // Said in finish order, not the picker's, so it holds in either sort.
+    const skipped = above.length ? ` The ${above.length} finished task${above.length === 1 ? " that comes" : "s that come"} after it in finish order ${above.length === 1 ? "is" : "are"} skipped (a task can miss several): ${parts.join(", ")}.` : "";
     return { job, level, teaches: level !== "fallback", why, note: `${head}${skipped}` };
   }
   function defaultTask(jobs) {
@@ -1166,6 +1184,6 @@
     return { cls, stroke: null };
   }
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, yieldCaption, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

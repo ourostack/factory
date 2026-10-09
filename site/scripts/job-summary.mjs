@@ -165,7 +165,14 @@ function returnsOf(F) {
 function flowOf(F) {
   const fe = bounded(F.flow_efficiency, "flow_efficiency");
   if (!fe || fe.state !== "partial") return fe;
-  return { ...fe, bound: ratioDirection(bounded(F.active_time_ms, "active_time_ms"), bounded(F.lead_time_ms, "lead_time_ms")) };
+  // An open task's working time grows with its lead time, so it is an "at
+  // least" figure too, as the rollups count it: with a censored lead time
+  // the two pull the same way and the ratio has no direction (review I-1).
+  const lead = bounded(F.lead_time_ms, "lead_time_ms");
+  let work = bounded(F.active_time_ms, "active_time_ms");
+  const open = Array.isArray(F.lead_time_ms?.reasons) && F.lead_time_ms.reasons.includes("censored");
+  if (open && work && (work.state === "measured" || work.state === "partial")) work = { ...work, state: "partial", bound: work.state === "partial" && work.bound !== "lower" ? "unknown" : "lower" };
+  return { ...fe, bound: ratioDirection(work, lead) };
 }
 
 export function jobDetails(F) {

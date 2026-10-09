@@ -580,7 +580,7 @@
     const fp = el("div", "outcome-block");
     fp.appendChild(el("h4", null, "First-pass yield"));
     const fv = el("p", "big-figure");
-    fv.appendChild(num(F.withoutScope(o.first_pass_yield), "pct"));
+    fv.appendChild(num(F.yieldCaption(o.first_pass_yield, words), "pct"));
     fp.appendChild(fv);
     if (words.yieldNote) fp.appendChild(el("p", "stat-note", words.yieldNote));
     // The counts the percentage is computed from, so a reader can rebuild it.
@@ -4881,7 +4881,10 @@
     row(dl, "Facts files by host", hostsNode);
     for (const [key, number] of Object.entries(health.slots || {})) {
       const node = el("span");
-      node.appendChild(num(number, SLOT_KIND[key] || "count"));
+      // Unsigned deliveries' scope is stated once, on the Store's sign-off
+      // section, so the row carries no second out-of-scope count (review M-3).
+      node.appendChild(num(key === "unsigned_deliveries" ? F.withoutScope(number) : number, SLOT_KIND[key] || "count"));
+      if (key === "unsigned_deliveries" && number && number.state !== "unavailable") node.appendChild(document.createTextNode(" (scope: the Store's sign-off section)"));
       const detail = health.details && Array.isArray(health.details[key]) ? health.details[key] : [];
       if (key !== "capture_coverage" && detail.length && number.state !== "unavailable") {
         const per = el("span", "slot-detail");

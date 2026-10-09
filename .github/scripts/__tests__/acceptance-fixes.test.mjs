@@ -231,7 +231,7 @@ test("I5: the Store's sign-off section agrees with itself, and says what its job
   assert.equal(F.reasonText("no_delivered_jobs"), "no delivered job has a first-pass result yet")
   const w = F.signoffWords(o, 31)
   assert.equal(w.scope, "These figures count 42 jobs: the 31 tasks the other pages show, and 11 task cards that have a sign-off record but no published session, so no time to show. Of the 42 jobs, 21 were delivered, 20 are not delivered yet and 1 has no sign-off record.")
-  assert.equal(w.yieldNote, "None of the 21 delivered jobs has a first-pass result (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Desk gives its reasons over all 42 jobs: 41 because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
+  assert.equal(w.yieldNote, "None of the 21 delivered jobs has a first-pass result (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Desk counts its reasons over all jobs, not only delivered ones: 41 because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
   // When the counts do not add up to the site's tasks, no claim is made about them.
   assert.equal(F.signoffWords(o, 30).scope, "These figures count 42 jobs, each a task card with a sign-off record or a published session. Of the 42 jobs, 21 were delivered, 20 are not delivered yet and 1 has no sign-off record.")
   const app = read("site/src/app.js")
@@ -541,10 +541,10 @@ test("Fix 1 I-2: the Store's yield note counts only delivered jobs and agrees wi
   const w = F.signoffWords(outcomesSummary(file), 31)
   // 21 = 5 awaiting an answer + 16 delivered before sign-off was recorded, the
   // section's own figures; the excluded total (42) is larger and never shown as delivered.
-  assert.equal(w.yieldNote, "None of the 21 delivered jobs has a first-pass result (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Desk gives its reasons over all 42 jobs: 41 because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
+  assert.equal(w.yieldNote, "None of the 21 delivered jobs has a first-pass result (the 5 awaiting an answer and the 16 delivered before sign-off was recorded). Desk counts its reasons over all jobs, not only delivered ones: 41 because the job's history was not recorded from the start (an adopted card), and 1 because the store has no record of this.")
   // One reason reads alone; with no delivered count, no note.
   const one = outcomesSummary({ ...file, first_pass_yield: { ...file.first_pass_yield, excluded: [{ jobs: 42, reason: "history_not_recorded" }] } })
-  assert.match(F.signoffWords(one, 31).yieldNote, /\. Desk gives its reasons over all 42 jobs: 42 because the job's history was not recorded from the start \(an adopted card\)\.$/)
+  assert.match(F.signoffWords(one, 31).yieldNote, /\. Desk counts its reasons over all jobs, not only delivered ones: 42 because the job's history was not recorded from the start \(an adopted card\)\.$/)
   const noCount = outcomesSummary({ ...file, signoff: { ...file.signoff, not_delivered: undefined } })
   assert.equal(F.signoffWords(noCount, 31).yieldNote, null)
 })
