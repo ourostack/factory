@@ -59,7 +59,7 @@ The waste table reads Desk's rollup of the evaluator's labels, and it never show
 
 ## What the store guarantees
 
-Every file under `facts/` passes the published schema, `desk.factory.published/1`, `/2`, `/3` or `/4`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored file stays valid under every later version and is never rewritten, except by a correction from the same session that only grows. In every version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most every field with every reason once, 22 fields by 11 reasons today, so 242 entries) says which fields were not recorded and why:
+Every file under `facts/` passes the published schema, `desk.factory.published/1`, `/2`, `/3` or `/4`, which Desk defines and this store's CI enforces on every pull request with Desk main's validator. A stored file stays valid under every later version and is never rewritten, except by a correction from the same session that only grows. In every version, a value that is absent or null was not recorded, never a zero, and the file's `unavailable` list (at most every field with every reason once, 22 fields by 12 reasons today, so 264 entries) says which fields were not recorded and why:
 
 - the shape is exact, and any unknown key is rejected;
 - every string matches an enum or a strict pattern, and a string holding a date or a time of day is rejected, with one exception: a job's finish day (below);
