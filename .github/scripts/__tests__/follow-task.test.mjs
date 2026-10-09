@@ -643,8 +643,8 @@ test("the map file (factory.site.map/2) keeps what the landing view draws, every
   assert.doesNotMatch(JSON.stringify(slim), /"intervals"/)
   // Every operator prompt, on the task clock, with its why (none known before Desk's waits).
   assert.deepEqual(slim.human_turns, [
-    { session: "s1", host: "h", at_ms: 0, basis: "first", window_ms: null, prompt_class: "m", output_class: "none", why: null },
-    { session: "s1", host: "h", at_ms: 15, basis: "after_stop", window_ms: 6, prompt_class: "s", output_class: "l", why: null },
+    { session: "s1", host: "h", at_ms: 0, day: null, basis: "first", window_ms: null, prompt_class: "m", output_class: "none", why: null },
+    { session: "s1", host: "h", at_ms: 15, day: null, basis: "after_stop", window_ms: 6, prompt_class: "s", output_class: "l", why: null },
   ])
   assert.deepEqual(slim.waits, [])
   assert.deepEqual(slim.human_turns_state, { state: "measured", reasons: [], basis: "store_from_hosts" })

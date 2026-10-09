@@ -2227,6 +2227,15 @@
     if (t.startsWith("This task is still open. ")) return t.slice("This task is still open. ".length);
     return t.replace(/^This task took/, "It took");
   }
+  // A prompt's UTC day for its drawer (A1 M5): "6 Oct (UTC)", or why the
+  // day is not known.
+  const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function promptDayWords(day, opts) {
+    if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return "not known: the task's clock is not tied to the calendar (no pull request anchors it)";
+    const d = new Date(`${day}T00:00:00Z`);
+    const year = opts && Number.isInteger(opts.year) ? opts.year : new Date().getUTCFullYear();
+    return `${d.getUTCDate()} ${MONTH_SHORT[d.getUTCMonth()]}${d.getUTCFullYear() === year ? "" : ` ${d.getUTCFullYear()}`} (UTC)`;
+  }
   function prStateWords(pr) {
     const who = pr.created === true ? "A pull request this task opened" : pr.created === false ? "A pull request this task's sessions mentioned but did not open" : "A pull request that first appeared in this task's sessions (opened or mentioned; this older record does not say which)";
     const what = pr.state === "merged" ? "it merged" : pr.state === "open" ? "it is open" : pr.state === "closed" ? "it was closed without merging" : "its state could not be read from GitHub";
@@ -2243,6 +2252,7 @@
       const rows = [
         ["What it is", `A prompt from the operator, ${BASIS_WORDS[t.basis] || "its relation to the agent's stop not recorded"}`],
         ["On the task clock", `${clockAt(p.ms, c.origin_ms)}${markPlace(p, c.model)}`],
+        ["Day (UTC)", promptDayWords(t.day)],
         ["Session", `session ${String(t.session || "not recorded").slice(0, 8)}`],
         ["Task idle before this prompt", idleWords(p)],
         ["Main agent stopped before this prompt", stoppedWords(t)],
@@ -2632,7 +2642,10 @@
   function prClock(prs, gh, opts) {
     const a = prAnchor(prs, gh, opts);
     const { value_ms, ...anchor } = a;
-    return { anchor, prs: placePrs(prs, gh, a, opts) };
+    // The anchor's epoch value, for the build's own use only (each prompt's
+    // UTC day); slimMap never writes it. Only a measured anchor gives days.
+    const origin = a.state === "measured" && Number.isFinite(value_ms) ? { value_ms, uncertainty_ms: Number.isFinite(a.uncertainty_ms) ? a.uncertainty_ms : 0 } : null;
+    return { anchor, prs: placePrs(prs, gh, a, opts), origin };
   }
 
   // The list states of a task's operator prompts and pull requests. Desk's
@@ -2707,6 +2720,17 @@
     // Without the build's GitHub reads, the same placement with none:
     // only a pull request the session timed and created is placed.
     const clock = s.pr_clock && typeof s.pr_clock === "object" && Array.isArray(s.pr_clock.prs) ? s.pr_clock : prClock(t.prs, null);
+    // A prompt's UTC day, where a measured anchor ties the task clock to the
+    // calendar and the anchor's own uncertainty cannot move it across
+    // midnight; else null (A1 M5). Only the day is written, never a time.
+    const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const dayOf = (at) => {
+      const o = clock.origin;
+      if (!o || !isMs(at)) return null;
+      const t = o.value_ms + at;
+      const lo = utcDay(t - o.uncertainty_ms);
+      return lo === utcDay(t + o.uncertainty_ms) ? lo : null;
+    };
     return {
       schema: "factory.site.map/2",
       job: String((report && report.job && report.job.id) || t.job || ""),
@@ -2757,7 +2781,7 @@
         .filter((h) => h && typeof h === "object")
         .map((h) => {
           const w = waitEnding.get(`${h.session}|${h.at_ms}`);
-          return { session: h.session, host: h.host, at_ms: h.at_ms, basis: h.basis, window_ms: h.window_ms, prompt_class: h.prompt_class, output_class: h.output_class, why: w && typeof w.why === "string" ? w.why : null };
+          return { session: h.session, host: h.host, at_ms: h.at_ms, day: dayOf(h.at_ms), basis: h.basis, window_ms: h.window_ms, prompt_class: h.prompt_class, output_class: h.output_class, why: w && typeof w.why === "string" ? w.why : null };
         }),
       // Desk's waits (reports D4; `why` from D5), as Desk states them.
       waits: waits.map((w) => ({ session: w.session, start_ms: w.start_ms, end_ms: w.end_ms, next_prompt_ms: w.next_prompt_ms, stop: w.stop && typeof w.stop === "object" ? { end: w.stop.end, asks: w.stop.asks, pending_agents: w.stop.pending_agents } : null, why: w.why, why_source: w.why_source, confidence: w.confidence, reasons: w.reasons })),
@@ -2861,6 +2885,7 @@
     sizeWords,
     operatorTime,
     prLegendWords,
+    promptDayWords,
     afterFinish,
     prCaption,
     prStateWords,

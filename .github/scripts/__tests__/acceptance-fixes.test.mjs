@@ -339,3 +339,28 @@ test("M4: every view states its own fold threshold in the same words, apart from
   const html = read("site/src/index.html")
   assert.match(html, /Desk starts a new burst after 15 minutes idle or when an operator prompt arrives; to fit the screen, the map may also fold shorter waits into the box beside them, and the note under the map gives the threshold at this width/)
 })
+
+// ------------------------------------------------------------------ M5
+
+test("M5: a prompt carries its UTC day where the task's clock has a measured anchor, and the prompt drawer shows it", async () => {
+  const { prClock } = await import("../../../site/scripts/pr-clock.mjs")
+  const M = 60000
+  const T0 = Date.parse("2026-10-05T22:00:00Z")
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z")
+  const prs = [{ repo: "o/r", number: 1, at_ms: 10 * M, created: true }, { repo: "o/r", number: 2, at_ms: 50 * M, created: true }]
+  const gh = new Map([["o/r#1", { created_at: iso(T0 + 10 * M + 3000), merged_at: null, state: "open" }], ["o/r#2", { created_at: iso(T0 + 50 * M + 5000), merged_at: null, state: "open" }]])
+  const clock = prClock(prs, gh)
+  assert.equal(clock.anchor.state, "measured")
+  assert.equal("value_ms" in clock.anchor, false, "the map never holds an epoch value")
+  const report = { job: { id: "j" }, timeline: { prs, human_turns: [{ session: "s", host: "claude-code", at_ms: 30 * M, basis: "first", window_ms: null, prompt_class: "s", output_class: "none" }, { session: "s", host: "claude-code", at_ms: 3 * 60 * M, basis: "after_stop", window_ms: 60 * M, prompt_class: "m", output_class: "l" }] } }
+  const map = W.slimMap(report, { pr_clock: clock, finish_date: null })
+  assert.deepEqual(map.human_turns.map((h) => h.day), ["2026-10-05", "2026-10-06"])
+  assert.equal(JSON.stringify(map).includes(String(T0).slice(0, 6)), false, "no epoch value in the file")
+  // With no anchor, no day is given.
+  const none = W.slimMap(report, { pr_clock: prClock(prs, null), finish_date: null })
+  assert.deepEqual(none.human_turns.map((h) => h.day), [null, null])
+  // The drawer's day row.
+  assert.equal(W.promptDayWords("2026-10-06", { year: 2026 }), "6 Oct (UTC)")
+  assert.equal(W.promptDayWords(null), "not known: the task's clock is not tied to the calendar (no pull request anchors it)")
+  assert.match(read("site/src/walk.js"), /\["Day \(UTC\)", promptDayWords\(t\.day\)\]/)
+})
