@@ -191,6 +191,12 @@ test("every reason Desk gives for why the agent stopped, or why that is not know
   }
 })
 
+test("the words for a wait whose why is not known fit a stop as well as labeled time", () => {
+  assert.equal(F.reasonText("not_labeled"), "the independent evaluator has not labeled this yet")
+  assert.equal(F.reasonText("stop_not_recorded"), "no recorded wait for the operator covers this time, so there is no record of why the agent stopped (some hosts do not record stops)")
+  assert.equal(F.reasonText("stop_partly_classified"), "why the agent stopped is not known for some of this waiting, and some of that may belong here, so this is at least this much")
+})
+
 test("the job table opens a job page that shows each measure's state and reason in words", () => {
   const src = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
   assert.match(src, /function renderJobDetail\(/)

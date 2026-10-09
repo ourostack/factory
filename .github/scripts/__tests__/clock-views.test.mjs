@@ -215,7 +215,7 @@ test("the Handoffs table has one row per prompt, in clock order: when it came, t
   const withWaits = twoBursts({ waits: [{ session: "s1", start_ms: H, end_ms: 3 * H, next_prompt_ms: 2 * H - 5 * M, why: null, why_source: "none", reasons: ["not_labeled"] }] })
   const t2 = W.handoffTable(W.clockMarks(withWaits, W.mapModel(withWaits, { maxBoxes: 7 })), 0, F.reasonText, 4 * H)
   assert.deepEqual([t2.show_why, t2.note], [true, null])
-  assert.equal(t2.rows[1].why, "not known (not labeled for waste yet)")
+  assert.equal(t2.rows[1].why, "not known (the independent evaluator has not labeled this yet)")
   assert.equal(t2.rows[0].why, "—", "a first prompt follows no stop")
   // A prompt before the task's start says so.
   assert.equal(W.clockAt(-90 * S, 0), "2 minutes before the task's start")
