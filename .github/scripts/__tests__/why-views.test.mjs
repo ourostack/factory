@@ -539,3 +539,184 @@ test("n3: while some time is not known, a class page ranks by classified time an
   const e = S.whyCauseLede(exact)
   assert.match(e, /the 1st of 2 known reasons the agent stopped, by time\. 2 tasks have it\./)
 })
+
+// ------------------------------- acceptance pass 3 follow-up (I-1, M-1–M-4)
+
+// A map whose stopped-short stops are partly overlapped by the task's own
+// work: one wait counts 30 minutes of waiting, two sit inside a work burst
+// (an agent of the task was working), so they count none.
+function overlapMap() {
+  return {
+    schema: "factory.site.map/2",
+    lead_window: { start_ms: 0, end_ms: 10 * H, state: "measured", reasons: [] },
+    bursts: [
+      { start_ms: 0, end_ms: 1 * H, working_ms: m(1 * H), sessions: ["s1"] },
+      { start_ms: 1.5 * H, end_ms: 5 * H, working_ms: m(3.5 * H), sessions: ["s1"] },
+    ],
+    gaps: [
+      { start_ms: 1 * H, end_ms: 1.5 * H, waited_on: "next_prompt", idle_by_waited_on_ms: { next_prompt: 0.5 * H }, idle_by_why_ms: { stopped_short: 0.5 * H } },
+      { start_ms: 5 * H, end_ms: 10 * H, waited_on: "next_prompt", idle_by_waited_on_ms: { next_prompt: 5 * H }, idle_by_why_ms: { acceptance: 5 * H } },
+    ],
+    sessions: [{ id: "s1", host: "claude-code", offset_ms: 0, end_ms: 10 * H }],
+    human_turns: [],
+    waits: [
+      { session: "s1", start_ms: 1 * H, end_ms: 1.5 * H, next_prompt_ms: 0.5 * H, stop: { end: "end_turn", asks: false, pending_agents: false }, why: "stopped_short", why_source: "evaluator", confidence: "high", reasons: [] },
+      { session: "s1", start_ms: 2 * H, end_ms: 4 * H, next_prompt_ms: 0, stop: { end: "end_turn", asks: false, pending_agents: true }, why: "stopped_short", why_source: "evaluator", confidence: "high", reasons: [] },
+      { session: "s1", start_ms: 4.25 * H, end_ms: 4.5 * H, next_prompt_ms: 0, stop: { end: "end_turn", asks: false, pending_agents: false }, why: "stopped_short", why_source: "evaluator", confidence: "medium", reasons: [] },
+      { session: "s1", start_ms: 5 * H, end_ms: 10 * H, next_prompt_ms: 5 * H, stop: { end: "end_turn", asks: false, pending_agents: false }, why: "acceptance", why_source: "evaluator", confidence: "high", reasons: [] },
+    ],
+    prs: [],
+  }
+}
+// A second task whose only stopped-short stop was overlapped: Desk lists it
+// under waiting for the next prompt, but not under stopped short.
+function overlapOnlyMap() {
+  const x = overlapMap()
+  x.waits = x.waits.filter((w) => w.why !== "stopped_short" || w.next_prompt_ms === 0).slice(0, 1)
+  return x
+}
+const overlapDoc = () => causesDoc([child("stopped_short", 0.5, ["j1"]), child("acceptance", 39.5, ["j1", "j2"])])
+
+test("I-1: a class page lists every stop of its class, those its task's own work overlapped after the counted ones, with none of their time counted", () => {
+  const d = S.causeDetail(overlapDoc(), "waiting:next_prompt:stopped_short", {})
+  // The page reads the map of every task that waited for the next prompt,
+  // not only those with counted time in this class.
+  assert.deepEqual(d.scan_jobs, ["j1", "j2"])
+  const out = S.whyWaitRows(d, { j1: overlapMap(), j2: overlapOnlyMap() })
+  assert.deepEqual(out.rows.map((r) => [r.job, r.counted, r.ms, r.span_ms]), [
+    ["j1", true, 0.5 * H, 0.5 * H],
+    ["j1", false, 0, 2 * H],
+    ["j2", false, 0, 2 * H],
+    ["j1", false, 0, 0.25 * H],
+  ])
+  assert.equal(out.counted, 1)
+  assert.equal(out.overlapped, 3)
+  // The counted time still agrees with the class's figure and the Pareto.
+  assert.equal(out.held_ms, d.ms)
+  assert.equal(out.rest_ms, 0)
+  assert.deepEqual(out.uncounted_jobs, ["j2"])
+  const bg = out.rows[1]
+  assert.match(bg.overlap, /overlapped by the agent's own background work/)
+  // A stop inside a work burst opens that burst, not a nearby wait.
+  assert.deepEqual(bg.item, { kind: "bursts", n: 2 })
+  assert.match(out.rows[3].overlap, /overlapped by the task's own work: a work burst of this task covers it/)
+  const s = S.whyWaitsSummary(out, d)
+  assert.match(s, /^4 stops have this why\. 1 holds the 30 minutes counted as waiting on this page and in the Pareto; 3 count none of their time as waiting, and they are listed after the counted ones, because the task's own work overlapped them\./)
+  assert.match(s, /One task whose stops of this class count no waiting is not in the tasks table above, which lists counted time\./)
+  // Every classified stop is listed, never only those with counted time.
+  const app = read("site/src/app.js")
+  assert.doesNotMatch(app, /Each wait for the next prompt with this why/)
+  assert.match(app, /whyWaitsSummary\(/)
+  assert.match(app, /d\.scan_jobs/)
+})
+
+test("I-1: with no overlapped stop the page and its summary read as before", () => {
+  const d = S.causeDetail(causesDoc([child("acceptance", 18.7, ["j1"]), child("not_known", 21.3, ["j1"], { reasons: ["not_labeled"] })]), "waiting:next_prompt:acceptance", {})
+  const out = S.whyWaitRows(d, { j1: mapFile(true) })
+  assert.equal(out.uncounted, 0)
+  assert.equal(S.whyWaitsSummary(out, d), "1 stop has this why, and it holds the 19 hours counted as waiting on this page and in the Pareto.")
+})
+
+test("M-1: a wait folded into a box is found by its gap number, and its drawer names it", () => {
+  const map = {
+    lead_window: { start_ms: 0, end_ms: 30 * H, state: "measured", reasons: [] },
+    bursts: [
+      { start_ms: 0, end_ms: 1 * H, working_ms: m(1 * H), sessions: ["s1"] },
+      { start_ms: 1 * H + 1 * M, end_ms: 3 * H, working_ms: m(3 * H - 1 * H - 1 * M), sessions: ["s1"] },
+      { start_ms: 20 * H, end_ms: 30 * H, working_ms: m(10 * H), sessions: ["s1"] },
+    ],
+    gaps: [
+      { start_ms: 1 * H, end_ms: 1 * H + 1 * M, waited_on: "next_prompt", idle_by_waited_on_ms: { next_prompt: 1 * M } },
+      { start_ms: 3 * H, end_ms: 20 * H, waited_on: "next_prompt", idle_by_waited_on_ms: { next_prompt: 17 * H } },
+    ],
+    sessions: [{ id: "s1", host: "claude-code", offset_ms: 0, end_ms: 30 * H }],
+  }
+  const model = W.mapModel(map, { maxBoxes: 2 })
+  assert.equal(model.items.some((x) => x.type === "wait" && x.gap_range[0] <= 1 && 1 <= x.gap_range[1]), false, "the short wait is folded")
+  const f = W.foldedGapAt(model, 1)
+  assert.equal(f.item.type, "box")
+  assert.equal(f.gap.n, 1)
+  assert.equal(W.foldedGapAt(model, 2), null, "a wait drawn as a triangle is not folded")
+  assert.equal(W.foldedGapAt(model, 9), null)
+  const seg = W.ladder(model).find((s) => s.item === f.item.index && s.folded)
+  const rows = new Map(W.drawer({ kind: "ladder", seg, item: f.item, gap: f.gap }, { model, lead_ms: 30 * H, origin_ms: 0 }).rows)
+  assert.match(rows.get("The wait you opened"), /^Gap 1, .*\(1 minute\): shorter than the map's fold threshold/)
+  const app = read("site/src/app.js")
+  assert.match(app, /W\.foldedGapAt\(model, sel\.from\)/)
+})
+
+test("M-2: the lede always names stopped short when it holds time, even when it is not among the largest classes", () => {
+  const t = ledeOf(row({ acceptance: 5 * H, approval: 4 * H, question: 3 * H, decision: 2 * H, stopped_short: 1 * H }))
+  assert.match(t, /5 hours came after it reported finished work for acceptance, 4 hours after it asked permission for its next action, 3 hours after it asked for information only the operator has, 1 hour after it stopped short of what it could have done, and 2 hours after it asked for a decision only the operator can make\./)
+  assert.doesNotMatch(t, /other kinds? of stop/)
+  const many = ledeOf(row({ acceptance: 6 * H, approval: 5 * H, question: 4 * H, decision: 3 * H, error_limit: 2 * H, stopped_short: 1 * H }))
+  assert.match(many, /4 hours after it asked for information only the operator has, 1 hour after it stopped short of what it could have done, and 5 hours after 2 other kinds of stop\./)
+})
+
+test("M-3: the not-recorded remainder is said of all the waiting, not of the wait before it", () => {
+  const r = row({ acceptance: 5 * H })
+  r.waiting_by_waited_on_ms.no_session = m(4 * H)
+  r.waiting_by_waited_on_ms.unknown = m(30 * M)
+  r.idle_ms = m(5 * H + 4 * H + 30 * M)
+  const t = ledeOf(r)
+  assert.match(t, /What 30 minutes of all the waiting waited on was not recorded\./)
+  assert.doesNotMatch(t, /of it waited on was not recorded/)
+})
+
+test("M-4: 'also' only follows a sentence about the same wait, and a share under 1% is not bounded by under 1%", () => {
+  // Nearly all the waiting had no session; the why split comes between.
+  const r = row({ question: 14 * M, acceptance: 10 * M })
+  r.waiting_by_waited_on_ms.no_session = m(26 * H)
+  r.idle_ms = m(26 * H + 24 * M)
+  r.longest_gap = m({ start_ms: 0, end_ms: 26 * H, duration_ms: 26 * H, waited_on: "no_session" })
+  const t = ledeOf(r)
+  assert.match(t, /The longest single wait was 26 hours, when no session of this task was running\./)
+  assert.doesNotMatch(t, /also with no session/)
+  // The next-prompt split is about the same wait, so "also" still reads.
+  assert.match(ledeOf(partlyRow()), /The longest single wait was 19 hours, also for the next prompt/)
+  const tiny = { ms: 0.01 * H, ceiling_ms: 0.02 * H, share_of_parent: 0.01 / 40, ceiling_share: 0.02 / 40 }
+  assert.equal(S.whyShareWords(tiny), "under 1%")
+  assert.equal(S.whyShareWords(tiny, true), "<1%")
+})
+
+// ---------------------------------------- PR #233 review, fix round 1
+
+test("review I-1: the A3 prompt names each stop with no counted time, its length and why it is not counted, and asks for all stops longest first", () => {
+  const d = S.causeDetail(overlapDoc(), "waiting:next_prompt:stopped_short", {})
+  const before = S.a3Prompt(d, { route: "r", dataUrl: "u" })
+  const out = S.whyWaitRows(d, { j1: overlapMap(), j2: overlapOnlyMap() }, (j) => `Task ${j}`)
+  const t = S.a3Prompt(d, { route: "r", dataUrl: "u", stops: out })
+  assert.match(t, /It also has 3 stops of this class whose time is not counted as waiting, so the figures above leave them out: factory task j1, 2 hours, overlapped by the agent's own background work[^;]*; factory task j2, 2 hours, overlapped by the agent's own background work[^;]*; factory task j1, 15 minutes, overlapped by the task's own work[^.]*\. They are the same kind of stop\./)
+  assert.match(t, /Walk me through its stops longest first, the ones with no counted time included, not only its longest counted waits,/)
+  assert.doesNotMatch(t, /Walk me through its longest waits first/)
+  // Without the stops (maps not loaded yet), or with none uncounted, the prompt is unchanged.
+  assert.equal(S.a3Prompt(d, { route: "r", dataUrl: "u", stops: { rows: [], uncounted: 0 } }), before)
+  const app = read("site/src/app.js")
+  assert.match(app, /stops: out/)
+})
+
+test("review M-B: a stop with no counted time is called overlapped only when the task's own work bursts cover it; otherwise no cause is given", () => {
+  const map = overlapMap()
+  // A stop inside the long wait, which an earlier wait already holds: no burst covers it.
+  map.waits.push({ session: "s1", start_ms: 6 * H, end_ms: 7 * H, next_prompt_ms: 0, stop: { end: "end_turn", asks: false, pending_agents: true }, why: "stopped_short", why_source: "evaluator", confidence: "high", reasons: [] })
+  const d = S.causeDetail(overlapDoc(), "waiting:next_prompt:stopped_short", {})
+  const out = S.whyWaitRows(d, { j1: map })
+  const plain = out.rows.find((r) => r.start_ms === 6 * H)
+  assert.equal(plain.counted, false)
+  assert.equal(plain.overlap, null)
+  assert.equal(plain.uncounted_words, "none of it counted as waiting")
+  assert.equal(out.uncounted, 3)
+  assert.equal(out.overlapped, 2)
+  assert.match(S.whyWaitsSummary(out, d), /3 count none of their time as waiting, and they are listed after the counted ones: 2 because the task's own work overlapped them\./)
+  const t = S.a3Prompt(d, { route: "r", dataUrl: "u", stops: out })
+  assert.match(t, /factory task j1, 1 hour, none of it counted as waiting[;.]/)
+  // A burst covers the stop, but the agents' state is not recorded: overlapped by the task's own work.
+  const covered = out.rows.find((r) => r.start_ms === 4.25 * H)
+  assert.match(covered.overlap, /^overlapped by the task's own work: a work burst of this task covers it/)
+})
+
+test("review M-A: the scan's limit is named where the tasks to scan are chosen", () => {
+  const steps = read("site/src/steps.js")
+  assert.match(steps, /a counted task whose next-prompt stops were all overlapped is never scanned/)
+  assert.match(steps, /a class whose stops were all overlapped gets no page/)
+})

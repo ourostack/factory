@@ -2025,6 +2025,22 @@
         return true;
       }
       const it = model.items.find((x) => (sel.kind === "bursts" && x.type === "box" && x.burst_range[0] <= sel.from && sel.from <= x.burst_range[1]) || (sel.kind === "gaps" && x.type === "wait" && x.gap_range[0] <= sel.from && sel.from <= x.gap_range[1]));
+      // A short wait folded into a box: open the box's short waits, naming
+      // the one asked for, and light that box and its folded rung (M-1).
+      const folded = !it && sel.kind === "gaps" ? W.foldedGapAt(model, sel.from) : null;
+      if (folded) {
+        const at = folded.item.index;
+        const seg = segs.find((x) => x.item === at && x.folded);
+        const rung = root.querySelector(`.lad-folded[data-item="${at}"]`);
+        const box = root.querySelector(`.vsm-box[data-item="${at}"]`);
+        for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
+        root.dataset.hl = `select|${at}`;
+        for (const n of [rung, box]) if (n) n.classList.add("is-hl");
+        const target = rung || box;
+        if (target) target.scrollIntoView({ block: "center" });
+        open(target, seg ? { kind: "ladder", seg, item: folded.item, gap: folded.gap } : { kind: "box", item: folded.item });
+        return true;
+      }
       if (!it) return false;
       const node = root.querySelector(`.vsm-box[data-item="${it.index}"], .vsm-wait[data-item="${it.index}"]`);
       if (node) node.scrollIntoView({ block: "center" });
@@ -4495,7 +4511,9 @@
     a3h.id = "a3-title";
     a3.appendChild(a3h);
     a3.appendChild(el("p", "chart-caption", `An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt asks: ${S.WHY_A3[d.why]} It hands the agent this why, its time, its largest tasks and where its data is.`));
-    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(d.key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt") });
+    const promptLinks = { route: absolute(S.causeRoute(d.key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt") };
+    // Rebuilt once the map files load, to name the stops that count no waiting.
+    let text = S.a3Prompt(d, promptLinks);
     const pbox = el("div", "drawer-prompt");
     const btn = el("button", "copy-prompt", "Copy as a prompt");
     btn.type = "button";
@@ -4562,18 +4580,23 @@
     // Every wait of this why, from the tasks' map files.
     const ws = el("section", "block");
     ws.setAttribute("aria-labelledby", "why-waits-title");
-    const wsh = el("h2", "block-title", "Its waits, longest first");
+    const wsh = el("h2", "block-title", "Its stops: counted waits longest first, then those with no counted time");
     wsh.id = "why-waits-title";
     ws.appendChild(wsh);
     const body = el("div");
     body.appendChild(el("p", "chart-empty", "Loading…"));
     ws.appendChild(body);
     box.appendChild(ws);
-    const jobs = d.tasks.map((t) => t.job);
+    // Every task that may hold a stop of this class, not only those with
+    // counted time in it (a stop its task's own work overlapped counts none).
+    const jobs = Array.isArray(d.scan_jobs) ? d.scan_jobs : d.tasks.map((t) => t.job);
     const maps = await Promise.all(jobs.map((j) => walkFile(mapPath(j))));
     if (seq !== stepSeq) return;
     const byJobMap = Object.fromEntries(jobs.map((j, i) => [j, maps[i]]));
-    renderWhyWaits(body, S.whyWaitRows(d, byJobMap, nameOf), d);
+    const out = S.whyWaitRows(d, byJobMap, nameOf);
+    renderWhyWaits(body, out, d);
+    text = S.a3Prompt(d, { ...promptLinks, stops: out });
+    pre.textContent = text;
   }
 
   // The waits of one why: each with its task, time, how the turn ended,
@@ -4581,20 +4604,21 @@
   // the wait's evidence drawer on the task's map. Never any text.
   function renderWhyWaits(body, out, d) {
     body.innerHTML = "";
-    body.appendChild(el("p", "chart-caption", "Each wait for the next prompt with this why, from each task's map file: its time counted as waiting, how the agent's turn ended (Desk's stop facts: never any text), who decided its why and with what confidence. Each opens the wait on its task's map, with its evidence and a prompt for an agent."));
+    body.appendChild(el("p", "chart-caption", "Every stop with this why, from each task's map file: its time counted as waiting, how the agent's turn ended (Desk's stop facts: never any text), who decided its why and with what confidence. Each opens the stop on its task's map, with its evidence and a prompt for an agent."));
     if (!out.rows.length) body.appendChild(el("p", "chart-empty", "No recorded wait holds this time."));
+    else body.appendChild(el("p", "chart-caption", S.whyWaitsSummary(out, d)));
     const ol = el("ol", "why-waits");
     for (const r of out.rows) {
       const li = document.createElement("li");
       li.appendChild(el("span", "cause-span-name", r.name));
-      li.appendChild(document.createTextNode(` · ${S.hoursWords(r.ms)} · `));
+      li.appendChild(document.createTextNode(r.counted ? ` · ${S.hoursWords(r.ms)} · ` : ` · ${S.hoursWords(r.span_ms)} long, none of it counted as waiting · `));
       const route = F.safeRoute("task", r.job);
       const a = el("a", null, r.item ? `open wait ${r.item.n} on the map` : "open its task");
       const safe = route ? (r.item ? `${route}?${r.item.kind}=${r.item.n}` : route) : null;
       if (safe) a.href = safe;
       if (r.item && r.item.kind === "bursts") a.textContent = `open burst ${r.item.n} on the map`;
       li.appendChild(a);
-      const facts = el("span", "why-wait-facts", `How the turn ended: ${r.stop}. Decided by: ${r.source}; confidence: ${r.confidence}.${r.reasons.length ? ` Why not known: ${r.reasons.map(W.whyReasonWords).join("; ")}.` : ""}`);
+      const facts = el("span", "why-wait-facts", `${r.counted ? "" : r.overlap ? `Counted as waiting: none, ${r.overlap}. ` : "Counted as waiting: none. "}How the turn ended: ${r.stop}. Decided by: ${r.source}; confidence: ${r.confidence}.${r.reasons.length ? ` Why not known: ${r.reasons.map(W.whyReasonWords).join("; ")}.` : ""}`);
       li.appendChild(facts);
       ol.appendChild(li);
     }
