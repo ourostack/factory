@@ -229,7 +229,7 @@ test("until Desk publishes why, the legend says every prompt is drawn in one col
   assert.equal(W.NOT_KNOWN_WHY, "not known yet: Desk does not publish why the agent stopped")
   assert.equal(W.whyLegend(c), "Why the agent stopped is not known yet: Desk does not publish why the agent stopped, so every prompt is drawn in one color.")
   const known = twoBursts({ waits: [{ session: "s1", start_ms: H, end_ms: 3 * H, why: "acceptance", why_source: "evaluator" }] })
-  assert.match(W.whyLegend(W.clockMarks(known, W.mapModel(known, { maxBoxes: 7 }))), /^Each prompt is colored by why the agent had stopped before it/)
+  assert.match(W.whyLegend(W.clockMarks(known, W.mapModel(known, { maxBoxes: 7 }))), /^Where a mark holds one prompt, it takes the color of why the agent had stopped before it/)
   // A merged top-row marker takes its group's why only when every prompt shares it.
   assert.equal(W.groupWhy([{ why: "acceptance" }, { why: "acceptance" }]), "acceptance")
   assert.equal(W.groupWhy([{ why: "acceptance" }, { why: "not_known" }]), "not_known")

@@ -921,10 +921,51 @@
     if (!Array.isArray(row.children)) return { why_split: "absent", children: [] };
     const kids = row.children
       .filter((c) => c && typeof c.cause === "string" && whyOfKey(c.cause) && typeof c.total_ms === "number" && Number.isFinite(c.total_ms) && c.total_ms > 0)
-      .map((c) => ({ why: whyOfKey(c.cause), key: c.cause, label: W.whyName(whyOfKey(c.cause)), ms: c.total_ms, share_of_parent: row.total_ms > 0 ? c.total_ms / row.total_ms : 0, jobs: arr(c.jobs).length, reasons: arr(c.reasons), href: causeRoute(c.cause) }))
+      .map((c) => ({ why: whyOfKey(c.cause), key: c.cause, label: W.whyName(whyOfKey(c.cause)), ms: c.total_ms, share_of_parent: row.total_ms > 0 ? c.total_ms / row.total_ms : 0, jobs: arr(c.jobs).length, reasons: arr(c.reasons), desk_bound: "bound" in c ? c.bound : undefined, href: causeRoute(c.cause) }))
       .sort((a, b) => W.WHY_KEYS.indexOf(a.why) - W.WHY_KEYS.indexOf(b.why));
     if (Math.abs(kids.reduce((a, c) => a + c.ms, 0) - row.total_ms) > SECOND) return { why_split: "mismatch", children: [] };
-    return { why_split: on ? "on" : "off", children: kids };
+    // While some of the bar has no known why, each class is at least its
+    // time and at most its time plus the time not known (addendum §4).
+    const nk = (kids.find((c) => c.why === "not_known") || { ms: 0 }).ms;
+    for (const c of kids) {
+      // Desk states each class's bound (D5, `bound`); older files do not, so
+      // it follows from the time not known.
+      c.bound = c.why === "not_known" ? null : c.desk_bound !== undefined ? (c.desk_bound === "lower" ? "lower" : null) : nk > 0 ? "lower" : null;
+      delete c.desk_bound;
+      if (c.bound) {
+        c.ceiling_ms = c.ms + nk;
+        c.ceiling_share = row.total_ms > 0 ? c.ceiling_ms / row.total_ms : 0;
+      }
+    }
+    return { why_split: on ? "on" : "off", children: kids, not_known_ms: nk };
+  }
+
+  // A class figure in words with its bound: "at least 5 hours (up to 17
+  // hours)", or "≥5h (≤17h)" in the short form; exact when nothing is not
+  // known. `c` has `ms` and, while bounded, `ceiling_ms`.
+  function whyAmountWords(c, short) {
+    if (!c) return "";
+    if (c.bound === "lower" && !(typeof c.ceiling_ms === "number" && c.ceiling_ms - c.ms > SECOND)) return short ? `≥${hoursShort(c.ms)}` : `at least ${hoursWords(c.ms)}`;
+    if (short) return typeof c.ceiling_ms === "number" && c.ceiling_ms - c.ms > SECOND ? `≥${hoursShort(c.ms)} (≤${hoursShort(c.ceiling_ms)})` : hoursShort(c.ms);
+    return W.boundedWords(c.ms, c.ceiling_ms, hoursWords);
+  }
+  // Its share of the parent bar, the same way: "at least 13% (up to 43%)".
+  function whyShareWords(c, short) {
+    if (!c) return "";
+    const f = short ? pctShort : W.pctWords;
+    return typeof c.ceiling_share === "number" && c.ceiling_ms - c.ms > SECOND ? `${short ? "≥" : "at least "}${f(c.share_of_parent)} (${short ? "≤" : "up to "}${f(c.ceiling_share)})` : f(c.share_of_parent);
+  }
+
+  // The "Split by why" toggle's state for a Pareto model: pressed when the
+  // bar is split, not pressed when the reader turned it off, and disabled,
+  // with its reason, when there is nothing to split.
+  function whyToggleState(model) {
+    const np = model && Array.isArray(model.bars) ? model.bars.find((b) => b.key === NEXT_PROMPT) : null;
+    const off = (note) => ({ state: "disabled", pressed: false, disabled: true, note });
+    if (!np) return off("No waiting for the next prompt is ranked, so there is nothing to split.");
+    if (np.why_split === "absent") return off("Desk does not publish why the agent stopped yet, so there is nothing to split.");
+    if (np.why_split === "mismatch") return off("Desk's split by why does not add up to the bar, so there is nothing to split.");
+    return np.why_split === "on" ? { state: "on", pressed: true, disabled: false, note: "" } : { state: "off", pressed: false, disabled: false, note: "" };
   }
 
   // Rank causes' lede, with real numbers: how many tasks the ranking
@@ -1044,7 +1085,14 @@
       // Desk's own figure for the task, with its state: a class is a lower
       // bound while some of the task's time is not classified.
       const n = task && task.next_prompt_by_why_ms ? W.stated(task.next_prompt_by_why_ms[why]) : null;
-      if (n && n.state !== "unavailable") return { ms: n.value, bound: n.state === "partial" ? (n.bound === "upper" ? "upper" : n.bound === null ? "none" : "lower") : null, source: "why" };
+      if (n && n.state !== "unavailable") {
+        const bound = n.state === "partial" ? (n.bound === "upper" ? "upper" : n.bound === null ? "none" : "lower") : null;
+        const out = { ms: n.value, bound, source: "why" };
+        // A class is at most its time plus the task's own time not known.
+        const nk = why !== "not_known" && bound === "lower" ? W.stated(task.next_prompt_by_why_ms.not_known) : null;
+        if (nk && nk.state !== "unavailable" && nk.value > 0) out.ceiling_ms = n.value + nk.value;
+        return out;
+      }
     }
     const [waste, what] = key.split(":");
     if (waste === "waiting" && !why) {
@@ -1127,10 +1175,15 @@
     if (!Array.isArray(parent.children)) return { ...base, state: "not_split", parent_ms: parent.total_ms };
     const split = whyChildren(parent, true);
     if (split.why_split === "mismatch") return { ...base, state: "not_split", parent_ms: parent.total_ms, mismatch: true };
-    const kids = [...split.children].sort((a, b) => b.ms - a.ms || W.WHY_KEYS.indexOf(a.why) - W.WHY_KEYS.indexOf(b.why));
-    const kid = kids.find((x) => x.why === why);
+    // Only the known classes are ranked; not known is the unclassified part.
+    const kids = split.children.filter((x) => x.why !== "not_known").sort((a, b) => b.ms - a.ms || W.WHY_KEYS.indexOf(a.why) - W.WHY_KEYS.indexOf(b.why));
+    const kid = split.children.find((x) => x.why === why);
+    const nkKid = split.children.find((x) => x.why === "not_known");
+    const nkMs = nkKid ? nkKid.ms : 0;
+    const nkReasons = nkKid ? nkKid.reasons : [];
     const row = parent.children.find((x) => x && x.cause === key);
-    if (!kid || !row) return { ...base, state: "none", parent_ms: parent.total_ms };
+    if (!kid || !row) return { ...base, state: "none", parent_ms: parent.total_ms, not_known_ms: why === "not_known" ? 0 : nkMs, not_known_reasons: why === "not_known" ? [] : nkReasons };
+    const rank = why === "not_known" ? null : kids.indexOf(kid) + 1;
     const ctx2 = { tasks: byJob(c.taskRows), stacks: byJob(c.stackRows), limit: typeof doc.references_per_cause === "number" ? doc.references_per_cause : null };
     const tasks = arr(row.jobs)
       .filter((j) => typeof j === "string")
@@ -1146,14 +1199,50 @@
       state: "ok",
       ms: kid.ms,
       jobs: tasks.length,
-      all: { rank: kids.indexOf(kid) + 1, of: kids.length, share: total > 0 ? kid.ms / total : 0, among: "why" },
+      ceiling_ms: kid.ceiling_ms,
+      all: { rank, of: kids.length, share: total > 0 ? kid.ms / total : 0, among: "why" },
       working: null,
       total_ms: total,
       tasks,
       spans,
       spans_cut: typeof doc.references_per_cause === "number" && arr(row.spans).length >= doc.references_per_cause,
-      child: { why, parent: NEXT_PROMPT, parent_ms: parent.total_ms, share_of_parent: kid.share_of_parent, rank: kids.indexOf(kid) + 1, of: kids.length, reasons: kid.reasons },
+      child: { why, parent: NEXT_PROMPT, parent_ms: parent.total_ms, share_of_parent: kid.share_of_parent, ceiling_ms: kid.ceiling_ms, ceiling_share: kid.ceiling_share, bound: kid.bound, rank, of: kids.length, reasons: kid.reasons, not_known_ms: why === "not_known" ? 0 : nkMs },
     };
+  }
+
+  // "classified as …" words for each class, for a page with none of it.
+  const WHY_AS = { stopped_short: "stopped short", question: "a question", error_limit: "an error or a limit", interrupted: "interrupted by the operator", decision: "a decision", approval: "an approval", acceptance: "an acceptance" };
+
+  // A why page's lede after the class's meaning, as parts: strings, and
+  // { link: "parent" } where the page links to waiting for the next prompt.
+  // Every class figure carries its bound (I1); a class with no classified
+  // wait is a zero only when every wait is classified (I2); only the known
+  // classes are ranked (m3).
+  function whyCauseLedeParts(d) {
+    const P = { link: "parent" };
+    if (d.state === "not_ranked") return [`No task the ranking counts waited for the next prompt, so no wait has this why. The ranking counts ${d.n} of ${d.N} tasks.`];
+    if (d.state === "not_split") {
+      if (d.mismatch) return [`Desk's split of the ${hoursWords(d.parent_ms)} of `, P, " by why does not add up to it, so this page lists no waits rather than wrong ones."];
+      return [`Why the agent stopped is not known yet for the ${hoursWords(d.parent_ms)} of `, P, ": Desk does not publish it, so that waiting is not split and this page has no waits to list. No figure is shown rather than a zero."];
+    }
+    if (d.state === "none") {
+      if (d.not_known_ms > 0) {
+        const why = d.not_known_reasons && d.not_known_reasons.length ? ` (why: ${d.not_known_reasons.map(W.whyReasonWords).join("; ")})` : "";
+        return [`No wait is classified as ${WHY_AS[d.why] || W.whyName(d.why).toLowerCase()} yet. Up to ${hoursWords(d.not_known_ms)} of the ${hoursWords(d.parent_ms)} of `, P, ` whose why is not known may hold some${why}.`];
+      }
+      return [`None of the ${hoursWords(d.parent_ms)} of `, P, ` in the tasks the ranking counts has this why: every one of them is classified.`];
+    }
+    const c = d.child;
+    const amount = whyAmountWords({ ms: d.ms, ceiling_ms: c.ceiling_ms });
+    const share = whyShareWords({ ms: d.ms, ceiling_ms: c.ceiling_ms, share_of_parent: c.share_of_parent, ceiling_share: c.ceiling_share });
+    const place = c.rank ? `, the ${ordinal(c.rank)} of ${c.of} known reasons the agent stopped, by time.` : ": the part of the waiting whose why is not classified.";
+    const jobs = d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`;
+    const nk = d.why === "not_known" && c.reasons.length ? ` Why it is not known: ${c.reasons.map(W.whyReasonWords).join("; ")}.` : "";
+    const floor = d.why !== "not_known" && c.ceiling_ms ? ` While ${hoursWords(c.not_known_ms)} of the waiting has no known why, this class's time is a floor: some of that time may be this class too.` : "";
+    return [`Across the ${d.n} tasks the ranking counts, it cost ${amount} (counted per task): ${share} of the ${hoursWords(c.parent_ms)} of `, P, `${place} ${jobs}${nk}${floor}`];
+  }
+  function whyCauseLede(d) {
+    return whyCauseLedeParts(d).map((x) => (typeof x === "string" ? x : "waiting for the next prompt")).join("");
   }
 
   // Every wait of the finished tasks a why sub-cause counts, from their map
@@ -1243,14 +1332,15 @@
     const l = links || {};
     const index = l.indexUrl ? ` Index of every data file: ${l.indexUrl}` : "";
     const top = arr(d.tasks).filter((t) => t.ms !== null).slice(0, 3);
-    const named = top.map((t) => `${t.promptName || `factory task ${String(t.job).slice(0, 8)}`}, ${t.bound === "lower" ? "at least " : ""}${hoursWords(t.ms)}`);
+    const named = top.map((t) => `${t.promptName || `factory task ${String(t.job).slice(0, 8)}`}, ${typeof t.ceiling_ms === "number" ? W.boundedWords(t.ms, t.ceiling_ms, hoursWords) : `${t.bound === "lower" ? "at least " : ""}${hoursWords(t.ms)}`}`);
     const tasksText = named.length ? ` Its largest ${named.length === 1 ? "task is" : "tasks are"} ${named.join("; ")}${d.jobs > named.length ? `; of ${d.jobs} tasks in all` : ""}.` : "";
     const share = d.all && typeof d.all.share === "number" ? `, ${W.pctWords(d.all.share)} of all the time ranked` : "";
     const rank = d.all && d.all.rank ? ` It ranks ${ordinal(d.all.rank)} of ${d.all.of} causes by time.` : "";
     const child = d.child || null;
-    const rankText = child ? ` It is ${W.pctWords(child.share_of_parent)} of the ${hoursWords(child.parent_ms)} of waiting for the next prompt, the ${ordinal(child.rank)} of ${child.of} reasons the agent stopped by time.` : rank;
+    const childShare = child ? whyShareWords({ ms: d.ms, ceiling_ms: child.ceiling_ms, share_of_parent: child.share_of_parent, ceiling_share: child.ceiling_share }) : "";
+    const rankText = child ? ` It is ${childShare} of the ${hoursWords(child.parent_ms)} of waiting for the next prompt${child.rank ? `, the ${ordinal(child.rank)} of ${child.of} known reasons the agent stopped, by time` : ": the part whose why is not classified"}.${child.ceiling_ms ? ` While ${hoursWords(child.not_known_ms)} of that waiting has no known why, this class's time is a floor.` : ""}` : rank;
     const where = child ? `the entry with cause "${d.key}" in the children of the entry with cause "${child.parent}"` : `the entry with cause "${d.key}"`;
-    const facts = `It cost ${hoursWords(d.ms)}, counted per task${share}.${rankText}${tasksText} Its page is ${l.route}, and its data is ${where} in ${l.dataUrl}.${child ? " Each wait's stop facts, who decided its why and with what confidence are in each task's map file, under waits." : ""}`;
+    const facts = `It cost ${child ? whyAmountWords({ ms: d.ms, ceiling_ms: child.ceiling_ms }) : hoursWords(d.ms)}, counted per task${share}.${rankText}${tasksText} Its page is ${l.route}, and its data is ${where} in ${l.dataUrl}.${child ? " Each wait's stop facts, who decided its why and with what confidence are in each task's map file, under waits." : ""}`;
     // An A3 already open for this cause: check or extend it, never start a duplicate.
     const open = arr(l.existing).filter((x) => x && x.url);
     if (open.length) {
@@ -1441,6 +1531,11 @@
     whyWaitRows,
     whyChildren,
     WHY_A3,
+    whyAmountWords,
+    whyShareWords,
+    whyToggleState,
+    whyCauseLede,
+    whyCauseLedeParts,
     spanItem,
     a3Prompt,
     KAIZEN_CAUSES,

@@ -310,6 +310,11 @@
     return ks[0] || null;
   }
 
+  // Every why with time in a split, in WHY_KEYS order.
+  function whysOf(by) {
+    return by ? WHY_KEYS.filter((k) => by[k] > 0) : [];
+  }
+
   // The causes of a gap, largest first.
   const gapCauses = (g) => Object.entries(gapIdleBy(g)).sort((a, b) => b[1] - a[1] || WAIT_KEYS.indexOf(a[0]) - WAIT_KEYS.indexOf(b[0])).map(([k]) => k);
 
@@ -674,6 +679,7 @@
         type: "wait",
         why_by: whyOf,
         why: topWhy(whyOf),
+        whys: whysOf(whyOf),
         gaps,
         count: gaps.length,
         start_ms: gaps[0].start_ms,
@@ -724,6 +730,7 @@
       inner_by: innerBy,
       inner_why_by: innerWhy,
       inner_why: topWhy(innerWhy),
+      inner_whys: whysOf(innerWhy),
       folded_count: folded.length,
       burst_range: [bs[0].n, bs[bs.length - 1].n],
       // Counts and labeled times as stated numbers: a part with no source
@@ -864,7 +871,9 @@
   // splits it (addendum §4): "waiting for the next prompt: agent stopped
   // short"; otherwise what it waited on, as before.
   function waitTitle(w) {
-    const what = w.waited_on === "next_prompt" && w.why ? whyTriangle(w.why, w.why_reasons) : w.waited_on === "mixed" && w.count > 1 ? "several causes" : waitedOnWords(w.waited_on, "short");
+    // A wait whose time holds several whys is named by its largest, "mostly".
+    const mixed = Array.isArray(w.whys) && w.whys.length > 1;
+    const what = w.waited_on === "next_prompt" && w.why ? (mixed ? whyTriangle(w.why, w.why_reasons).replace(/^waiting for the next prompt: /, "waiting for the next prompt: mostly ") : whyTriangle(w.why, w.why_reasons)) : w.waited_on === "mixed" && w.count > 1 ? "several causes" : waitedOnWords(w.waited_on, "short");
     return w.count === 1 ? what : `${w.count} waits: ${what}`;
   }
 
@@ -987,7 +996,15 @@
         waitSegs.push(one);
         continue;
       }
-      for (const p of why.parts) waitSegs.push({ key: `wait_next_prompt_${p.why}`, cause: "next_prompt", why: p.why, label: `Next prompt · ${whyName(p.why)}`, ms: p.ms, state: p.n.state, bound: p.n.state === "partial" ? p.n.bound : undefined, reasons: p.why === "not_known" ? why.not_known.reasons.map((r) => r.reason) : [] });
+      for (const p of why.parts) {
+        const seg = { key: `wait_next_prompt_${p.why}`, cause: "next_prompt", why: p.why, label: `Next prompt · ${whyName(p.why)}`, ms: p.ms, state: p.n.state, bound: p.n.state === "partial" ? p.n.bound : undefined, reasons: p.why === "not_known" ? why.not_known.reasons.map((r) => r.reason) : [] };
+        // A class is at most its time plus the time whose why is not known.
+        if (p.why !== "not_known" && why.not_known.ms > 0) {
+          seg.bound = "lower";
+          seg.ceiling_ms = p.ms + why.not_known.ms;
+        }
+        waitSegs.push(seg);
+      }
     }
     const nextSeg = idle.by.find((x) => x.key === "next_prompt");
     const WHY_NOTES = {
@@ -1036,8 +1053,9 @@
       if (o.seg === "defects") return ".vsm-box.has-defects";
       return ".vsm-box, .lad-low, .sum-working";
     }
-    if (key === "wait_cause" && o.why && WHY_KEYS.includes(o.why)) return `.vsm-wait.why-${o.why}, .lad-high.why-${o.why}`;
-    if (key === "why") return WHY_KEYS.includes(o.why) ? `.vsm-wait.why-${o.why}, .lad-high.why-${o.why}` : ".vsm-wait.has-next_prompt, .lad-high.has-next_prompt";
+    // A why lights every wait that holds some of it, not only those it tops.
+    if (key === "wait_cause" && o.why && WHY_KEYS.includes(o.why)) return `.vsm-wait.has-why-${o.why}, .lad-high.has-why-${o.why}`;
+    if (key === "why") return WHY_KEYS.includes(o.why) ? `.vsm-wait.has-why-${o.why}, .lad-high.has-why-${o.why}` : ".vsm-wait.has-next_prompt, .lad-high.has-next_prompt";
     if (key === "wait_cause") return WAIT_KEYS.includes(o.cause) ? `.vsm-wait.has-${o.cause}, .lad-high.has-${o.cause}` : ".vsm-wait, .lad-high, .sum-waiting";
     if (key === "longest") return Number.isInteger(o.item) ? `[data-item="${o.item}"]` : ".vsm-wait";
     return {
@@ -1499,6 +1517,14 @@
     return c === "low" ? "low (not sound)" : c;
   }
 
+  // A class figure with its bound (addendum §4, Bounds): "at least X (up
+  // to Y)" while some time has no known why (Y is X plus that time), else
+  // X alone. `fmt` turns milliseconds into words.
+  function boundedWords(ms, ceilingMs, fmt) {
+    const f = typeof fmt === "function" ? fmt : durationWords;
+    return typeof ceilingMs === "number" && ceilingMs - ms > SECOND ? `at least ${f(ms)} (up to ${f(ceilingMs)})` : f(ms);
+  }
+
   // "at least ", "at most ", "about " or "" for a stated figure.
   function qualOf(n) {
     if (!n || n.state !== "partial") return "";
@@ -1576,14 +1602,18 @@
     const out = [` Of the ${totalW} it waited for the operator's next prompt, `];
     const shown = s.top.slice(0, 3);
     const rest = s.top.slice(3);
+    // While some of it has no known why, each class is at least its figure
+    // and at most its figure plus the time not known (addendum §4, Bounds).
+    const nkMs = s.not_known.ms > 0 ? s.not_known.ms : 0;
+    const fig = (ms, n) => (nkMs > 0 ? boundedWords(ms, ms + nkMs, durationWords) : `${qualOf(n)}${durationWords(ms)}`);
     shown.forEach((x, i) => {
-      const qq = qualOf(x.n);
+      const qq = nkMs > 0 ? "at least " : qualOf(x.n);
       if (i > 0) out.push(i === shown.length - 1 && !rest.length && s.template === "all" ? ", and " : ", ");
-      out.push(t("why", `${qq}${durationWords(x.ms)}`, { why: x.why, q: qq }), ` ${i === 0 ? "came " : ""}${WHY_AFTER[x.why]}`);
+      out.push(t("why", fig(x.ms, x.n), { why: x.why, q: qq }), ` ${i === 0 ? "came " : ""}${WHY_AFTER[x.why]}`);
     });
     if (rest.length) {
       const ms = rest.reduce((a, x) => a + x.ms, 0);
-      out.push(`${s.template === "all" ? ", and " : ", "}${qualOf(rest[0].n)}${durationWords(ms)} after ${rest.length} other kind${rest.length === 1 ? "" : "s"} of stop`);
+      out.push(`${s.template === "all" ? ", and " : ", "}${fig(ms, rest[0].n)} after ${rest.length} other kind${rest.length === 1 ? "" : "s"} of stop`);
     }
     if (s.template === "partly") out.push(", and ", t("why", `${qualOf(s.not_known.n)}${durationWords(s.not_known.ms)}`, { why: "not_known" }), ` is not known (why: ${notKnownWords(s.not_known)})`);
     out.push(".");
@@ -1941,7 +1971,7 @@
     const known = ps.some((p) => p.why && p.why !== "not_known");
     if (!known && !ps.some((p) => p.wait && typeof p.wait.why === "string")) return `Why the agent stopped is ${NOT_KNOWN_WHY}, so every prompt is drawn in one color.`;
     if (!known) return "Why the agent stopped is not known for any prompt here, so every prompt is drawn in one color; each prompt's evidence says why it is not known.";
-    return "Each prompt is colored by why the agent had stopped before it, as in the key below; a dark gray one's why is not known. Its evidence and the Handoffs table name it in words.";
+    return "Where a mark holds one prompt, it takes the color of why the agent had stopped before it, as in the key below; a dark gray one's why is not known, and a count badge holds several prompts. Each prompt's evidence and the Handoffs table name its why in words.";
   }
   // The classes the prompts of a clock carry, in WHY_KEYS order, for the
   // map's key.
@@ -2270,8 +2300,10 @@
         select: `bursts=${r(it.burst_range)}`,
       };
     }
+    // Where Desk splits its next-prompt time, the prompt names why the agent stopped.
+    const whyMix = it.why_by && whysOf(it.why_by).length ? `; why the agent stopped: ${whysOf(it.why_by).sort((a, b) => it.why_by[b] - it.why_by[a] || WHY_KEYS.indexOf(a) - WHY_KEYS.indexOf(b)).map((k) => `${whyName(k).toLowerCase()}, ${durationWords(it.why_by[k])}`).join("; ")}` : "";
     return {
-      what: `the wait ${c.model ? waitPlace(c.model, it) : ""} (gap${it.gap_range[0] === it.gap_range[1] ? "" : "s"} ${r(it.gap_range).replace("-", "–")}${total ? ` of ${total.gaps}` : ""}; waited on: ${it.waited_on === "mixed" ? "several causes" : waitedOnWords(it.waited_on, "short")})`.replace("wait  (", "wait ("),
+      what: `the wait ${c.model ? waitPlace(c.model, it) : ""} (gap${it.gap_range[0] === it.gap_range[1] ? "" : "s"} ${r(it.gap_range).replace("-", "–")}${total ? ` of ${total.gaps}` : ""}; waited on: ${it.waited_on === "mixed" ? "several causes" : waitedOnWords(it.waited_on, "short")}${whyMix})`.replace("wait  (", "wait ("),
       where: `It lasted ${durationWords(it.duration_ms)}, ${it.end_ms - it.start_ms < 2 * MINUTE ? `starting at minute ${Math.round((it.start_ms - (typeof c.origin_ms === "number" ? c.origin_ms : 0)) / MINUTE)} after the task's start` : minuteSpan(it.start_ms, it.end_ms, c.origin_ms)}`,
       locator: idx("gaps", it.gap_range),
       select: `gaps=${r(it.gap_range)}`,
@@ -2670,6 +2702,7 @@
     waitPlace,
     promptName,
     promptItem,
+    boundedWords,
     sumStated,
     statedText,
     waitedOnWords,

@@ -82,7 +82,7 @@ test("every reason a why is not known has words, short and long, and none shows 
 
 test("the lede names the top classes in hours and the not-known rest with its reason (partly classified)", () => {
   const t = ledeOf(partlyRow())
-  assert.match(t, /Of the 36 hours it waited for the operator's next prompt, at least 17 hours came after it reported finished work for acceptance, at least 2 hours after it stopped short of what it could have done, and 17 hours is not known \(why: not labeled yet\)\./)
+  assert.match(t, /Of the 36 hours it waited for the operator's next prompt, at least 17 hours \(up to 34 hours\) came after it reported finished work for acceptance, at least 2 hours \(up to 19 hours\) after it stopped short of what it could have done, and 17 hours is not known \(why: not labeled yet\)\./)
   assert.match(t, /The longest single wait was 19 hours, also for the next prompt, after it reported finished work for acceptance\./)
 })
 
@@ -247,14 +247,14 @@ test("a prompt marker takes the class of the wait it ends, and the legend lists 
   const clock = W.clockMarks(f, W.mapModel(f, { maxBoxes: 7 }))
   assert.deepEqual(clock.prompts.map((p) => p.why), ["acceptance", "not_known"])
   assert.deepEqual(W.whyKeysIn(clock), ["acceptance", "not_known"])
-  assert.match(W.whyLegend(clock), /colored by why the agent had stopped/)
+  assert.match(W.whyLegend(clock), /takes the color of why the agent had stopped/)
   const c0 = W.clockMarks(mapFile(false), W.mapModel(mapFile(false), { maxBoxes: 7 }))
   assert.match(W.whyLegend(c0), /not known yet: Desk does not publish why the agent stopped/)
 })
 
 test("a lede figure for a class lights the triangles of that class", () => {
-  assert.equal(W.highlightSelector("why", { why: "acceptance" }), ".vsm-wait.why-acceptance, .lad-high.why-acceptance")
-  assert.equal(W.highlightSelector("wait_cause", { cause: "next_prompt", why: "stopped_short" }), ".vsm-wait.why-stopped_short, .lad-high.why-stopped_short")
+  assert.equal(W.highlightSelector("why", { why: "acceptance" }), ".vsm-wait.has-why-acceptance, .lad-high.has-why-acceptance")
+  assert.equal(W.highlightSelector("wait_cause", { cause: "next_prompt", why: "stopped_short" }), ".vsm-wait.has-why-stopped_short, .lad-high.has-why-stopped_short")
 })
 
 // ------------------------------------------------------- Rank causes, split
@@ -313,8 +313,8 @@ test("a why's page has its time, its share of the next-prompt waiting, its tasks
   assert.equal(d.state, "ok")
   assert.equal(d.ms, 5 * H)
   assert.equal(d.child.share_of_parent, 5 / 40)
-  assert.equal(d.child.rank, 3)
-  assert.equal(d.child.of, 4)
+  assert.equal(d.child.rank, 2)
+  assert.equal(d.child.of, 3)
   assert.deepEqual(d.tasks.map((t) => [t.job, t.ms, t.bound]), [["j1", 5 * H, "lower"]])
   assert.match(S.causeMeaning("waiting:next_prompt:stopped_short"), /it stopped short: its authorization covered the next step/)
   assert.match(S.causeMeaning("waiting:next_prompt:decision"), /human gate/)
@@ -345,7 +345,7 @@ test("Copy as a prompt asks the why's A3 question and says where its data sits",
   const t = S.a3Prompt(d, { route: "https://x.test/#/causes/waiting:next_prompt:stopped_short", dataUrl: "https://x.test/rollups/causes.json" })
   assert.match(t, /why do agents stop short of what their authorization covers\?/)
   assert.match(t, /the entry with cause "waiting:next_prompt:stopped_short" in the children of the entry with cause "waiting:next_prompt"/)
-  assert.match(t, /13% of the 40 hours of waiting for the next prompt/)
+  assert.match(t, /at least 13% \(up to 43%\) of the 40 hours of waiting for the next prompt/)
   assert.match(t, /at least 5 hours/)
   for (const k of W.WHY_KEYS) assert.ok(S.WHY_A3[k], k)
 })
@@ -379,4 +379,124 @@ test("the page draws the split: the Pareto toggle is on by default and every why
   assert.match(html, /Split by why/)
   const app = read("site/src/app.js")
   for (const name of ["whyFill", "drawWhyLegend", "renderWhyWaits"]) assert.match(app, new RegExp(`function ${name}\\(`), name)
+})
+
+// ------------------------------------------- review fix round 1 (S5 v1.1)
+
+test("I1: while some time has no known why, every class figure states its floor and its ceiling (at least X, up to X + not known)", () => {
+  // The lede: each class it names, and the summed rest.
+  const t = ledeOf(partlyRow())
+  assert.match(t, /at least 17 hours \(up to 34 hours\) came after it reported finished work for acceptance, at least 2 hours \(up to 19 hours\) after it stopped short/)
+  const many = row({ acceptance: 5 * H, stopped_short: 4 * H, question: 3 * H, decision: 2 * H, error_limit: 1 * H }, { notKnown: 6 * H, reasons: { not_labeled: m(6 * H) } })
+  assert.match(ledeOf(many), /at least 3 hours \(up to 9 hours\) after 2 other kinds of stop/)
+  // Fully classified: no bound, no ceiling.
+  assert.doesNotMatch(ledeOf(row({ acceptance: 5 * H, stopped_short: 2 * H })), /up to/)
+  // The time bar's class segments carry their ceiling.
+  const r = partlyRow()
+  const wait = W.timeBar(stackOf(r), r, W.idleSplit(r, null), segs).groups[1].segments
+  assert.equal(wait.find((x) => x.why === "acceptance").ceiling_ms, 34 * H)
+  assert.equal(wait.find((x) => x.why === "not_known").ceiling_ms, undefined)
+  assert.equal(W.boundedWords(17.1 * H, 34 * H, W.durationWords), "at least 17 hours (up to 34 hours)")
+  assert.equal(W.boundedWords(5 * H, 5 * H, W.durationWords), "5 hours")
+})
+
+test("I1: the Pareto children, a why's page, its tasks and its A3 prompt state the ceiling", () => {
+  const bar = S.paretoModel(causesDoc(kids()), "all").bars[0]
+  const ss = bar.children.find((c) => c.why === "stopped_short")
+  assert.equal(ss.bound, "lower")
+  assert.equal(ss.ceiling_ms, 17 * H)
+  assert.equal(S.whyAmountWords(ss), "at least 5 hours (up to 17 hours)")
+  assert.equal(S.whyShareWords(ss), "at least 13% (up to 43%)")
+  assert.equal(S.whyAmountWords(ss, true), "≥5h (≤17h)")
+  const nk = bar.children.find((c) => c.why === "not_known")
+  assert.equal(nk.bound, null)
+  assert.equal(S.whyAmountWords(nk), "12 hours")
+  const exact = S.paretoModel(causesDoc([child("stopped_short", 10, ["j1"]), child("acceptance", 30, ["j1"])]), "all").bars[0]
+  assert.equal(S.whyAmountWords(exact.children[0]), "10 hours")
+  const taskRows = [{ job: "j1", next_prompt_by_why_ms: { stopped_short: lower(5 * H), not_known: m(12 * H) } }]
+  const d = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:stopped_short", { taskRows })
+  assert.equal(d.ceiling_ms, 17 * H)
+  assert.equal(d.tasks[0].ceiling_ms, 17 * H)
+  assert.match(S.whyCauseLede(d), /it cost at least 5 hours \(up to 17 hours\) \(counted per task\): at least 13% \(up to 43%\) of the 40 hours of/)
+  const a3 = S.a3Prompt(d, { route: "r", dataUrl: "u" })
+  assert.match(a3, /It cost at least 5 hours \(up to 17 hours\), counted per task/)
+  assert.match(a3, /at least 13% \(up to 43%\) of the 40 hours of waiting for the next prompt/)
+  assert.match(a3, /factory task j1, at least 5 hours \(up to 17 hours\)/)
+})
+
+test("I2: a class with no classified wait is never stated as zero while some time has no known why", () => {
+  const d = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:interrupted", {})
+  assert.equal(d.state, "none")
+  assert.equal(d.not_known_ms, 12 * H)
+  assert.deepEqual(d.not_known_reasons, ["not_labeled"])
+  const t = S.whyCauseLede(d)
+  assert.match(t, /No wait is classified as interrupted by the operator yet\. Up to 12 hours of the 40 hours of .* whose why is not known may hold some \(why: not labeled yet\)\./)
+  assert.doesNotMatch(t, /^None|None of/)
+  // With every wait classified, "none" is a true zero.
+  const all = S.causeDetail(causesDoc([child("stopped_short", 10, ["j1"]), child("acceptance", 30, ["j1"])]), "waiting:next_prompt:interrupted", {})
+  assert.match(S.whyCauseLede(all), /None of the 40 hours of .* has this why: every one of them is classified\./)
+})
+
+test("m3: a why's page ranks only the known classes, and not known is the unclassified part", () => {
+  const d = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:stopped_short", {})
+  assert.equal(d.child.rank, 2)
+  assert.equal(d.child.of, 3)
+  assert.match(S.whyCauseLede(d), /the 2nd of 3 known reasons the agent stopped, by time/)
+  const n = S.causeDetail(causesDoc(kids()), "waiting:next_prompt:not_known", {})
+  assert.equal(n.child.rank, null)
+  const t = S.whyCauseLede(n)
+  assert.match(t, /the part of the waiting whose why is not classified/)
+  // m2: the stop's own reason words, never the waste labels'.
+  assert.match(t, /Why it is not known: not labeled yet\./)
+  assert.doesNotMatch(t, /for waste/)
+  assert.doesNotMatch(S.a3Prompt(n, { route: "r", dataUrl: "u" }), /of \d+ reasons the agent stopped/)
+})
+
+test("m1: the toggle is disabled, never pressed, when there is nothing to split", () => {
+  const on = S.paretoModel(causesDoc(kids()), "all")
+  assert.deepEqual(S.whyToggleState(on), { state: "on", pressed: true, disabled: false, note: "" })
+  assert.equal(S.whyToggleState(S.paretoModel(causesDoc(kids()), "all", { split: false })).pressed, false)
+  const none = S.whyToggleState(S.paretoModel(causesDoc(), "all"))
+  assert.equal(none.disabled, true)
+  assert.equal(none.pressed, false)
+  assert.match(none.note, /nothing to split/)
+  assert.equal(S.whyToggleState(S.paretoModel(causesDoc([child("acceptance", 20, ["j1"])]), "all")).disabled, true)
+  const app = read("site/src/app.js")
+  assert.match(app, /aria-disabled/)
+})
+
+test("m4: a mixed wait is labeled mostly its largest class and lights for every class it holds", () => {
+  const f = mapFile(true)
+  f.gaps[0].idle_by_why_ms = { acceptance: 12 * H, stopped_short: 6.7 * H }
+  const w = W.mapModel(f, { maxBoxes: 7 }).items.filter((x) => x.type === "wait")[0]
+  assert.deepEqual(w.whys, ["stopped_short", "acceptance"])
+  assert.equal(W.waitTitle(w), "waiting for the next prompt: mostly agent asked for acceptance")
+  assert.equal(W.highlightSelector("why", { why: "stopped_short" }), ".vsm-wait.has-why-stopped_short, .lad-high.has-why-stopped_short")
+  assert.equal(W.highlightSelector("wait_cause", { cause: "next_prompt", why: "stopped_short" }), ".vsm-wait.has-why-stopped_short, .lad-high.has-why-stopped_short")
+  assert.match(read("site/src/app.js"), /has-why-\$\{/)
+})
+
+test("m5: the wait drawer's prompt names why the agent stopped", () => {
+  const model = W.mapModel(mapFile(true), { maxBoxes: 7 })
+  const a = model.items.filter((x) => x.type === "wait")[0]
+  const p = W.promptText({ ...W.promptItem({ kind: "wait", item: a }, { model, origin_ms: 0 }), name: "825084c9", route: "r", dataUrl: "u" })
+  assert.match(p, /why the agent stopped: human gate: acceptance, 19 hours/)
+})
+
+test("m7: the legend promises a class color only where a mark holds one prompt", () => {
+  const f = mapFile(true)
+  const clock = W.clockMarks(f, W.mapModel(f, { maxBoxes: 7 }))
+  assert.match(W.whyLegend(clock), /^Where a mark holds one prompt, it takes the color of why the agent had stopped before it/)
+})
+
+test("I1: Desk's own bound on a class row is used where it is stated", () => {
+  const stated = [child("stopped_short", 5, ["j1"], { bound: "lower", reasons: ["stop_partly_classified"] }), child("acceptance", 23, ["j1"], { bound: "lower", reasons: ["stop_partly_classified"] }), child("not_known", 12, ["j1"], { reasons: ["not_labeled"] })]
+  const ss = S.paretoModel(causesDoc(stated), "all").bars[0].children[0]
+  assert.equal(ss.bound, "lower")
+  assert.equal(S.whyAmountWords(ss), "at least 5 hours (up to 17 hours)")
+  // A class Desk states as exact stays exact.
+  const exact = [child("stopped_short", 10, ["j1"], { reasons: [] }), child("acceptance", 30, ["j1"], { reasons: [] })]
+  assert.equal(S.paretoModel(causesDoc(exact), "all").bars[0].children[0].bound, null)
+  // A lower bound with no known ceiling still says at least.
+  assert.equal(S.whyAmountWords({ ms: 5 * H, bound: "lower" }), "at least 5 hours")
 })

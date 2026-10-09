@@ -59,16 +59,17 @@
   --c-op: #3d3c38;
   --c-pr: #1f63b8;
   /* Why the agent stopped before a wait for the next prompt (addendum §4):
-     one hue per actionable class, one blue for the three human gates, which
-     their patterns tell apart; "why not known" is an outline. Checked with
-     the dataviz validator on this page's surface (lightness, chroma, CVD
-     separation, 3:1 contrast). Every class also carries a pattern and a
-     label, so none is told by hue alone. */
-  --c-why-stopped_short: #c0461a;
+     one color per actionable class, one brown for the three human gates,
+     which their patterns tell apart; "why not known" is an outline. Stopped short is teal with a
+     checkerboard so an unsplit next-prompt bar (orange, solid) can never
+     read as all stopped short; the gate brown stays clear of the pull
+     request blue. Checked with the dataviz validator on this page's
+     surface; pairs below its floors are told apart by pattern and label. */
+  --c-why-stopped_short: #008a90;
   --c-why-question: #9b3fb5;
-  --c-why-error_limit: #9a6b00;
-  --c-why-interrupted: #00897b;
-  --c-why-gate: #2f62c8;
+  --c-why-error_limit: #614989;
+  --c-why-interrupted: #6b7a00;
+  --c-why-gate: #7e5401;
   --c-why-not_known: #6f6e69;
 
   /* Hatches from the tokens: a stripe of the meaning color over the page. */
@@ -130,11 +131,11 @@
     --c-wait-other_task: #e57a9a;
     --c-op: #d6d4cc;
     --c-pr: #6aa7ee;
-    --c-why-stopped_short: #e0682e;
+    --c-why-stopped_short: #1ea3aa;
     --c-why-question: #b277cf;
-    --c-why-error_limit: #b08218;
-    --c-why-interrupted: #1fa894;
-    --c-why-gate: #5b8ee6;
+    --c-why-error_limit: #6f6de8;
+    --c-why-interrupted: #8f9a26;
+    --c-why-gate: #886e1f;
     --c-why-not_known: #a8a7a0;
     --c-alarm: #ef5a5a;
     --c-accent: #9d88f0;
@@ -1390,12 +1391,12 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 @media (max-width: 640px) { table.data-table.cause-tasks td:first-child { min-width: 9em; } table.data-table.cause-tasks th { white-space: normal; } }
 
 /* Why the agent stopped: a fill per class, a color and a pattern (the SVG
-   charts use the matching patterns in index.html, why-pat-*). Solid for
-   stopped short, dots for a question, horizontal lines for an error or a
-   limit, vertical lines for an interruption; the gates share one blue,
+   charts use the matching patterns in index.html, why-pat-*). A
+   checkerboard for stopped short, dots for a question, horizontal lines for an error or a
+   limit, vertical lines for an interruption; the gates share one brown,
    with diagonal lines (decision), the other diagonal (approval) and a
    cross-hatch (acceptance); why not known is an outline. */
-.why-fill-stopped_short { --wc: var(--c-why-stopped_short); background: var(--wc); }
+.why-fill-stopped_short { --wc: var(--c-why-stopped_short); background: repeating-conic-gradient(var(--wc) 0 25%, color-mix(in srgb, var(--wc) 30%, transparent) 0 50%) 0 0 / 6px 6px; box-shadow: inset 0 0 0 1.5px var(--wc); }
 .why-fill-question { --wc: var(--c-why-question); background: radial-gradient(circle, var(--wc) 1.6px, transparent 1.9px) 0 0 / 5px 5px, color-mix(in srgb, var(--wc) 35%, transparent); box-shadow: inset 0 0 0 1.5px var(--wc); }
 .why-fill-error_limit { --wc: var(--c-why-error_limit); background: repeating-linear-gradient(0deg, var(--wc) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1.5px var(--wc); }
 .why-fill-interrupted { --wc: var(--c-why-interrupted); background: repeating-linear-gradient(90deg, var(--wc) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1.5px var(--wc); }
@@ -1414,6 +1415,7 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 .vsm-wait.why-not_known .vsm-tri path { stroke-dasharray: 3 2; }
 /* The Pareto's split toggle sits beside the mode buttons. */
 .why-toggle-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 0; }
+.why-toggle[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .pareto-why-seg { stroke: var(--page-plane); stroke-width: 1; }
 .pareto-why-legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--text-secondary); }
 .pareto-why-legend li { display: inline-flex; align-items: center; gap: 6px; }
