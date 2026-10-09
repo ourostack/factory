@@ -364,3 +364,60 @@ test("M5: a prompt carries its UTC day where the task's clock has a measured anc
   assert.equal(W.promptDayWords(null), "not known: the task's clock is not tied to the calendar (no pull request anchors it)")
   assert.match(read("site/src/walk.js"), /\["Day \(UTC\)", promptDayWords\(t\.day\)\]/)
 })
+
+// ------------------------------------------------------------------ M6-M8
+
+test("M6: the Pareto axis says its bars are job-hours summed over tasks", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /\$\{scale\.unit === "hours" \? "Job-hours" : "Job-minutes"\}, summed over tasks/)
+  assert.doesNotMatch(app, /\(per task\)`/)
+})
+
+// CIEDE2000 between two hex colors, for the palette check.
+function de2000(h1, h2) {
+  const lab = (h) => {
+    const c = [0, 2, 4].map((i) => parseInt(h.slice(1 + i, 3 + i), 16) / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+    const x = (c[0] * 0.4124 + c[1] * 0.3576 + c[2] * 0.1805) / 0.95047
+    const y = c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722
+    const z = (c[0] * 0.0193 + c[1] * 0.1192 + c[2] * 0.9505) / 1.08883
+    const t = (v) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116)
+    return [116 * t(y) - 16, 500 * (t(x) - t(y)), 200 * (t(y) - t(z))]
+  }
+  const [L1, a1, b1] = lab(h1)
+  const [L2, a2, b2] = lab(h2)
+  const rad = (d) => (d * Math.PI) / 180
+  const Cb = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2
+  const G = 0.5 * (1 - Math.sqrt(Cb ** 7 / (Cb ** 7 + 25 ** 7)))
+  const a1p = (1 + G) * a1
+  const a2p = (1 + G) * a2
+  const C1p = Math.hypot(a1p, b1)
+  const C2p = Math.hypot(a2p, b2)
+  const h1p = ((Math.atan2(b1, a1p) * 180) / Math.PI + 360) % 360
+  const h2p = ((Math.atan2(b2, a2p) * 180) / Math.PI + 360) % 360
+  let dh = h2p - h1p
+  if (C1p * C2p === 0) dh = 0
+  else if (Math.abs(dh) > 180) dh -= 360 * Math.sign(dh)
+  const dL = L2 - L1
+  const dC = C2p - C1p
+  const dH = 2 * Math.sqrt(C1p * C2p) * Math.sin(rad(dh / 2))
+  const Lb = (L1 + L2) / 2
+  const Cbp = (C1p + C2p) / 2
+  const hb = Math.abs(h1p - h2p) <= 180 ? (h1p + h2p) / 2 : (h1p + h2p + 360) / 2
+  const T = 1 - 0.17 * Math.cos(rad(hb - 30)) + 0.24 * Math.cos(rad(2 * hb)) + 0.32 * Math.cos(rad(3 * hb + 6)) - 0.2 * Math.cos(rad(4 * hb - 63))
+  const SL = 1 + (0.015 * (Lb - 50) ** 2) / Math.sqrt(20 + (Lb - 50) ** 2)
+  const SC = 1 + 0.045 * Cbp
+  const SH = 1 + 0.015 * Cbp * T
+  const RT = -2 * Math.sqrt(Cbp ** 7 / (Cbp ** 7 + 25 ** 7)) * Math.sin(rad(60 * Math.exp(-(((hb - 275) / 25) ** 2))))
+  return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH))
+}
+
+test("M7: in both themes, extra processing and long tool call, and defects and after a failed tool call, are clearly different colors", () => {
+  const css = read("site/src/styles.css")
+  const dark = css.slice(css.indexOf("@media (prefers-color-scheme: dark)"))
+  const light = css.slice(0, css.indexOf("@media (prefers-color-scheme: dark)"))
+  const tok = (src, name) => new RegExp(`--${name}: (#[0-9a-f]{6});`).exec(src)[1]
+  for (const src of [light, dark]) {
+    assert.ok(de2000(tok(src, "c-waste-extra-processing"), tok(src, "c-wait-long_tool_call")) >= 12)
+    assert.ok(de2000(tok(src, "c-waste-defects"), tok(src, "c-wait-tool_failure")) >= 12)
+  }
+})

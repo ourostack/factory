@@ -4060,7 +4060,7 @@
       left.appendChild(tx);
     }
     const lt = svg("text", { x: 12, y: top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${top + H / 2})`, "text-anchor": "middle" });
-    lt.textContent = `${scale.unit === "hours" ? "Hours" : "Minutes"} (per task)`;
+    lt.textContent = `${scale.unit === "hours" ? "Job-hours" : "Job-minutes"}, summed over tasks`;
     left.appendChild(lt);
     const right = svg("svg", { class: "sb-axis", width: rightW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
