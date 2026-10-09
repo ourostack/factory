@@ -984,7 +984,7 @@ test("each lede number lights its own part of the map; a cause lights only the w
   assert.equal(W.highlightSelector("nonsense"), null)
   const app = read("site/src/app.js")
   assert.match(app, /has-\$\{k\}/, "waits and ladder steps carry their causes as classes")
-  assert.match(app, /W\.highlightSelector\(key, \{ item, cause, seg \}\)/)
+  assert.match(app, /W\.highlightSelector\(key, \{ item, cause, seg, why \}\)/)
   // The swimlane's labels row is one tab stop with arrow keys inside (I4).
   assert.match(app, /tabindex: k === current \? 0 : -1/)
   assert.match(app, /ArrowRight: pos \+ 1/)

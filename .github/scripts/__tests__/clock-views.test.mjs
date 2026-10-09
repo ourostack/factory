@@ -215,7 +215,8 @@ test("the Handoffs table has one row per prompt, in clock order: when it came, t
   const withWaits = twoBursts({ waits: [{ session: "s1", start_ms: H, end_ms: 3 * H, next_prompt_ms: 2 * H - 5 * M, why: null, why_source: "none", reasons: ["not_labeled"] }] })
   const t2 = W.handoffTable(W.clockMarks(withWaits, W.mapModel(withWaits, { maxBoxes: 7 })), 0, F.reasonText, 4 * H)
   assert.deepEqual([t2.show_why, t2.note], [true, null])
-  assert.equal(t2.rows[1].why, "not known (the independent evaluator has not labeled this yet)")
+  // A stop's own reason words (walk.js WHY_REASON_WORDS): a stop is not labeled for waste.
+  assert.equal(t2.rows[1].why, "not known (not labeled yet)")
   assert.equal(t2.rows[0].why, "—", "a first prompt follows no stop")
   // A prompt before the task's start says so.
   assert.equal(W.clockAt(-90 * S, 0), "2 minutes before the task's start")
@@ -228,7 +229,7 @@ test("until Desk publishes why, the legend says every prompt is drawn in one col
   assert.equal(W.NOT_KNOWN_WHY, "not known yet: Desk does not publish why the agent stopped")
   assert.equal(W.whyLegend(c), "Why the agent stopped is not known yet: Desk does not publish why the agent stopped, so every prompt is drawn in one color.")
   const known = twoBursts({ waits: [{ session: "s1", start_ms: H, end_ms: 3 * H, why: "acceptance", why_source: "evaluator" }] })
-  assert.match(W.whyLegend(W.clockMarks(known, W.mapModel(known, { maxBoxes: 7 }))), /^A prompt drawn in the waiting color has a recorded why/)
+  assert.match(W.whyLegend(W.clockMarks(known, W.mapModel(known, { maxBoxes: 7 }))), /^Where a mark holds one prompt, it takes the color of why the agent had stopped before it/)
   // A merged top-row marker takes its group's why only when every prompt shares it.
   assert.equal(W.groupWhy([{ why: "acceptance" }, { why: "acceptance" }]), "acceptance")
   assert.equal(W.groupWhy([{ why: "acceptance" }, { why: "not_known" }]), "not_known")

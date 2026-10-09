@@ -132,7 +132,9 @@
   // A cause key from Desk's causes rollup (`waiting:<waited_on>`,
   // `defects:<tool kind>`, `<waste>:all`) in the page's words.
   function causeWords(key) {
-    const [waste, what] = String(key).split(":");
+    const [waste, what, why] = String(key).split(":");
+    // A sub-cause of waiting for the next prompt, by why the agent stopped.
+    if (waste === "waiting" && what === "next_prompt" && why) return `Waiting · next prompt · ${whyName(why).toLowerCase()}`;
     if (waste === "waiting") {
       return `Waiting · ${waitedOnWords(what, "short")}`;
     }
@@ -279,6 +281,40 @@
     if (len > 0) by[WAIT_KEYS.includes(g && g.waited_on) ? g.waited_on : "unknown"] = len;
     return by;
   }
+  // One gap's or burst's next-prompt idle time by why the agent stopped
+  // (Desk D5 `idle_by_why_ms`, stated numbers or bare milliseconds), or
+  // null when Desk does not state it. Returns { why: ms } with time only.
+  function whyBy(x) {
+    const src = x && x.idle_by_why_ms;
+    if (!src || typeof src !== "object" || Array.isArray(src)) return null;
+    const by = {};
+    for (const [k, n] of Object.entries(src)) {
+      const v = typeof n === "number" ? (Number.isFinite(n) ? n : null) : val(n);
+      if (v === null || v <= 0) continue;
+      const key = WHY_KEYS.includes(k) ? k : "not_known";
+      by[key] = (by[key] || 0) + v;
+    }
+    return by;
+  }
+  // Adds `from` into `into` (a why split), keeping null when neither states one.
+  function addWhy(into, from) {
+    if (!from) return into;
+    const out = into || {};
+    for (const [k, ms] of Object.entries(from)) out[k] = (out[k] || 0) + ms;
+    return out;
+  }
+  // The why that holds the most time, or null.
+  function topWhy(by) {
+    if (!by) return null;
+    const ks = Object.keys(by).filter((k) => by[k] > 0).sort((a, b) => by[b] - by[a] || WHY_KEYS.indexOf(a) - WHY_KEYS.indexOf(b));
+    return ks[0] || null;
+  }
+
+  // Every why with time in a split, in WHY_KEYS order.
+  function whysOf(by) {
+    return by ? WHY_KEYS.filter((k) => by[k] > 0) : [];
+  }
+
   // The causes of a gap, largest first.
   const gapCauses = (g) => Object.entries(gapIdleBy(g)).sort((a, b) => b[1] - a[1] || WAIT_KEYS.indexOf(a[0]) - WAIT_KEYS.indexOf(b[0])).map(([k]) => k);
 
@@ -494,10 +530,15 @@
           if (unknown && top.key !== "unknown") add(` What ${durationWords(unknown.ms)} of it waited on was not recorded.`);
         }
       }
+      // Why the agent stopped before its waiting for the next prompt (§4).
+      const next = by.find((x) => x.key === "next_prompt");
+      add(...whyLedeParts(nextPromptWhy(row), next ? next.ms : 0, tok));
       const gap = row.longest_gap && row.longest_gap.state !== "unavailable" ? row.longest_gap.value : null;
       if (waiting > 0 && gap && typeof gap.duration_ms === "number" && gap.duration_ms > 0) {
         const same = top && top.key === gap.waited_on;
-        add(" The longest single wait was ", tok("longest", durationWords(gap.duration_ms)), same ? `, also ${ALSO[gap.waited_on] || "with its cause not recorded"}.` : `, when ${waitedOnWords(gap.waited_on, "long")}.`);
+        // Desk names the why of a longest wait for the next prompt (D5).
+        const after = gap.waited_on === "next_prompt" && WHY_AFTER[gap.why] ? `, ${WHY_AFTER[gap.why]}` : "";
+        add(" The longest single wait was ", tok("longest", durationWords(gap.duration_ms)), same ? `, also ${ALSO[gap.waited_on] || "with its cause not recorded"}${after}.` : `, when ${waitedOnWords(gap.waited_on, "long")}${after}.`);
       }
     }
 
@@ -631,8 +672,14 @@
       const causes = Object.keys(by).sort((a, b) => by[b] - by[a] || WAIT_KEYS.indexOf(a) - WAIT_KEYS.indexOf(b));
       if (!causes.length) causes.push(gaps[0].waited_on || "unknown");
       const longest = gaps.reduce((a, g) => (!a || g.end_ms - g.start_ms > a.end_ms - a.start_ms ? g : a), null);
+      // Why the agent stopped, where Desk splits a gap's next-prompt time.
+      let whyOf = null;
+      for (const g of gaps) whyOf = addWhy(whyOf, whyBy(g));
       return {
         type: "wait",
+        why_by: whyOf,
+        why: topWhy(whyOf),
+        whys: whysOf(whyOf),
         gaps,
         count: gaps.length,
         start_ms: gaps[0].start_ms,
@@ -663,6 +710,8 @@
     for (const g of folded) for (const [k, ms] of Object.entries(gapIdleBy(g))) innerBy[k] = (innerBy[k] || 0) + ms;
     for (const b of bs) for (const [k, ms] of Object.entries(burstIdleBy(b))) innerBy[k] = (innerBy[k] || 0) + ms;
     for (const k of Object.keys(innerBy)) if (!(innerBy[k] > 0)) delete innerBy[k];
+    let innerWhy = null;
+    for (const x of [...folded, ...bs]) innerWhy = addWhy(innerWhy, whyBy(x));
     const starts = [...bs.map((b) => b.start_ms), ...folded.map((g) => g.start_ms)];
     const ends = [...bs.map((b) => b.end_ms), ...folded.map((g) => g.end_ms)];
     return {
@@ -679,6 +728,9 @@
       inner_wait_ms: foldedMs + (span - working),
       inner_causes: Object.keys(innerBy).sort((a, b) => innerBy[b] - innerBy[a] || WAIT_KEYS.indexOf(a) - WAIT_KEYS.indexOf(b)),
       inner_by: innerBy,
+      inner_why_by: innerWhy,
+      inner_why: topWhy(innerWhy),
+      inner_whys: whysOf(innerWhy),
       folded_count: folded.length,
       burst_range: [bs[0].n, bs[bs.length - 1].n],
       // Counts and labeled times as stated numbers: a part with no source
@@ -729,6 +781,18 @@
       b.session_numbers = b.sessions.map((id) => sessionOrder.indexOf(id) + 1).filter((n) => n > 0).sort((x, y) => x - y);
     }
     items.forEach((it, i) => (it.index = i));
+    // Desk's waits (map/2 `waits`), and for each item the ones that overlap
+    // it: the wait drawer's stops, and the reasons of a why not known (the
+    // time no recorded wait holds is "stop not recorded").
+    const waitsAll = (Array.isArray(map && map.waits) ? map.waits : []).filter((w) => w && typeof w === "object" && isMs(w.start_ms) && isMs(w.end_ms));
+    for (const it of items) {
+      it.stops = waitsAll.filter((w) => w.start_ms < it.end_ms && w.end_ms > it.start_ms).sort((a, b) => a.start_ms - b.start_ms);
+      const nk = (it.type === "wait" ? it.why : it.inner_why) === "not_known";
+      if (nk) {
+        const rs = [...new Set(it.stops.filter((w) => w.why === "not_known").flatMap((w) => (Array.isArray(w.reasons) ? w.reasons : [])))];
+        it.why_reasons = rs.length ? rs : ["stop_not_recorded"];
+      } else it.why_reasons = [];
+    }
     boxes.forEach((b, i) => (b.box_no = i + 1));
     waits.forEach((w, i) => (w.wait_no = i + 1));
     const js = o.jobStates || {};
@@ -803,8 +867,14 @@
   }
 
   // A wait's label: duration and what it waited on.
+  // A wait for the next prompt says why the agent stopped where Desk
+  // splits it (addendum §4): "waiting for the next prompt: agent stopped
+  // short"; otherwise what it waited on, as before.
   function waitTitle(w) {
-    return w.count === 1 ? waitedOnWords(w.waited_on, "short") : `${w.count} waits: ${w.waited_on === "mixed" ? "several causes" : waitedOnWords(w.waited_on, "short")}`;
+    // A wait whose time holds several whys is named by its largest, "mostly".
+    const mixed = Array.isArray(w.whys) && w.whys.length > 1;
+    const what = w.waited_on === "next_prompt" && w.why ? (mixed ? whyTriangle(w.why, w.why_reasons).replace(/^waiting for the next prompt: /, "waiting for the next prompt: mostly ") : whyTriangle(w.why, w.why_reasons)) : w.waited_on === "mixed" && w.count > 1 ? "several causes" : waitedOnWords(w.waited_on, "short");
+    return w.count === 1 ? what : `${w.count} waits: ${what}`;
   }
 
   // The fold, in one sentence for the map's caption.
@@ -914,7 +984,36 @@
       workSegs = [...work, { key: "not_labeled", label: "Not labeled yet", ms: working - labeled, state: "measured" }];
     }
     if (idle.state === "partial") partial = true;
-    const waitSegs = idle.by.map((x) => ({ key: `wait_${x.key}`, cause: x.key, label: waitCauseLabel(x.key), ms: x.ms, state: idle.state }));
+    // The next-prompt part is split by why the agent stopped where Desk
+    // publishes a split that adds up to it (addendum §4): each class its
+    // own segment, and the time whose why is not known an outline. Without
+    // one, it stays one segment and the bar says why is not known yet.
+    const why = nextPromptWhy(taskRow);
+    const waitSegs = [];
+    for (const x of idle.by) {
+      const one = { key: `wait_${x.key}`, cause: x.key, label: waitCauseLabel(x.key), ms: x.ms, state: idle.state };
+      if (x.key !== "next_prompt" || why.state !== "ok" || !why.parts.length || Math.abs(why.parts.reduce((a, p) => a + p.ms, 0) - x.ms) > SECOND) {
+        waitSegs.push(one);
+        continue;
+      }
+      for (const p of why.parts) {
+        const seg = { key: `wait_next_prompt_${p.why}`, cause: "next_prompt", why: p.why, label: `Next prompt · ${whyName(p.why)}`, ms: p.ms, state: p.n.state, bound: p.n.state === "partial" ? p.n.bound : undefined, reasons: p.why === "not_known" ? why.not_known.reasons.map((r) => r.reason) : [] };
+        // A class is at most its time plus the time whose why is not known.
+        if (p.why !== "not_known" && why.not_known.ms > 0) {
+          seg.bound = "lower";
+          seg.ceiling_ms = p.ms + why.not_known.ms;
+        }
+        waitSegs.push(seg);
+      }
+    }
+    const nextSeg = idle.by.find((x) => x.key === "next_prompt");
+    const WHY_NOTES = {
+      absent: "Why the agent stopped before the waiting for the next prompt is not known yet: Desk does not publish it for this task, so that part is not split.",
+      mismatch: "Desk's split of the waiting for the next prompt by why the agent stopped does not add up to it, so that part is not split.",
+      unavailable: "Why the agent stopped is not measured for this task's waiting for the next prompt, so that part is not split.",
+      ok: "Desk's split of the waiting for the next prompt by why the agent stopped does not match this bar's figure, so that part is not split.",
+    };
+    if (nextSeg && !waitSegs.some((x) => x.why)) notes.push(WHY_NOTES[why.state] || WHY_NOTES.unavailable);
     const share = (x) => ({ ...x, share: x.ms / lead });
     const groups = [
       { key: "working", label: "Working", ms: working, segments: workSegs.map(share) },
@@ -924,7 +1023,7 @@
     const wb = boundOf(workN);
     groups[0].qualifier = wb === "lower" ? "at least " : wb === "upper" ? "at most " : "";
     groups[1].qualifier = idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : "";
-    return { state: "ok", total_ms: lead, groups, segments: [...groups[0].segments, ...groups[1].segments], partial, notes, lead_state: leadN.state };
+    return { state: "ok", total_ms: lead, groups, segments: [...groups[0].segments, ...groups[1].segments], partial, notes, lead_state: leadN.state, why_state: why.state };
   }
 
   // A waiting cause as a legend label: "Next prompt (the agent had stopped)".
@@ -954,6 +1053,9 @@
       if (o.seg === "defects") return ".vsm-box.has-defects";
       return ".vsm-box, .lad-low, .sum-working";
     }
+    // A why lights every wait that holds some of it, not only those it tops.
+    if (key === "wait_cause" && o.why && WHY_KEYS.includes(o.why)) return `.vsm-wait.has-why-${o.why}, .lad-high.has-why-${o.why}`;
+    if (key === "why") return WHY_KEYS.includes(o.why) ? `.vsm-wait.has-why-${o.why}, .lad-high.has-why-${o.why}` : ".vsm-wait.has-next_prompt, .lad-high.has-next_prompt";
     if (key === "wait_cause") return WAIT_KEYS.includes(o.cause) ? `.vsm-wait.has-${o.cause}, .lad-high.has-${o.cause}` : ".vsm-wait, .lad-high, .sum-waiting";
     if (key === "longest") return Number.isInteger(o.item) ? `[data-item="${o.item}"]` : ".vsm-wait";
     return {
@@ -1242,6 +1344,7 @@
           ["What it is", "Idle time inside a work box: waits shorter than the map's fold threshold, and idle moments inside bursts"],
           ["Waited on", (it.inner_causes && it.inner_causes.length ? it.inner_causes : ["unknown"]).map((k) => (it.inner_by && it.inner_by[k] > 0 ? `${waitedOnWords(k, "short")}, ${durationWords(it.inner_by[k])}` : waitedOnWords(k, "short"))).join("; ")],
           ["Length", `${durationWords(ms)} (${share(ms)})`],
+          ...(it.inner_by && it.inner_by.next_prompt > 0 ? whyRows(it.inner_why_by, it.stops, it.why_reasons, c.lead_ms) : []),
         ],
         evidence: [],
       };
@@ -1254,8 +1357,36 @@
       ["Length", `${durationWords(ms)} (${share(ms)})`],
     ];
     if (it.count > 1) rows.push(["Longest of them", durationWords(it.longest_ms)]);
+    if (it.by && it.by.next_prompt > 0) rows.push(...whyRows(it.why_by, it.stops, it.why_reasons, c.lead_ms));
     // The drawer's swatch is the cause's own (the largest, for a mixed wait).
-    return { title: `Wait: ${waitTitle(it)}`, segment: "waiting", cause: it.causes[0] || "unknown", rows, evidence: [] };
+    return { title: `Wait: ${waitTitle(it)}`, segment: "waiting", cause: it.causes[0] || "unknown", why: it.waited_on === "next_prompt" ? it.why : null, rows, evidence: [] };
+  }
+
+  // The wait drawer's rows on why the agent stopped (addendum §4): the
+  // item's next-prompt time by why, then each Desk wait it holds with its
+  // why, who decided it and with what confidence, and the mechanical stop
+  // facts. Never any text from the session. `whyOf` is the item's split
+  // (null when Desk does not publish one), `stops` Desk's waits that
+  // overlap it.
+  function whyRows(whyOf, stops, reasons, leadMs) {
+    const rows = [];
+    if (!whyOf) {
+      rows.push(["Why the agent stopped", NOT_KNOWN_WHY]);
+      return rows;
+    }
+    const parts = WHY_KEYS.filter((k) => whyOf[k] > 0).map((k) => `${k === "not_known" ? `why not known (${(reasons || []).map(whyReasonWords).join("; ") || "its reason not recorded"})` : whyName(k).toLowerCase()}, ${durationWords(whyOf[k])}`);
+    rows.push(["Why the agent stopped", parts.length ? parts.join("; ") : "no waiting for the next prompt here"]);
+    const ss = Array.isArray(stops) ? stops : [];
+    ss.forEach((w, k) => {
+      const tag = ss.length > 1 ? `Stop ${k + 1} of ${ss.length}: ` : "Stop: ";
+      const why = w.why && w.why !== "not_known" && WHY_WORDS[w.why] ? WHY_WORDS[w.why] : `not known (${(Array.isArray(w.reasons) && w.reasons.length ? w.reasons : ["stop_not_recorded"]).map(whyReasonWords).join("; ")})`;
+      rows.push([`${tag}why`, why]);
+      rows.push([`${tag}decided by`, whySourceWords(w.why_source)]);
+      rows.push([`${tag}confidence`, w.why_source === "none" ? "none: not classified" : confidenceText(w.confidence)]);
+      rows.push([`${tag}how the turn ended`, stopWords(w) || "not recorded: these facts carry no stop"]);
+      if (isMs(w.next_prompt_ms)) rows.push([`${tag}counted as waiting`, `${durationWords(w.next_prompt_ms)}${isMs(leadMs) && leadMs > 0 ? ` (${pctWords(w.next_prompt_ms / leadMs)} of the lead time)` : ""}`]);
+    });
+    return rows;
   }
 
   // ------------------------------------------- the human-agent clock (views)
@@ -1303,6 +1434,191 @@
     not_recorded: "how it ended was not recorded",
   };
   const BASIS_WORDS = { first: "the session's first prompt", after_stop: "after the agent had stopped", mid_turn: "while the agent was still working" };
+
+  // ------------------------------------------- why the agent stopped (§4)
+
+  // Desk splits the task's waiting for the next prompt by why the agent
+  // stopped (reports D5: `next_prompt_by_why_ms`, `not_known_by_reason_ms`,
+  // `idle_by_why_ms` on gaps and bursts, `waits[].why`, and the sub-causes
+  // `waiting:next_prompt:<why>` in rollups/causes.json). The keys, in the
+  // order the page stacks them: the classes an agent-side kaizen can act on
+  // first, then the human gates, then the time whose why is not known. The
+  // page groups the gates; the data keeps them apart.
+  const WHY_KEYS = ["stopped_short", "question", "error_limit", "interrupted", "decision", "approval", "acceptance", "not_known"];
+  const WHY_CLASSES = WHY_KEYS.filter((k) => k !== "not_known");
+  const WHY_GATES = ["decision", "approval", "acceptance"];
+  const isWhy = (k) => WHY_KEYS.includes(k);
+  function whyGroup(k) {
+    if (WHY_GATES.includes(k)) return "gate";
+    return k === "not_known" || !isWhy(k) ? "not_known" : "actionable";
+  }
+  // A class's name on a legend, a bar or a cause page.
+  const WHY_NAMES = {
+    stopped_short: "Stopped short",
+    question: "Asked a question",
+    error_limit: "Error or limit",
+    interrupted: "Interrupted by the operator",
+    decision: "Human gate: decision",
+    approval: "Human gate: approval",
+    acceptance: "Human gate: acceptance",
+    not_known: "Why not known",
+  };
+  function whyName(k) {
+    return WHY_NAMES[k] || WHY_NAMES.not_known;
+  }
+  // The triangle's words: "waiting for the next prompt: agent stopped short".
+  const WHY_AGENT = {
+    stopped_short: "agent stopped short",
+    question: "agent asked a question",
+    error_limit: "agent hit an error or a limit",
+    interrupted: "operator interrupted the agent",
+    decision: "agent asked for a decision",
+    approval: "agent asked for approval",
+    acceptance: "agent asked for acceptance",
+  };
+  // The lede's words: "after it stopped short of what it could have done".
+  const WHY_AFTER = {
+    stopped_short: "after it stopped short of what it could have done",
+    question: "after it asked for information only the operator has",
+    error_limit: "after its turn ended on an error or a limit",
+    interrupted: "after the operator interrupted it",
+    decision: "after it asked for a decision only the operator can make",
+    approval: "after it asked permission for its next action",
+    acceptance: "after it reported finished work for acceptance",
+  };
+  // Why a why is not known, in a few words (Desk's NOT_KNOWN_REASONS), for
+  // labels; format.js REASON_TEXT holds the full sentence for each.
+  const WHY_REASON_KEYS = ["not_labeled", "could_not_tell", "stop_not_recorded", "outside_own_share", "not_in_published_facts"];
+  const WHY_REASON_WORDS = {
+    not_labeled: "not labeled yet",
+    could_not_tell: "the evaluator could not tell",
+    stop_not_recorded: "the stop was not recorded",
+    outside_own_share: "outside this task's own part of the session",
+    not_in_published_facts: "older facts record no stop",
+    stop_partly_classified: "why is not known for part of this waiting",
+  };
+  function whyReasonWords(r) {
+    return WHY_REASON_WORDS[r] || String(r).replace(/_/g, " ");
+  }
+  function whyTriangle(why, reasons) {
+    if (why && why !== "not_known" && WHY_AGENT[why]) return `waiting for the next prompt: ${WHY_AGENT[why]}`;
+    const rs = Array.isArray(reasons) && reasons.length ? reasons.map(whyReasonWords).join("; ") : "its reason not recorded";
+    return `waiting for the next prompt: why not known (${rs})`;
+  }
+  // Who decided a wait's why (Desk's why_source), and its confidence; a
+  // low-confidence label keeps its class and is marked not sound, as the
+  // waste table does.
+  const WHY_SOURCE_WORDS = { rule: "a rule, from how the turn ended", evaluator: "the evaluator's label", none: "no one: it is not classified" };
+  function whySourceWords(src) {
+    return WHY_SOURCE_WORDS[src] || "not recorded";
+  }
+  function confidenceText(c) {
+    if (typeof c !== "string" || !c) return "not stated";
+    return c === "low" ? "low (not sound)" : c;
+  }
+
+  // A class figure with its bound (addendum §4, Bounds): "at least X (up
+  // to Y)" while some time has no known why (Y is X plus that time), else
+  // X alone. `fmt` turns milliseconds into words.
+  function boundedWords(ms, ceilingMs, fmt) {
+    const f = typeof fmt === "function" ? fmt : durationWords;
+    return typeof ceilingMs === "number" && ceilingMs - ms > SECOND ? `at least ${f(ms)} (up to ${f(ceilingMs)})` : f(ms);
+  }
+
+  // "at least ", "at most ", "about " or "" for a stated figure.
+  function qualOf(n) {
+    if (!n || n.state !== "partial") return "";
+    return n.bound === "upper" ? "at most " : n.bound === null ? "about " : "at least ";
+  }
+
+  // A task row's waiting for the next prompt, split by why (Desk D5):
+  //   { state: "absent", total }        Desk does not publish the split
+  //   { state: "unavailable", reasons } the waiting is not measured
+  //   { state: "mismatch", total, sum } the parts do not add up to it
+  //   { state: "ok", total, parts, top, not_known, classified_ms, template }
+  // `parts` are the keys with time, in WHY_KEYS order, each { why, ms, n }
+  // with `n` its stated figure; `top` the classes by time, largest first;
+  // `not_known` { ms, n, reasons: [{ reason, ms }] }. `template` picks the
+  // lede: "all" classified, "partly", or none classified because
+  // "not_labeled", "not_recorded" or otherwise "not_known"; "none" when
+  // there is no such waiting.
+  function nextPromptWhy(row) {
+    const total = row && row.waiting_by_waited_on_ms ? stated(row.waiting_by_waited_on_ms.next_prompt) : { state: "unavailable", reasons: ["not_recorded"] };
+    const src = row && row.next_prompt_by_why_ms;
+    if (!src || typeof src !== "object" || Array.isArray(src)) return { state: "absent", total };
+    if (total.state === "unavailable") return { state: "unavailable", total, reasons: total.reasons };
+    const figs = WHY_KEYS.map((why) => ({ why, n: stated(src[why]) }));
+    const missing = figs.filter((x) => x.n.state === "unavailable");
+    if (missing.length) return { state: "unavailable", total, reasons: [...new Set(missing.flatMap((x) => x.n.reasons))] };
+    const sum = figs.reduce((a, x) => a + x.n.value, 0);
+    if (Math.abs(sum - total.value) > SECOND) return { state: "mismatch", total, sum };
+    const parts = figs.filter((x) => x.n.value > 0).map((x) => ({ why: x.why, ms: x.n.value, n: x.n }));
+    const top = parts.filter((x) => x.why !== "not_known").sort((a, b) => b.ms - a.ms || WHY_KEYS.indexOf(a.why) - WHY_KEYS.indexOf(b.why));
+    const nk = figs.find((x) => x.why === "not_known").n;
+    const byReason = row.not_known_by_reason_ms && typeof row.not_known_by_reason_ms === "object" ? row.not_known_by_reason_ms : {};
+    const reasons = Object.entries(byReason)
+      .map(([reason, x]) => ({ reason, ms: val(x) }))
+      .filter((x) => x.ms !== null && x.ms > 0)
+      .sort((a, b) => b.ms - a.ms || WHY_REASON_KEYS.indexOf(a.reason) - WHY_REASON_KEYS.indexOf(b.reason));
+    const classified = top.reduce((a, x) => a + x.ms, 0);
+    let template = "partly";
+    if (total.value <= 0 || sum <= 0) template = "none";
+    else if (nk.value <= 0) template = "all";
+    else if (classified <= 0) {
+      const rs = reasons.map((x) => x.reason);
+      if (rs.length && rs.every((r) => r === "not_labeled")) template = "not_labeled";
+      else if (rs.length && rs.every((r) => r === "stop_not_recorded" || r === "not_in_published_facts")) template = "not_recorded";
+      else template = "not_known";
+    }
+    return { state: "ok", total, parts, top, not_known: { ms: nk.value, n: nk, reasons }, classified_ms: classified, template };
+  }
+
+  // The not-known reasons in words: one reason alone, or each with its time.
+  function notKnownWords(nk) {
+    const rs = (nk && nk.reasons) || [];
+    if (!rs.length) return "its reason not recorded";
+    if (rs.length === 1) return whyReasonWords(rs[0].reason);
+    return rs.map((x) => `${whyReasonWords(x.reason)}, ${durationWords(x.ms)}`).join("; ");
+  }
+
+  // The lede's sentence on why the agent stopped (addendum §4), one
+  // template per state, as parts (strings and number tokens). `nextMs` is
+  // the task's waiting for the next prompt as the lede counts it (for the
+  // "not known yet" sentence when Desk publishes no split).
+  function whyLedeParts(split, nextMs, tok) {
+    const t = tok || ((key, text, extra) => ({ key, text, ...(extra || {}) }));
+    const s = split || { state: "absent" };
+    if (s.state === "absent") {
+      if (!(nextMs > 0)) return [];
+      return [` Why the agent stopped before the ${durationWords(nextMs)} it waited for the operator's next prompt is not known yet: Desk does not publish it for this task, so that waiting is not split.`];
+    }
+    if (s.state === "mismatch") return [` Why the agent stopped is published for this task, but its parts do not add up to its ${durationWords(s.total.value)} of waiting for the next prompt, so no split is shown.`];
+    if (s.state !== "ok" || s.template === "none") return [];
+    const q = qualOf(s.total);
+    const totalW = `${q}${durationWords(s.total.value)}`;
+    if (s.template === "not_labeled") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known yet: the evaluator has not labeled those stops.`];
+    if (s.template === "not_recorded") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known: ${notKnownWords(s.not_known)}.`];
+    if (s.template === "not_known") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known (why: ${notKnownWords(s.not_known)}).`];
+    const out = [` Of the ${totalW} it waited for the operator's next prompt, `];
+    const shown = s.top.slice(0, 3);
+    const rest = s.top.slice(3);
+    // While some of it has no known why, each class is at least its figure
+    // and at most its figure plus the time not known (addendum §4, Bounds).
+    const nkMs = s.not_known.ms > 0 ? s.not_known.ms : 0;
+    const fig = (ms, n) => (nkMs > 0 ? boundedWords(ms, ms + nkMs, durationWords) : `${qualOf(n)}${durationWords(ms)}`);
+    shown.forEach((x, i) => {
+      const qq = nkMs > 0 ? "at least " : qualOf(x.n);
+      if (i > 0) out.push(i === shown.length - 1 && !rest.length && s.template === "all" ? ", and " : ", ");
+      out.push(t("why", fig(x.ms, x.n), { why: x.why, q: qq }), ` ${i === 0 ? "came " : ""}${WHY_AFTER[x.why]}`);
+    });
+    if (rest.length) {
+      const ms = rest.reduce((a, x) => a + x.ms, 0);
+      out.push(`${s.template === "all" ? ", and " : ", "}${fig(ms, rest[0].n)} after ${rest.length} other kind${rest.length === 1 ? "" : "s"} of stop`);
+    }
+    if (s.template === "partly") out.push(", and ", t("why", `${qualOf(s.not_known.n)}${durationWords(s.not_known.ms)}`, { why: "not_known" }), ` is not known (why: ${notKnownWords(s.not_known)})`);
+    out.push(".");
+    return out;
+  }
 
   const isMs = (x) => typeof x === "number" && Number.isFinite(x);
 
@@ -1532,7 +1848,10 @@
 
   // What a group of prompts counts, in a few words and in full.
   function promptGroupWords(marks, origin) {
-    if (marks.length === 1) return { short: `prompt ${marks[0].n}`, label: `Operator prompt ${marks[0].n}, ${clockAt(marks[0].ms, origin)}` };
+    if (marks.length === 1) {
+      const why = marks[0].ref && marks[0].ref.why && marks[0].ref.why !== "not_known" && WHY_NAMES[marks[0].ref.why] ? `; why the agent had stopped: ${whyName(marks[0].ref.why).toLowerCase()}` : "";
+      return { short: `prompt ${marks[0].n}`, label: `Operator prompt ${marks[0].n}, ${clockAt(marks[0].ms, origin)}${why}` };
+    }
     const ns = marks.map((x) => x.n);
     const run = ns.every((n, i) => i === 0 || n === ns[i - 1] + 1);
     const which = ns.length === 2 ? `prompts ${ns[0]} and ${ns[1]}` : run ? `prompts ${ns[0]} to ${ns[ns.length - 1]}` : `prompts ${ns.slice(0, -1).join(", ")} and ${ns[ns.length - 1]}`;
@@ -1648,9 +1967,17 @@
   const NOT_KNOWN_WHY = "not known yet: Desk does not publish why the agent stopped";
   // The legend's sentence about the prompt marks' color.
   function whyLegend(clock) {
-    const known = ((clock && clock.prompts) || []).some((p) => p.why && p.why !== "not_known");
-    if (!known) return `Why the agent stopped is ${NOT_KNOWN_WHY}, so every prompt is drawn in one color.`;
-    return "A prompt drawn in the waiting color has a recorded why (its evidence names it); a gray one's why is not known.";
+    const ps = (clock && clock.prompts) || [];
+    const known = ps.some((p) => p.why && p.why !== "not_known");
+    if (!known && !ps.some((p) => p.wait && typeof p.wait.why === "string")) return `Why the agent stopped is ${NOT_KNOWN_WHY}, so every prompt is drawn in one color.`;
+    if (!known) return "Why the agent stopped is not known for any prompt here, so every prompt is drawn in one color; each prompt's evidence says why it is not known.";
+    return "Where a mark holds one prompt, it takes the color of why the agent had stopped before it, as in the key below; a dark gray one's why is not known, and a count badge holds several prompts. Each prompt's evidence and the Handoffs table name its why in words.";
+  }
+  // The classes the prompts of a clock carry, in WHY_KEYS order, for the
+  // map's key.
+  function whyKeysIn(clock) {
+    const seen = new Set(((clock && clock.prompts) || []).map((p) => (p.why && isWhy(p.why) ? p.why : "not_known")));
+    return WHY_KEYS.filter((k) => seen.has(k));
   }
 
   // The pull requests that first appeared in one map item: the same marks
@@ -1717,13 +2044,13 @@
     if (mark.why && mark.why !== "not_known" && WHY_WORDS[mark.why]) {
       const w = mark.wait || {};
       const src = w.why_source === "rule" ? "by rule, from how the turn ended" : w.why_source === "evaluator" ? "the evaluator's label" : null;
-      const conf = typeof w.confidence === "string" ? `${w.confidence} confidence` : null;
+      const conf = typeof w.confidence === "string" ? `${confidenceText(w.confidence)} confidence` : null;
       const extra = [src, conf].filter(Boolean).join(", ");
       return `${WHY_WORDS[mark.why]}${extra ? ` (${extra})` : ""}`;
     }
     if (!mark.wait) return NOT_KNOWN_WHY;
     const rs = Array.isArray(mark.wait.reasons) ? mark.wait.reasons : [];
-    return rs.length ? `not known (${rs.map(words).join("; ")})` : "not known";
+    return rs.length ? `not known (${rs.map((r) => (WHY_REASON_WORDS[r] ? whyReasonWords(r) : words(r))).join("; ")})` : "not known";
   }
 
   // How the agent's turn ended before a prompt (Desk's stop facts), or null.
@@ -1973,8 +2300,10 @@
         select: `bursts=${r(it.burst_range)}`,
       };
     }
+    // Where Desk splits its next-prompt time, the prompt names why the agent stopped.
+    const whyMix = it.why_by && whysOf(it.why_by).length ? `; why the agent stopped: ${whysOf(it.why_by).sort((a, b) => it.why_by[b] - it.why_by[a] || WHY_KEYS.indexOf(a) - WHY_KEYS.indexOf(b)).map((k) => `${whyName(k).toLowerCase()}, ${durationWords(it.why_by[k])}`).join("; ")}` : "";
     return {
-      what: `the wait ${c.model ? waitPlace(c.model, it) : ""} (gap${it.gap_range[0] === it.gap_range[1] ? "" : "s"} ${r(it.gap_range).replace("-", "–")}${total ? ` of ${total.gaps}` : ""}; waited on: ${it.waited_on === "mixed" ? "several causes" : waitedOnWords(it.waited_on, "short")})`.replace("wait  (", "wait ("),
+      what: `the wait ${c.model ? waitPlace(c.model, it) : ""} (gap${it.gap_range[0] === it.gap_range[1] ? "" : "s"} ${r(it.gap_range).replace("-", "–")}${total ? ` of ${total.gaps}` : ""}; waited on: ${it.waited_on === "mixed" ? "several causes" : waitedOnWords(it.waited_on, "short")}${whyMix})`.replace("wait  (", "wait ("),
       where: `It lasted ${durationWords(it.duration_ms)}, ${it.end_ms - it.start_ms < 2 * MINUTE ? `starting at minute ${Math.round((it.start_ms - (typeof c.origin_ms === "number" ? c.origin_ms : 0)) / MINUTE)} after the task's start` : minuteSpan(it.start_ms, it.end_ms, c.origin_ms)}`,
       locator: idx("gaps", it.gap_range),
       select: `gaps=${r(it.gap_range)}`,
@@ -2313,6 +2642,9 @@
         // a box's inner causes from these, and the stated envelopes would
         // double the file for no figure the page shows.
         idle_by_waited_on_ms: slimCauses(b.idle_by_waited_on_ms),
+        // Its next-prompt idle time by why the agent stopped (Desk D5), the
+        // same way; absent until Desk publishes it.
+        ...(b.idle_by_why_ms && typeof b.idle_by_why_ms === "object" ? { idle_by_why_ms: slimCauses(b.idle_by_why_ms) } : {}),
         sessions: arr(b.sessions),
         agents: b.agents,
         tool_calls: b.tool_calls,
@@ -2326,7 +2658,9 @@
       // A gap keeps Desk's per-gap split when Desk states one.
       gaps: items(t.gaps).map((g) => {
         const by = slimCauses(g.idle_by_waited_on_ms);
-        return by && Object.keys(by).length ? { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on, idle_by_waited_on_ms: by } : { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on };
+        const out = by && Object.keys(by).length ? { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on, idle_by_waited_on_ms: by } : { start_ms: g.start_ms, end_ms: g.end_ms, waited_on: g.waited_on };
+        if (g.idle_by_why_ms && typeof g.idle_by_why_ms === "object") out.idle_by_why_ms = slimCauses(g.idle_by_why_ms);
+        return out;
       }),
       sessions: arr(t.sessions).map((x) => ({ id: x.id, host: x.host, offset_ms: x.offset_ms, end_ms: x.end_ms })),
       agents: arr(t.agents).map((a) => ({ session: a.session, n: a.n, parent: a.parent })),
@@ -2368,6 +2702,7 @@
     waitPlace,
     promptName,
     promptItem,
+    boundedWords,
     sumStated,
     statedText,
     waitedOnWords,
@@ -2414,6 +2749,25 @@
     handoffRows,
     NOT_KNOWN_WHY,
     whyLegend,
+    whyKeysIn,
+    WHY_KEYS,
+    WHY_CLASSES,
+    WHY_GATES,
+    WHY_REASON_KEYS,
+    WHY_AFTER,
+    WHY_WORDS,
+    whyGroup,
+    whyName,
+    whyTriangle,
+    whyReasonWords,
+    whySourceWords,
+    confidenceText,
+    stopWords,
+    qualOf,
+    nextPromptWhy,
+    whyLedeParts,
+    whyRows,
+    whyBy,
     groupWhy,
     boxPrCount,
     clockListWords,
