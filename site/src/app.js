@@ -1915,6 +1915,9 @@
     line("sum-value", "of which value-adding", fig("value", row && row.value_in_working_ms), "as the evaluator labeled it");
     line("sum-waiting", "Waiting", idle && idle.state !== "unavailable" && words.has("waiting") ? document.createTextNode(words.get("waiting")) : el("span", "num num-unavailable", "no data"), "idle: lead time − working time");
     line("sum-fe", "Flow efficiency", fig("fe", row && row.flow_efficiency), "working time ÷ lead time");
+    // The operator's own time: the Store's attention estimate, for this task.
+    const op = W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore);
+    line("sum-attention", "Operator attention", op.attention ? document.createTextNode(op.attention) : el("span", "num num-unavailable", "no data"), "reading and answering, estimated");
     if (phone) root.appendChild(sum);
     else {
       // The summary sits beside the boxes and adds no height to any row: it
@@ -2647,6 +2650,8 @@
         if (old) old.remove();
         vt.appendChild(el("span", "vsm-finish", ` · ${finishSentence(j, "short")}`));
       }
+      // The operator's own time on this task (A1 I2).
+      ledeEl.appendChild(el("span", "lede-operator", ` ${W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore).text}`));
       tokens.push(...ledeEl.querySelectorAll(".lede-num"));
     });
     safely("time-went", () => {

@@ -160,3 +160,34 @@ test("I6: a figure with no direction never names a bound; it says some reasons p
   assert.doesNotMatch(words, /on or before|on or after/)
   assert.match(words, /not a bound/)
 })
+
+// ------------------------------------------------------------------ I2
+
+test("I2: a task page states the operator's own time: the Store's attention estimate for this one task, and the prompts it rests on", () => {
+  const turns = [
+    ...Array(7).fill({ prompt_class: "s", output_class: "l" }),
+    ...Array(4).fill({ prompt_class: "m", output_class: "m" }),
+    { prompt_class: "xs", output_class: "xl" },
+    { prompt_class: "xs", output_class: "none" },
+  ]
+  // 825084c9 as data.json gives it: 2,209,789 ms over 13 turns, measured.
+  const o = W.operatorTime({ attention_ms: measured(2209789), human_turns: measured(13) }, turns, { state: "measured", reasons: [] }, F.reasonText)
+  assert.equal(o.state, "ok")
+  assert.equal(o.attention, "37 minutes")
+  assert.equal(o.text, "The operator sent 13 prompts (7 short, 4 medium and 2 very short) and read the agent's output before 12 of them (7 long, 4 medium and 1 very long). The store's estimate of the operator's attention on this task, their reading and answering time, is 37 minutes; it is the same estimate the Store page averages over delivered tasks.")
+  // Waiting is never called attention.
+  assert.doesNotMatch(o.text, /wait/i)
+  // A partial estimate keeps its bound and reason; one with no direction names no bound.
+  const p = W.operatorTime({ attention_ms: partial(769527, ["host_records_partly"], "lower"), human_turns: partial(3, ["host_records_partly"], "lower") }, [], { state: "partial", reasons: ["host_records_partly"] }, F.reasonText)
+  assert.equal(p.attention, "at least 13 minutes")
+  assert.match(p.text, /^The operator sent at least 3 prompts\. The store's estimate of the operator's attention on this task, their reading and answering time, is at least 13 minutes \(partial: the host records only part of this, so the figure is a lower bound\);/)
+  // No estimate: says so, with the reason, and never a zero.
+  const u = W.operatorTime({ attention_ms: unavailable(["not_recorded"]), human_turns: unavailable(["not_recorded"]) }, [], null, F.reasonText)
+  assert.equal(u.state, "none")
+  assert.equal(u.attention, null)
+  assert.equal(u.text, "The store has no estimate of the operator's attention on this task, because the store has no record of this; the prompts the operator sent are not recorded either.")
+  // The page shows it in the lede and in the map's summary box.
+  const app = read("site/src/app.js")
+  assert.match(app, /W\.operatorTime\(/)
+  assert.match(app, /line\("sum-attention", "Operator attention"/)
+})

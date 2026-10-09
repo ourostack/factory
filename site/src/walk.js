@@ -1413,6 +1413,52 @@
     return SIZE_WORDS[c] || "not recorded";
   }
 
+  // The operator's own time on one task, for its page: the Store's
+  // attention estimate (Desk's per-task estimate of the operator's reading
+  // and answering time, data.json `jobs[].attention_ms`, the figure the
+  // Store page averages over delivered tasks) and the prompts it rests on
+  // (`jobs[].human_turns`, with the map's per-prompt size classes and the
+  // size of the output the operator read before each). Time the task spent
+  // waiting for the next prompt is never called attention. `words` turns a
+  // reason code into words; `core` does the same without the direction a
+  // reason claims, for a figure whose direction is not known. Returns
+  // { state: "ok" | "none", attention, text }.
+  const SIZE_SHORT = { xs: "very short", s: "short", m: "medium", l: "long", xl: "very long" };
+  const SIZE_ORDER = ["xs", "s", "m", "l", "xl"];
+  function sizeList(classes) {
+    const n = new Map();
+    for (const c of classes) if (SIZE_SHORT[c]) n.set(c, (n.get(c) || 0) + 1);
+    const parts = [...n].sort((a, b) => b[1] - a[1] || SIZE_ORDER.indexOf(a[0]) - SIZE_ORDER.indexOf(b[0])).map(([c, k]) => `${k} ${SIZE_SHORT[c]}`);
+    return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0] || "";
+  }
+  function operatorTime(job, turns, turnsState, words, core) {
+    const say = typeof words === "function" ? words : (c) => String(c).replace(/_/g, " ");
+    const plain = typeof core === "function" ? core : say;
+    const list = (Array.isArray(turns) ? turns : []).filter((t) => t && typeof t === "object");
+    const why = (x, fn) => (x.reasons.length ? x.reasons.map(fn).join("; ") : say("not_recorded"));
+    const dir = (x) => (x.state !== "partial" ? "" : x.bound === "lower" ? "at least " : x.bound === "upper" ? "at most " : "about ");
+    const count = stated(job && job.human_turns);
+    let promptText;
+    if (count.state === "unavailable") promptText = null;
+    else {
+      const n = count.value;
+      const sizes = list.length === n ? sizeList(list.map((t) => t.prompt_class)) : "";
+      const read = list.length === n ? list.filter((t) => SIZE_SHORT[t.output_class]) : [];
+      const outSizes = sizeList(read.map((t) => t.output_class));
+      promptText = `The operator sent ${dir(count)}${n} prompt${n === 1 ? "" : "s"}${sizes ? ` (${sizes})` : ""}${read.length ? ` and read the agent's output before ${read.length} of them (${outSizes})` : ""}.`;
+    }
+    const att = stated(job && job.attention_ms);
+    if (att.state === "unavailable") {
+      const tail = promptText ? ` ${promptText}` : "; the prompts the operator sent are not recorded either.";
+      return { state: "none", attention: null, text: `The store has no estimate of the operator's attention on this task, because ${why(att, plain)}${promptText ? "." : ""}${tail}` };
+    }
+    const value = `${dir(att)}${durationWords(att.value)}`;
+    const known = att.state === "partial" && (att.bound === "lower" || att.bound === "upper");
+    const note = att.state === "partial" ? ` (partial: ${known ? why(att, say) : `${why(att, plain)}; which way the true figure lies is not known`})` : "";
+    const head = promptText ? `${promptText} ` : "";
+    return { state: "ok", attention: value, text: `${head}The store's estimate of the operator's attention on this task, their reading and answering time, is ${value}${note}; it is the same estimate the Store page averages over delivered tasks.` };
+  }
+
   // Why the agent stopped before a prompt (addendum §4's classes).
   const WHY_WORDS = {
     decision: "it needed a decision only the operator can make",
@@ -2777,6 +2823,7 @@
     operatorLane,
     prLane,
     sizeWords,
+    operatorTime,
     ANCHOR_SPREAD_MS,
     ANCHOR_PLACE_LIMIT_MS,
     prKey,
