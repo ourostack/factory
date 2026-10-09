@@ -257,10 +257,10 @@ test("with no fold, every burst has its own box and every gap its own triangle; 
   const model = W.mapModel(map, { maxBoxes: 10 })
   assert.equal(model.fold_ms, 0)
   assert.equal(model.items.filter((x) => x.type === "box").length, 4)
-  assert.match(W.foldWords(model), /Every work burst has its own box/)
+  assert.match(W.foldWords(model), /every work burst has its own box/)
   const folded = W.mapModel(synthetic(40, 9), { maxBoxes: 3 })
   assert.ok(folded.fold_ms > 0)
-  assert.match(W.foldWords(folded), /^Waits shorter than .+ are folded into the box beside them/)
+  assert.match(W.foldWords(folded), /^At this width the map folds waits shorter than .+ into the box beside them/)
 })
 
 test("the data box keeps the design's order, the rework loop counts defect stretches, and sessions read k of n", () => {

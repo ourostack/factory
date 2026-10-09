@@ -879,9 +879,10 @@
 
   // The fold, in one sentence for the map's caption.
   function foldWords(model) {
-    if (!model.fold_ms) return "Every work burst has its own box and every wait its own triangle.";
-    if (model.fold_ms === Infinity) return "All work is folded into one box, so the map stays legible; its data box says how many bursts it holds.";
-    return `Waits shorter than ${durationWords(model.fold_ms)} are folded into the box beside them, so the map stays legible; each box says how many bursts it holds, and the ladder shows the folded waits beside its working time.`;
+    // The same words in every view, naming the view's own threshold (A1 M4).
+    if (!model.fold_ms) return "At this width the map folds no wait: every work burst has its own box and every wait its own triangle.";
+    if (model.fold_ms === Infinity) return "At this width the map folds every wait into one box, so it stays legible; its data box says how many bursts it holds. A wider screen may show more boxes.";
+    return `At this width the map folds waits shorter than ${durationWords(model.fold_ms)} into the box beside them, so it stays legible; each box says how many bursts it holds, and the ladder shows the folded waits beside its working time. A wider or narrower screen may fold a different threshold.`;
   }
 
   // The timeline ladder: one segment per item. A box is low (working) with
