@@ -38,3 +38,10 @@ test("the README's No content bullet says stop.asks is only a yes/no bit, and th
   assert.match(section, /`stop\.asks`, a yes\/no bit/)
   assert.match(section, /UTC day each task finished and the times of the operator's prompts/)
 })
+
+test("the README states the unavailable limit the store's mirror accepts: every field with every reason once", async () => {
+  const { PUBLISHED_UNAVAILABLE_FIELDS, UNAVAILABLE_REASONS, UNAVAILABLE_LIMIT } = await import("../lib/corrections.mjs")
+  const stated = /(\d+) fields by (\d+) reasons today, so (\d+) entries/u.exec(README)
+  assert.ok(stated, "the README states the unavailable limit")
+  assert.deepEqual(stated.slice(1).map(Number), [PUBLISHED_UNAVAILABLE_FIELDS.length, UNAVAILABLE_REASONS.length, UNAVAILABLE_LIMIT])
+})
