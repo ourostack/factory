@@ -86,7 +86,7 @@
   // began) is a lower bound.
   function totalBound(n) {
     const b = W.boundOf(n);
-    if (b === "window") return has(n, "card_dates_shorter_than_work") ? "lower" : null;
+    if (b === "window") return has(n, "card_dates_shorter_than_work") || has(n, "finish_time_not_known") ? "lower" : null;
     return b;
   }
   function totalWords(n, open) {

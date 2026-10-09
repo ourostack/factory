@@ -13,8 +13,10 @@
 //   upper             always an upper bound
 //   unknown           no direction
 //   lower_if_censored a lower bound only when every reason is the job still being
-//                     open or the task card's dates being shorter than the work
-//                     its sessions recorded (Desk raises the lead time to that span)
+//                     open, the task card's dates being shorter than the work
+//                     its sessions recorded (Desk raises the lead time to that span),
+//                     or no record giving the finish time (Desk runs the lead time
+//                     to the end of the recorded work)
 //   from_reasons      read from the reasons (below)
 //   upper_if_awaiting an upper bound when every reason is a sign-off still
 //                     awaited, else unknown
@@ -42,13 +44,15 @@
 // session whose start was lost can only make it shorter: an upper bound.
 
 const FROM = "from_reasons";
-const LEAD_FLOORS = new Set(["censored", "card_dates_shorter_than_work"]);
+const LEAD_FLOORS = new Set(["censored", "card_dates_shorter_than_work", "finish_time_not_known"]);
 const AWAITING = new Set(["awaiting_signoff"]);
 // A finish day taken from a record written after the task finished is at or
 // after the true day.
 const FINISH_LATER_RECORD = new Set(["finish_from_card_update", "finish_from_labels_landing", "finish_from_last_work"]);
-// The anchor rests on a pull request nothing confirms: it may predate the task, so the true finish is at or after the day shown.
-const FINISH_EARLIER_RECORD = new Set(["anchor_unconfirmed"]);
+// The anchor rests on a pull request nothing confirms: it may predate the task, so the true finish is at or after the day shown. Desk's
+// `finish_before_last_work`: the task's recorded work went on past the day, so it finished then or later (with a card update's "at most",
+// the two pull both ways).
+const FINISH_EARLIER_RECORD = new Set(["anchor_unconfirmed", "finish_before_last_work"]);
 const FINISH_NO_DIRECTION = new Set(["lead_window_partial", "anchor_after_labels"]);
 // Disagreeing pull requests have no direction of their own unless the anchor
 // is also unconfirmed (a timed anchor, whose samples are all at or before

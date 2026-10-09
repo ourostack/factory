@@ -114,6 +114,33 @@ test("rung 1: a day from the card's last update is an upper bound, and a reopene
   assert.deepEqual([k.basis, k.bound], ["desk_transition", "unknown"])
 })
 
+// Desk's guard (ourostack/desk#271): a day the facts prove is earlier than the day the task's work ended. Task 825084c9 (finding B1)
+// published 29 Sep from a card update while its work ran to 2 Oct; the site must not say "on or before" it.
+test("rung 1: a Desk day guarded with finish_before_last_work is never 'on or before'", () => {
+  const b1 = { state: "partial", value: "2026-09-29", basis: "card_updated", reasons: ["finish_before_last_work", "finish_from_card_update"], bound: null, bound_reason: "bound_reasons_conflict" }
+  const f = resolveFinishDate({ ...base, desk: b1 })
+  assert.deepEqual(f, { state: "partial", value: "2026-09-29", reasons: ["finish_before_last_work", "finish_from_card_update"], basis: "desk_card_updated", bound: "unknown" })
+  assert.equal(forRollupFile(f).bound, null)
+  assert.equal(forRollupFile(f).bound_reason, "bound_reasons_conflict")
+  // Without Desk's bound the store reaches the same answer from the reasons alone.
+  const { bound: _bound, bound_reason: _why, ...bare } = b1
+  assert.equal(resolveFinishDate({ ...base, desk: bare }).bound, "unknown")
+  // A guarded day from a recorded move to done is "on or after".
+  const moved = resolveFinishDate({ ...base, desk: { state: "partial", value: "2026-10-05", basis: "transition", reasons: ["finish_before_last_work"], bound: "lower" } })
+  assert.deepEqual(moved, { state: "partial", value: "2026-10-05", reasons: ["finish_before_last_work"], basis: "desk_transition", bound: "lower" })
+  assert.equal(resolveFinishDate({ ...base, desk: { state: "partial", value: "2026-10-05", basis: "transition", reasons: ["finish_before_last_work"] } }).bound, "lower")
+})
+
+test("rung 2: a lead window that runs to the end of the recorded work because no record gives the finish time ends on or after the finish", () => {
+  const anchor = { state: "measured", reasons: [], value_ms: T0 }
+  const f = resolveFinishDate({ ...base, leadWindow: win(2 * DAY, "partial", ["finish_time_not_known"]), anchor })
+  assert.deepEqual(f, { state: "partial", value: "2026-10-03", reasons: ["finish_from_last_work"], basis: "pr_anchor", bound: "upper" })
+  const g = resolveFinishDate({ ...base, leadWindow: win(2 * DAY, "partial", ["card_dates_shorter_than_work", "finish_time_not_known"]), anchor })
+  assert.deepEqual([g.bound, g.reasons], ["upper", ["finish_from_last_work"]])
+  // The lead time itself is at least the recorded work.
+  assert.equal(direct({ state: "partial", value: 5, reasons: ["finish_time_not_known"] }, "lead_time_ms").bound, "lower")
+})
+
 test("rung 1 is skipped when Desk gives no usable day: unavailable, malformed, in the future or before 2025", () => {
   const labelsDay = "2026-10-06"
   for (const desk of [

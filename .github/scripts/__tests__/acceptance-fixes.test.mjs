@@ -38,7 +38,7 @@ function job(id, status, order, opts = {}) {
 // ------------------------------------------------------------------ B1
 
 test("B1: a finish day whose recorded finish is before the task's last work is no bound, and never reads on or before", () => {
-  assert.equal(F.reasonText("finish_before_last_work"), "the recorded finish time is earlier than the task's last work, so it is not a bound")
+  assert.equal(F.reasonText("finish_before_last_work"), "the task's recorded work went on past this day, so it may have finished later and this day may not be a bound")
   const fd = { state: "partial", value: "2026-09-29", basis: "desk_card_updated", bound: null, reasons: ["finish_before_last_work"] }
   const f = F.finishDay(fd, { year: 2026 })
   assert.equal(f.kind, "about")
@@ -46,7 +46,7 @@ test("B1: a finish day whose recorded finish is before the task's last work is n
   assert.match(f.words, /29 Sep/)
   assert.equal(f.short, "~29 Sep")
   // The reason is said with the day, wherever the day is a sentence.
-  assert.match(F.finishWords(job("x", "done", 1, { date: fd }), [job("x", "done", 1, { date: fd })]), /not a bound/)
+  assert.match(F.finishWords(job("x", "done", 1, { date: fd }), [job("x", "done", 1, { date: fd })]), /may not be a bound/)
 })
 
 // ------------------------------------------------------------------ B2
@@ -158,7 +158,7 @@ test("I6: a figure with no direction never names a bound; it says some reasons p
   const fd = { state: "partial", value: "2026-10-02", basis: "desk_card_updated", bound: null, reasons: ["finish_from_card_update", "finish_before_last_work"] }
   const words = F.finishWords({ id: "x", status: "done", finish_order: measured(1), finish_basis: "labels", finish_date: fd }, [], { year: 2026 })
   assert.doesNotMatch(words, /on or before|on or after/)
-  assert.match(words, /not a bound/)
+  assert.match(words, /may not be a bound/)
 })
 
 // ------------------------------------------------------------------ I2
