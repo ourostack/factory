@@ -96,6 +96,8 @@ function fromDesk(desk, today) {
   return out;
 }
 
+const LAST_WORK_ENDS = new Set(["card_dates_shorter_than_work", "finish_time_not_known"]);
+
 // Rung 2. The shared anchor (prAnchor's result) plus the end of the lead window.
 function fromAnchor(anchor, leadWindow, today) {
   if (!anchor || (anchor.state !== "measured" && anchor.state !== "partial") || !Number.isFinite(anchor.value_ms)) return null;
@@ -110,10 +112,11 @@ function fromAnchor(anchor, leadWindow, today) {
   const reasons = [...(anchor.reasons || [])];
   if (anchor.state === "partial" && anchor.bound === "lower" && !reasons.includes("anchor_unconfirmed")) reasons.push("anchor_unconfirmed");
   // A window that is partial only because the card's dates are shorter than the
-  // work moves its start; its end is the end of the last recorded work, which is
-  // on or after the card's move to done. Any other reason may move the end.
+  // work (its start moves) or because no record gives the finish time (Desk
+  // runs it to the end of the work) ends at the end of the last recorded work,
+  // which is on or after the card's move to done. Any other reason may move the end.
   if (leadWindow.state === "partial") {
-    const only = Array.isArray(leadWindow.reasons) && leadWindow.reasons.length > 0 && leadWindow.reasons.every((r) => r === "card_dates_shorter_than_work");
+    const only = Array.isArray(leadWindow.reasons) && leadWindow.reasons.length > 0 && leadWindow.reasons.every((r) => LAST_WORK_ENDS.has(r));
     reasons.push(only ? "finish_from_last_work" : "lead_window_partial");
   }
   return stated(day, reasons, "pr_anchor");
