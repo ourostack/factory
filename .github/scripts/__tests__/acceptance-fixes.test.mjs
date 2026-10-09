@@ -191,3 +191,24 @@ test("I2: a task page states the operator's own time: the Store's attention esti
   assert.match(app, /W\.operatorTime\(/)
   assert.match(app, /line\("sum-attention", "Operator attention"/)
 })
+
+// ------------------------------------------------------------------ I4
+
+test("I4: the glossary defines the v1.1 words: finish day (UTC) and its marks, Handoffs, the prompt and pull request markers, operator attention and every why-the-agent-stopped class", () => {
+  const html = read("site/src/index.html")
+  const terms = [...html.matchAll(/<dt id="g-([a-z0-9-]+)">/g)].map((m) => m[1])
+  for (const t of ["finish-day", "handoffs", "prompt-marker", "pull-request-markers", "operator-attention", "why-the-agent-stopped", "stopped-short", "human-gate", "asked-a-question", "error-or-limit", "interrupted", "why-not-known"]) {
+    assert.ok(terms.includes(t), t)
+    assert.ok(F.glossaryRoute(t), t)
+  }
+  const dd = (t) => html.slice(html.indexOf(`<dt id="g-${t}">`), html.indexOf("</dd>", html.indexOf(`<dt id="g-${t}">`)))
+  // "(UTC)" is stated once, with the marks.
+  assert.match(dd("finish-day"), /UTC/)
+  assert.match(dd("finish-day"), /on or before/)
+  assert.match(dd("finish-day"), /on or after/)
+  assert.match(dd("finish-day"), /direction not known/)
+  assert.match(dd("human-gate"), /decision.*approval.*acceptance/)
+  assert.match(dd("why-not-known"), /not labeled yet/)
+  // Attention is not waiting.
+  assert.match(dd("operator-attention"), /not the time the task waited/)
+})
