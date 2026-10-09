@@ -216,7 +216,7 @@
 
   // Reasons that only say the task's window is open or starts at its first
   // session: within that window the figure is exact.
-  const WINDOW_REASONS = new Set(["censored", "card_dates_shorter_than_work", "open_job", "labels_from_shared_session"]);
+  const WINDOW_REASONS = new Set(["censored", "card_dates_shorter_than_work", "finish_time_not_known", "open_job", "labels_from_shared_session"]);
 
   // Which way a partial figure may be off: "lower" (the true value is at
   // least this), "upper" (at most this), "window" (exact within the task's
