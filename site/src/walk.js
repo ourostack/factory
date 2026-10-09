@@ -1763,11 +1763,19 @@
     // How long the agent then worked: to its next stop in the same session
     // (the next after-stop prompt's time minus its wait), or it was still
     // working at the next prompt, or no later prompt came.
+    // A session shared with other tasks can run on long after this task
+    // ended, so the last prompt's work is capped at the task's own window
+    // and says so (A1 pass 2 M-n3). An open task's window ends at its last
+    // recorded work, which is no end, so it is not capped.
+    const lwin = mp.lead_window || {};
+    const stillOpen = (Array.isArray(lwin.reasons) && lwin.reasons.includes("censored")) || (mp.finish_date && Array.isArray(mp.finish_date.reasons) && mp.finish_date.reasons.includes("open_job"));
+    const taskEnd = !stillOpen && lwin.state !== "unavailable" && isMs(lwin.end_ms) ? lwin.end_ms : null;
     prompts.forEach((p, i) => {
       const next = prompts.slice(i + 1).find((q) => q.turn.session === p.turn.session);
       if (!next) {
         const end = sessionEnd.get(p.turn.session);
-        p.worked = { kind: "last", ms: isMs(end) && end >= p.ms ? end - p.ms : null };
+        if (isMs(end) && taskEnd !== null && end > taskEnd && p.ms <= taskEnd) p.worked = { kind: "last", ms: taskEnd - p.ms, capped: true };
+        else p.worked = { kind: "last", ms: isMs(end) && end >= p.ms ? end - p.ms : null };
       } else if (next.turn.basis === "after_stop" && isMs(next.turn.window_ms)) p.worked = { kind: "until_stop", ms: Math.max(0, next.ms - next.turn.window_ms - p.ms) };
       else if (next.turn.basis === "mid_turn") p.worked = { kind: "until_prompt", ms: next.ms - p.ms };
       else p.worked = { kind: "not_recorded", ms: null };
@@ -2082,6 +2090,7 @@
     const w = p.worked || { kind: "not_recorded" };
     if (w.kind === "until_stop") return `${durationWords(w.ms)}, then it stopped`;
     if (w.kind === "until_prompt") return `still working at the next prompt, ${durationWords(w.ms)} later`;
+    if (w.kind === "last" && w.capped) return `no later prompt while this task was open; the task ended ${durationWords(w.ms)} later, and the session went on to other work`;
     if (w.kind === "last") return isMs(w.ms) ? `no later prompt in this session; it ended ${durationWords(w.ms)} later` : "no later prompt in this session";
     return "not recorded";
   }
@@ -2898,6 +2907,7 @@
     groupWhy,
     boxPrCount,
     clockListWords,
+    workedWords,
     prTimeWords,
     operatorLane,
     prLane,

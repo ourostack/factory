@@ -544,7 +544,7 @@
     // The cost per accepted outcome is the page's headline, shown once, above;
     // this section holds what it rests on.
     // What the jobs counted here are, beside the site's tasks (A1 I5).
-    const words = F.signoffWords(o, taskCount);
+    const words = F.signoffWords(o, taskCount, o.attention && o.attention.per_delivered && Number.isInteger(o.attention.per_delivered.N) ? o.attention.per_delivered.N : null);
     if (words.scope) container.appendChild(el("p", "stat-note", words.scope));
     const grid = el("div", "outcome-tiles");
     container.appendChild(grid);
@@ -554,7 +554,7 @@
     const dl = el("dl", "health-facts");
     figure(dl, "Accepted (recorded by the agent on the operator's word)", o.signoff.accepted);
     const waiting = el("span");
-    waiting.appendChild(num(o.unsigned, "count"));
+    waiting.appendChild(num(F.withoutScope(o.unsigned), "count"));
     if (o.oldest_unsigned_wait.state !== "unavailable") {
       waiting.appendChild(document.createTextNode(" \u00b7 longest: "));
       waiting.appendChild(num(o.oldest_unsigned_wait, "text"));
@@ -580,7 +580,7 @@
     const fp = el("div", "outcome-block");
     fp.appendChild(el("h4", null, "First-pass yield"));
     const fv = el("p", "big-figure");
-    fv.appendChild(num(o.first_pass_yield, "pct"));
+    fv.appendChild(num(F.yieldCaption(o.first_pass_yield, words), "pct"));
     fp.appendChild(fv);
     if (words.yieldNote) fp.appendChild(el("p", "stat-note", words.yieldNote));
     // The counts the percentage is computed from, so a reader can rebuild it.
@@ -3348,11 +3348,11 @@
           const h = (s.ms / scale.max_ms) * H;
           const top = y(base + s.ms);
           const fill = s.key === "unsplit" ? "url(#hatch-unsplit)" : s.cause ? (s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${s.cause})`) : s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, false);
-          const r = svg("rect", { x: x0, y: top, width: barW, height: Math.max(0, h), class: `sb-seg seg-${s.cause ? `wait-${s.cause}` : s.key}` });
+          const look = F.segmentLook(s);
+          const r = svg("rect", { x: x0, y: top, width: barW, height: Math.max(0, h), class: look.cls });
           r.style.fill = fill;
-          const seg = SEGMENT_BY_KEY.get(s.key);
-          if ((seg && seg.fill === "outline") || s.key === "working_unsplit" || s.key === "unsplit") {
-            r.style.stroke = s.key === "unsplit" ? "var(--baseline)" : `var(${seg ? seg.token : "--c-not-labeled"})`;
+          if (look.stroke) {
+            r.style.stroke = look.stroke;
             r.style.strokeWidth = "1.2";
           }
           a.appendChild(r);
@@ -3531,8 +3531,15 @@
           const v = share ? s.share : s.ms;
           const top = y(base + v);
           const h = Math.max(0, y(base) - top);
-          const r = svg("rect", { x: bx, y: top, width: barW, height: h, class: "sb-seg" });
+          // The same class and outline as the stack-up: "Not labeled yet" is
+          // an outline, never a blank band (A1 pass 2 I-n1).
+          const look = F.segmentLook(s);
+          const r = svg("rect", { x: bx, y: top, width: barW, height: h, class: look.cls });
           r.style.fill = partFill(s);
+          if (look.stroke) {
+            r.style.stroke = look.stroke;
+            r.style.strokeWidth = "1.2";
+          }
           g.appendChild(r);
           if (s.state === "partial" && h > 2) g.appendChild(svg("rect", { x: bx, y: top, width: barW, height: h, fill: "url(#ot-partial)" }));
           base += v;
@@ -3556,7 +3563,7 @@
         t.textContent = `${b.unsplit.n}/${b.unsplit.of} not split`;
         g.appendChild(t);
       }
-      markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, ...(b.unsplit && b.unsplit.n ? [{ label: "No split yet", value: b.unsplit.words }] : []), { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
+      markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, ...(b.unsplit && b.unsplit.n ? [{ label: b.unsplit.final ? "No split" : "No split yet", value: b.unsplit.words }] : []), { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
       plot.appendChild(g);
     });
     frame.appendChild(plot);
@@ -3576,7 +3583,7 @@
     // Each week whose split is mostly or partly not known says so in words.
     const unsplitWeeks = bars.filter((b) => b.unsplit && b.unsplit.n);
     if (unsplitWeeks.length) {
-      const p = el("p", "chart-caption ot-unsplit-note", `Not measured yet: ${unsplitWeeks.map((b) => `week of ${b.label}, ${b.unsplit.words}`).join("; ")}. Their hours count in the week's lead time as "split not known", and in no cause; "n/m not split" under a bar says the same.`);
+      const p = el("p", "chart-caption ot-unsplit-note", S.unsplitNote(unsplitWeeks));
       container.appendChild(p);
     }
     container.appendChild(el("p", "chart-caption", `The number above a bar is how many tasks finished that week; * marks a thin week (fewer than 3). A dashed slot is a week with no finished task, never a zero bar. Hatched parts are partial. Weeks are labeled by the Monday they start on${ax.every > 1 ? `, every ${ax.every} weeks` : ""}.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here; the table below gives each week's days."}`));
@@ -4716,14 +4723,16 @@
     let title = VIEW_TITLE[r.view];
     if (drawerEl && drawerEl.open) drawerEl.close();
     if (r.view === "task") {
-      // #/ opens on a task with something to teach; when none has, the
-      // page says why it opens on another.
+      // #/ opens on a task with something to teach and waste labels; the
+      // page says which rule chose it.
       const landing = F.landingChoice(data.jobs);
       const id = r.job || (landing.job ? landing.job.id : null);
       const note = document.getElementById("landing-note");
       if (note) {
-        note.textContent = !r.job && landing.why ? landing.why : "";
-        note.hidden = !(!r.job && landing.why);
+        // On #/ only: the rule that chose the task, and why the finished
+        // tasks listed above it were skipped (A1 pass 2 M-n1).
+        note.textContent = !r.job && landing.note ? landing.note : "";
+        note.hidden = !(!r.job && landing.note);
       }
       renderTaskWalk(data, id, r.select).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
       const j = data.jobs.find((x) => x.id === id);
@@ -4872,7 +4881,10 @@
     row(dl, "Facts files by host", hostsNode);
     for (const [key, number] of Object.entries(health.slots || {})) {
       const node = el("span");
-      node.appendChild(num(number, SLOT_KIND[key] || "count"));
+      // Unsigned deliveries' scope is stated once, on the Store's sign-off
+      // section, so the row carries no second out-of-scope count (review M-3).
+      node.appendChild(num(key === "unsigned_deliveries" ? F.withoutScope(number) : number, SLOT_KIND[key] || "count"));
+      if (key === "unsigned_deliveries" && number && number.state !== "unavailable") node.appendChild(document.createTextNode(" (scope: the Store's sign-off section)"));
       const detail = health.details && Array.isArray(health.details[key]) ? health.details[key] : [];
       if (key !== "capture_coverage" && detail.length && number.state !== "unavailable") {
         const per = el("span", "slot-detail");
