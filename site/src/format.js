@@ -227,6 +227,18 @@
     );
   }
 
+  // A reason's words without the direction they claim ("so this is a lower
+  // bound", "so the task finished on or before it"): for a figure whose
+  // combined direction is not known, or that has no value at all, where a
+  // bound named by one reason would be false.
+  const DIRECTION_CLAUSES = [/, so (?:the count|this|the figure) is an? (?:lower|upper) bound$/, /, so this is at least this much$/, /, so the task finished on or (?:before|after) it$/];
+  function reasonCore(code) {
+    let t = reasonText(code);
+    for (const re of DIRECTION_CLAUSES) t = t.replace(re, "");
+    return t;
+  }
+  const PULL_BOTH = "some of these reasons pull the figure up and others down, so which way the true figure lies is not known";
+
   // The parts of one number, as plain data. `text` is what the figure reads;
   // `marker` is the visible word for a partial number; `reason` is the
   // reasons in words; `nofn` is "n of N <what>" for a rollup.
@@ -237,7 +249,10 @@
     if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) {
       throw new TypeError("FactoryFormat: unknown kind " + kind);
     }
-    const reason = number.reasons.map(reasonText).join("; ");
+    // A figure with no value, or with no known direction, never names a
+    // bound in its reasons.
+    const directionless = number.state === "unavailable" || (number.state === "partial" && (number.bound === "unknown" || (number.bound === null && number.bound_reason !== "bound_not_moved")));
+    const reason = number.reasons.map(directionless ? reasonCore : reasonText).join("; ");
     const nofn =
       Number.isInteger(number.n) && Number.isInteger(number.N) && typeof number.of === "string"
         ? `${number.n} of ${number.N} ${number.of}` +
@@ -277,7 +292,7 @@
       text: direction + body,
       // An unverified host is said as such, visibly, not only in the reason.
       marker: `${Array.isArray(number.reasons) && number.reasons.includes("unverified_host") ? "unverified" : "partial"}${unknownDirection ? `, ${UNKNOWN_DIRECTION}` : ""}`,
-      reason: unknownDirection ? `${reason}; which way the true figure lies is not known` : noDirection ? `${reason}; ${noDirection}` : reason,
+      reason: unknownDirection ? `${reason}; ${PULL_BOTH}` : noDirection ? `${reason}; ${noDirection}` : number.bound === null ? `${reason}; ${PULL_BOTH}` : reason,
       nofn,
       basis,
       unknownDirection,
@@ -770,7 +785,7 @@
     if (!f.day) return `It is finished, but no source gives its finish day (${f.reasons.map(reasonText).join("; ")}), so it is listed after the ${dated.length} dated task${dated.length === 1 ? "" : "s"}.${unlabeled}`;
     const rank = dated.findIndex((x) => x.id === j.id) + 1;
     const where = rank > 0 ? `, the ${ordinal(rank)} of ${dated.length} dated task${dated.length === 1 ? "" : "s"}` : "";
-    const why = f.kind === "about" && f.reasons.length ? ` The day is no bound: ${f.reasons.map(reasonText).join("; ")}.` : "";
+    const why = f.kind === "about" && f.reasons.length ? ` The day is no bound: ${f.reasons.map(reasonCore).join("; ")}.` : "";
     return `It finished ${f.words.replace(/ \(direction not known\)$/, "")} (UTC${f.kind === "about" ? "; direction not known" : ""})${where}.${why}${unlabeled}`;
   }
 
@@ -992,5 +1007,5 @@
   ];
 
   return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

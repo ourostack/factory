@@ -133,3 +133,30 @@ test("I1: Compare orders the same finished tasks as Over time, by finish date, a
   assert.match(lede.text, /1 task still open follows on the right/)
   assert.match(lede.text, /1 finished task has no finish day \(no record gives the day this task finished\), so it sits after the dated ones/)
 })
+
+// ------------------------------------------------------------------ I6
+
+test("I6: a figure with no direction never names a bound; it says some reasons pull it up and others down", () => {
+  // The Store's operator attention per delivered task, as data.json gives it.
+  const d = F.describe({ state: "partial", value: 2575396, reasons: ["unmeasured_members", "host_records_partly", "turns_not_recorded"], bound: "unknown" }, "duration")
+  assert.doesNotMatch(d.reason, /lower bound|upper bound/)
+  assert.match(d.reason, /some of these reasons pull the figure up and others down, so which way the true figure lies is not known/)
+  assert.match(d.reason, /the host records only part of this/)
+  // Desk's null bound says its own reason, which says the pull both ways.
+  const n = F.describe({ state: "partial", value: 3, reasons: ["host_records_partly", "censored"], bound: null, bound_reason: "bound_reasons_conflict" }, "count")
+  assert.doesNotMatch(n.reason, /lower bound|upper bound/)
+  assert.match(n.reason, /^the host records only part of this; the job is still open; direction not known, because its reasons pull it both ways, so the true figure may be higher or lower$/)
+  // A null bound with no reason of Desk's says the pull itself.
+  assert.match(F.describe({ state: "partial", value: 3, reasons: ["host_records_partly", "censored"], bound: null }, "count").reason, /; some of these reasons pull the figure up and others down/)
+  // "no data" never names a bound.
+  const u = F.describe({ state: "unavailable", reasons: ["field_absent", "host_records_partly", "no_accepted_outcomes", "turns_not_recorded"] }, "count")
+  assert.doesNotMatch(u.reason, /bound/)
+  assert.doesNotMatch(F.toText({ state: "unavailable", reasons: ["censored", "returns_not_fully_recorded"] }, "count"), /bound/)
+  // A figure with a direction keeps its words.
+  assert.match(F.describe({ state: "partial", value: 3, reasons: ["host_records_partly"], bound: "lower" }, "count").reason, /so the figure is a lower bound/)
+  // A finish day with no bound never says "on or before" in its reasons either.
+  const fd = { state: "partial", value: "2026-10-02", basis: "desk_card_updated", bound: null, reasons: ["finish_from_card_update", "finish_before_last_work"] }
+  const words = F.finishWords({ id: "x", status: "done", finish_order: measured(1), finish_basis: "labels", finish_date: fd }, [], { year: 2026 })
+  assert.doesNotMatch(words, /on or before|on or after/)
+  assert.match(words, /not a bound/)
+})
