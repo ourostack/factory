@@ -151,7 +151,7 @@ test("each part of a task's bar lights its evidence on the map: working parts th
   const app = read("site/src/app.js")
   assert.match(app, /el\("button", `tw-seg tw-part tw-\$\{s\.key\}`\)/, "each segment is a button")
   assert.match(app, /el\("button", "tw-row tw-part"\)/, "each legend row is a button")
-  assert.match(app, /light\(s\.cause \? \{ key: "wait_cause", cause: s\.cause \} : \{ key: "class", seg: s\.key \}, btn\)/)
+  assert.match(app, /light\(s\.cause \? \{ key: "wait_cause", cause: s\.cause, why: s\.why \} : \{ key: "class", seg: s\.key \}, btn\)/)
   assert.match(app, /tokens\.push\(\.\.\.twEl\.querySelectorAll\("\.tw-part"\)\)/, "they share one pressed state with the lede's numbers")
   assert.match(app, /"Rank this cause"/, "a waiting cause offers its page on Rank causes")
   assert.match(app, /has-value" : ""\}\$\{hasMs\(it\.defect_stretches\) \? " has-defects"/)

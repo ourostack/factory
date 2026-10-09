@@ -1350,6 +1350,30 @@
     return sw;
   }
 
+  // Why the agent stopped (addendum §4): a class's fill, as a CSS class
+  // (styles.css .why-fill-*) or an SVG pattern (index.html why-pat-*), each
+  // a color and a pattern, so no class is told by hue alone.
+  function whyFill(why, css) {
+    const k = W.WHY_KEYS.includes(why) ? why : "not_known";
+    return css ? `why-fill-${k}` : `url(#why-pat-${k})`;
+  }
+  function whySwatch(why) {
+    const sw = el("span", `swatch ${whyFill(why, true)}`);
+    sw.setAttribute("aria-hidden", "true");
+    return sw;
+  }
+  // A key of the classes drawn: each its swatch and its name.
+  function drawWhyLegend(container, keys, cls) {
+    const ul = el("ul", cls || "why-key");
+    for (const k of keys) {
+      const li = document.createElement("li");
+      li.append(whySwatch(k), document.createTextNode(W.whyName(k)));
+      ul.appendChild(li);
+    }
+    container.appendChild(ul);
+    return ul;
+  }
+
   // ------------------------------------------------------------- the drawer
 
   const drawerEl = document.getElementById("evidence-drawer");
@@ -1609,13 +1633,13 @@
 
   // What each lede number lights up on the map (walk.js highlightSelector):
   // a cause lights only the waits that waited on it.
-  function highlight(root, key, item, cause, seg) {
-    const tag = `${key}|${item === undefined ? "" : item}|${cause || ""}|${seg || ""}`;
+  function highlight(root, key, item, cause, seg, why) {
+    const tag = `${key}|${item === undefined ? "" : item}|${cause || ""}|${seg || ""}|${why || ""}`;
     const on = root.dataset.hl === tag;
     root.dataset.hl = on ? "" : tag;
     for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
     if (on) return false;
-    const pick = W.highlightSelector(key, { item, cause, seg });
+    const pick = W.highlightSelector(key, { item, cause, seg, why });
     if (pick) for (const n of root.querySelectorAll(pick)) n.classList.add("is-hl");
     return true;
   }
@@ -1767,7 +1791,8 @@
       ladCol.append(strip, lad);
       for (; segIndex < segs.length && segs[segIndex].item === i; segIndex++) {
         const sg = segs[segIndex];
-        const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}${(sg.causes || []).map((k) => ` has-${k}`).join("")}`);
+        const sgWhy = sg.level === "high" ? (sg.folded ? it.inner_why : it.why) : null;
+        const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}${(sg.causes || []).map((k) => ` has-${k}`).join("")}${sgWhy ? ` why-${sgWhy}` : ""}`);
         b.type = "button";
         b.dataset.item = String(i);
         b.appendChild(el("span", "lad-label", sg.label));
@@ -1828,7 +1853,7 @@
         });
         data.appendChild(more);
       } else {
-        main = el("button", `vsm-wait cause-${it.waited_on}${it.causes.map((k) => ` has-${k}`).join("")}${longestItem === it ? " is-longest" : ""}`);
+        main = el("button", `vsm-wait cause-${it.waited_on}${it.causes.map((k) => ` has-${k}`).join("")}${it.why ? ` why-${it.why}` : ""}${longestItem === it ? " is-longest" : ""}`);
         main.type = "button";
         main.dataset.item = String(i);
         const tri = svg("svg", { viewBox: "0 0 40 34", width: 40, height: 34, "aria-hidden": "true", class: "vsm-tri" });
@@ -1926,6 +1951,16 @@
       legend.appendChild(p);
     };
     lgGlyph("prompt", `An operator prompt: above the box it falls in, and as a tick on the ladder's first lane at its time. ${W.whyLegend(clock)}`);
+    // The classes drawn on this map, each with its color and pattern.
+    const whyKeys = [...new Set([...W.whyKeysIn(clock).filter((k) => k !== "not_known" || clock.prompts.some((p) => p.wait && typeof p.wait.why === "string")), ...model.items.map((x) => (x.type === "wait" ? x.why : x.inner_why)).filter(Boolean)])];
+    const ordered = W.WHY_KEYS.filter((k) => whyKeys.includes(k));
+    if (ordered.length) {
+      const p = el("p", "vsm-legend-item vsm-legend-why", "Why the agent stopped, on the prompts and on the triangles of waiting for the next prompt (a dashed triangle: why not known):");
+      legend.appendChild(p);
+      drawWhyLegend(legend, ordered);
+    } else if (model.items.some((x) => x.type === "wait" && x.by && x.by.next_prompt > 0)) {
+      legend.appendChild(el("p", "vsm-legend-item", "Why the agent stopped before each wait for the next prompt is not known yet: Desk does not publish it for this task, so the triangles say only that the agent had stopped."));
+    }
     lgGlyph("opened", "A pull request that first appeared in this task's sessions (opened there or mentioned; Desk does not say which yet), on the ladder's second lane at GitHub's opening time; a diamond is one merged.");
     lgGlyph("opened", "An outlined mark is a time known only in part: its evidence says which way the true time lies.", { partial: true });
     if (outside.before.count || outside.after.count) lgGlyph("opened", `A time before the task started${clock.open ? " or after its last recorded work" : " or after its lead time ended"} is listed in a dashed margin beside the map, with how far outside it lies, never drawn at the map's edge.`);
@@ -1990,7 +2025,7 @@
       root,
       model,
       select,
-      highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause, tok.seg),
+      highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause, tok.seg, tok.why),
     };
   }
 
@@ -2062,7 +2097,9 @@
     const where = it.type === "box" ? `work box ${it.box_no}` : "this wait";
     if (prompts.length === 1) {
       b.appendChild(el("span", "vsm-op-text", `prompt ${prompts[0].n}`));
-      b.setAttribute("aria-label", `Operator prompt ${prompts[0].n} of ${prompts[0].total}, in ${where}. Opens the evidence.`);
+      const pw = prompts[0].why && prompts[0].why !== "not_known" ? ` Why the agent had stopped: ${W.whyName(prompts[0].why).toLowerCase()}.` : "";
+      b.setAttribute("aria-label", `Operator prompt ${prompts[0].n} of ${prompts[0].total}, in ${where}.${pw} Opens the evidence.`);
+      if (pw) b.title = pw.trim();
       b.addEventListener("click", () => openMark(b, { kind: "prompt", mark: prompts[0] }));
       return b;
     }
@@ -2453,9 +2490,11 @@
     // evidence on the map: a working part lights the boxes that hold it, a
     // waiting cause its triangles and ladder steps.
     const press = (s, btn) => {
-      if (typeof light === "function") light(s.cause ? { key: "wait_cause", cause: s.cause } : { key: "class", seg: s.key }, btn);
+      if (typeof light === "function") light(s.cause ? { key: "wait_cause", cause: s.cause, why: s.why } : { key: "class", seg: s.key }, btn);
     };
-    const partWords = (s) => `${s.label}: ${W.durationWords(s.ms)}, ${W.pctWords(s.share)} of the lead time`;
+    // A class's figure says "at least" while some of the waiting is not classified.
+    const segLabel = (s) => (s.why === "not_known" && s.reasons && s.reasons.length ? `${s.label} (${s.reasons.map(W.whyReasonWords).join("; ")})` : s.label);
+    const partWords = (s) => `${segLabel(s)}: ${s.why ? W.qualOf(s) : ""}${W.durationWords(s.ms)}, ${W.pctWords(s.share)} of the lead time`;
     const track = el("div", "tw-bar");
     track.setAttribute("role", "group");
     track.setAttribute("aria-label", `Lead time ${atLeast}${W.durationWords(bar.total_ms)}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.durationWords(g.ms)}`).join("; ")}. Each part lights its evidence on the map.`);
@@ -2467,7 +2506,8 @@
         d.type = "button";
         d.setAttribute("aria-pressed", "false");
         d.style.width = g.ms > 0 ? `${(s.ms / g.ms) * 100}%` : "0";
-        if (s.cause) d.classList.add(`wait-${s.cause}`);
+        if (s.why) d.classList.add(whyFill(s.why, true), "tw-why");
+        else if (s.cause) d.classList.add(`wait-${s.cause}`);
         else {
           d.style.background = s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, true);
           const seg = SEGMENT_BY_KEY.get(s.key);
@@ -2492,15 +2532,15 @@
         const b = el("button", "tw-row tw-part");
         b.type = "button";
         b.setAttribute("aria-pressed", "false");
-        b.appendChild(s.cause ? waitSwatch(s.cause) : swatch(s.key === "working_unsplit" ? "not_labeled" : s.key));
-        b.appendChild(el("span", "tw-name", s.label));
-        b.appendChild(el("span", "tw-ms", `${W.durationWords(s.ms)} · ${W.pctWords(s.share)} of the lead time`));
+        b.appendChild(s.why ? whySwatch(s.why) : s.cause ? waitSwatch(s.cause) : swatch(s.key === "working_unsplit" ? "not_labeled" : s.key));
+        b.appendChild(el("span", "tw-name", segLabel(s)));
+        b.appendChild(el("span", "tw-ms", `${s.why ? W.qualOf(s) : ""}${W.durationWords(s.ms)} · ${W.pctWords(s.share)} of the lead time`));
         b.setAttribute("aria-label", `${partWords(s)}. Lights it on the map.`);
         b.addEventListener("click", () => press(s, b));
         li.appendChild(b);
         if (s.cause) {
           const a = el("a", "tw-cause-link", "Rank this cause");
-          const key = `waiting:${s.cause}`;
+          const key = s.why ? `waiting:${s.cause}:${s.why}` : `waiting:${s.cause}`;
           const safe = window.FactorySteps.isCauseKey(key) ? window.FactorySteps.causeRoute(key) : null;
           if (safe) a.href = safe;
           a.setAttribute("aria-label", `Rank ${W.causeWords(key)} across every task`);
@@ -2719,7 +2759,7 @@
       // A wider target than the tick itself.
       g.appendChild(svg("rect", { x: xx - 6, y: yOp + 1, width: 12, height: OP_H - 2, class: "lane-hit" }));
       const t = o.mark.turn;
-      keyed(g, `Operator prompt ${o.n} of ${o.mark.total}, ${W.clockAt(o.ms, ctx.origin)}${t.basis === "after_stop" && typeof t.window_ms === "number" ? `, ${W.durationWords(t.window_ms)} after the main agent stopped` : t.basis === "mid_turn" ? ", while the agent was still working" : ", the session's first prompt"}. Opens the evidence.`, (n) => openMark(n, { kind: "prompt", mark: o.mark }), opList);
+      keyed(g, `Operator prompt ${o.n} of ${o.mark.total}, ${W.clockAt(o.ms, ctx.origin)}${t.basis === "after_stop" && typeof t.window_ms === "number" ? `, ${W.durationWords(t.window_ms)} after the main agent stopped` : t.basis === "mid_turn" ? ", while the agent was still working" : ", the session's first prompt"}.${o.mark.why && o.mark.why !== "not_known" ? ` Why the agent had stopped: ${W.whyName(o.mark.why).toLowerCase()}.` : ""} Opens the evidence.`, (n) => openMark(n, { kind: "prompt", mark: o.mark }), opList);
       s.appendChild(g);
     }
     if (opList.length) opList[0].setAttribute("tabindex", "0");
@@ -3135,6 +3175,8 @@
   }
   function causeSwatch(key) {
     const k = String(key);
+    const kp = k.split(":");
+    if (kp.length === 3 && kp[1] === "next_prompt") return whySwatch(kp[2]);
     if (k.startsWith("waiting:")) return waitSwatch(k.slice(8));
     if (k === "other") {
       const sw = el("span", "swatch");
@@ -3155,11 +3197,11 @@
   // The two buttons that switch a chart between all elapsed time and agent
   // working time.
   function wireModes(viewId, which, redraw) {
-    for (const b of document.querySelectorAll(`#${viewId} .mode-btn`)) {
+    for (const b of document.querySelectorAll(`#${viewId} .mode-btn[data-mode]`)) {
       b.setAttribute("aria-pressed", String(b.dataset.mode === modes[which]));
       b.onclick = () => {
         modes[which] = b.dataset.mode === "working" || (b.dataset.mode === "share" && which === "compare") ? b.dataset.mode : "all";
-        for (const x of document.querySelectorAll(`#${viewId} .mode-btn`)) x.setAttribute("aria-pressed", String(x.dataset.mode === modes[which]));
+        for (const x of document.querySelectorAll(`#${viewId} .mode-btn[data-mode]`)) x.setAttribute("aria-pressed", String(x.dataset.mode === modes[which]));
         // The mode goes in the URL, so a link or a reload opens this view.
         try {
           history.replaceState(null, "", which === "compare" ? F.compareHash({ mode: modes.compare, ...overTimeView }) : `#/${which}${modes[which] !== "all" ? `?mode=${modes[which]}` : ""}`);
@@ -4019,6 +4061,25 @@
         r.style.strokeWidth = "1";
       }
       a.appendChild(r);
+      // Waiting for the next prompt, stacked by why the agent stopped: the
+      // actionable classes from the base, then the human gates, then the
+      // time whose why is not known (an outline). The stack adds up to the
+      // bar; its own height and the running total are unchanged.
+      if (b.why_split === "on" && b.children.length) {
+        r.style.fill = "transparent";
+        let base = top + H;
+        for (const c of b.children) {
+          const h = (c.ms / scale.max_ms) * H;
+          const seg = svg("rect", { x: cx - barW / 2, y: base - h, width: barW, height: Math.max(0, h), class: "pareto-why-seg" });
+          seg.style.fill = whyFill(c.why, false);
+          if (c.why === "not_known") {
+            seg.style.stroke = "var(--c-why-not_known)";
+            seg.style.strokeWidth = "1.5";
+          }
+          a.appendChild(seg);
+          base -= h;
+        }
+      }
       const v = svg("text", { x: cx, y: y(b.ms) - 6, class: "sb-value", "text-anchor": "middle" });
       v.textContent = S.hoursShort(b.ms);
       a.appendChild(v);
@@ -4033,6 +4094,7 @@
         { label: "Running total", value: S.cumWords(b.cum) },
         { label: "Tasks", value: String(b.jobs) },
         ...(b.members ? [{ label: "Folded in", value: b.members.map((k) => W.causeWords(k)).join("; ") }] : []),
+        ...(b.why_split === "on" ? b.children.map((c) => ({ label: c.label, value: `${S.hoursWords(c.ms)}, ${W.pctWords(c.share_of_parent)} of this bar` })) : []),
       ]);
       root.appendChild(a);
       pts.push([cx, yc(b.cum)]);
@@ -4051,6 +4113,15 @@
     lineKey.setAttribute("aria-hidden", "true");
     key.append(lineKey, document.createTextNode("The line is the running total: the share of all the time ranked that the causes up to that bar carry, on the right-hand axis."));
     container.appendChild(key);
+    // The split by why: its key, or why the bar is not split.
+    const np = model.bars.find((b) => b.key === "waiting:next_prompt");
+    if (np) {
+      if (np.why_split === "on" && np.children.length) {
+        container.appendChild(el("p", "chart-caption", "The bar for waiting for the next prompt is stacked by why the agent stopped, from the base: the classes an agent-side change can act on, then the human gates, then the time whose why is not known (an outline). Each class has its own page, listed in the table below."));
+        drawWhyLegend(container, np.children.map((c) => c.why), "pareto-why-legend");
+      } else if (np.why_split === "absent") container.appendChild(el("p", "chart-caption", "Why the agent stopped is not known yet for the waiting for the next prompt: Desk does not publish it, so that bar is not split."));
+      else if (np.why_split === "mismatch") container.appendChild(el("p", "chart-caption", "Desk's split of the waiting for the next prompt by why the agent stopped does not add up to the bar, so the bar is not split rather than split wrongly."));
+    }
   }
 
   function drawParetoTable(container, model) {
@@ -4074,6 +4145,23 @@
       tr.appendChild(el("td", "num", S.cumWords(b.cum)));
       tr.appendChild(el("td", "num", String(b.jobs)));
       tb.appendChild(tr);
+      // Its split by why, as rows under it: each class's time, its share of
+      // the bar, and a link to its page. Never ranked beside the causes.
+      if (b.why_split === "on") {
+        for (const c of b.children) {
+          const sr = el("tr", "why-sub-row");
+          sr.appendChild(el("td", "num", "—"));
+          const cd = document.createElement("td");
+          cd.appendChild(whySwatch(c.why));
+          cd.appendChild(causeLink(c.key, `of which: ${c.label.charAt(0).toLowerCase()}${c.label.slice(1)}${c.why === "not_known" && c.reasons.length ? ` (${c.reasons.map(W.whyReasonWords).join("; ")})` : ""}`));
+          sr.appendChild(cd);
+          sr.appendChild(el("td", "num", phone ? S.hoursShort(c.ms) : S.hoursWords(c.ms)));
+          sr.appendChild(el("td", "num", `${phone ? S.shortPct(c.share_of_parent) : W.pctWords(c.share_of_parent)} of it`));
+          sr.appendChild(el("td", "num", "—"));
+          sr.appendChild(el("td", "num", String(c.jobs)));
+          tb.appendChild(sr);
+        }
+      }
     });
     table.appendChild(tb);
     const wrap = el("div", "table-wrap");
@@ -4081,11 +4169,12 @@
     container.appendChild(wrap);
   }
 
+  let whySplitOn = true;
   async function renderCauses(data) {
     const seq = ++stepSeq;
     const [doc, tasks, stack] = await Promise.all([walkFile("rollups/causes.json"), walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
     if (seq !== stepSeq) return;
-    const all = S.paretoModel(doc, "all");
+    let all = S.paretoModel(doc, "all", { split: whySplitOn });
     const working = doc ? S.paretoModel(doc, "working") : null;
     const byId = new Map(data.jobs.map((j) => [j.id, j]));
     const nameOf = (job) => (byId.has(job) ? jobLabel(byId.get(job)) : F.jobLabel(localNames, job));
@@ -4103,7 +4192,25 @@
     }
     if (all.state === "absent") document.getElementById("causes-unlabeled").hidden = true;
     else unlabeledNote(document.getElementById("causes-unlabeled"), data, "causes");
+    // "Split by why" (on by default): the next-prompt bar stacked by why
+    // the agent stopped. It applies to all elapsed time; agent working time
+    // leaves waiting out.
+    const tg = document.getElementById("why-toggle");
+    const syncToggle = () => {
+      if (!tg) return;
+      tg.setAttribute("aria-pressed", String(whySplitOn));
+      const row = tg.parentElement;
+      if (row) row.hidden = modes.causes === "working";
+    };
+    if (tg) {
+      tg.onclick = () => {
+        whySplitOn = !whySplitOn;
+        all = S.paretoModel(doc, "all", { split: whySplitOn });
+        draw();
+      };
+    }
     const draw = () => {
+      syncToggle();
       const m = modes.causes === "working" ? working || all : all;
       document.getElementById("pareto-caption").textContent = all.state === "absent" ? "" : S.paretoCaption(m);
       safely("pareto", () => drawPareto(document.getElementById("pareto"), m));
@@ -4129,6 +4236,10 @@
     const promptNameOf = (job) => W.promptName(F.taskName(localNames, byId.get(job) || { id: job }));
     const d = S.causeDetail(doc, key, { taskRows: tasks && tasks.jobs, stackRows: stack && stack.jobs, nameOf, promptNameOf });
     box.innerHTML = "";
+    if (d.why) {
+      await renderWhyCause(box, d, { seq, byId, nameOf, doc });
+      return;
+    }
     const h1 = el("h1", "view-title cause-title");
     h1.appendChild(causeSwatch(key));
     h1.appendChild(document.createTextNode(d.label));
@@ -4146,6 +4257,25 @@
     const rankWords = `${F.ordinal(d.all.rank)} of ${d.all.of} causes`;
     lede.textContent = `${S.causeMeaning(key)} Across the ${d.n} tasks the ranking counts, it cost ${S.hoursWords(d.ms)} (counted per task), ${W.pctWords(d.all.share)} of all the time ranked: ${rankWords}${d.working ? `, and ${F.ordinal(d.working.rank)} of ${d.working.of} once waiting is left out` : ""}. ${d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`}`;
     box.appendChild(lede);
+    // Waiting for the next prompt, by why the agent stopped: each class
+    // with its time and page, or why it is not split.
+    if (key === "waiting:next_prompt") {
+      const row = doc.causes.find((x) => x && x.cause === key);
+      const split = row ? S.whyChildren(row, true) : { why_split: "absent", children: [] };
+      const p = el("p", "chart-caption");
+      if (split.why_split === "on" && split.children.length) {
+        p.appendChild(document.createTextNode("By why the agent stopped: "));
+        split.children.forEach((c, i) => {
+          if (i) p.appendChild(document.createTextNode("; "));
+          p.appendChild(whySwatch(c.why));
+          p.appendChild(document.createTextNode(" "));
+          p.appendChild(causeLink(c.key, c.label.charAt(0).toLowerCase() + c.label.slice(1)));
+          p.appendChild(document.createTextNode(`, ${S.hoursWords(c.ms)} (${W.pctWords(c.share_of_parent)})`));
+        });
+        p.appendChild(document.createTextNode("."));
+      } else p.textContent = split.why_split === "mismatch" ? "Desk's split of this waiting by why the agent stopped does not add up to it, so it is not split here." : "Why the agent stopped is not known yet for this waiting: Desk does not publish it, so it is not split here.";
+      box.appendChild(p);
+    }
 
     // The A3: an issue already taken on for this cause (Act's mapping
     // table), or S2's copy-as-prompt that starts one, naming the cause, its
@@ -4275,6 +4405,158 @@
         a.textContent = it.kind === "gaps" ? `open wait ${it.n} on the map` : `open burst ${it.n} on the map`;
       }
     }
+  }
+
+  // One why's page (#/causes/waiting:next_prompt:<why>): what it means, its
+  // time and share of the waiting for the next prompt, Copy as a prompt for
+  // an A3, its tasks, and every wait of that class with its evidence.
+  async function renderWhyCause(box, d, ctx) {
+    const { seq, byId, nameOf } = ctx;
+    const h1 = el("h1", "view-title cause-title");
+    h1.appendChild(whySwatch(d.why));
+    h1.appendChild(document.createTextNode(d.label));
+    box.appendChild(h1);
+    document.title = `${d.label} · The factory`;
+    const parentLink = () => causeLink("waiting:next_prompt", "waiting for the next prompt");
+    const lede = el("p", "lede");
+    lede.appendChild(document.createTextNode(`${S.causeMeaning(d.key)} `));
+    if (d.state === "not_ranked") {
+      lede.appendChild(document.createTextNode(`No task the ranking counts waited for the next prompt, so no wait has this why. The ranking counts ${d.n} of ${d.N} tasks.`));
+      box.appendChild(lede);
+      return;
+    }
+    if (d.state === "not_split") {
+      lede.appendChild(document.createTextNode(d.mismatch ? `Desk's split of the ${S.hoursWords(d.parent_ms)} of ` : `Why the agent stopped is not known yet for the ${S.hoursWords(d.parent_ms)} of `));
+      lede.appendChild(parentLink());
+      lede.appendChild(document.createTextNode(d.mismatch ? " by why does not add up to it, so this page lists no waits rather than wrong ones." : ": Desk does not publish it, so that waiting is not split and this page has no waits to list. No figure is shown rather than a zero."));
+      box.appendChild(lede);
+      return;
+    }
+    if (d.state === "none") {
+      lede.appendChild(document.createTextNode(`None of the ${S.hoursWords(d.parent_ms)} of `));
+      lede.appendChild(parentLink());
+      lede.appendChild(document.createTextNode(" in the tasks the ranking counts has this why."));
+      box.appendChild(lede);
+      return;
+    }
+    const c = d.child;
+    lede.appendChild(document.createTextNode(`Across the ${d.n} tasks the ranking counts, it cost ${S.hoursWords(d.ms)} (counted per task): ${W.pctWords(c.share_of_parent)} of the ${S.hoursWords(c.parent_ms)} of `));
+    lede.appendChild(parentLink());
+    lede.appendChild(document.createTextNode(`, the ${F.ordinal(c.rank)} of ${c.of} reasons the agent stopped by time. ${d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`}${d.why === "not_known" && c.reasons.length ? ` Why it is not known: ${c.reasons.map((r) => (F.hasReasonText(r) ? F.reasonText(r) : W.whyReasonWords(r))).join("; ")}.` : ""}${d.why !== "not_known" && d.tasks.some((t) => t.bound === "lower") ? " While some of a task's waiting has no known why, its time for this class is a lower bound: the class may hold some of the rest." : ""}`));
+    box.appendChild(lede);
+
+    // Copy as a prompt: an A3 on this why.
+    const a3 = el("section", "block a3-block");
+    a3.setAttribute("aria-labelledby", "a3-title");
+    const a3h = el("h2", "block-title", "Start an A3");
+    a3h.id = "a3-title";
+    a3.appendChild(a3h);
+    a3.appendChild(el("p", "chart-caption", `An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt asks: ${S.WHY_A3[d.why]} It hands the agent this why, its time, its largest tasks and where its data is.`));
+    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(d.key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt") });
+    const pbox = el("div", "drawer-prompt");
+    const btn = el("button", "copy-prompt", "Copy as a prompt");
+    btn.type = "button";
+    const status = el("span", "copy-status");
+    status.setAttribute("role", "status");
+    const pre = el("p", "prompt-text", text);
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        status.textContent = "Copied. Paste it to the agent.";
+      } catch (err) {
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        status.textContent = "The prompt is selected; copy it with the keyboard.";
+      }
+    });
+    pbox.append(btn, status, pre);
+    a3.appendChild(pbox);
+    box.appendChild(a3);
+
+    // Its tasks, each with Desk's own stated figure for this why.
+    const ts = el("section", "block");
+    ts.setAttribute("aria-labelledby", "cause-tasks-title");
+    const tsh = el("h2", "block-title", "Its tasks, largest first");
+    tsh.id = "cause-tasks-title";
+    ts.appendChild(tsh);
+    const table = el("table", "data-table cause-tasks");
+    // On a phone the finish day sits under the task's name, as on every cause page.
+    const narrow = box.clientWidth < 600;
+    tableHead(table, narrow ? [["Task", ""], ["Time with this why", "num"], ["Share of this why", "num"]] : [["Task", ""], ["Finished (UTC)", ""], ["Time with this why", "num"], ["Share of this why", "num"]]);
+    const tb = document.createElement("tbody");
+    for (const t of d.tasks) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.appendChild(jobLink(t.job, t.name));
+      tr.appendChild(td);
+      const tj = byId.get(t.job);
+      const tf = F.finishDay(tj ? tj.finish_date : null);
+      const tfWords = tf.kind === "open" ? "open" : tf.day ? tf.words : "not dated yet";
+      if (narrow) {
+        const dd = el("span", "cell-day", tf.day ? `finished ${tf.words}` : tfWords);
+        dd.title = tf.words;
+        td.appendChild(dd);
+      } else {
+        const fc = el("td", null, tfWords);
+        fc.title = tf.words;
+        tr.appendChild(fc);
+      }
+      const q = { lower: "at least ", upper: "at most ", none: "about " }[t.bound] || "";
+      tr.appendChild(el("td", "num", t.ms === null ? "not stated" : `${q}${S.hoursWords(t.ms)}`));
+      tr.appendChild(el("td", "num", t.ms === null || !(d.ms > 0) ? "—" : W.pctWords(t.ms / d.ms)));
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    const tw = el("div", "table-wrap");
+    tw.appendChild(table);
+    ts.appendChild(tw);
+    box.appendChild(ts);
+
+    // Every wait of this why, from the tasks' map files.
+    const ws = el("section", "block");
+    ws.setAttribute("aria-labelledby", "why-waits-title");
+    const wsh = el("h2", "block-title", "Its waits, longest first");
+    wsh.id = "why-waits-title";
+    ws.appendChild(wsh);
+    const body = el("div");
+    body.appendChild(el("p", "chart-empty", "Loading…"));
+    ws.appendChild(body);
+    box.appendChild(ws);
+    const jobs = d.tasks.map((t) => t.job);
+    const maps = await Promise.all(jobs.map((j) => walkFile(mapPath(j))));
+    if (seq !== stepSeq) return;
+    const byJobMap = Object.fromEntries(jobs.map((j, i) => [j, maps[i]]));
+    renderWhyWaits(body, S.whyWaitRows(d, byJobMap, nameOf), d);
+  }
+
+  // The waits of one why: each with its task, time, how the turn ended,
+  // who decided its why and with what confidence, and a link that opens
+  // the wait's evidence drawer on the task's map. Never any text.
+  function renderWhyWaits(body, out, d) {
+    body.innerHTML = "";
+    body.appendChild(el("p", "chart-caption", "Each wait for the next prompt with this why, from each task's map file: its time counted as waiting, how the agent's turn ended (Desk's stop facts: never any text), who decided its why and with what confidence. Each opens the wait on its task's map, with its evidence and a prompt for an agent."));
+    if (!out.rows.length) body.appendChild(el("p", "chart-empty", "No recorded wait holds this time."));
+    const ol = el("ol", "why-waits");
+    for (const r of out.rows) {
+      const li = document.createElement("li");
+      li.appendChild(el("span", "cause-span-name", r.name));
+      li.appendChild(document.createTextNode(` · ${S.hoursWords(r.ms)} · `));
+      const route = F.safeRoute("task", r.job);
+      const a = el("a", null, r.item ? `open wait ${r.item.n} on the map` : "open its task");
+      const safe = route ? (r.item ? `${route}?${r.item.kind}=${r.item.n}` : route) : null;
+      if (safe) a.href = safe;
+      if (r.item && r.item.kind === "bursts") a.textContent = `open burst ${r.item.n} on the map`;
+      li.appendChild(a);
+      const facts = el("span", "why-wait-facts", `How the turn ended: ${r.stop}. Decided by: ${r.source}; confidence: ${r.confidence}.${r.reasons.length ? ` Why not known: ${r.reasons.map(W.whyReasonWords).join("; ")}.` : ""}`);
+      li.appendChild(facts);
+      ol.appendChild(li);
+    }
+    if (out.rows.length) body.appendChild(ol);
+    if (out.rest_ms > 1000) body.appendChild(el("p", "chart-caption", `${S.hoursWords(out.rest_ms)} of this time is held by no wait listed here: ${d.why === "not_known" ? "no recorded stop holds it (the stop was not recorded), or" : ""} its task's map file does not list the wait.`));
+    if (out.missing.length) body.appendChild(el("p", "chart-caption", `The map file of ${out.missing.length === 1 ? "one task" : `${out.missing.length} tasks`} is not published or lists no waits, so its waits are not listed here.`));
   }
 
   // ----------------------------------------------------------- step 4: act

@@ -58,6 +58,18 @@
      a pull request time. A known why takes the next-prompt waiting color. */
   --c-op: #3d3c38;
   --c-pr: #1f63b8;
+  /* Why the agent stopped before a wait for the next prompt (addendum §4):
+     one hue per actionable class, one blue for the three human gates, which
+     their patterns tell apart; "why not known" is an outline. Checked with
+     the dataviz validator on this page's surface (lightness, chroma, CVD
+     separation, 3:1 contrast). Every class also carries a pattern and a
+     label, so none is told by hue alone. */
+  --c-why-stopped_short: #c0461a;
+  --c-why-question: #9b3fb5;
+  --c-why-error_limit: #9a6b00;
+  --c-why-interrupted: #00897b;
+  --c-why-gate: #2f62c8;
+  --c-why-not_known: #6f6e69;
 
   /* Hatches from the tokens: a stripe of the meaning color over the page. */
   --hatch-agents-working: repeating-linear-gradient(135deg, var(--c-agents-working) 0 2px, transparent 2px 6px);
@@ -118,6 +130,12 @@
     --c-wait-other_task: #e57a9a;
     --c-op: #d6d4cc;
     --c-pr: #6aa7ee;
+    --c-why-stopped_short: #e0682e;
+    --c-why-question: #b277cf;
+    --c-why-error_limit: #b08218;
+    --c-why-interrupted: #1fa894;
+    --c-why-gate: #5b8ee6;
+    --c-why-not_known: #a8a7a0;
     --c-alarm: #ef5a5a;
     --c-accent: #9d88f0;
 
@@ -864,7 +882,13 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .lad-mark-multi { z-index: 2; }
 .lad-mark:hover, .lad-mark:focus-visible { background: color-mix(in srgb, var(--focus) 14%, transparent); }
 .lad-tick { display: inline-block; width: 2px; height: 12px; border-radius: 1px; background: var(--c-op); flex: none; }
-.lad-tick.why-decision, .lad-tick.why-approval, .lad-tick.why-acceptance, .lad-tick.why-question, .lad-tick.why-stopped_short, .lad-tick.why-error_limit, .lad-tick.why-interrupted, .lad-tick.why-unknown { background: var(--c-wait-next_prompt); }
+.lad-tick.why-stopped_short { background: var(--c-why-stopped_short); }
+.lad-tick.why-question { background: var(--c-why-question); }
+.lad-tick.why-error_limit { background: var(--c-why-error_limit); }
+.lad-tick.why-interrupted { background: var(--c-why-interrupted); }
+.lad-tick.why-decision { background: var(--c-why-gate); }
+.lad-tick.why-approval { background: var(--c-why-gate); }
+.lad-tick.why-acceptance { background: var(--c-why-gate); }
 .lad-span { position: absolute; top: 50%; height: 2px; margin-top: -1px; background: color-mix(in srgb, var(--text-secondary) 45%, transparent); border-radius: 1px; }
 .lad-mark-count { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 650; line-height: 1; padding: 1px 4px 1px 3px; border-radius: 7px; border: 1.25px solid var(--c-op); color: var(--text-primary); background: var(--page-plane); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lad-mark-count.count-pr { border-color: var(--c-pr); }
@@ -880,7 +904,13 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .pr-line { font-size: 13px; line-height: 1.6; margin: 4px 0 0; }
 .clock-glyph { flex: none; display: block; overflow: visible; }
 .clock-glyph.glyph-prompt { fill: var(--c-op); }
-.clock-glyph.glyph-prompt.why-decision, .clock-glyph.glyph-prompt.why-approval, .clock-glyph.glyph-prompt.why-acceptance, .clock-glyph.glyph-prompt.why-question, .clock-glyph.glyph-prompt.why-stopped_short, .clock-glyph.glyph-prompt.why-error_limit, .clock-glyph.glyph-prompt.why-interrupted, .clock-glyph.glyph-prompt.why-unknown { fill: var(--c-wait-next_prompt); }
+.clock-glyph.glyph-prompt.why-stopped_short { fill: var(--c-why-stopped_short); }
+.clock-glyph.glyph-prompt.why-question { fill: var(--c-why-question); }
+.clock-glyph.glyph-prompt.why-error_limit { fill: var(--c-why-error_limit); }
+.clock-glyph.glyph-prompt.why-interrupted { fill: var(--c-why-interrupted); }
+.clock-glyph.glyph-prompt.why-decision { fill: var(--c-why-gate); }
+.clock-glyph.glyph-prompt.why-approval { fill: var(--c-why-gate); }
+.clock-glyph.glyph-prompt.why-acceptance { fill: var(--c-why-gate); }
 .clock-glyph.glyph-opened, .clock-glyph.glyph-merged, .clock-glyph.glyph-pr { fill: var(--c-pr); }
 .clock-glyph.glyph-multi { fill: var(--c-op); }
 .clock-glyph.is-partial path, .clock-glyph.is-partial circle, .clock-glyph.is-partial rect { fill: var(--page-plane); stroke: var(--c-pr); stroke-width: 1.4; stroke-dasharray: 2 1.2; }
@@ -1122,7 +1152,13 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-act { fill: var(--text-secondary); }
 .lane-fail { fill: var(--c-alarm); }
 .lane-op { cursor: pointer; outline: none; fill: var(--c-op); }
-.lane-op.why-decision, .lane-op.why-approval, .lane-op.why-acceptance, .lane-op.why-question, .lane-op.why-stopped_short, .lane-op.why-error_limit, .lane-op.why-interrupted, .lane-op.why-unknown { fill: var(--c-wait-next_prompt); }
+.lane-op.why-stopped_short { fill: var(--c-why-stopped_short); }
+.lane-op.why-question { fill: var(--c-why-question); }
+.lane-op.why-error_limit { fill: var(--c-why-error_limit); }
+.lane-op.why-interrupted { fill: var(--c-why-interrupted); }
+.lane-op.why-decision { fill: var(--c-why-gate); }
+.lane-op.why-approval { fill: var(--c-why-gate); }
+.lane-op.why-acceptance { fill: var(--c-why-gate); }
 .lane-op-band { fill: var(--c-wait-next_prompt); opacity: 0.16; }
 .lane-hit { fill: transparent; }
 .lane-pr { cursor: pointer; outline: none; }
@@ -1352,3 +1388,38 @@ table.data-table.ot-table { width: 100%; }
 /* A cause's task table fits a phone: the day sits under the name, so the table needs no 640px floor. */
 table.data-table.cause-tasks { min-width: 0; width: 100%; }
 @media (max-width: 640px) { table.data-table.cause-tasks td:first-child { min-width: 9em; } table.data-table.cause-tasks th { white-space: normal; } }
+
+/* Why the agent stopped: a fill per class, a color and a pattern (the SVG
+   charts use the matching patterns in index.html, why-pat-*). Solid for
+   stopped short, dots for a question, horizontal lines for an error or a
+   limit, vertical lines for an interruption; the gates share one blue,
+   with diagonal lines (decision), the other diagonal (approval) and a
+   cross-hatch (acceptance); why not known is an outline. */
+.why-fill-stopped_short { --wc: var(--c-why-stopped_short); background: var(--wc); }
+.why-fill-question { --wc: var(--c-why-question); background: radial-gradient(circle, var(--wc) 1.6px, transparent 1.9px) 0 0 / 5px 5px, color-mix(in srgb, var(--wc) 35%, transparent); box-shadow: inset 0 0 0 1.5px var(--wc); }
+.why-fill-error_limit { --wc: var(--c-why-error_limit); background: repeating-linear-gradient(0deg, var(--wc) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1.5px var(--wc); }
+.why-fill-interrupted { --wc: var(--c-why-interrupted); background: repeating-linear-gradient(90deg, var(--wc) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1.5px var(--wc); }
+.why-fill-decision { --wc: var(--c-why-gate); background: repeating-linear-gradient(45deg, var(--wc) 0 2px, transparent 2px 5px); box-shadow: inset 0 0 0 1.5px var(--wc); }
+.why-fill-approval { --wc: var(--c-why-gate); background: repeating-linear-gradient(135deg, var(--wc) 0 2px, transparent 2px 5px); box-shadow: inset 0 0 0 1.5px var(--wc); }
+.why-fill-acceptance { --wc: var(--c-why-gate); background: repeating-linear-gradient(45deg, var(--wc) 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(135deg, var(--wc) 0 1.5px, transparent 1.5px 5px); box-shadow: inset 0 0 0 1.5px var(--wc); }
+.why-fill-not_known { --wc: var(--c-why-not_known); background: transparent; box-shadow: inset 0 0 0 1.5px var(--wc); }
+.swatch.why-fill-stopped_short, .swatch.why-fill-question, .swatch.why-fill-error_limit, .swatch.why-fill-interrupted, .swatch.why-fill-decision, .swatch.why-fill-approval, .swatch.why-fill-acceptance, .swatch.why-fill-not_known { width: 14px; height: 14px; }
+/* A wait for the next prompt on the map takes its class's color on the
+   triangle's outline; its label names the class. */
+.vsm-wait.why-stopped_short .vsm-tri path { stroke: var(--c-why-stopped_short); }
+.vsm-wait.why-question .vsm-tri path { stroke: var(--c-why-question); }
+.vsm-wait.why-error_limit .vsm-tri path { stroke: var(--c-why-error_limit); }
+.vsm-wait.why-interrupted .vsm-tri path { stroke: var(--c-why-interrupted); }
+.vsm-wait.why-decision .vsm-tri path, .vsm-wait.why-approval .vsm-tri path, .vsm-wait.why-acceptance .vsm-tri path { stroke: var(--c-why-gate); }
+.vsm-wait.why-not_known .vsm-tri path { stroke-dasharray: 3 2; }
+/* The Pareto's split toggle sits beside the mode buttons. */
+.why-toggle-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 0; }
+.pareto-why-seg { stroke: var(--page-plane); stroke-width: 1; }
+.pareto-why-legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--text-secondary); }
+.pareto-why-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.why-sub-row td:first-child, .why-sub-row td:nth-child(2) { padding-left: 22px; }
+.why-key { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text-secondary); }
+.why-key li { display: inline-flex; align-items: center; gap: 6px; }
+.why-waits { margin: 8px 0 0; padding-left: 1.4em; }
+.why-waits li { margin: 0 0 8px; line-height: 1.5; }
+.why-waits .why-wait-facts { display: block; font-size: 13px; color: var(--text-secondary); }

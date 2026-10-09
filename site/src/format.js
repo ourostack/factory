@@ -556,8 +556,10 @@
   // Old links keep working: #job-<id> and #session-<id> (the first site's
   // task and session pages) and its section anchors redirect.
   const ROUTE_ID = /^[0-9A-Za-z_-]{1,64}$/;
-  // A cause key from Desk's causes rollup: "<waste>:<what>".
-  const CAUSE_ID = /^[a-z][a-z_]{0,40}:[a-z0-9][a-z0-9_.-]{0,60}$/;
+  // A cause key from Desk's causes rollup: "<waste>:<what>", or one of the
+  // sub-causes of waiting for the next prompt by why the agent stopped,
+  // "waiting:next_prompt:<why>" (Desk D5; the classes of addendum §4).
+  const CAUSE_ID = /^(?:[a-z][a-z_]{0,40}:[a-z0-9][a-z0-9_.-]{0,60}|waiting:next_prompt:(?:stopped_short|question|error_limit|interrupted|decision|approval|acceptance|not_known))$/;
   const PAGES = ["compare", "causes", "act", "why", "about", "store"];
   // The first site's in-page sections, and where each one lives now.
   const OLD_ANCHORS = {

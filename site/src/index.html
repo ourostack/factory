@@ -31,6 +31,33 @@
     <pattern id="hatch-unsplit" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="7" style="stroke: var(--baseline)" stroke-width="2" />
     </pattern>
+    <!-- Why the agent stopped (styles.css .why-fill-*): a color and a pattern per class. -->
+    <pattern id="why-pat-stopped_short" patternUnits="userSpaceOnUse" width="6" height="6">
+      <rect width="6" height="6" style="fill: var(--c-why-stopped_short)" />
+    </pattern>
+    <pattern id="why-pat-question" patternUnits="userSpaceOnUse" width="5" height="5">
+      <rect width="5" height="5" style="fill: var(--c-why-question); opacity: 0.35" />
+      <circle cx="2.5" cy="2.5" r="1.6" style="fill: var(--c-why-question)" />
+    </pattern>
+    <pattern id="why-pat-error_limit" patternUnits="userSpaceOnUse" width="4" height="4">
+      <line x1="0" y1="1" x2="4" y2="1" style="stroke: var(--c-why-error_limit)" stroke-width="2" />
+    </pattern>
+    <pattern id="why-pat-interrupted" patternUnits="userSpaceOnUse" width="4" height="4">
+      <line x1="1" y1="0" x2="1" y2="4" style="stroke: var(--c-why-interrupted)" stroke-width="2" />
+    </pattern>
+    <pattern id="why-pat-decision" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="5" style="stroke: var(--c-why-gate)" stroke-width="2" />
+    </pattern>
+    <pattern id="why-pat-approval" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(-45)">
+      <line x1="1" y1="0" x2="1" y2="5" style="stroke: var(--c-why-gate)" stroke-width="2" />
+    </pattern>
+    <pattern id="why-pat-acceptance" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+      <line x1="1" y1="0" x2="1" y2="5" style="stroke: var(--c-why-gate)" stroke-width="1.5" />
+      <line x1="0" y1="1" x2="5" y2="1" style="stroke: var(--c-why-gate)" stroke-width="1.5" />
+    </pattern>
+    <pattern id="why-pat-not_known" patternUnits="userSpaceOnUse" width="6" height="6">
+      <rect width="6" height="6" style="fill: var(--page-plane)" />
+    </pattern>
     <!-- Laid over a part known only in part (Compare, Over time). -->
     <pattern id="ot-partial" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
       <line x1="1" y1="0" x2="1" y2="5" style="stroke: var(--page-plane)" stroke-width="1.6" />
@@ -154,6 +181,10 @@
       <div class="mode-toggle" role="group" aria-label="What the bars count">
         <button type="button" class="mode-btn" data-mode="all" aria-pressed="true">All elapsed time</button>
         <button type="button" class="mode-btn" data-mode="working" aria-pressed="false">Agent working time</button>
+      </div>
+      <div class="why-toggle-row">
+        <button type="button" class="mode-btn why-toggle" id="why-toggle" aria-pressed="true">Split by why</button>
+        <span class="chart-caption" id="why-toggle-note">Splits the bar for waiting for the next prompt by why the agent stopped.</span>
       </div>
       <p class="chart-caption" id="pareto-caption"></p>
       <div id="pareto"></div>

@@ -874,7 +874,9 @@
     const total = shown.reduce((a, x) => a + x.c.total_ms, 0);
     const bar = ({ c, i }) => {
       const [waste, what] = c.cause.split(":");
-      return { key: c.cause, label: W.causeWords(c.cause), waste, wait: waste === "waiting" ? what : null, segment: W.causeSegment(c.cause), ms: c.total_ms, jobs: arr(c.jobs).length, index: i, href: causeRoute(c.cause) };
+      const b = { key: c.cause, label: W.causeWords(c.cause), waste, wait: waste === "waiting" ? what : null, segment: W.causeSegment(c.cause), ms: c.total_ms, jobs: arr(c.jobs).length, index: i, href: causeRoute(c.cause) };
+      if (c.cause === NEXT_PROMPT) Object.assign(b, whyChildren(c, o.split !== false));
+      return b;
     };
     let bars = shown.map(bar);
     if (bars.length > maxBars) {
@@ -899,6 +901,30 @@
       left_out: mode === "working" ? indexed.filter(({ c }) => isWaiting(c.cause)).reduce((a, x) => a + x.c.total_ms, 0) : 0,
       bars,
     };
+  }
+
+  // The parent cause Desk splits by why the agent stopped (D5).
+  const NEXT_PROMPT = "waiting:next_prompt";
+  const SECOND = 1000;
+  const whyOfKey = (k) => {
+    const p = String(k).split(":");
+    return p.length === 3 && `${p[0]}:${p[1]}` === NEXT_PROMPT && W.WHY_KEYS.includes(p[2]) ? p[2] : null;
+  };
+
+  // The Pareto bar of waiting for the next prompt, split by why the agent
+  // stopped: `why_split` is "on" (its `children` stack it, in W.WHY_KEYS
+  // order: the actionable classes from the base, then the human gates, then
+  // the time whose why is not known), "off" (the toggle is off), "absent"
+  // (Desk publishes no split) or "mismatch" (the children do not add up to
+  // the bar, so it is not split rather than split wrongly).
+  function whyChildren(row, on) {
+    if (!Array.isArray(row.children)) return { why_split: "absent", children: [] };
+    const kids = row.children
+      .filter((c) => c && typeof c.cause === "string" && whyOfKey(c.cause) && typeof c.total_ms === "number" && Number.isFinite(c.total_ms) && c.total_ms > 0)
+      .map((c) => ({ why: whyOfKey(c.cause), key: c.cause, label: W.whyName(whyOfKey(c.cause)), ms: c.total_ms, share_of_parent: row.total_ms > 0 ? c.total_ms / row.total_ms : 0, jobs: arr(c.jobs).length, reasons: arr(c.reasons), href: causeRoute(c.cause) }))
+      .sort((a, b) => W.WHY_KEYS.indexOf(a.why) - W.WHY_KEYS.indexOf(b.why));
+    if (Math.abs(kids.reduce((a, c) => a + c.ms, 0) - row.total_ms) > SECOND) return { why_split: "mismatch", children: [] };
+    return { why_split: on ? "on" : "off", children: kids };
   }
 
   // Rank causes' lede, with real numbers: how many tasks the ranking
@@ -970,6 +996,8 @@
     unknown: "Waste the evaluator could not classify.",
   };
   function causeMeaning(key) {
+    const why = whyOfKey(key);
+    if (why) return `Waiting is idle time, when no agent of the task was working. Here the agent had stopped and was waiting for the operator's next prompt, and ${why === "not_known" ? "why it stopped is not known: the evaluator has not labeled the stop, could not tell, or no stop was recorded" : W.WHY_WORDS[why]}.${W.whyGroup(why) === "gate" ? " This is a human gate: its length is mostly the operator's response time, which this split does not judge." : ""}`;
     const [waste, what] = String(key).split(":");
     if (waste === "waiting") return `Waiting is idle time, when no agent of the task was working. Here ${W.waitedOnWords(what, "long")}.`;
     const base = WASTE_MEANING[waste] || WASTE_MEANING.unknown;
@@ -1011,8 +1039,15 @@
     const top = task && task.top_causes && task.top_causes.state !== "unavailable" ? arr(task.top_causes.value) : [];
     const hit = top.find((x) => x && x.cause === key && typeof x.total_ms === "number");
     if (hit) return { ms: hit.total_ms, bound: null, source: "task" };
+    const why = whyOfKey(key);
+    if (why) {
+      // Desk's own figure for the task, with its state: a class is a lower
+      // bound while some of the task's time is not classified.
+      const n = task && task.next_prompt_by_why_ms ? W.stated(task.next_prompt_by_why_ms[why]) : null;
+      if (n && n.state !== "unavailable") return { ms: n.value, bound: n.state === "partial" ? (n.bound === "upper" ? "upper" : n.bound === null ? "none" : "lower") : null, source: "why" };
+    }
     const [waste, what] = key.split(":");
-    if (waste === "waiting") {
+    if (waste === "waiting" && !why) {
       const v = val(task && task.waiting_by_waited_on_ms && task.waiting_by_waited_on_ms[what]);
       if (v !== null) return { ms: v, bound: null, source: "waiting" };
     } else if (what === "all") {
@@ -1038,6 +1073,7 @@
     const promptNameOf = typeof c.promptNameOf === "function" ? c.promptNameOf : (job) => `factory task ${String(job).slice(0, 8)}`;
     const label = W.causeWords(key);
     if (!doc || !Array.isArray(doc.causes)) return { state: "absent", key, label };
+    if (whyOfKey(key)) return whyCauseDetail(doc, key, c, nameOf, promptNameOf);
     const index = doc.causes.findIndex((x) => x && x.cause === key);
     const all = paretoModel(doc, "all", { maxBars: Infinity });
     if (index < 0) return { state: "not_ranked", key, label, n: doc.n, N: doc.N, of: all.bars.length };
@@ -1074,6 +1110,103 @@
       spans_cut: typeof doc.references_per_cause === "number" && arr(cause.spans).length >= doc.references_per_cause,
     };
   }
+
+  // A sub-cause's page (#/causes/waiting:next_prompt:<why>): Desk lists it
+  // under its parent's `children`, never beside it in the ranking.
+  //   state "not_ranked"  no parent row (no counted task waited for a prompt)
+  //   state "not_split"   Desk publishes no split of the parent yet
+  //   state "none"        the split holds no time for this why
+  //   state "ok"          with `child` { why, parent_ms, share_of_parent,
+  //                       rank, of, reasons } beside causeDetail's fields
+  function whyCauseDetail(doc, key, c, nameOf, promptNameOf) {
+    const why = whyOfKey(key);
+    const label = W.causeWords(key);
+    const parent = doc.causes.find((x) => x && x.cause === NEXT_PROMPT);
+    const base = { key, label, why, waste: "waiting", wait: "next_prompt", segment: "waiting", n: doc.n, N: doc.N, basis: doc.basis || null };
+    if (!parent) return { ...base, state: "not_ranked", of: paretoModel(doc, "all", { maxBars: Infinity }).bars.length };
+    if (!Array.isArray(parent.children)) return { ...base, state: "not_split", parent_ms: parent.total_ms };
+    const split = whyChildren(parent, true);
+    if (split.why_split === "mismatch") return { ...base, state: "not_split", parent_ms: parent.total_ms, mismatch: true };
+    const kids = [...split.children].sort((a, b) => b.ms - a.ms || W.WHY_KEYS.indexOf(a.why) - W.WHY_KEYS.indexOf(b.why));
+    const kid = kids.find((x) => x.why === why);
+    const row = parent.children.find((x) => x && x.cause === key);
+    if (!kid || !row) return { ...base, state: "none", parent_ms: parent.total_ms };
+    const ctx2 = { tasks: byJob(c.taskRows), stacks: byJob(c.stackRows), limit: typeof doc.references_per_cause === "number" ? doc.references_per_cause : null };
+    const tasks = arr(row.jobs)
+      .filter((j) => typeof j === "string")
+      .map((job) => ({ job, name: nameOf(job), promptName: promptNameOf(job), href: `#/task/${job}`, ...(taskCauseMs(key, job, row, ctx2) || { ms: null, bound: null, source: null }) }))
+      .sort((a, b) => (b.ms === null ? -1 : b.ms) - (a.ms === null ? -1 : a.ms) || (a.job < b.job ? -1 : 1));
+    const spans = arr(row.spans)
+      .filter((s) => s && typeof s.job === "string" && typeof s.start_ms === "number" && typeof s.end_ms === "number" && s.end_ms >= s.start_ms)
+      .map((s, k) => ({ k, job: s.job, name: nameOf(s.job), start_ms: s.start_ms, end_ms: s.end_ms, ms: s.end_ms - s.start_ms }))
+      .sort((a, b) => b.ms - a.ms || a.k - b.k);
+    const total = typeof doc.total_ms === "number" && doc.total_ms > 0 ? doc.total_ms : paretoModel(doc, "all", { maxBars: Infinity }).total_ms;
+    return {
+      ...base,
+      state: "ok",
+      ms: kid.ms,
+      jobs: tasks.length,
+      all: { rank: kids.indexOf(kid) + 1, of: kids.length, share: total > 0 ? kid.ms / total : 0, among: "why" },
+      working: null,
+      total_ms: total,
+      tasks,
+      spans,
+      spans_cut: typeof doc.references_per_cause === "number" && arr(row.spans).length >= doc.references_per_cause,
+      child: { why, parent: NEXT_PROMPT, parent_ms: parent.total_ms, share_of_parent: kid.share_of_parent, rank: kids.indexOf(kid) + 1, of: kids.length, reasons: kid.reasons },
+    };
+  }
+
+  // Every wait of the finished tasks a why sub-cause counts, from their map
+  // files (Desk's `waits`, map/2), longest first: each with its task, its
+  // next-prompt time, how the turn ended, who decided its why and with what
+  // confidence, and the map item that holds it. `maps` is { job: map }.
+  // `held_ms` is their sum; any rest of the sub-cause is time no recorded
+  // wait holds (stop not recorded).
+  function whyWaitRows(d, maps, nameOf) {
+    if (!d || d.state !== "ok") return { rows: [], held_ms: 0, rest_ms: 0, missing: [] };
+    const name = typeof nameOf === "function" ? nameOf : (job) => `Task ${String(job).slice(0, 8)}`;
+    const rows = [];
+    const missing = [];
+    for (const t of d.tasks) {
+      const map = maps ? maps[t.job] : null;
+      if (!map || !Array.isArray(map.waits)) {
+        missing.push(t.job);
+        continue;
+      }
+      map.waits.forEach((w, k) => {
+        if (!w || typeof w !== "object" || w.why !== d.why || typeof w.next_prompt_ms !== "number" || !(w.next_prompt_ms > 0)) return;
+        rows.push({
+          job: t.job,
+          name: name(t.job),
+          k,
+          session: String(w.session || "").slice(0, 8),
+          start_ms: w.start_ms,
+          end_ms: w.end_ms,
+          ms: w.next_prompt_ms,
+          stop: W.stopWords(w) || "not recorded: these facts carry no stop",
+          source: W.whySourceWords(w.why_source),
+          confidence: w.why_source === "none" ? "none: not classified" : W.confidenceText(w.confidence),
+          reasons: arr(w.reasons),
+          item: spanItem(map, { start_ms: w.start_ms, end_ms: w.end_ms }),
+        });
+      });
+    }
+    rows.sort((a, b) => b.ms - a.ms || (a.job < b.job ? -1 : a.job > b.job ? 1 : a.k - b.k));
+    const held = rows.reduce((a, r) => a + r.ms, 0);
+    return { rows, held_ms: held, rest_ms: Math.max(0, d.ms - held), missing };
+  }
+
+  // The A3 question each why raises (addendum §4: "why do agents stop short?").
+  const WHY_A3 = {
+    stopped_short: "why do agents stop short of what their authorization covers?",
+    question: "could the agents' questions have been avoided?",
+    error_limit: "why do agents' turns end on an error or a limit?",
+    interrupted: "why does the operator interrupt agents mid-turn?",
+    decision: "could fewer of these decisions reach the operator, or reach the operator sooner?",
+    approval: "could standing authorization cover more of these approvals?",
+    acceptance: "could finished work reach acceptance faster, or need less of it?",
+    not_known: "why is the reason the agent stopped not known, and what would let us classify it?",
+  };
 
   // Which item of a task's map holds a stretch: the wait (gap) it overlaps
   // most, or else the work burst it overlaps most (idle moments inside a
@@ -1114,13 +1247,17 @@
     const tasksText = named.length ? ` Its largest ${named.length === 1 ? "task is" : "tasks are"} ${named.join("; ")}${d.jobs > named.length ? `; of ${d.jobs} tasks in all` : ""}.` : "";
     const share = d.all && typeof d.all.share === "number" ? `, ${W.pctWords(d.all.share)} of all the time ranked` : "";
     const rank = d.all && d.all.rank ? ` It ranks ${ordinal(d.all.rank)} of ${d.all.of} causes by time.` : "";
-    const facts = `It cost ${hoursWords(d.ms)}, counted per task${share}.${rank}${tasksText} Its page is ${l.route}, and its data is the entry with cause "${d.key}" in ${l.dataUrl}.`;
+    const child = d.child || null;
+    const rankText = child ? ` It is ${W.pctWords(child.share_of_parent)} of the ${hoursWords(child.parent_ms)} of waiting for the next prompt, the ${ordinal(child.rank)} of ${child.of} reasons the agent stopped by time.` : rank;
+    const where = child ? `the entry with cause "${d.key}" in the children of the entry with cause "${child.parent}"` : `the entry with cause "${d.key}"`;
+    const facts = `It cost ${hoursWords(d.ms)}, counted per task${share}.${rankText}${tasksText} Its page is ${l.route}, and its data is ${where} in ${l.dataUrl}.${child ? " Each wait's stop facts, who decided its why and with what confidence are in each task's map file, under waits." : ""}`;
     // An A3 already open for this cause: check or extend it, never start a duplicate.
     const open = arr(l.existing).filter((x) => x && x.url);
     if (open.length) {
       const at = open.map((x) => `${x.ref} (${x.url})${x.countermeasure ? `, with countermeasure ${x.countermeasure.ref}${x.countermeasure.merged ? ", merged, not yet checked" : ", not yet merged"}` : ""}`).join("; ");
       return `Factory cause "${d.label}" (${d.key}): an A3 already exists at ${at}; help me check or extend it. ${facts} Walk me through its biggest stretches first, then help me check whether the countermeasure worked, with labeled tasks from before and after it shipped, or extend the A3 if the cause is still open.${index}`;
     }
+    if (child) return `Help me start an A3 on factory cause "${d.label}" (${d.key}): ${WHY_A3[child.why]} ${facts} Walk me through its longest waits first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.${index}`;
     return `Help me start an A3 on factory cause "${d.label}" (${d.key}). ${facts} Walk me through its biggest stretches first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.${index}`;
   }
 
@@ -1301,6 +1438,9 @@
     unlabeledWords,
     causeMeaning,
     causeDetail,
+    whyWaitRows,
+    whyChildren,
+    WHY_A3,
     spanItem,
     a3Prompt,
     KAIZEN_CAUSES,
