@@ -599,10 +599,10 @@ test("I-1: a class page lists every stop of its class, those its task's own work
   assert.match(bg.overlap, /overlapped by the agent's own background work/)
   // A stop inside a work burst opens that burst, not a nearby wait.
   assert.deepEqual(bg.item, { kind: "bursts", n: 2 })
-  assert.match(out.rows[3].overlap, /overlapped by the task's own work: an agent of this task was working/)
+  assert.match(out.rows[3].overlap, /overlapped by the task's own work: a work burst of this task covers it/)
   const s = S.whyWaitsSummary(out, d)
-  assert.match(s, /^4 stops have this why\. 1 holds the 30 minutes counted as waiting on this page and in the Pareto; 3 were overlapped by the agent's own work, so none of their time counts as waiting, and they are listed after the counted ones\./)
-  assert.match(s, /One task whose only stops of this class were overlapped is not in the tasks table above, which lists counted time\./)
+  assert.match(s, /^4 stops have this why\. 1 holds the 30 minutes counted as waiting on this page and in the Pareto; 3 count none of their time as waiting, and they are listed after the counted ones, because the task's own work overlapped them\./)
+  assert.match(s, /One task whose stops of this class count no waiting is not in the tasks table above, which lists counted time\./)
   // Every classified stop is listed, never only those with counted time.
   const app = read("site/src/app.js")
   assert.doesNotMatch(app, /Each wait for the next prompt with this why/)
@@ -613,7 +613,7 @@ test("I-1: a class page lists every stop of its class, those its task's own work
 test("I-1: with no overlapped stop the page and its summary read as before", () => {
   const d = S.causeDetail(causesDoc([child("acceptance", 18.7, ["j1"]), child("not_known", 21.3, ["j1"], { reasons: ["not_labeled"] })]), "waiting:next_prompt:acceptance", {})
   const out = S.whyWaitRows(d, { j1: mapFile(true) })
-  assert.equal(out.overlapped, 0)
+  assert.equal(out.uncounted, 0)
   assert.equal(S.whyWaitsSummary(out, d), "1 stop has this why, and it holds the 19 hours counted as waiting on this page and in the Pareto.")
 })
 
@@ -677,4 +677,46 @@ test("M-4: 'also' only follows a sentence about the same wait, and a share under
   const tiny = { ms: 0.01 * H, ceiling_ms: 0.02 * H, share_of_parent: 0.01 / 40, ceiling_share: 0.02 / 40 }
   assert.equal(S.whyShareWords(tiny), "under 1%")
   assert.equal(S.whyShareWords(tiny, true), "<1%")
+})
+
+// ---------------------------------------- PR #233 review, fix round 1
+
+test("review I-1: the A3 prompt names each stop with no counted time, its length and why it is not counted, and asks for all stops longest first", () => {
+  const d = S.causeDetail(overlapDoc(), "waiting:next_prompt:stopped_short", {})
+  const before = S.a3Prompt(d, { route: "r", dataUrl: "u" })
+  const out = S.whyWaitRows(d, { j1: overlapMap(), j2: overlapOnlyMap() }, (j) => `Task ${j}`)
+  const t = S.a3Prompt(d, { route: "r", dataUrl: "u", stops: out })
+  assert.match(t, /It also has 3 stops of this class whose time is not counted as waiting, so the figures above leave them out: factory task j1, 2 hours, overlapped by the agent's own background work[^;]*; factory task j2, 2 hours, overlapped by the agent's own background work[^;]*; factory task j1, 15 minutes, overlapped by the task's own work[^.]*\. They are the same kind of stop\./)
+  assert.match(t, /Walk me through its stops longest first, the ones with no counted time included, not only its longest counted waits,/)
+  assert.doesNotMatch(t, /Walk me through its longest waits first/)
+  // Without the stops (maps not loaded yet), or with none uncounted, the prompt is unchanged.
+  assert.equal(S.a3Prompt(d, { route: "r", dataUrl: "u", stops: { rows: [], uncounted: 0 } }), before)
+  const app = read("site/src/app.js")
+  assert.match(app, /stops: out/)
+})
+
+test("review M-B: a stop with no counted time is called overlapped only when the task's own work bursts cover it; otherwise no cause is given", () => {
+  const map = overlapMap()
+  // A stop inside the long wait, which an earlier wait already holds: no burst covers it.
+  map.waits.push({ session: "s1", start_ms: 6 * H, end_ms: 7 * H, next_prompt_ms: 0, stop: { end: "end_turn", asks: false, pending_agents: true }, why: "stopped_short", why_source: "evaluator", confidence: "high", reasons: [] })
+  const d = S.causeDetail(overlapDoc(), "waiting:next_prompt:stopped_short", {})
+  const out = S.whyWaitRows(d, { j1: map })
+  const plain = out.rows.find((r) => r.start_ms === 6 * H)
+  assert.equal(plain.counted, false)
+  assert.equal(plain.overlap, null)
+  assert.equal(plain.uncounted_words, "none of it counted as waiting")
+  assert.equal(out.uncounted, 3)
+  assert.equal(out.overlapped, 2)
+  assert.match(S.whyWaitsSummary(out, d), /3 count none of their time as waiting, and they are listed after the counted ones: 2 because the task's own work overlapped them\./)
+  const t = S.a3Prompt(d, { route: "r", dataUrl: "u", stops: out })
+  assert.match(t, /factory task j1, 1 hour, none of it counted as waiting[;.]/)
+  // A burst covers the stop, but the agents' state is not recorded: overlapped by the task's own work.
+  const covered = out.rows.find((r) => r.start_ms === 4.25 * H)
+  assert.match(covered.overlap, /^overlapped by the task's own work: a work burst of this task covers it/)
+})
+
+test("review M-A: the scan's limit is named where the tasks to scan are chosen", () => {
+  const steps = read("site/src/steps.js")
+  assert.match(steps, /a counted task whose next-prompt stops were all overlapped is never scanned/)
+  assert.match(steps, /a class whose stops were all overlapped gets no page/)
 })

@@ -4511,7 +4511,9 @@
     a3h.id = "a3-title";
     a3.appendChild(a3h);
     a3.appendChild(el("p", "chart-caption", `An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt asks: ${S.WHY_A3[d.why]} It hands the agent this why, its time, its largest tasks and where its data is.`));
-    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(d.key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt") });
+    const promptLinks = { route: absolute(S.causeRoute(d.key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt") };
+    // Rebuilt once the map files load, to name the stops that count no waiting.
+    let text = S.a3Prompt(d, promptLinks);
     const pbox = el("div", "drawer-prompt");
     const btn = el("button", "copy-prompt", "Copy as a prompt");
     btn.type = "button";
@@ -4578,7 +4580,7 @@
     // Every wait of this why, from the tasks' map files.
     const ws = el("section", "block");
     ws.setAttribute("aria-labelledby", "why-waits-title");
-    const wsh = el("h2", "block-title", "Its stops: counted waits longest first, then overlapped ones");
+    const wsh = el("h2", "block-title", "Its stops: counted waits longest first, then those with no counted time");
     wsh.id = "why-waits-title";
     ws.appendChild(wsh);
     const body = el("div");
@@ -4591,7 +4593,10 @@
     const maps = await Promise.all(jobs.map((j) => walkFile(mapPath(j))));
     if (seq !== stepSeq) return;
     const byJobMap = Object.fromEntries(jobs.map((j, i) => [j, maps[i]]));
-    renderWhyWaits(body, S.whyWaitRows(d, byJobMap, nameOf), d);
+    const out = S.whyWaitRows(d, byJobMap, nameOf);
+    renderWhyWaits(body, out, d);
+    text = S.a3Prompt(d, { ...promptLinks, stops: out });
+    pre.textContent = text;
   }
 
   // The waits of one why: each with its task, time, how the turn ended,
@@ -4613,7 +4618,7 @@
       if (safe) a.href = safe;
       if (r.item && r.item.kind === "bursts") a.textContent = `open burst ${r.item.n} on the map`;
       li.appendChild(a);
-      const facts = el("span", "why-wait-facts", `${r.overlap ? `Counted as waiting: none, ${r.overlap}. ` : ""}How the turn ended: ${r.stop}. Decided by: ${r.source}; confidence: ${r.confidence}.${r.reasons.length ? ` Why not known: ${r.reasons.map(W.whyReasonWords).join("; ")}.` : ""}`);
+      const facts = el("span", "why-wait-facts", `${r.counted ? "" : r.overlap ? `Counted as waiting: none, ${r.overlap}. ` : "Counted as waiting: none. "}How the turn ended: ${r.stop}. Decided by: ${r.source}; confidence: ${r.confidence}.${r.reasons.length ? ` Why not known: ${r.reasons.map(W.whyReasonWords).join("; ")}.` : ""}`);
       li.appendChild(facts);
       ol.appendChild(li);
     }

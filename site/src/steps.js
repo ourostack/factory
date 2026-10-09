@@ -1285,7 +1285,16 @@
       // counted time in it, then every other task that waited for the next
       // prompt. A stop overlapped by its task's own work counts no waiting,
       // so its task can be missing from the class's own row (I-1).
+      // Limits, from what Desk publishes (factory#233 review, M-A):
+      // - a counted task whose next-prompt stops were all overlapped is never scanned,
+      //   because it holds no next-prompt time, so it is not in the parent's `jobs`;
+      // - a class whose stops were all overlapped gets no page,
+      //   because Desk writes no child row for it.
+      // Neither occurs in today's data. Closing them needs Desk to list such
+      // tasks or stops per row.
       scan_jobs: [...new Set([...tasks.map((t) => t.job), ...arr(parent.jobs).filter((j) => typeof j === "string")])],
+      // Each scanned task's name as a prompt gives it, for the stops the A3 prompt names.
+      prompt_names: Object.fromEntries([...new Set([...tasks.map((t) => t.job), ...arr(parent.jobs).filter((j) => typeof j === "string")])].map((j) => [j, promptNameOf(j)])),
       spans,
       spans_cut: typeof doc.references_per_cause === "number" && arr(row.spans).length >= doc.references_per_cause,
       child: { why, parent: NEXT_PROMPT, parent_ms: parent.total_ms, share_of_parent: kid.share_of_parent, ceiling_ms: kid.ceiling_ms, ceiling_share: kid.ceiling_share, bound: kid.bound, rank, of: kids.length, reasons: kid.reasons, not_known_ms: why === "not_known" ? 0 : nkMs },
@@ -1360,6 +1369,11 @@
         if (typeof w.start_ms !== "number" || typeof w.end_ms !== "number") return;
         const counted = w.next_prompt_ms > 0;
         const bg = w.stop && w.stop.pending_agents === true;
+        // Overlap is said only where the data shows it: the task's own work
+        // bursts cover the stop. Desk also counts none for a stop outside
+        // the lead window or one an earlier wait already holds, and those
+        // are given no cause (factory#233 review, M-B).
+        const covered = !counted && burstsCover(map, w.start_ms, w.end_ms);
         rows.push({
           job,
           name: name(job),
@@ -1370,7 +1384,8 @@
           ms: w.next_prompt_ms,
           span_ms: Math.max(0, w.end_ms - w.start_ms),
           counted,
-          overlap: counted ? null : bg ? "overlapped by the agent's own background work: its background agents were still running, so this time counts as working, not waiting" : "overlapped by the task's own work: an agent of this task was working, so this time counts as working, not waiting",
+          overlap: !covered ? null : bg ? "overlapped by the agent's own background work: a work burst of this task covers it, and its background agents were still running when it stopped, so this time counts as working, not waiting" : "overlapped by the task's own work: a work burst of this task covers it, so this time counts as working, not waiting",
+          uncounted_words: counted ? null : "none of it counted as waiting",
           stop: W.stopWords(w) || "not recorded: these facts carry no stop",
           source: W.whySourceWords(w.why_source),
           confidence: w.why_source === "none" ? "none: not classified" : W.confidenceText(w.confidence),
@@ -1385,7 +1400,16 @@
     const held = rows.reduce((a, r) => a + r.ms, 0);
     const counted = rows.filter((r) => r.counted);
     const uncounted = [...new Set(rows.filter((r) => !r.counted).map((r) => r.job))].filter((j) => !counts.has(j));
-    return { rows, held_ms: held, rest_ms: Math.max(0, d.ms - held), missing, counted: counted.length, overlapped: rows.length - counted.length, uncounted_jobs: uncounted };
+    return { rows, held_ms: held, rest_ms: Math.max(0, d.ms - held), missing, counted: counted.length, uncounted: rows.length - counted.length, overlapped: rows.filter((r) => r.overlap).length, uncounted_jobs: uncounted };
+  }
+
+  // Whether a task's work bursts cover a stretch of its clock, within a
+  // second: bursts never overlap one another, so their overlaps add up.
+  function burstsCover(map, start, end) {
+    const list = map && Array.isArray(map.bursts) ? map.bursts : map && map.bursts && Array.isArray(map.bursts.items) ? map.bursts.items : [];
+    if (!(end > start)) return list.some((b) => b && b.start_ms <= start && start < b.end_ms);
+    const over = list.reduce((a, b) => (b && typeof b.start_ms === "number" && typeof b.end_ms === "number" ? a + Math.max(0, Math.min(b.end_ms, end) - Math.max(b.start_ms, start)) : a), 0);
+    return over >= end - start - SECOND;
   }
 
   // The sentence above a class page's stops: how many there are, how many
@@ -1394,15 +1418,18 @@
     if (!out || !out.rows.length) return "";
     const n = out.rows.length;
     const c = out.counted;
+    const u = out.uncounted;
     const o = out.overlapped;
     const held = `the ${hoursWords(out.held_ms)} counted as waiting on this page and in the Pareto`;
-    if (!o) return n === 1 ? `1 stop has this why, and it holds ${held}.` : `${n} stops have this why, and they hold ${held}.`;
+    if (!u) return n === 1 ? `1 stop has this why, and it holds ${held}.` : `${n} stops have this why, and they hold ${held}.`;
     const head = `${n} stop${n === 1 ? " has" : "s have"} this why.`;
     const cPart = c ? ` ${c} hold${c === 1 ? "s" : ""} ${held};` : ` None of them holds time counted as waiting;`;
-    const oPart = ` ${o} ${o === 1 ? "was" : "were"} overlapped by the agent's own work, so none of ${o === 1 ? "its" : "their"} time counts as waiting, and ${o === 1 ? "it is" : "they are"} listed after the counted ones.`;
+    const them = u === 1 ? "it" : "them";
+    const why = o === u ? `, because the task's own work overlapped ${them}.` : o ? `: ${o} because the task's own work overlapped ${o === 1 ? "it" : "them"}.` : ".";
+    const uPart = ` ${u} count${u === 1 ? "s" : ""} none of ${u === 1 ? "its" : "their"} time as waiting, and ${u === 1 ? "it is" : "they are"} listed after the counted ones${why}`;
     const k = out.uncounted_jobs.length;
-    const tasks = k ? ` ${k === 1 ? "One task" : `${k} tasks`} whose only stops of this class were overlapped ${k === 1 ? "is" : "are"} not in the tasks table above, which lists counted time.` : "";
-    return `${head}${cPart}${oPart}${tasks}`;
+    const tasks = k ? ` ${k === 1 ? "One task" : `${k} tasks`} whose stops of this class count no waiting ${k === 1 ? "is" : "are"} not in the tasks table above, which lists counted time.` : "";
+    return `${head}${cPart}${uPart}${tasks}`;
   }
 
   // The A3 question each why raises (addendum §4: "why do agents stop short?").
@@ -1472,7 +1499,12 @@
       const at = open.map((x) => `${x.ref} (${x.url})${x.countermeasure ? `, with countermeasure ${x.countermeasure.ref}${x.countermeasure.merged ? ", merged, not yet checked" : ", not yet merged"}` : ""}`).join("; ");
       return `Factory cause "${d.label}" (${d.key}): an A3 already exists at ${at}; help me check or extend it. ${facts} Walk me through its biggest stretches first, then help me check whether the countermeasure worked, with labeled tasks from before and after it shipped, or extend the A3 if the cause is still open.${index}`;
     }
-    if (child) return `Help me start an A3 on factory cause "${d.label}" (${d.key}): ${WHY_A3[child.why]} ${facts} Walk me through its longest waits first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.${index}`;
+    // Stops of this class that count no waiting are named with their length
+    // and why, so the agent does not rank them last (factory#233 review, I-1).
+    const st = l.stops && Array.isArray(l.stops.rows) ? l.stops.rows.filter((r) => r && r.counted === false) : [];
+    const stopsText = child && st.length ? ` It also has ${st.length === 1 ? "1 stop" : `${st.length} stops`} of this class whose time is not counted as waiting, so the figures above leave ${st.length === 1 ? "it" : "them"} out: ${st.map((r) => `${(d.prompt_names && d.prompt_names[r.job]) || `factory task ${String(r.job).slice(0, 8)}`}, ${hoursWords(r.span_ms)}, ${r.overlap || r.uncounted_words || "none of it counted as waiting"}`).join("; ")}. ${st.length === 1 ? "It is" : "They are"} the same kind of stop.` : "";
+    const walk = stopsText ? "Walk me through its stops longest first, the ones with no counted time included, not only its longest counted waits," : "Walk me through its longest waits first,";
+    if (child) return `Help me start an A3 on factory cause "${d.label}" (${d.key}): ${WHY_A3[child.why]} ${facts}${stopsText} ${walk} then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.${index}`;
     return `Help me start an A3 on factory cause "${d.label}" (${d.key}). ${facts} Walk me through its biggest stretches first, then draft the A3 with me: the background, the current condition, the root cause, a countermeasure to try, and how we would check it worked with labeled tasks from before and after it shipped.${index}`;
   }
 
