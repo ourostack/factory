@@ -174,6 +174,7 @@
     anchor_after_labels: "the task's pull requests put its finish after the day its labels landed, so the two disagree; the labels' day is shown and may be too early",
     median_of_subset: "a median of only the tasks that were measured has no direction: the others could move it either way",
     no_finish_source: "no record gives the day this task finished",
+    finish_before_last_work: "the recorded finish time is earlier than the task's last work, so it is not a bound",
     job_offsets_withheld: "the desk withholds this task's timing",
     pr_time_not_placed: "some of the task's pull requests have no time on the task clock, so they cannot be counted in a box",
     clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
@@ -684,17 +685,47 @@
     return `#/${parts.join("/")}`;
   }
 
-  // The task #/ opens: the finished task with the latest finish position
-  // (finished means labeled for waste, so its finish is known), named or
-  // private alike, the same task an agent reaches by following llms.txt to
-  // the largest finish_order among labeled tasks. Without one: the done task
-  // with the latest position, then any task with a position, then the first.
+  // A task is finished when its status says done or cancelled and it has a
+  // place in finish order, labeled for waste or not.
+  const CLOSED_STATUS = new Set(["done", "cancelled"]);
+  const finishPos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
+  function isFinished(j) {
+    return !!j && CLOSED_STATUS.has(j.status) && finishPos(j) > 0;
+  }
+  const finishKey = (j) => (j && j.finish_date && (j.finish_date.state === "measured" || j.finish_date.state === "partial") && typeof j.finish_date.value === "string" ? j.finish_date.value : null);
+
+  // The task #/ opens: the latest-finished task (by finish day, every done
+  // or cancelled task, labeled or not) whose lead time is at least an hour,
+  // so the first screen has a walk to show. Days are the only order the
+  // store knows, so two tasks on the same day are a tie, and a tie goes to
+  // the larger lead time. A lead time counts when it is measured or an "at
+  // least" figure of an hour or more. Without one: the latest dated finished
+  // task (the larger lead time on a tie), then the finished task with the
+  // latest position, then any task with a position, then the first.
+  const LANDING_MIN_LEAD_MS = 3600000;
+  function leadValue(j) {
+    const n = j && j.lead_time_ms;
+    return n && n.state !== "unavailable" && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : -1;
+  }
+  function leadAtLeast(j, ms) {
+    const n = j && j.lead_time_ms;
+    if (!n || leadValue(j) < ms) return false;
+    return n.state === "measured" || (n.state === "partial" && n.bound === "lower");
+  }
   function defaultTask(jobs) {
     const list = Array.isArray(jobs) ? jobs : [];
-    const pos = (j) => (j && j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
-    const best = (xs) => xs.reduce((a, j) => (a === null || pos(j) > pos(a) ? j : a), null);
-    const placed = list.filter((j) => j && pos(j) > 0);
-    return best(placed.filter((j) => j.finish_basis === "labels")) || best(placed.filter((j) => j.status === "done")) || best(placed) || list[0] || null;
+    const latest = (xs) =>
+      xs.reduce((a, j) => {
+        if (a === null) return j;
+        const ka = finishKey(a);
+        const kj = finishKey(j);
+        if (ka !== kj) return kj > ka ? j : a;
+        if (leadValue(j) !== leadValue(a)) return leadValue(j) > leadValue(a) ? j : a;
+        return finishPos(j) > finishPos(a) ? j : a;
+      }, null);
+    const byPos = (xs) => xs.reduce((a, j) => (a === null || finishPos(j) > finishPos(a) ? j : a), null);
+    const dated = list.filter((j) => isFinished(j) && finishKey(j) !== null);
+    return latest(dated.filter((j) => leadAtLeast(j, LANDING_MIN_LEAD_MS))) || latest(dated) || byPos(list.filter(isFinished)) || byPos(list.filter((j) => finishPos(j) > 0)) || list[0] || null;
   }
 
   // The Compare route for its choices, defaults left out: the stack-up's
@@ -716,38 +747,31 @@
     return s + ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
   }
 
-  // A task's place in finish order, as the task table and picker show it.
-  // Only a labeled task has finished in the store's sense; the rest are
-  // listed after it, so their cell says why instead of showing a position.
+  // A task's place in finish order, as the task table and picker show it:
+  // a position for every finished task (done or cancelled), labeled or not.
   function finishCell(j) {
     const placed = !!(j && j.finish_order && j.finish_order.state === "measured");
     if (!placed) return "no session";
-    if (j.finish_basis === "labels") return ordinal(j.finish_order.value);
-    return j.status === "done" ? "not labeled" : "open";
+    return isFinished(j) ? ordinal(j.finish_order.value) : "open";
   }
 
-  // The task page's sentence about finish order. Tasks first labeled in the
-  // same commit finished together, as far as the store can tell; their
-  // positions inside that batch are lead-time order, and the sentence says so
-  // rather than claiming a finishing sequence.
-  function finishWords(j, jobs) {
+  // The task page's sentence about where a task sits in finish order: by
+  // its finish day (UTC) among the dated finished tasks ("It finished on or
+  // before 6 Oct (UTC), the 12th of 20 dated tasks."), with whether it is
+  // labeled for waste yet. A finished task with no day says why and that it
+  // is listed after the dated ones.
+  function finishWords(j, jobs, opts) {
     const list = Array.isArray(jobs) ? jobs : [];
-    const labeled = list.filter((x) => x && x.finish_basis === "labels");
     if (!j || !j.finish_order || j.finish_order.state !== "measured") return "It has no place in finish order: no session of it is published.";
-    if (j.finish_basis !== "labels") {
-      if (j.status === "done") return "It is done but not labeled for waste yet, so it is listed after the labeled tasks, by its first session.";
-      return "It is still open, so it is listed after the finished tasks, by its first session.";
-    }
-    const pos = `${ordinal(j.finish_order.value)} of ${labeled.length}`;
-    const g = j.finish_group && j.finish_group.state === "measured" ? j.finish_group.value : null;
-    const batch = g === null ? [] : labeled.filter((x) => x.finish_group && x.finish_group.state === "measured" && x.finish_group.value === g);
-    if (batch.length > 1) {
-      const groups = new Set(labeled.map((x) => (x.finish_group && x.finish_group.state === "measured" ? x.finish_group.value : null)).filter((x) => x !== null));
-      const latest = g === Math.max(...groups);
-      const others = batch.length - 1;
-      return `It was labeled together with ${others} other task${others === 1 ? "" : "s"}${latest ? ", the latest batch" : ""}; within a batch, tasks are ordered by lead time, so it is ${pos} labeled tasks.`;
-    }
-    return `It was the ${pos} labeled tasks to finish.`;
+    if (!isFinished(j)) return "It is still open, so it is listed after the finished tasks, by its first session.";
+    const unlabeled = j.finish_basis === "labels" ? "" : " It is not labeled for waste yet.";
+    const dated = list.filter((x) => isFinished(x) && finishKey(x) !== null).sort((a, b) => finishPos(a) - finishPos(b));
+    const f = finishDay(j.finish_date, opts);
+    if (!f.day) return `It is finished, but no source gives its finish day (${f.reasons.map(reasonText).join("; ")}), so it is listed after the ${dated.length} dated task${dated.length === 1 ? "" : "s"}.${unlabeled}`;
+    const rank = dated.findIndex((x) => x.id === j.id) + 1;
+    const where = rank > 0 ? `, the ${ordinal(rank)} of ${dated.length} dated task${dated.length === 1 ? "" : "s"}` : "";
+    const why = f.kind === "about" && f.reasons.length ? ` The day is no bound: ${f.reasons.map(reasonText).join("; ")}.` : "";
+    return `It finished ${f.words.replace(/ \(direction not known\)$/, "")} (UTC${f.kind === "about" ? "; direction not known" : ""})${where}.${why}${unlabeled}`;
   }
 
   // A task's finish day in words, with its state and bound: "on 26 Sep"
@@ -967,6 +991,6 @@
     { key: "no_session", label: "No session running", token: "--c-no-session", fill: "hatch" },
   ];
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

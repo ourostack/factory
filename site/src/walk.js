@@ -1076,10 +1076,11 @@
   function pickerRows(jobs, taskRows, nameOf, query) {
     const byJob = new Map((Array.isArray(taskRows) ? taskRows : []).map((r) => [r.job, r]));
     const pos = (j) => (j.finish_order && j.finish_order.state === "measured" ? j.finish_order.value : -1);
-    // Two groups: finished tasks (their finish is known from the commit
-    // that labeled them), the latest first; then tasks still open or not
-    // labeled yet, the latest to start first, those with no facts last.
-    const finished = (j) => j.finish_basis === "labels" && pos(j) > 0;
+    // Two groups: finished tasks (done or cancelled, labeled for waste or
+    // not), the latest first; then tasks still open, the latest to start
+    // first, those with no facts last. A finished task not labeled yet
+    // carries `unlabeled`, for its badge.
+    const finished = (j) => (j.status === "done" || j.status === "cancelled") && pos(j) > 0;
     const q = typeof query === "string" ? query.trim().toLowerCase() : "";
     return (Array.isArray(jobs) ? jobs : [])
       .map((j, i) => ({ j, i }))
@@ -1103,6 +1104,7 @@
           feText,
           badge,
           group: finished(j) ? "finished" : "open",
+          unlabeled: finished(j) && j.finish_basis !== "labels",
         };
       })
       .filter((x) => !q || x.name.toLowerCase().includes(q) || x.id.toLowerCase().includes(q));

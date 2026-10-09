@@ -1554,7 +1554,7 @@
       for (const r of rows) {
         if (r.group !== group) {
           group = r.group;
-          list.appendChild(el("li", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open or not labeled yet, the latest to start first"));
+          list.appendChild(el("li", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open, the latest to start first"));
         }
         const li = document.createElement("li");
         const a = el("a", "picker-row");
@@ -1569,6 +1569,7 @@
         if (r.finish && r.finish.kind !== "open") meta.appendChild(el("span", "picker-finish", r.finish.day ? `finished ${r.finish.words}` : r.finish.words));
         meta.appendChild(el("span", null, `lead ${fig(r.lead, "duration")}`));
         meta.appendChild(el("span", null, `flow ${r.feText || "no data"}`));
+        if (r.unlabeled) meta.appendChild(el("span", "picker-badge picker-badge-none", "not labeled yet"));
         if (r.badge) meta.appendChild(el("span", `picker-badge picker-badge-${r.badge === "partial" ? "partial" : "none"}`, r.badge));
         a.appendChild(meta);
         li.appendChild(a);
@@ -3316,14 +3317,14 @@
       t.textContent = text;
       plot.appendChild(t);
     };
-    if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, in finish order →");
+    if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, by finish day (UTC) →");
     if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: T + H, class: "sb-divider" }));
-    if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Not finished →" : "Still open or not labeled yet, by when work began →");
+    if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Still open →" : "Still open, by when work began →");
 
     const barW = colW - 8;
     bars.forEach((b, i) => {
       const x0 = i * colW + 4 + 4;
-      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${b.finish.words} (UTC)` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
+      const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${b.finish.words} (UTC)` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.unlabeled ? ", not labeled yet" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
       const a = svgLink(b.href, `${label}. Follow this task.`);
       a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
       a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
@@ -3843,7 +3844,7 @@
       const name = document.createElement("td");
       name.appendChild(jobLink(b.job, b.name));
       tr.appendChild(name);
-      tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish` : b.open ? "open" : b.status === "done" ? "done, not labeled" : b.status || "no data"));
+      tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish${b.unlabeled ? ", not labeled yet" : ""}` : b.open ? "open" : b.status || "no data"));
       tr.appendChild(el("td", null, b.finish ? (b.finish.kind === "open" ? "open" : b.finish.words) : "—"));
       tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
       const g = (k) => b.groups.find((x) => x.key === k);
@@ -3882,7 +3883,7 @@
           ? "Agent working time only, for the tasks whose working time the evaluator has labeled, in finish order, linear from zero at their own scale. Waiting is left out, so defects, rework and necessary steps, where agent-side fixes live, show. Select a bar to follow its task."
           : mode === "share"
             ? "Each task's own lead time as 100%, on a 0 to 100% axis, with the same parts in the same order, so a 20-minute task's make-up compares with a 200-hour one's. Each bar is labeled with the share agents were working. A task whose split is not known is one hatched bar, never 100% of one part. Select a bar to follow its task."
-            : "The whole lead time of each task, linear from zero. Left to right: finished tasks in finish order, the latest on the right; then tasks still open or not labeled yet, by when work began. Select a bar to follow its task.";
+            : "The whole lead time of each task, linear from zero. Left to right: every finished task (done or cancelled) by finish day (UTC), the latest on the right, with any finished task that has no finish day after the dated ones; then tasks still open, by when work began. Select a bar to follow its task.";
       const view = !all.length || mode !== "working" ? null : S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working")));
       const bars = !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
       const leftOut = document.getElementById("stackup-left-out");

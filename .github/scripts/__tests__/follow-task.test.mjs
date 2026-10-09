@@ -461,7 +461,7 @@ test("the picker lists every task, the latest to finish first, with badges for p
   assert.ok(W.pickerRows(jobs, null, name, "").every((r) => r.badge === "no data"))
 })
 
-test("the picker's row 1 is the latest finished task: open and unlabeled tasks follow in their own group, however late their facts arrived (I-R1)", () => {
+test("the picker's row 1 is the latest finished task: open tasks follow in their own group, however late their facts arrived (I-R1); a finished task not labeled yet stays in the finished group (A1 I1)", () => {
   const jobs = [
     { id: "open0030", finish_order: m(30), finish_basis: "facts", status: "processing" },
     { id: "done0009", finish_order: m(9), finish_basis: "labels", status: "done" },
@@ -471,13 +471,14 @@ test("the picker's row 1 is the latest finished task: open and unlabeled tasks f
     { id: "done0010", finish_order: m(10), finish_basis: "facts", status: "done" },
   ]
   const out = W.pickerRows(jobs, [], (j) => j.id, "")
-  assert.equal(out[0].id, "done0009")
-  assert.deepEqual(out.map((r) => r.id), ["done0009", "done0002", "open0030", "open0012", "done0010", "nofacts0"])
-  assert.deepEqual(out.map((r) => r.group), ["finished", "finished", "open", "open", "open", "open"])
-  // On the real snapshot too: row 1 is the labeled task with the highest finish position.
+  assert.equal(out[0].id, "done0010")
+  assert.deepEqual(out.map((r) => r.id), ["done0010", "done0009", "done0002", "open0030", "open0012", "nofacts0"])
+  assert.deepEqual(out.map((r) => r.group), ["finished", "finished", "finished", "open", "open", "open"])
+  assert.deepEqual(out.map((r) => !!r.unlabeled), [true, false, false, false, false, false])
+  // On the real snapshot too: row 1 is the finished task with the highest finish position.
   const snap = JSON.parse(read(".github/fixtures/walk/snapshot.json"))
   if (Array.isArray(snap.jobs) && snap.jobs.length) {
-    const best = snap.jobs.filter((j) => j.finish_basis === "labels").sort((a, b) => b.finish_order.value - a.finish_order.value)[0]
+    const best = snap.jobs.filter((j) => (j.status === "done" || j.status === "cancelled") && j.finish_order.state === "measured").sort((a, b) => b.finish_order.value - a.finish_order.value)[0]
     assert.equal(W.pickerRows(snap.jobs, snap.tasks || [], (j) => j.id, "")[0].id, best.id)
   }
 })

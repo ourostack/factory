@@ -36,15 +36,15 @@
   // ------------------------------------------------------------ the order
 
   // Every chart on Compare tasks reads left to right in the walk's order:
-  // finished tasks (labeled for waste, so their finish is known) in finish
-  // order, the latest on the right; then tasks still open or not labeled
-  // yet, by when work began, the latest on the right; then any task with no
-  // place at all (no session published). No date is used: finish_order is a
-  // position.
+  // finished tasks (done or cancelled, labeled for waste or not) in finish
+  // order, which is finish-day order with the undated ones after the dated,
+  // the latest on the right; then tasks still open, by when work began, the
+  // latest on the right; then any task with no place at all (no session
+  // published). Over time counts the same finished tasks.
   function walkOrder(jobs) {
     const list = arr(jobs).filter((j) => j && typeof j.id === "string");
     const pos = (j) => (j.finish_order && j.finish_order.state === "measured" && typeof j.finish_order.value === "number" ? j.finish_order.value : null);
-    const finished = (j) => j.finish_basis === "labels" && pos(j) > 0;
+    const finished = (j) => F.isFinished(j);
     const asc = (a, b) => pos(a) - pos(b);
     const placed = list.filter((j) => pos(j) !== null);
     return [
@@ -134,6 +134,7 @@
         short: String(j.id).slice(0, 8),
         group,
         pos,
+        unlabeled: group === "finished" && j.finish_basis !== "labels",
         status: typeof status === "string" ? status : null,
         open,
         shared: !!(task && task.labels_from_shared_session),
@@ -340,12 +341,18 @@
     if (!list.length || list.every((b) => b.state === "no_data" && arr(b.reasons).includes("not_published"))) return { state: "absent", text: "The walk's data is not published yet, so no task can be compared. No bar is drawn rather than a zero.", facts: null };
     const fin = list.filter((b) => b.group === "finished");
     const rest = list.length - fin.length;
-    const restText = rest ? ` The ${plural(rest, "task")} not finished in the store's sense (still open, or done but not labeled for waste yet) follow on the right.` : "";
+    // Finished tasks are in finish-day order; one with no day sits after the
+    // dated ones, and the lede says why.
+    const undated = fin.filter((b) => !(b.finish && b.finish.day));
+    const undatedText = undated.length
+      ? ` ${undated.length === 1 ? "1 finished task has" : `${undated.length} finished tasks have`} no finish day (${[...new Set(undated.flatMap((b) => arr(b.finish && b.finish.reasons)))].map(words).join("; ") || "not recorded"}), so ${undated.length === 1 ? "it sits" : "they sit"} after the dated ones.`
+      : "";
+    const restText = `${undatedText}${rest ? ` ${rest === 1 ? "1 task still open follows" : `${rest} tasks still open follow`} on the right.` : ""}`;
     const split = fin.filter((b) => b.state === "ok" && b.groups.length === 2);
     if (!split.length) {
       return {
         state: "none_finished",
-        text: `${fin.length ? `None of the ${plural(fin.length, "finished task")} splits into working and waiting yet` : "No task has finished in the store's sense yet (finished means labeled for waste)"}, so there is no share to give across finished tasks.${restText}`,
+        text: `${fin.length ? `None of the ${plural(fin.length, "finished task")} splits into working and waiting yet` : "No task has finished yet"}, so there is no share to give across finished tasks.${restText}`,
         facts: null,
       };
     }

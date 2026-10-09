@@ -1,0 +1,135 @@
+// The first v1.1 acceptance walk's findings (A1): a finish day that is no
+// bound (B1), the landing task (B2), one "Finished" list (I1), the
+// operator's own time on a task page (I2), llms.txt's landing rule (I3),
+// the glossary (I4), the Store's sign-off words (I5), partial notes with no
+// direction (I6), the unmeasured part of a week (I7) and the minor ones
+// (M1-M10).
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { test } from "node:test"
+
+const require = createRequire(import.meta.url)
+const F = require("../../../site/src/format.js")
+const W = require("../../../site/src/walk.js")
+const S = require("../../../site/src/steps.js")
+const read = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8")
+
+const H = 3600000
+const measured = (value) => ({ state: "measured", value, reasons: [] })
+const partial = (value, reasons, bound) => ({ state: "partial", value, reasons, bound })
+const unavailable = (reasons) => ({ state: "unavailable", reasons })
+const day = (value, basis = "desk_card_updated", bound = "upper", reasons = ["finish_from_card_update"]) =>
+  bound === "measured" ? { state: "measured", value, basis, reasons: [] } : { state: "partial", value, basis, bound, reasons }
+
+// A data.json job.
+function job(id, status, order, opts = {}) {
+  return {
+    id,
+    status,
+    finish_order: order === null ? unavailable(["no_facts"]) : measured(order),
+    finish_basis: opts.basis || (opts.labeled ? "labels" : status === "done" || status === "cancelled" ? "date" : "facts"),
+    finish_date: opts.date === undefined ? unavailable([status === "done" || status === "cancelled" ? "no_finish_source" : "open_job"]) : opts.date,
+    lead_time_ms: opts.lead === undefined ? measured(10 * H) : opts.lead,
+    ...(opts.name ? { name: opts.name } : {}),
+  }
+}
+
+// ------------------------------------------------------------------ B1
+
+test("B1: a finish day whose recorded finish is before the task's last work is no bound, and never reads on or before", () => {
+  assert.equal(F.reasonText("finish_before_last_work"), "the recorded finish time is earlier than the task's last work, so it is not a bound")
+  const fd = { state: "partial", value: "2026-09-29", basis: "desk_card_updated", bound: null, reasons: ["finish_before_last_work"] }
+  const f = F.finishDay(fd, { year: 2026 })
+  assert.equal(f.kind, "about")
+  assert.doesNotMatch(f.words, /on or before|on or after/)
+  assert.match(f.words, /29 Sep/)
+  assert.equal(f.short, "~29 Sep")
+  // The reason is said with the day, wherever the day is a sentence.
+  assert.match(F.finishWords(job("x", "done", 1, { date: fd }), [job("x", "done", 1, { date: fd })]), /not a bound/)
+})
+
+// ------------------------------------------------------------------ B2
+
+test("B2: #/ lands on the latest-finished task whose lead time is at least an hour, labeled or not; a same-day tie goes to the longer lead time", () => {
+  const jobs = [
+    job("old", "done", 1, { labeled: true, date: day("2026-09-29"), lead: partial(54 * H, ["card_dates_shorter_than_work"], "lower") }),
+    job("tiny", "done", 2, { labeled: true, date: day("2026-10-06"), lead: partial(37000, ["card_dates_shorter_than_work"], "lower") }),
+    job("short7", "done", 3, { date: day("2026-10-07"), lead: measured(7 * H) }),
+    job("long7", "done", 4, { date: day("2026-10-07"), lead: measured(126 * H) }),
+    job("open", "processing", 5, { lead: measured(300 * H) }),
+  ]
+  assert.equal(F.defaultTask(jobs).id, "long7")
+  // The order inside a day is not known, so the later position alone never wins.
+  assert.equal(F.defaultTask([jobs[3], jobs[2]].map((j, i) => ({ ...j, finish_order: measured(i + 1) }))).id, "long7")
+  // A task under an hour never lands while a longer finished one exists.
+  assert.equal(F.defaultTask(jobs.filter((j) => !j.id.endsWith("7"))).id, "old")
+  // A cancelled task counts as finished.
+  assert.equal(F.defaultTask([jobs[0], job("cx", "cancelled", 9, { date: day("2026-10-08"), lead: measured(2 * H) })]).id, "cx")
+  // An "at most" lead time is not known to be an hour.
+  assert.equal(F.defaultTask([jobs[0], job("um", "done", 9, { date: day("2026-10-08"), lead: partial(2 * H, ["x"], "upper") })]).id, "old")
+  // Fallbacks: the latest dated finished task, then any finished task, then the latest position.
+  assert.equal(F.defaultTask([jobs[1], jobs[4]]).id, "tiny")
+  assert.equal(F.defaultTask([job("u", "done", 2), jobs[4]]).id, "u")
+  assert.equal(F.defaultTask([jobs[4], job("d", "drafting", 1)]).id, "open")
+  assert.equal(F.defaultTask([]), null)
+})
+
+test("B2: the task header places a task among the dated tasks by date, never among labeling batches", () => {
+  const jobs = [
+    job("a", "done", 1, { labeled: true, date: day("2026-09-26") }),
+    job("b", "done", 2, { date: day("2026-10-06", "desk_transition", "measured") }),
+    job("c", "done", 3, { labeled: true, date: day("2026-10-06") }),
+    job("u", "done", 4, { labeled: true }),
+    job("o", "processing", 5),
+    job("n", "drafting", null),
+  ]
+  const by = Object.fromEntries(jobs.map((j) => [j.id, j]))
+  assert.equal(F.finishWords(by.b, jobs, { year: 2026 }), "It finished on 6 Oct (UTC), the 2nd of 3 dated tasks. It is not labeled for waste yet.")
+  assert.equal(F.finishWords(by.c, jobs, { year: 2026 }), "It finished on or before 6 Oct (UTC), the 3rd of 3 dated tasks.")
+  assert.equal(F.finishWords(by.u, jobs, { year: 2026 }), "It is finished, but no source gives its finish day (no record gives the day this task finished), so it is listed after the 3 dated tasks.")
+  assert.match(F.finishWords(by.o, jobs), /still open/)
+  assert.match(F.finishWords(by.n, jobs), /no place in finish order/)
+  for (const j of jobs) assert.doesNotMatch(F.finishWords(j, jobs), /batch|labeled tasks/)
+  // The finish cell reads the same order: a position for every finished task.
+  assert.equal(F.finishCell(by.b), "2nd")
+  assert.equal(F.finishCell(by.o), "open")
+  assert.equal(F.finishCell(by.n), "no session")
+})
+
+// ------------------------------------------------------------------ I1
+
+test("I1: the picker holds one Finished list, every done or cancelled task, the latest first, with a not-labeled-yet badge", () => {
+  const jobs = [
+    job("lab", "done", 1, { labeled: true, date: day("2026-09-29") }),
+    job("new", "done", 3, { date: day("2026-10-07") }),
+    job("cx", "cancelled", 2, { date: day("2026-10-06") }),
+    job("nodate", "done", 4),
+    job("open", "processing", 5),
+  ]
+  const rows = S.sortPicker(W.pickerRows(jobs, [], (j) => j.id, ""), (id) => F.finishDay(jobs.find((j) => j.id === id).finish_date), "newest")
+  assert.deepEqual(rows.map((r) => [r.id, r.group]), [["new", "finished"], ["cx", "finished"], ["lab", "finished"], ["nodate", "finished"], ["open", "open"]])
+  assert.deepEqual(rows.filter((r) => r.unlabeled).map((r) => r.id), ["new", "cx", "nodate"])
+  const app = read("site/src/app.js")
+  assert.match(app, /"not labeled yet"/)
+  assert.match(app, /"Still open, the latest to start first"/)
+  assert.doesNotMatch(app, /Still open or not labeled yet/)
+})
+
+test("I1: Compare orders the same finished tasks as Over time, by finish date, and says why an undated one sits last", () => {
+  const jobs = [
+    job("lab", "done", 1, { labeled: true, date: day("2026-09-29") }),
+    job("new", "done", 3, { date: day("2026-10-07") }),
+    job("cx", "cancelled", 2, { date: day("2026-10-06") }),
+    job("nodate", "done", 4),
+    job("open", "processing", 5),
+  ]
+  const order = S.walkOrder(jobs)
+  assert.deepEqual(order.map((x) => [x.j.id, x.group]), [["lab", "finished"], ["cx", "finished"], ["new", "finished"], ["nodate", "finished"], ["open", "open"]])
+  const rows = jobs.map((j) => ({ job: j.id, status: measured(j.status), lead_time_ms: measured(10 * H), working_ms: unavailable(["source_unreadable"]) }))
+  const bars = S.stackBars(jobs, [], rows, { nameOf: (j) => j.id })
+  const lede = S.compareLede(bars, rows, F.reasonText)
+  assert.doesNotMatch(lede.text, /store's sense|labeled for waste yet\) follow/)
+  assert.match(lede.text, /1 task still open follows on the right/)
+  assert.match(lede.text, /1 finished task has no finish day \(no record gives the day this task finished\), so it sits after the dated ones/)
+})
