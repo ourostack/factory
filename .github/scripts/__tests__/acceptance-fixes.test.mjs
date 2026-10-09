@@ -235,3 +235,65 @@ test("I5: the Store's sign-off section agrees with itself, and says what its job
   const app = read("site/src/app.js")
   assert.match(app, /F\.signoffWords\(o, /)
 })
+
+// ------------------------------------------------------------------ I7
+
+const MEAS = (value) => ({ class: "inferred", state: "measured", value, reasons: [] })
+const UNREAD = { class: "inferred", state: "unavailable", reasons: ["source_unreadable"] }
+function stack(job, split) {
+  return {
+    job,
+    status: MEAS("done"),
+    lead_time_ms: MEAS(10 * H),
+    working_ms: split ? MEAS(2 * H) : UNREAD,
+    idle_ms: split ? MEAS(8 * H) : UNREAD,
+    idle: { next_prompt: split ? MEAS(8 * H) : UNREAD, no_session: split ? MEAS(0) : UNREAD },
+    working: { agents_working_unlabeled_ms: MEAS(0), not_labeled_ms: split ? MEAS(2 * H) : UNREAD, class_ms: {}, waste_ms: {} },
+  }
+}
+
+test("I7: a week says how many of its tasks have no working/waiting split yet, and a cause cell never reads ≥0 for them", async () => {
+  const { buildByWeek } = await import("../../../site/scripts/by-week.mjs")
+  const { checkByWeek } = await import("../../../site/scripts/check-numbers.mjs")
+  // A later week whose one task waited with no session running, so that cause has a row.
+  const later = stack("dddd", true)
+  later.idle = { next_prompt: MEAS(7 * H), no_session: MEAS(H) }
+  const stackup = { jobs: [stack("aaaa", true), stack("bbbb", false), stack("cccc", false), later] }
+  const day = (value) => ({ state: "partial", value, basis: "desk_card_updated", bound: "upper", reasons: ["finish_from_card_update"] })
+  const doc = buildByWeek({ stackup, tasks: { jobs: [] }, finishDates: new Map([...["aaaa", "bbbb", "cccc"].map((j) => [j, day("2026-10-06")]), ["dddd", day("2026-10-13")]]) })
+  const w = doc.weeks[0]
+  assert.equal(w.n_unsplit, 2)
+  assert.deepEqual(w.unsplit_reasons, ["source_unreadable"])
+  assert.deepEqual(checkByWeek(doc), [])
+  const ot = S.overTime(doc, { jobs: [], taskRows: [], year: 2026 })
+  assert.equal(ot.weeks[0].unsplit.n, 2)
+  assert.equal(ot.weeks[0].unsplit.words, "2 of 3 tasks have no working/waiting split yet (a session's log could not be read)")
+  const t = S.causeTable(ot, "all")
+  const np = t.rows.find((r) => r.key === "waiting:next_prompt")
+  assert.ok(np)
+  const ns = S.causeTable(ot, "all").rows.find((r) => r.key === "waiting:no_session")
+  // The zero is only over the task with a split; the cell says so instead of ≥0.
+  assert.equal(ns.cells[0].short, "not measured for 2")
+  assert.match(ns.cells[0].words, /none recorded in the 1 task with a split; not measured for the other 2/)
+  assert.equal(ns.cells[1].short, "1h")
+  for (const r of S.causeTable(ot, "share").rows) for (const c of r.cells) assert.notEqual(c.short, "≥0")
+  for (const r of t.rows) for (const c of r.cells) assert.notEqual(c.short, "≥0")
+  // The page says it under each bar and in the caption.
+  const app = read("site/src/app.js")
+  assert.match(app, /b\.unsplit && b\.unsplit\.n/)
+})
+
+// ------------------------------------------------------------------ M9
+
+test("M9: a weekly sum stays at least when its no-direction members are exact (bound_not_moved), and has no direction when one truly has none", async () => {
+  const { sumFigures } = await import("../../../site/scripts/by-week.mjs")
+  const exact = { state: "partial", value: 0, reasons: ["card_dates_shorter_than_work"], bound: null, bound_reason: "bound_not_moved" }
+  const low = { state: "partial", value: 0, reasons: ["card_dates_shorter_than_work"], bound: "lower" }
+  assert.equal(sumFigures([exact, low, { state: "unavailable", reasons: ["source_unreadable"] }]).bound, "lower")
+  const open = { state: "partial", value: 5, reasons: ["x"], bound: null, bound_reason: "bound_reasons_conflict" }
+  const s = sumFigures([open, low])
+  assert.equal(s.bound, null)
+  assert.equal(s.bound_reason, "bound_reasons_conflict")
+  // llms.txt says so.
+  assert.match(read("site/src/llms-template.txt"), /a member whose `bound_reason` is `bound_not_moved` is exact and adds no direction to a sum/)
+})

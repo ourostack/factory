@@ -3496,7 +3496,9 @@
     const drawn = bars.filter((b) => !b.empty && typeof b.total === "number");
     const scale = share ? { unit: "share", max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total)) * 1.1);
     const y = (v) => T + H - (v / scale.max_ms) * H;
-    const totalH = T + H + 46;
+    // A line under the week labels when any week has tasks with no split.
+    const anyUnsplit = bars.some((b) => b.unsplit && b.unsplit.n > 0);
+    const totalH = T + H + 46 + (anyUnsplit ? 16 : 0);
     const row = el("div", "sb-row");
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
     axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? "% of the week's lead time" : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
@@ -3515,7 +3517,7 @@
       const bx = x0 + (ax.colW - barW) / 2;
       const g = svg("g", { tabindex: "0", role: "img", class: "ot-week" });
       const parts = b.segments.map((s) => `${s.label} ${share ? S.overTimeCell({ state: s.state, value: s.share, reasons: ["x"], bound: s.bound }, false, "share").words : S.overTimeCell({ state: s.state, value: s.ms, reasons: ["x"], bound: s.bound }, false, "hours").words}`);
-      g.setAttribute("aria-label", b.empty ? `Week of ${b.label}: no task finished.` : `Week of ${b.label}: ${b.count}; ${b.days.words}. ${b.totalWords}. ${parts.join("; ")}.`);
+      g.setAttribute("aria-label", b.empty ? `Week of ${b.label}: no task finished.` : `Week of ${b.label}: ${b.count}; ${b.days.words}.${b.unsplit && b.unsplit.n ? ` ${b.unsplit.words}.` : ""} ${b.totalWords}. ${parts.join("; ")}.`);
       if (b.empty) {
         g.appendChild(svg("rect", { x: x0 + 2, y: T, width: Math.max(2, ax.colW - 4), height: H, class: "ot-empty" }));
         if (ax.showValues) {
@@ -3548,7 +3550,13 @@
         t.textContent = b.label;
         g.appendChild(t);
       }
-      markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
+      // Under the bar: how many of its tasks have no working/waiting split yet (A1 I7).
+      if (b.unsplit && b.unsplit.n && ax.showValues) {
+        const t = svg("text", { x: x0 + ax.colW / 2, y: T + H + 42, class: "axis-tick ot-unsplit", "text-anchor": "middle" });
+        t.textContent = `${b.unsplit.n}/${b.unsplit.of} not split`;
+        g.appendChild(t);
+      }
+      markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, ...(b.unsplit && b.unsplit.n ? [{ label: "No split yet", value: b.unsplit.words }] : []), { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
       plot.appendChild(g);
     });
     frame.appendChild(plot);
@@ -3565,6 +3573,12 @@
       ul.appendChild(li);
     }
     container.appendChild(ul);
+    // Each week whose split is mostly or partly not known says so in words.
+    const unsplitWeeks = bars.filter((b) => b.unsplit && b.unsplit.n);
+    if (unsplitWeeks.length) {
+      const p = el("p", "chart-caption ot-unsplit-note", `Not measured yet: ${unsplitWeeks.map((b) => `week of ${b.label}, ${b.unsplit.words}`).join("; ")}. Their hours count in the week's lead time as "split not known", and in no cause; "n/m not split" under a bar says the same.`);
+      container.appendChild(p);
+    }
     container.appendChild(el("p", "chart-caption", `The number above a bar is how many tasks finished that week; * marks a thin week (fewer than 3). A dashed slot is a week with no finished task, never a zero bar. Hatched parts are partial. Weeks are labeled by the Monday they start on${ax.every > 1 ? `, every ${ax.every} weeks` : ""}.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here; the table below gives each week's days."}`));
   }
 

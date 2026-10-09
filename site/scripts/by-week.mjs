@@ -154,6 +154,7 @@ export function buildByWeek({ stackup, tasks, finishDates }) {
         doc.weeks.push({ week, starts_on, n: 0, n_partial: 0, ...dayCounts([]), jobs: [] });
         continue;
       }
+      const unsplit = (r) => !isNumber(r.working_ms);
       const partialTask = (r) => dateOf(r).state !== "measured" || figuresOf(r, keys).some((f) => !f || f.state !== "measured");
       doc.weeks.push({
         week,
@@ -161,6 +162,10 @@ export function buildByWeek({ stackup, tasks, finishDates }) {
         n: mine.length,
         n_partial: mine.filter(partialTask).length,
         ...dayCounts(mine.map(dateOf)),
+        // The tasks whose time does not split into working and waiting yet
+        // (no working time), and why: their hours are in lead_ms only.
+        n_unsplit: mine.filter(unsplit).length,
+        unsplit_reasons: [...new Set(mine.filter(unsplit).flatMap((r) => (Array.isArray(r.working_ms?.reasons) && r.working_ms.reasons.length ? r.working_ms.reasons : ["not_recorded"])))].sort(),
         jobs: mine.map((r) => r.job),
         lead_ms: sumBy(mine, (r) => r.lead_time_ms),
         working_ms: sumBy(mine, (r) => r.working_ms),

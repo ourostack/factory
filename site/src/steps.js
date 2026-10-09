@@ -508,6 +508,15 @@
     return { counts: c, earlier, later, bracket: earlier && later ? "both" : earlier ? "left" : later ? "right" : null, words: n ? `${lean}${may ? `: ${may}` : ""}` : "" };
   }
 
+  // A week's tasks whose time does not split into working and waiting yet
+  // (by_week.json `n_unsplit`, `unsplit_reasons`), in words (A1 I7).
+  function unsplitOf(w) {
+    const k = Number.isInteger(w.n_unsplit) ? w.n_unsplit : 0;
+    if (!(k > 0) || !(w.n > 0)) return { n: 0, words: "" };
+    const why = arr(w.unsplit_reasons).map(F.reasonText).join("; ") || F.reasonText("not_recorded");
+    return { n: k, of: w.n, short: `${k} of ${w.n} not split`, words: `${k} of ${plural(w.n, "task")} ${k === 1 ? "has" : "have"} no working/waiting split yet (${why})` };
+  }
+
   function overTime(doc, opts) {
     const o = opts || {};
     const fdOpts = Number.isInteger(o.year) ? { year: o.year } : undefined;
@@ -531,6 +540,7 @@
         thin: w.n > 0 && w.n < THIN_WEEK,
         count: w.n === 0 ? "no task finished" : `${plural(w.n, "task")}${w.n_partial > 0 ? `, ${w.n_partial} partial` : ""}`,
         days,
+        unsplit: unsplitOf(w),
         jobs: arr(w.jobs),
         raw: w,
       };
@@ -737,7 +747,15 @@
         const total = ns.reduce((a, n) => a + (val(n) || 0), 0);
         const cells = ot.weeks.map((w, i) => {
           const n = w.empty ? null : m === "share" ? shareOf(ns[i], w.raw.lead_ms) : ns[i];
-          return { week: w.week, ...cellOf(n, w.empty, kind) };
+          const c = cellOf(n, w.empty, kind);
+          // A zero that is only "at least" because some of the week's tasks
+          // have no split says so, never "≥0" (A1 I7).
+          const u = w.unsplit || { n: 0 };
+          if (u.n > 0 && c.value === 0 && c.bound === "lower") {
+            const rest = w.n - u.n;
+            return { week: w.week, ...c, short: `not measured for ${u.n}`, words: `none recorded in the ${plural(rest, "task")} with a split; not measured for the other ${u.n}` };
+          }
+          return { week: w.week, ...c };
         });
         return { key, label: W.causeWords(key), segment: W.causeSegment(key), wait: key.startsWith("waiting:") ? key.slice(8) : null, href: causeRoute(key), total_ms: total, totalWords: hoursWords(total), cells };
       })
