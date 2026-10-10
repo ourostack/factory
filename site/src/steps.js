@@ -26,6 +26,15 @@
   const MINUTE = 60000;
   const HOUR = 60 * MINUTE;
 
+  // Absent means legacy, not zero and not an invented request. Desk alone
+  // owns episode calculation; readers preserve its envelope and offsets.
+  function readLifecycleClocks(row) {
+    if (!row || typeof row !== "object" || !Object.hasOwn(row, "clocks")) return null;
+    const issues = F.lifecycleClockIssues(row.clocks);
+    if (issues.length) throw new TypeError(`FactorySteps: invalid lifecycle clocks (${issues.map((i) => `${i.code} at ${i.path}`).join(", ")})`);
+    return JSON.parse(JSON.stringify(row.clocks));
+  }
+
   const arr = (x) => (Array.isArray(x) ? x : []);
   const val = (n) => (n && n.state !== "unavailable" && typeof n.value === "number" && Number.isFinite(n.value) ? n.value : null);
   const has = (n, code) => !!(n && Array.isArray(n.reasons) && n.reasons.includes(code));
@@ -1725,5 +1734,6 @@
     ratioBound,
     shareOf,
     sortPicker,
+    readLifecycleClocks,
   };
 });

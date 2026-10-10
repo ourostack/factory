@@ -17,7 +17,7 @@ import { validateImprovementQueue } from "./improvement-queue.mjs";
 
 // The page's own words for each reason. A reason with no words would reach
 // a reader as a code, so it fails the build here.
-const { hasReasonText } = createRequire(import.meta.url)("../src/format.js");
+const { hasReasonText, lifecycleClockIssues } = createRequire(import.meta.url)("../src/format.js");
 
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
@@ -183,6 +183,12 @@ export function checkNumbers(data) {
   }
 
   function walk(node, path, top) {
+    // EXACT lifecycle subtree only. Its class/basis/period offsets are a
+    // different, closed contract; no general numbers/queue exemption.
+    if (/^jobs\[\d+\]\.clocks$/.test(path)) {
+      for (const issue of lifecycleClockIssues(node)) bad(issue.path ? `${path}.${issue.path}` : path, issue.code);
+      return;
+    }
     if (!isStated(node) && NUMBER_PATHS.some((re) => re.test(path))) {
       bad(path, ROLLUP_PATHS.some((re) => re.test(path)) ? "rollup_expected" : "number_expected");
     }

@@ -26,6 +26,9 @@
 
   // The page's own limit for a stale site. The health file cannot change it.
   const STALE_AFTER_HOURS = 36;
+  const CLOCK_KEYS = Object.freeze(["request_to_delivery_ms", "queue_ms", "production_ms", "active_in_production_ms", "production_remainder_ms"]);
+  const CLOCK_BASES = new Set(["recorded_activity", "done_transition", "terminal_observation", "recorded_work_end", "latest_observation", "lifecycle_history", "original_request_not_recorded"]);
+  const CLOCK_FIELDS = new Set(["class", "state", "value", "reasons", "basis", "bound", "bound_reason", "so_far"]);
   const UNKNOWN_DIRECTION = "could be higher or lower";
   const CLOCK_SKEW_HOURS = 0.1;
 
@@ -178,6 +181,12 @@
     finish_before_last_work: "the task's recorded work went on past this day, so it may have finished later and this day may not be a bound",
     finish_time_not_known: "no published record places the time the task finished, so its lead time runs to the end of its recorded work and is at least that",
     job_offsets_withheld: "the desk withholds this task's timing",
+    // Additive lifecycle report reasons, not new published facts vocabulary.
+    original_request_not_recorded: "the original request was not recorded",
+    work_before_card: "recorded work began before the task card",
+    late_work_without_reopen: "work was recorded after delivery without a recorded reopen",
+    episode_boundary_not_recorded: "a production episode boundary was not recorded",
+    episode_history_incomplete: "the recorded production episode history is incomplete",
     pr_time_not_placed: "some of the task's pull requests have no time on the task clock, so they cannot be counted in a box",
     clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
   };
@@ -371,6 +380,105 @@
       basis,
       unknownDirection,
     };
+  }
+
+  // One shared browser/build contract. Validation only: no episodes, durations,
+  // request source or bound direction are calculated in the store.
+  function clockIssues(clock) {
+    const out = [];
+    const bad = (code, path = "") => out.push({ path, code });
+    if (!clock || typeof clock !== "object" || Array.isArray(clock)) {
+      bad("clock_expected");
+      return out;
+    }
+    for (const key of Object.keys(clock)) if (!CLOCK_FIELDS.has(key)) bad("unknown_key", key);
+    if (!["measured", "declared", "inferred", "unavailable"].includes(clock.class)) bad("bad_class");
+    if (!["measured", "partial", "unavailable"].includes(clock.state)) bad("bad_state");
+    if ((clock.state === "unavailable") !== (clock.class === "unavailable")) bad("class_state_mismatch");
+    if (!Array.isArray(clock.reasons)) bad("missing_reasons");
+    else {
+      if (clock.state === "measured" && clock.reasons.length) bad("measured_with_reasons");
+      if (clock.state !== "measured" && !clock.reasons.length) bad("missing_reasons");
+      for (const r of clock.reasons) {
+        if (typeof r !== "string" || !r) bad("bad_reason");
+        else if (!hasReasonText(r)) bad("reason_without_text");
+      }
+    }
+    if (clock.state === "unavailable") {
+      if ("value" in clock) bad("value_on_unavailable");
+    } else if (typeof clock.value !== "number" || !Number.isFinite(clock.value) || clock.value < 0) bad("bad_value");
+    if (!Array.isArray(clock.basis) || clock.basis.some((b) => !CLOCK_BASES.has(b)) || new Set(clock.basis).size !== clock.basis.length) bad("bad_basis");
+    if (typeof clock.so_far !== "boolean") bad("bad_so_far");
+    if (clock.state === "partial") {
+      if (!("bound" in clock)) bad("partial_without_direction");
+      else if (clock.bound === null) {
+        if (typeof clock.bound_reason !== "string" || !hasReasonText(clock.bound_reason)) bad("null_bound_without_reason");
+      } else if (!["lower", "upper"].includes(clock.bound)) bad("bad_bound");
+      if (clock.bound !== null && "bound_reason" in clock) bad("unexpected_bound_reason");
+    } else if ("bound" in clock || "bound_reason" in clock) bad("bound_on_whole_number");
+    return out;
+  }
+
+  function lifecycleClockIssues(clocks) {
+    const out = [];
+    const bad = (path, code) => out.push({ path, code });
+    if (!clocks || typeof clocks !== "object" || Array.isArray(clocks)) {
+      bad("", "clocks_expected");
+      return out;
+    }
+    for (const key of Object.keys(clocks)) if (![...CLOCK_KEYS, "production_periods"].includes(key)) bad(key, "unknown_key");
+    for (const key of CLOCK_KEYS) {
+      for (const issue of clockIssues(clocks[key])) bad(issue.path ? `${key}.${issue.path}` : key, issue.code);
+      // No positive original-request provenance exists in the current paired
+      // producer contract. A first recorded offset (positive or negative) is
+      // not proof. A future positive source needs its own reviewed contract.
+      if (key === "request_to_delivery_ms" || key === "queue_ms") {
+        const c = clocks[key];
+        if (c && (c.state !== "unavailable" || !Array.isArray(c.reasons) || !c.reasons.includes("original_request_not_recorded") || !Array.isArray(c.basis) || !c.basis.includes("original_request_not_recorded"))) bad(key, "original_request_provenance_missing");
+      }
+    }
+    const periods = clocks.production_periods;
+    const path = "production_periods";
+    if (!periods || typeof periods !== "object" || Array.isArray(periods)) bad(path, "periods_expected");
+    else {
+      for (const k of Object.keys(periods)) if (!["state", "reasons", "items"].includes(k)) bad(`${path}.${k}`, "unknown_key");
+      if (!["measured", "partial", "unavailable"].includes(periods.state)) bad(path, "bad_state");
+      if (periods.state === "measured" && CLOCK_KEYS.some((key) => Array.isArray(clocks[key]?.reasons) && clocks[key].reasons.some((r) => r === "episode_history_incomplete" || r === "episode_boundary_not_recorded"))) bad(path, "episode_history_not_exact");
+      if (!Array.isArray(periods.reasons)) bad(path, "missing_reasons");
+      else {
+        if (periods.state === "measured" && periods.reasons.length) bad(path, "measured_with_reasons");
+        if (periods.state !== "measured" && !periods.reasons.length) bad(path, "missing_reasons");
+        for (const r of periods.reasons) if (typeof r !== "string" || !hasReasonText(r)) bad(path, "reason_without_text");
+      }
+      if (!Array.isArray(periods.items)) bad(path, "bad_period_items");
+      else {
+        if (periods.state === "unavailable" && periods.items.length) bad(path, "items_on_unavailable");
+        let previousEnd = -Infinity;
+        periods.items.forEach((p, i) => {
+          const at = `${path}.items[${i}]`;
+          if (!p || typeof p !== "object" || Array.isArray(p)) return bad(at, "period_expected");
+          for (const k of Object.keys(p)) if (!["start_ms", "end_ms", "start_basis", "end_basis", "so_far"].includes(k)) bad(`${at}.${k}`, "unknown_key");
+          if (!Number.isFinite(p.start_ms) || !Number.isFinite(p.end_ms) || p.start_ms > p.end_ms || p.start_ms < previousEnd) bad(at, "bad_period_offsets");
+          previousEnd = p.end_ms;
+          if (p.start_basis !== "recorded_activity" || !["done_transition", "terminal_observation", "recorded_work_end", "latest_observation"].includes(p.end_basis)) bad(at, "bad_basis");
+          if (periods.state === "measured" && ["terminal_observation", "recorded_work_end", "latest_observation"].includes(p.end_basis)) bad(at, "fallback_period_measured");
+          if (typeof p.so_far !== "boolean") bad(at, "bad_so_far");
+        });
+      }
+    }
+    return out;
+  }
+
+  function formatClock(clock, { zone } = {}) {
+    // Durations are offsets, not dates. Accept zone for the shared formatter
+    // interface, but never shift a duration or invent a wall-clock endpoint.
+    const issues = clockIssues(clock);
+    if (issues.length) throw new TypeError(`FactoryFormat: invalid clock (${issues.map((i) => i.code).join(", ")})`);
+    const number = { ...clock, ...(clock.class === "declared" || clock.class === "inferred" ? { basis: clock.class } : {}) };
+    let text = toText(number, "duration");
+    if (clock.state === "partial" && clock.bound === null) text += " — Direction not known";
+    if (clock.so_far) text += " (so far)";
+    return text;
   }
 
   // The same, as one line of text, for tooltips and labels.
@@ -1185,5 +1293,5 @@
   }
 
   return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, yieldCaption, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
-    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
+    barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, formatClock, clockIssues, lifecycleClockIssues, CLOCK_KEYS, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

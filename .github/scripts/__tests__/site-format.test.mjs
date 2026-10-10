@@ -1,12 +1,56 @@
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { test } from "node:test"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 
 const F = createRequire(import.meta.url)("../../../site/src/format.js")
 
 const m = (value) => ({ state: "measured", value, reasons: [] })
 const p = (value, reasons, bound) => ({ state: "partial", value, reasons, ...(bound ? { bound } : {}) })
 const u = (reasons) => ({ state: "unavailable", reasons })
+
+// This allowance is only for these five report reasons, never the closed facts vocabulary.
+const CLOCK_REPORT_REASONS_AHEAD_OF_DESK = [
+  "original_request_not_recorded", "work_before_card", "late_work_without_reopen",
+  "episode_boundary_not_recorded", "episode_history_incomplete",
+]
+
+test("clock report reason allowance expires individually when actual Desk report reasons catch up", async () => {
+  for (const reason of CLOCK_REPORT_REASONS_AHEAD_OF_DESK) assert.ok(F.hasReasonText(reason), reason)
+  if (!process.env.DESK_DIR) {
+    assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1", "Desk report reasons required")
+    return
+  }
+  const report = join(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/pipeline/report.js")
+  assert.ok(existsSync(report), "Desk's actual report reason source is required")
+  const { REASON_TEXT } = await import(pathToFileURL(report).href)
+  assert.deepEqual(CLOCK_REPORT_REASONS_AHEAD_OF_DESK.filter((r) => Object.hasOwn(REASON_TEXT, r)), [], "Desk now exposes clock reasons: remove caught-up entries from CLOCK_REPORT_REASONS_AHEAD_OF_DESK")
+})
+
+test("formatClock states provenance and producer direction visibly, refusing unsupported clocks", () => {
+  assert.equal(typeof F.formatClock, "function")
+  const c = { class: "declared", state: "partial", value: 65000, reasons: ["censored"], basis: ["latest_observation"], bound: "lower", so_far: true }
+  assert.match(F.formatClock(c), /at least 1m/)
+  assert.match(F.formatClock(c), /declared/)
+  assert.match(F.formatClock(c), /so far/)
+  assert.match(F.formatClock({ ...c, bound: "upper" }), /at most 1m/)
+  const opposing = { ...c, bound: null, bound_reason: "bound_reasons_conflict" }
+  assert.match(F.formatClock(opposing), /Direction not known/)
+  for (const bad of [null, {}, { ...c, basis: ["unknown"] }, { ...c, bound: "unknown" }, { ...c, class: "unavailable" }]) assert.throws(() => F.formatClock(bad), TypeError)
+  const reasons = {
+    original_request_not_recorded: "the original request was not recorded",
+    work_before_card: "recorded work began before the task card",
+    late_work_without_reopen: "work was recorded after delivery without a recorded reopen",
+    episode_boundary_not_recorded: "a production episode boundary was not recorded",
+    episode_history_incomplete: "the recorded production episode history is incomplete",
+  }
+  for (const [reason, text] of Object.entries(reasons)) {
+    assert.equal(F.reasonText(reason), text)
+    assert.match(F.formatClock({ class: "unavailable", state: "unavailable", reasons: [reason], basis: [], so_far: false }), /no data/)
+  }
+})
 
 test("the formatter refuses anything that is not a stated number", () => {
   for (const bad of [5, 0, null, undefined, NaN, "5", {}, { value: 3 }, { state: "measured" }]) {

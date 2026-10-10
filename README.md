@@ -206,3 +206,15 @@ been proved. Missing/unreadable/malformed/extra-key/unknown switches are not
 ready. This file is not created here and stays off the maintenance automerge
 allowlist; `factory.json` and `capture.json` are unchanged. Intake/readers do
 not enable a triage producer, runner or runtime.
+
+## Additive lifecycle clocks
+
+New reports may carry `clocks`; reports without it retain their existing numbers and display. `readLifecycleClocks(row)` reads only this producer envelope. Our store and browser do not calculate production episodes. `formatClock(clock, {zone})` formats a duration with its observation class, partial direction and “so far” marker, never a new epoch timestamp.
+
+The five duration keys are `request_to_delivery_ms`, `queue_ms`, `production_ms`, `active_in_production_ms` and `production_remainder_ms`. Each Clock is `{class,state,value?,reasons,basis,bound?,bound_reason?,so_far}`. Classes are `measured|declared|inferred|unavailable`; states are `measured|partial|unavailable`. Unavailable clocks have no value. Partial clocks have a producer-supplied `lower|upper|null` bound, with a reason when direction is null. Opposing bounds visibly say “Direction not known”.
+
+Basis is a closed array of `recorded_activity`, `done_transition`, `terminal_observation`, `recorded_work_end`, `latest_observation`, `lifecycle_history` and `original_request_not_recorded`. `production_periods` contains `{state,reasons,items}` with signed task-clock offsets `{start_ms,end_ms,start_basis,end_basis,so_far}`; a truncated history is not an exact episode list. Production remainder is not automatically idle time or waste.
+
+Current published facts do not prove the original request. Request-to-delivery and queue therefore remain unavailable with `original_request_not_recorded`, including adopted work with positive offsets; negative offsets additionally carry `work_before_card`. No prose, task creation, first capture or declared class supplies that proof. A future positive request source needs a separate reviewed, paired producer/validator contract. Late work without reopen, missing episode boundaries and incomplete history have explicit reasons. Acceptance classes, legacy lead/queue measures, UTC finish-day/week precision and Pacific grouping are unchanged.
+
+This is reader preparation, not clock-producer or runtime qualification. The ten cases in `.github/scripts/__tests__/fixtures/v12-clocks.json` are synthetic reader inputs/results, to be paired byte-identically by Desk's later producer. The strictly named `CLOCK_REPORT_REASONS_AHEAD_OF_DESK` test allowance covers only the five new report reasons and fails as each appears in Desk's actual report table; it does not relax facts validation. Trusted-base/head checks and the closed improvements queue remain in force.
