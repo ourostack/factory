@@ -62,6 +62,8 @@ import { finishInputsOf, resolveFinishDate, utcDay } from "./finish-date.mjs";
 import { buildByWeek } from "./by-week.mjs";
 import { taskNames } from "./task-names.mjs";
 import { createPullReader, maxLookups, prAnchor, prKey, pullsDoc } from "./pr-clock.mjs";
+import { readTriageBatches } from "../../.github/scripts/triage-values.mjs";
+import { deriveImprovementQueue } from "./improvement-queue.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -928,6 +930,9 @@ const harnesses = harnessSummary(scopedFacts).map((h) => ({
 }));
 
 const data = {
+  // Current issue/PR/job shapes have no exact triage revision or structured
+  // decision fields. Do not promote their titles into verified decisions.
+  improvements: deriveImprovementQueue({ batches: readTriageBatches(mainDir), publicEvidence: [], now: Date.now() }),
   schema: "factory-site/3",
   built_at: builtAt,
   ...(reportsCommit ? { reports_commit: reportsCommit } : {}),

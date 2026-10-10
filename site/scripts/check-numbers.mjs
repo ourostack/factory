@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { validateImprovementQueue } from "./improvement-queue.mjs";
 
 // The page's own words for each reason. A reason with no words would reach
 // a reader as a code, so it fails the build here.
@@ -204,6 +205,12 @@ export function checkNumbers(data) {
     }
     for (const [k, v] of Object.entries(node)) {
       if (top && k === "config") continue;
+      // EXACT data.improvements only: a separate closed, codes-only queue
+      // contract, not a measurement. All other paths keep the existing walk.
+      if (top && k === "improvements") {
+        if (!validateImprovementQueue(v).ok) bad("improvements", "triage_projection_invalid");
+        continue;
+      }
       if (k === "template") {
         if (typeof v === "string" && /\d/.test(v)) bad(`${path}.${k}`, "digits_in_text");
         continue;

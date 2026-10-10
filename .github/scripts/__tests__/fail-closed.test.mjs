@@ -46,6 +46,23 @@ test("the site words the unknown status as not measured, with the reason", () =>
 
 const workflow = (name) => readFileSync(new URL(`../../workflows/${name}`, import.meta.url), "utf8")
 
+test("triage trusted checks are independent in validate/merge and main build/pages", () => {
+  for (const name of ["validate.yml", "merge.yml"]) {
+    const text = workflow(name)
+    assert.match(text, /check-triage\.sh/)
+    assert.match(text, /triage_authority_check_unavailable/)
+    // Installed missing/crashing gates and pristine-base bootstrap are tested
+    // by executed workflow bodies in validate-workflow.test.mjs (S2-1).
+    // An absence-refusal bootstrap predicate is not a skip-on-missing gate.
+  }
+  const merge = workflow("merge.yml")
+  assert.match(merge, /current_actor/)
+  assert.match(merge, /collaborators\/.*\/permission/)
+  assert.match(merge, /--repo "\$REPOSITORY" --pr "\$number"/)
+  assert.match(merge, /trusted_maintainer/)
+  for (const name of ["build.yml", "pages.yml"]) assert.match(workflow(name), /triage-values\.mjs --store/)
+})
+
 test("the store's own check scripts are never skipped when absent", () => {
   for (const name of ["validate.yml", "merge.yml"]) {
     const text = workflow(name)

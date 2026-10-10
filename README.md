@@ -129,4 +129,80 @@ The store also checks plugin names on every facts file a pull request adds or mo
 
 **Your GitHub account and the timing of your pull requests are visible.** An intake pull request is opened from the contributor's GitHub account, so that account appears as the pull request's author, like any other public contribution, and GitHub shows when the pull request and its commits were made. A rejected pull request stays readable after it is closed. The facts inside it still carry no identity, and no time of day.
 
-Changes to anything outside the data paths, published facts under `facts/`, published waste labels under `labels/` and capture records under `capture/`, are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI merges only the correction records and `factory.json` changes described under "How the loop closes itself", and leaves everything else for a maintainer.
+Changes to anything outside the data paths, published facts under `facts/`, published waste labels under `labels/`, capture records under `capture/`, and bounded authenticated triage under `triage/`, are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI merges only the correction records and `factory.json` changes described under "How the loop closes itself", and leaves everything else for a maintainer.
+
+## Trusted triage intake and inspection queue
+
+Triage is a separate, public codes-only transport: `triage/<16 lowercase hex>.json`
+with schema `desk.factory.triage/1`. A batch contains at most twenty bounded
+rows. Only an **added regular Git blob at a new path** is eligible. Existing
+batches cannot be replaced, removed, renamed or copied, even by a maintainer.
+A correction or withdrawal is a new batch with higher row revisions; similar
+new corrections are additions, not edits to historical files.
+
+Both trusted validation and main-branch merge independently read the actual
+PR actor and exact head from GitHub, then the actor's repository permission.
+Successful write/admin permission (including maintain) is required for triage;
+JSON ownership, Git authors and event association do not grant it. Unknown API
+answers produce `triage_authority_check_unavailable` and leave the PR open.
+Known non-maintainers receive `triage_untrusted_producer`. Ordinary contributor
+facts retain their existing rules. The token-held step writes only its API
+responses to a protected runner-temp snapshot; the token-free step invokes
+the released Desk validator with that trusted snapshot through its runner
+seam, plus the store's independent immutable Git check. Candidate scripts are
+never executed by that validation. Before taking action, merge reads the
+actor/head and known permission again; drift holds the PR for revalidation,
+and every merge request pins the validated head with GitHub's `sha` guard.
+
+**Introducing-PR bootstrap.** The PR workflow validates from its checked-out
+base, not from head helpers. On a genuinely pre-triage base where both helpers
+are absent and have never existed in its complete Git history, it reads the
+exact Git merge-result change statuses and paths first. Any `triage` path,
+unknown/malformed read or partial/deleted helper installation is an explicit
+`triage_check_unavailable` failure. Only non-triage changes may then use the
+unchanged previous Desk CLI path, with the existing correction, capture and
+facts checks. The guard never copies or executes a helper from the candidate.
+Once the helpers exist on base, missing/crashing checks remain failures, not
+reasons to fall back. Main's merge/build/Pages workflows use the helpers from
+the same complete main checkout after landing; this bootstrap does not enable
+triage or change maintenance automerge eligibility.
+
+Main builds reject malformed, dirty or nonregular triage data before reading
+it. The site derives `data.json.improvements` and publishes that identical
+value in `rollups/improvements.json` (`factory-improvements/1`). This is an
+**inspection queue, not an execution queue or claim grant**. It retains the
+highest revision of each opaque public ID. Equal-revision disagreement or
+two IDs for the same public issue is a conflict. Omission never withdraws an
+annotation. Stale/source-unknown/withdrawn rows remain explicit. Publication
+age is coarse: a batch is fresh for at most 72 hours; it is not an exact review
+time. Conflicting or incomplete coverage stays unknown and is never summed
+across hosts. With no batches the state is `not_reviewed`, not a healthy queue.
+
+Each row's availability is `verified_public_context`,
+`private_detail_not_published` or `stale_or_conflicting`. Only positively public,
+exactly matching evidence and basis revisions can supply context labels.
+Current public issue/PR/job shapes supply no validated structured triage
+decision, recommendation or continuation, so those fields remain
+`{state:"unavailable",reason:"detail_not_published"}`. A title or gate code is
+not a decision. Private human decisions remain actionable without publishing
+their details: “Ask your linked agent to inspect the local annotation.”
+The handoff carries only the public opaque annotation ID/revision, public
+basis/pointers and `authority_limit:"inspect_only_no_new_authority"`. Its
+`data_path` is `rollups/improvements.json`. Ownership not published remains
+unknown; the linked agent must resolve the acknowledged ID on its own desk,
+inspect only authorized local detail, and bring a recommendation to the
+actual decision owner. It must not guess a card, publish private detail,
+claim work or start implementation from this handoff.
+
+The maintained numbers gate recognizes this closed queue **only at the exact
+top-level `data.improvements` path** and validates it with the shared queue
+validator. Invalid projection produces `triage_projection_invalid`; no other
+measurement, nested subtree or schema string gets an exemption.
+
+**Readiness stays off in this change.** The default-branch switch is a separate
+reviewed maintenance change containing only `triage.json` with exactly
+`{"triage":1}`, after trusted checks and deployed absence-state readers have
+been proved. Missing/unreadable/malformed/extra-key/unknown switches are not
+ready. This file is not created here and stays off the maintenance automerge
+allowlist; `factory.json` and `capture.json` are unchanged. Intake/readers do
+not enable a triage producer, runner or runtime.

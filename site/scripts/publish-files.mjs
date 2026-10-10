@@ -19,6 +19,7 @@ const { slimMap } = require("../src/walk.js");
 const { reasonTable } = require("../src/format.js");
 import { prClock } from "./pr-clock.mjs";
 import { forRollupFile } from "./finish-date.mjs";
+import { validateImprovementQueue } from "./improvement-queue.mjs";
 
 // A file at or under this size is small enough for an agent to read whole.
 export const READ_WHOLE_BYTES = 256 * 1024;
@@ -113,9 +114,16 @@ export function readPulls(path) {
 // `pulls` is readPulls' result (or null): each task's map file places its
 // pull requests through it.
 export function publishData({ reports, dist, pulls = null }) {
+  const dataPath = join(dist, "data.json");
+  let improvements;
+  if (existsSync(dataPath)) improvements = JSON.parse(readFileSync(dataPath, "utf8")).improvements;
+  if (improvements !== undefined && !validateImprovementQueue(improvements).ok) throw new Error("triage_projection_invalid");
+  if (improvements === undefined && (existsSync(join(reports, "rollups/improvements.json")) ||
+      existsSync(join(dist, "rollups/improvements.json")))) throw new Error("triage_projection_invalid");
   const copied = [];
   for (const [sub, depth] of [["jobs", 1], ["rollups", 0]]) {
     for (const rel of jsonFiles(join(reports, sub), depth)) {
+      if (sub === "rollups" && rel === "improvements.json") continue; // only the checked data twin below
       const to = join(dist, sub, rel);
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(join(reports, sub, rel), to);
@@ -125,7 +133,16 @@ export function publishData({ reports, dist, pulls = null }) {
   // Each task's row gains the store's name and finish order (data.json is
   // built into dist before this step runs).
   const tasksPath = join(dist, "rollups", "tasks.json");
-  const dataPath = join(dist, "data.json");
+  // One projection is the source of both twins. Never publish a stale reports
+  // queue over the freshly checked main-branch queue in data.json.
+  if (existsSync(dataPath)) {
+    if (improvements !== undefined) {
+      const path = join(dist, "rollups", "improvements.json");
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(improvements), "utf8");
+      copied.push("rollups/improvements.json");
+    }
+  }
   if (existsSync(tasksPath) && existsSync(dataPath)) {
     try {
       const enriched = enrichTasks(JSON.parse(readFileSync(tasksPath, "utf8")), JSON.parse(readFileSync(dataPath, "utf8")));
@@ -192,6 +209,7 @@ const GROUPS = [
   { title: "Step 2, compare tasks", match: (p) => p === "rollups/stackup.json", what: () => "one row per task: its lead time split into working time by the evaluator's labels and waiting (idle time) by what it waited on; what each bar of the stack-up draws" },
   { title: "Step 3, rank causes", match: (p) => p === "rollups/causes.json", what: () => "each cause's time in job-hours (a moment two tasks share counts for each), largest first with its running share, and the tasks and stretches behind it; what the Pareto chart and each #/causes/<key> page draw" },
   { title: "Step 2, compare tasks over time", match: (p) => p === "rollups/by_week.json", what: () => "finished tasks' hours by finish week (`basis: \"by_finish_week\"`: each task counts in the ISO week, UTC with Monday as the first day, in which it finished): per week the lead, working and idle time, working time by class and waste, idle time by what it waited on, and the median flow efficiency of the tasks measured (n of N); `tasks[]` is one dot per task (finish date and flow efficiency); `unplaced` lists finished tasks with no finish date; what Compare's Over time view draws" },
+  { title: "Improvement annotations", match: (p) => p === "rollups/improvements.json", what: () => "the identical data.json.improvements inspection queue (factory-improvements/1): explicit coverage/absence/conflict, safe public context availability and opaque inspect-only handoffs; no private decision prose or new authority" },
   { title: "Other rollups", match: (p) => /^rollups\/[^/]+\.json$/.test(p), what: (p) => `the pipeline's ${p.slice(8, -5)} rollup` },
   { title: "The site's own health", match: (p) => p === "health.json", what: () => "whether the site data is current" },
 ];
