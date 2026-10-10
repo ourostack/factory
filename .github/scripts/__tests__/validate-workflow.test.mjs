@@ -167,7 +167,7 @@ function workflowRun(source, name) {
   assert.ok(at >= 0, name)
   return block.slice(at + "        run: |\n".length).split("\n").map((l) => l.startsWith("          ") ? l.slice(10) : l).join("\n")
 }
-function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, introducing = false, poisonHead = false, triagePath } = {}) {
+function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, introducing = false, poisonHead = false, triagePath, mergeBearingHead = false } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "triage-workflow-")))
   const dir = join(home, "repo"), temp = join(home, "trusted-temp"), bin = join(home, "bin")
   for (const p of [dir, temp, bin]) mkdirSync(p)
@@ -201,9 +201,19 @@ function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, in
   }
   git("config", "user.name", "OWNER"); git("config", "user.email", "owner@example.invalid")
   const base = git("rev-parse", "HEAD")
-  let head
+  let head, sourceHead
   if (introducing) {
-    head = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+    // CI runs tests from a merge RESULT checkout. Its HEAD is not a PR head.
+    // Keep the exact current candidate tree (fetched by clone as Git objects),
+    // but give this synthetic introducing PR only the exact old base parent.
+    // Never weaken the released validator's merge-bearing-head refusal.
+    sourceHead = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+    const tree = git("rev-parse", `${sourceHead}^{tree}`)
+    head = git("commit-tree", tree, "-p", base, "-m", "synthetic introducing PR with current source tree")
+    assert.equal(git("rev-parse", `${head}^{tree}`), tree)
+    assert.equal(git("rev-list", "--parents", "-n", "1", head), `${head} ${base}`)
+    assert.equal(git("rev-list", "--merges", `${base}..${head}`), "")
+    if (mergeBearingHead) head = git("commit-tree", tree, "-p", base, "-p", head, "-m", "real disallowed merge-bearing PR head")
     git("branch", "candidate", head)
   } else {
     git("checkout", "-qb", "candidate")
@@ -262,7 +272,7 @@ process.stdout.write(JSON.stringify(response));
     return spawnSync("bash", ["-c", script], { cwd: dir, env: scoped, encoding: "utf8" })
   }
   return {
-    home, dir, temp, pr, head, base, run,
+    home, dir, temp, pr, head, sourceHead, base, run,
     git,
     requests: () => JSON.parse(readFileSync(calls, "utf8")),
     outputs: () => Object.fromEntries(readFileSync(env.GITHUB_OUTPUT, "utf8").trim().split("\n").filter(Boolean).map((l) => l.split("="))),
@@ -317,7 +327,7 @@ test("S2-1: real introducing maintenance head validates with exact 050c278a base
     assert.equal(r.run(workflowRun(text, "Re-read the actual actor and head after validation"), true, {
       ACTOR: outputs.actor, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
     }).status, 0)
-    t.diagnostic(`exact introducing base=${r.base} head=${r.head}; old-helper bytes unchanged; maintenance passed`)
+    t.diagnostic(`introducing source=${r.sourceHead} fixtureHead=${r.head} base=${r.base}; exact source tree, single base parent; old-helper bytes unchanged; maintenance passed`)
     assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), false)
     assert.equal(existsSync(join(r.dir, ".github/scripts/check-triage.sh")), false)
     noActions(r)
@@ -426,11 +436,60 @@ test("S2-1: installed missing/crashing helpers and helper deletion history never
         AUTHOR_ASSOCIATION: outputs.association, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
         ...(kind === "deleted_history" ? { BASE_SHA: r.git("rev-parse", "HEAD") } : {}),
       })
+
       assert.equal(result.status, 1)
       assert.match(result.stdout, /triage_check_unavailable|validator_unavailable/)
       noActions(r)
     } finally { r.close() }
   }
+})
+
+test("remote CI: introducing fixture works from scrubbed merged-result checkout instead of treating its merge as PR head", (t) => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "triage-ci-merged-")))
+  const repo = join(home, "repo")
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+  const base = "050c278a8119b6d7ebb681f4f0ab6b57ea800dd2"
+  try {
+    execFileSync("git", ["clone", "--quiet", "--no-hardlinks", ROOT, repo])
+    const source = git("rev-parse", "HEAD")
+    git("config", "user.name", "fixture"); git("config", "user.email", "fixture@example.invalid")
+    copyFileSync(new URL(import.meta.url), join(repo, ".github/scripts/__tests__/validate-workflow.test.mjs"))
+    git("add", "--", ".github/scripts/__tests__/validate-workflow.test.mjs")
+    git("commit", "-q", "--allow-empty", "-m", "candidate test bytes")
+    const candidate = git("rev-parse", "HEAD")
+    git("checkout", "-q", "--detach", base)
+    git("merge", "--quiet", "--no-ff", "--no-edit", candidate)
+    const merged = git("rev-parse", "HEAD")
+    assert.equal(git("rev-list", "--parents", "-n", "1", merged).split(" ").length, 3)
+    assert.equal(git("rev-parse", `${merged}^{tree}`), git("rev-parse", `${candidate}^{tree}`))
+    const result = spawnSync(process.execPath, ["--test", "--test-name-pattern=S2-1: real introducing|S2-1: actual prechange",
+      ".github/scripts/__tests__/validate-workflow.test.mjs"], {
+      cwd: repo, encoding: "utf8", maxBuffer: 8 * 1024 * 1024,
+      env: { PATH: process.env.PATH, HOME: home, CI: "true", FACTORY_REQUIRE_DESK: "1", DESK_DIR: process.env.DESK_DIR },
+    })
+    t.diagnostic(`CI-shaped source=${source} candidate=${candidate} merged=${merged}; two-parent checkout; token-free child`)
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+  } finally { rmSync(home, { recursive: true, force: true }) }
+})
+
+test("remote CI: real merge-bearing PR head remains refused by unchanged released Desk and actual-base controller", () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  const r = authorityWorkflow({}, { actualBase: true, introducing: true, mergeBearingHead: true })
+  try {
+    assert.equal(r.git("rev-list", "--parents", "-n", "1", r.head).split(" ").length, 3)
+    const direct = r.run(`node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr --base "$BASE_SHA" --head "$HEAD_SHA" --author-association COLLABORATOR`)
+    assert.equal(direct.status, 1)
+    assert.deepEqual(JSON.parse(direct.stdout), { ok: false, errors: [{ code: "unexpected_merge", path: "head" }], maintenance: false })
+    r.run(workflowRun(text, "Decide whether the author maintains this repository"), true)
+    const outputs = r.outputs()
+    const validation = r.run(workflowRun(text, "Validate the pull request"), false, {
+      AUTHOR_ASSOCIATION: outputs.association, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
+    })
+    assert.equal(validation.status, 1)
+    assert.match(validation.stdout, /factory-rejected: unexpected_merge/)
+    noActions(r)
+  } finally { r.close() }
 })
 
 test("actual merge workflow permission unavailable holds triage, known read refuses, permission upgrade before rejection holds", () => {
