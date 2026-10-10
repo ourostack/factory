@@ -50,7 +50,7 @@ import { STALE_AFTER_HOURS, buildHealth, intakeClass, lastBuildFromRuns } from "
 const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
 // The table that links a kaizen issue to the cause it works on (steps.js),
 // written into data.json so agents read the mapping as data.
-const { kaizenCauseOf } = createRequire(import.meta.url)("../src/steps.js");
+const { kaizenCauseOf, readLifecycleClocks } = createRequire(import.meta.url)("../src/steps.js");
 import { checkByWeek, checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
@@ -217,6 +217,8 @@ const finishInputs = new Map();
 const jobs = jobFiles.map((f) => {
   const report = readJSON(join(jobsDir, f), {});
   const summary = jobSummary(report, f);
+  const clocks = readLifecycleClocks(report);
+  if (clocks !== null) summary.clocks = clocks;
   finishInputs.set(summary.id, finishInputsOf(report));
   return summary;
 });

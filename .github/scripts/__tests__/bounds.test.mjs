@@ -15,7 +15,18 @@ test("a measure with no row in the direction table cannot be made partial: the b
 
 test("every row in the table names a known rule", () => {
   for (const [measure, rule] of Object.entries(DIRECTIONS)) {
-    assert.ok(["lower", "upper", "unknown", "from_reasons", "lower_if_censored", "upper_if_awaiting", "finish_date", "from_members"].includes(rule), measure)
+    assert.ok(["lower", "upper", "unknown", "from_reasons", "lower_if_censored", "upper_if_awaiting", "finish_date", "from_members", "producer_clock"].includes(rule), measure)
+  }
+})
+
+test("lifecycle clock directions belong to Desk, including opposing bounds; they are never recomputed from reasons", () => {
+  for (const measure of ["request_to_delivery_ms", "queue_ms", "production_ms", "active_in_production_ms", "production_remainder_ms"]) {
+    const clock = { class: "measured", state: "partial", value: 4, reasons: ["log_truncated"], basis: ["recorded_activity"], bound: null, bound_reason: "bound_reasons_conflict", so_far: false }
+    assert.deepEqual(direct(clock, measure), clock)
+    assert.throws(() => directionOf(measure, clock.reasons), /producer/)
+    const missing = { ...clock }
+    delete missing.bound
+    assert.throws(() => direct(missing, measure), /clock/i)
   }
 })
 

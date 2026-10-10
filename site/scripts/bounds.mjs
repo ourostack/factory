@@ -44,6 +44,8 @@
 // session whose start was lost can only make it shorter: an upper bound.
 
 const FROM = "from_reasons";
+import { createRequire } from "node:module";
+const { clockIssues } = createRequire(import.meta.url)("../src/format.js");
 const LEAD_FLOORS = new Set(["censored", "card_dates_shorter_than_work", "finish_time_not_known"]);
 const AWAITING = new Set(["awaiting_signoff"]);
 // A finish day taken from a record written after the task finished is at or
@@ -65,6 +67,13 @@ export const DIRECTIONS = Object.freeze({
   // Per-job report measures (jobs table and job page).
   lead_time_ms: "lower_if_censored",
   queue_before_start_ms: "upper",
+  // These envelopes already carry Desk's joined direction. Reasons alone
+  // cannot recover episode bounds or opposing input dimensions.
+  request_to_delivery_ms: "producer_clock",
+  queue_ms: "producer_clock",
+  production_ms: "producer_clock",
+  active_in_production_ms: "producer_clock",
+  production_remainder_ms: "producer_clock",
   active_time_ms: FROM,
   busy_time_ms: FROM,
   flow_efficiency: "unknown",
@@ -141,6 +150,7 @@ function fromReasons(reasons) {
 export function directionOf(measure, reasons) {
   if (!Object.hasOwn(DIRECTIONS, measure)) throw new Error(`no bound direction for the measure ${measure}`);
   const rule = DIRECTIONS[measure];
+  if (rule === "producer_clock") throw new Error(`the measure ${measure} takes its direction from the producer clock`);
   if (rule === FROM) return fromReasons(reasons);
   if (rule === "upper_if_awaiting") return reasons.length > 0 && reasons.every((r) => AWAITING.has(r)) ? "upper" : "unknown";
   if (rule === "finish_date") {
@@ -174,6 +184,10 @@ export function ratioDirection(part, whole) {
 // The number with its direction when partial, and without any bound
 // otherwise. The measure must have a row even when the number is whole.
 export function direct(number, measure) {
+  if (DIRECTIONS[measure] === "producer_clock") {
+    if (clockIssues(number).length) throw new TypeError(`invalid producer clock for ${measure}`);
+    return { ...number };
+  }
   const direction = directionOf(measure, Array.isArray(number?.reasons) ? number.reasons : []);
   if (!number || number.state !== "partial") {
     if (number && "bound" in number) {

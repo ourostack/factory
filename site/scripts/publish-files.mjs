@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const { slimMap } = require("../src/walk.js");
 const { reasonTable } = require("../src/format.js");
+const { readLifecycleClocks } = require("../src/steps.js");
 import { prClock } from "./pr-clock.mjs";
 import { forRollupFile } from "./finish-date.mjs";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
@@ -58,6 +59,7 @@ export function enrichTasks(tasksDoc, dataDoc) {
     ...tasksDoc,
     store_fields: ["name", "finish_order", "finish_group", "finish_basis", "finish_date"],
     jobs: tasksDoc.jobs.map((r) => {
+      readLifecycleClocks(r);
       const j = r && jobs.get(r.job);
       return {
         ...r,
@@ -120,6 +122,18 @@ export function publishData({ reports, dist, pulls = null }) {
   if (improvements !== undefined && !validateImprovementQueue(improvements).ok) throw new Error("triage_projection_invalid");
   if (improvements === undefined && (existsSync(join(reports, "rollups/improvements.json")) ||
       existsSync(join(dist, "rollups/improvements.json")))) throw new Error("triage_projection_invalid");
+  // Refuse malformed additive envelopes before copying any report/twin.
+  // Legacy unreadable files retain the existing unavailable-display behavior.
+  for (const [sub, depth] of [["jobs", 1], ["rollups", 0]]) {
+    for (const rel of jsonFiles(join(reports, sub), depth)) {
+      let doc;
+      try { doc = JSON.parse(readFileSync(join(reports, sub, rel), "utf8")); } catch { continue; }
+      readLifecycleClocks(doc);
+      if (sub === "rollups" && ["tasks.json", "stackup.json"].includes(rel)) {
+        for (const row of Array.isArray(doc?.jobs) ? doc.jobs : []) readLifecycleClocks(row);
+      }
+    }
+  }
   const copied = [];
   for (const [sub, depth] of [["jobs", 1], ["rollups", 0]]) {
     for (const rel of jsonFiles(join(reports, sub), depth)) {
@@ -179,7 +193,10 @@ export function publishData({ reports, dist, pulls = null }) {
     mkdirSync(dirname(to), { recursive: true });
     const job = String((report.job && report.job.id) || report.timeline.job || "");
     const store = { pr_clock: prClock(report.timeline.prs, pulls ? pulls.gh : null, { capped: pulls ? pulls.capped : undefined }), finish_date: finishDates.get(job) || null };
-    writeFileSync(to, JSON.stringify(slimMap(report, store)), "utf8");
+    const map = slimMap(report, store);
+    const clocks = readLifecycleClocks(report);
+    if (clocks !== null) map.clocks = clocks;
+    writeFileSync(to, JSON.stringify(map), "utf8");
     maps.push(`map/${rel}`);
   }
   const all = [...jsonFiles(dist, 0), ...jsonFiles(join(dist, "rollups"), 0).map((p) => `rollups/${p}`), ...jsonFiles(join(dist, "map"), 0).map((p) => `map/${p}`), ...jsonFiles(join(dist, "jobs"), 1).map((p) => `jobs/${p}`)];

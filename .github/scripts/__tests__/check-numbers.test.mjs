@@ -17,6 +17,31 @@ const queueDoc = () => deriveImprovementQueue({
   now: queueNow,
 })
 
+test("clock envelopes accept unavailable and null-bound states only at exact lifecycle paths", () => {
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/v12-clocks.json", import.meta.url), "utf8"))
+  for (const c of fixture.cases) assert.deepEqual(checkNumbers({ jobs: [{ clocks: c.expected }] }), [], c.id)
+  const mutations = [
+    ["partial_without_direction", (c) => { delete c.production_remainder_ms.bound }],
+    ["null_bound_without_reason", (c) => { delete c.production_remainder_ms.bound_reason }],
+    ["bad_basis", (c) => { c.production_ms.basis = ["speculative_request"] }],
+    ["bad_class", (c) => { c.production_ms.class = "exact" }],
+    ["bad_so_far", (c) => { c.production_ms.so_far = 1 }],
+    ["value_on_unavailable", (c) => { c.queue_ms.value = 0 }],
+    ["bound_on_whole_number", (c) => { c.queue_ms.bound = "lower" }],
+    ["bad_value", (c) => { c.production_ms.value = Infinity }],
+    ["unknown_key", (c) => { c.production_ms.epoch = 123 }],
+    ["reason_without_text", (c) => { c.queue_ms.reasons = ["invented"] }],
+  ]
+  for (const [code, mutate] of mutations) {
+    const c = structuredClone(fixture.cases.find((c) => c.id === "opposing_bounds").expected)
+    mutate(c)
+    assert.ok(checkNumbers({ jobs: [{ clocks: c }] }).some((e) => e.code === code), code)
+  }
+  const c = fixture.cases[0].expected
+  assert.ok(checkNumbers({ nested: { clocks: c } }).length)
+  assert.ok(checkNumbers({ jobs: [{ clocks: c, unrelated: { state: "partial", value: 1, reasons: ["log_truncated"], bound: null, bound_reason: "bound_reasons_conflict" } }] }).length)
+})
+
 test("exact data.improvements closed queue accepts reviewed and unknown absence, never as a measurement", () => {
   for (const improvements of [queueDoc(), deriveImprovementQueue({ batches: [], now: queueNow })]) {
     assert.deepEqual(checkNumbers({ ...good(), improvements }), [])
