@@ -257,7 +257,9 @@ jobs:
           while IFS=$'\t' read -r number association same_repo held actor trusted_maintainer; do
             result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
-              summary "factory-merge: #$number $(jq -r '(.unavailable // "") | if test("^[a-z][a-z0-9_]{0,63}_check_unavailable$") then . else "validator_unavailable" end' "$result" 2> /dev/null || echo validator_unavailable); no action"
+              reason=$(jq -r '(.unavailable // "") | if test("^[a-z][a-z0-9_]{0,63}_check_unavailable$") then . else "validator_unavailable" end' "$result" 2> /dev/null || true)
+              # jq on an empty missing-helper result may exit 0 without output.
+              summary "factory-merge: #$number ${reason:-validator_unavailable}; no action"
               unavailable=1
               continue
             fi

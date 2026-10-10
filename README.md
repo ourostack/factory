@@ -154,6 +154,19 @@ never executed by that validation. Before taking action, merge reads the
 actor/head and known permission again; drift holds the PR for revalidation,
 and every merge request pins the validated head with GitHub's `sha` guard.
 
+**Introducing-PR bootstrap.** The PR workflow validates from its checked-out
+base, not from head helpers. On a genuinely pre-triage base where both helpers
+are absent and have never existed in its complete Git history, it reads the
+exact Git merge-result change statuses and paths first. Any `triage` path,
+unknown/malformed read or partial/deleted helper installation is an explicit
+`triage_check_unavailable` failure. Only non-triage changes may then use the
+unchanged previous Desk CLI path, with the existing correction, capture and
+facts checks. The guard never copies or executes a helper from the candidate.
+Once the helpers exist on base, missing/crashing checks remain failures, not
+reasons to fall back. Main's merge/build/Pages workflows use the helpers from
+the same complete main checkout after landing; this bootstrap does not enable
+triage or change maintenance automerge eligibility.
+
 Main builds reject malformed, dirty or nonregular triage data before reading
 it. The site derives `data.json.improvements` and publishes that identical
 value in `rollups/improvements.json` (`factory-improvements/1`). This is an

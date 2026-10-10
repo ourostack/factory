@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { test } from "node:test"
@@ -167,31 +167,62 @@ function workflowRun(source, name) {
   assert.ok(at >= 0, name)
   return block.slice(at + "        run: |\n".length).split("\n").map((l) => l.startsWith("          ") ? l.slice(10) : l).join("\n")
 }
-function authorityWorkflow(scenario, { factsOnly = false } = {}) {
-  const home = mkdtempSync(join(tmpdir(), "triage-workflow-"))
+function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, introducing = false, poisonHead = false, triagePath } = {}) {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "triage-workflow-")))
   const dir = join(home, "repo"), temp = join(home, "trusted-temp"), bin = join(home, "bin")
   for (const p of [dir, temp, bin]) mkdirSync(p)
-  symlinkSync(process.env.DESK_DIR, join(temp, "desk"), "dir")
+  if (actualBase) {
+    // A physical, byte-identical released CLI entry point matches CI's clone.
+    // A symlink-only Desk root makes its import-meta entry guard skip main.
+    const cli = "plugins/desk/mcp/scripts/factory.js"
+    mkdirSync(dirname(join(temp, "desk", cli)), { recursive: true })
+    copyFileSync(join(process.env.DESK_DIR, cli), join(temp, "desk", cli))
+    symlinkSync(join(process.env.DESK_DIR, "plugins/desk/mcp/src"), join(temp, "desk/plugins/desk/mcp/src"), "dir")
+    copyFileSync(join(process.env.DESK_DIR, "plugins/desk/plugin.json"), join(temp, "desk/plugins/desk/plugin.json"))
+  } else symlinkSync(process.env.DESK_DIR, join(temp, "desk"), "dir")
   const git = (...args) => execFileSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
   const write = (p, bytes) => { mkdirSync(dirname(join(dir, p)), { recursive: true }); writeFileSync(join(dir, p), bytes) }
-  git("init", "-q", "--initial-branch=main"); git("config", "user.name", "OWNER"); git("config", "user.email", "owner@example.invalid")
-  write("README.md", "trusted base\n")
-  for (const p of [
-    ".github/scripts/triage-values.mjs", ".github/scripts/check-triage.sh", ".github/scripts/check-capture.sh",
-    ".github/scripts/check-intake-plugins.sh", ".github/scripts/check-corrections.mjs", ".github/scripts/lib/corrections.mjs", "intake.json",
-  ]) write(p, readFileSync(join(ROOT, p)))
-  git("add", "."); git("commit", "-qm", "base")
+  if (actualBase) {
+    // Exact prechange resources, NOT current candidate helpers copied into a
+    // made-up base. Candidate objects stay in Git; checkout stays on old main.
+    execFileSync("git", ["clone", "--quiet", "--no-hardlinks", ROOT, dir])
+    git("checkout", "-qB", "main", "050c278a8119b6d7ebb681f4f0ab6b57ea800dd2")
+    assert.equal(existsSync(join(dir, ".github/scripts/triage-values.mjs")), false)
+    assert.equal(existsSync(join(dir, ".github/scripts/check-triage.sh")), false)
+  } else {
+    // Installed-era fixture for normal Node2 gates, not a bootstrap test.
+    git("init", "-q", "--initial-branch=main")
+    write("README.md", "trusted base\n")
+    for (const p of [
+      ".github/scripts/triage-values.mjs", ".github/scripts/check-triage.sh", ".github/scripts/check-capture.sh",
+      ".github/scripts/check-intake-plugins.sh", ".github/scripts/check-corrections.mjs", ".github/scripts/lib/corrections.mjs", "intake.json",
+    ]) write(p, readFileSync(join(ROOT, p)))
+    git("add", "."); git("-c", "user.name=OWNER", "-c", "user.email=owner@example.invalid", "commit", "-qm", "installed base")
+  }
+  git("config", "user.name", "OWNER"); git("config", "user.email", "owner@example.invalid")
   const base = git("rev-parse", "HEAD")
-  git("checkout", "-qb", "candidate")
-  const f = JSON.parse(readFileSync(join(ROOT, ".github/scripts/__tests__/fixtures/v12-triage.json"), "utf8"))
-  if (factsOnly) {
-    const name = readdirSync(join(ROOT, "facts")).find((n) => n.endsWith(".json"))
-    write(`facts/${name}`, readFileSync(join(ROOT, "facts", name)))
-  } else write("triage/0123456789abcdef.json", JSON.stringify(f.public) + "\n")
-  git("add", "."); git("commit", "-qm", "candidate data")
-  const head = git("rev-parse", "HEAD")
+  let head
+  if (introducing) {
+    head = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+    git("branch", "candidate", head)
+  } else {
+    git("checkout", "-qb", "candidate")
+    const f = JSON.parse(readFileSync(join(ROOT, ".github/scripts/__tests__/fixtures/v12-triage.json"), "utf8"))
+    if (factsOnly) {
+      const name = readdirSync(join(ROOT, "facts")).find((n) => n.endsWith(".json"))
+      const fact = JSON.parse(readFileSync(join(ROOT, "facts", name), "utf8"))
+      if (actualBase) fact.session.duration_ms += 1
+      write(`facts/${name}`, JSON.stringify(fact) + "\n")
+    } else if (poisonHead) {
+      write(".github/scripts/triage-values.mjs", `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(join(temp, "HEAD_EXECUTED"))}, "unsafe");\n`)
+      write(".github/scripts/check-triage.sh", `touch ${JSON.stringify(join(temp, "HEAD_EXECUTED"))}\n`)
+    } else write(triagePath ?? "triage/0123456789abcdef.json", JSON.stringify(f.public) + "\n")
+    git("add", "."); git("commit", "-qm", "candidate data")
+    head = git("rev-parse", "HEAD")
+  }
   git("checkout", "-q", "main")
-  git("remote", "add", "origin", dir)
+  if (actualBase) git("remote", "set-url", "origin", dir)
+  else git("remote", "add", "origin", dir)
   const pr = { number: 1, state: "open", draft: false, labels: [], user: { login: "actual-actor" }, head: { sha: head, repo: { full_name: "example/project" } } }
   const config = join(home, "responses.json"), calls = join(home, "calls.json")
   writeFileSync(config, JSON.stringify({ pr, ...scenario })); writeFileSync(calls, "[]")
@@ -232,6 +263,7 @@ process.stdout.write(JSON.stringify(response));
   }
   return {
     home, dir, temp, pr, head, base, run,
+    git,
     requests: () => JSON.parse(readFileSync(calls, "utf8")),
     outputs: () => Object.fromEntries(readFileSync(env.GITHUB_OUTPUT, "utf8").trim().split("\n").filter(Boolean).map((l) => l.split("="))),
     result: () => JSON.parse(readFileSync(join(temp, "factory-validate-1.json"), "utf8")),
@@ -257,6 +289,146 @@ test("actual merge workflow accepts real API write/admin, never event/Git OWNER,
       assert.equal(requests.filter((c) => c.endpoint === "repos/example/project/pulls/1").length, 2)
       assert.ok(requests.some((c) => c.endpoint === "repos/example/project/collaborators/actual-actor/permission"))
       assert.ok(!requests.some((c) => c.endpoint.includes("event-OWNER")))
+    } finally { r.close() }
+  }
+})
+
+test("S2-1: real introducing maintenance head validates with exact 050c278a base resources, never preinstalled candidate helpers", (t) => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  const r = authorityWorkflow({}, { actualBase: true, introducing: true })
+  try {
+    assert.equal(r.base, "050c278a8119b6d7ebb681f4f0ab6b57ea800dd2")
+    for (const p of [".github/scripts/check-capture.sh", ".github/scripts/check-corrections.mjs", ".github/scripts/check-intake-plugins.sh"]) {
+      assert.deepEqual(readFileSync(join(r.dir, p)), execFileSync("git", ["-C", ROOT, "cat-file", "blob", `${r.base}:${p}`]))
+    }
+    assert.equal(r.run(workflowRun(text, "Decide whether the author maintains this repository"), true).status, 0)
+    const outputs = r.outputs()
+    const result = r.run(workflowRun(text, "Validate the pull request"), false, {
+      AUTHOR_ASSOCIATION: outputs.association, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
+    })
+    const diagnostic = result.status === 0 ? "" : (() => {
+      const direct = r.run(`node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr --base "$BASE_SHA" --head "$HEAD_SHA" --author-association "${outputs.association}"`)
+      return `\nDirect released CLI exit ${direct.status}\n${direct.stdout}\n${direct.stderr}`
+    })()
+    assert.equal(result.status, 0, result.stdout + result.stderr + diagnostic)
+    const answer = JSON.parse(readFileSync(join(r.temp, "factory-validate.json"), "utf8"))
+    assert.equal(answer.ok, true)
+    assert.equal(answer.maintenance, true)
+    assert.equal(r.run(workflowRun(text, "Re-read the actual actor and head after validation"), true, {
+      ACTOR: outputs.actor, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
+    }).status, 0)
+    t.diagnostic(`exact introducing base=${r.base} head=${r.head}; old-helper bytes unchanged; maintenance passed`)
+    assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), false)
+    assert.equal(existsSync(join(r.dir, ".github/scripts/check-triage.sh")), false)
+    noActions(r)
+  } finally { r.close() }
+})
+
+test("S2-1: actual prechange main merge controller validates introducing code and leaves it maintenance, not automerged", () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  const r = authorityWorkflow({}, { actualBase: true, introducing: true })
+  try {
+    const oldMerge = readFileSync(join(r.dir, ".github/workflows/merge.yml"), "utf8")
+    assert.equal(r.run(workflowRun(oldMerge, "Find the pull requests at the validated head"), true).status, 0)
+    const validation = r.run(workflowRun(oldMerge, "Validate with Desk main (no token)"))
+    assert.equal(validation.status, 0, validation.stdout + validation.stderr)
+    assert.equal(r.result().ok, true)
+    assert.equal(r.result().maintenance, true)
+    const action = r.run(workflowRun(oldMerge, "Merge or reject"), true)
+    assert.equal(action.status, 0, action.stdout + action.stderr)
+    assert.ok(r.requests().some((c) => c.endpoint === "repos/example/project/issues/1/labels"))
+    assert.ok(!r.requests().some((c) => c.endpoint.endsWith("/merge") || c.args.includes("state=closed")))
+  } finally { r.close() }
+})
+
+test("S2-1: first landed main contains helpers atomically; merge/build/pages use them and never bootstrap missing installed helpers", () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  const r = authorityWorkflow({}, { actualBase: true, introducing: true })
+  try {
+    // Simulate checkout of the complete actual introducing Git commit as main,
+    // not copying just the new helpers into an old or invented base.
+    r.git("reset", "--hard", r.head)
+    assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), true)
+    assert.equal(existsSync(join(r.dir, ".github/scripts/check-triage.sh")), true)
+    const build = readFileSync(join(r.dir, ".github/workflows/build.yml"), "utf8")
+    const pages = readFileSync(join(r.dir, ".github/workflows/pages.yml"), "utf8")
+    const reports = r.run(workflowRun(build, "Build the reports"), false, { FACTORY_SITE_OFFLINE: "1" })
+    assert.equal(reports.status, 0, reports.stdout + reports.stderr)
+    cpSync(join(r.dir, "_out"), join(r.dir, "_reports"), { recursive: true })
+    const site = r.run(workflowRun(pages, "Build site data"), false, { FACTORY_SITE_OFFLINE: "1" })
+    assert.equal(site.status, 0, site.stdout + site.stderr)
+    assert.equal(r.run(workflowRun(mergeText, "Find the pull requests at the validated head"), true).status, 0)
+    assert.equal(r.run(workflowRun(mergeText, "Validate with Desk main (no token)")).status, 0)
+    assert.equal(r.result().ok, true)
+    rmSync(join(r.dir, ".github/scripts/triage-values.mjs"))
+    assert.notEqual(r.run(workflowRun(build, "Build the reports"), false, { FACTORY_SITE_OFFLINE: "1" }).status, 0)
+    assert.notEqual(r.run(workflowRun(pages, "Build site data"), false, { FACTORY_SITE_OFFLINE: "1" }).status, 0)
+    r.run(workflowRun(mergeText, "Validate with Desk main (no token)"))
+    const held = r.run(workflowRun(mergeText, "Merge or reject"), true)
+    assert.equal(held.status, 1)
+    assert.match(held.stdout, /validator_unavailable|triage_check_unavailable/)
+    noActions(r)
+  } finally { r.close() }
+})
+
+test("S2-1: pristine-base bootstrap preserves facts checks and never executes hostile head helper replacements", () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  for (const opts of [{ actualBase: true, factsOnly: true }, { actualBase: true, poisonHead: true }]) {
+    const r = authorityWorkflow({}, opts)
+    try {
+      r.run(workflowRun(text, "Decide whether the author maintains this repository"), true)
+      const outputs = r.outputs()
+      const result = r.run(workflowRun(text, "Validate the pull request"), false, {
+        AUTHOR_ASSOCIATION: outputs.association, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
+      })
+      assert.equal(result.status, 0, result.stdout + result.stderr)
+      assert.equal(existsSync(join(r.temp, "HEAD_EXECUTED")), false)
+      assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), false)
+      noActions(r)
+    } finally { r.close() }
+  }
+})
+
+test("S2-1: any triage change on pristine actual base is an explicit unavailable hold, not a head-helper fallback", () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  for (const triagePath of ["triage/0123456789abcdef.json", "triage/nested/untrusted.mjs", "triage/bad\npath.json"]) {
+    const r = authorityWorkflow({}, { actualBase: true, triagePath })
+    try {
+      r.run(workflowRun(text, "Decide whether the author maintains this repository"), true)
+      const outputs = r.outputs()
+      const result = r.run(workflowRun(text, "Validate the pull request"), false, {
+        AUTHOR_ASSOCIATION: outputs.association, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
+      })
+      assert.equal(result.status, 1)
+      assert.match(result.stdout, /triage_check_unavailable/)
+      assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), false)
+      noActions(r)
+    } finally { r.close() }
+  }
+})
+
+test("S2-1: installed missing/crashing helpers and helper deletion history never downgrade to legacy validation", () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
+  for (const kind of ["missing", "crash", "deleted_history"]) {
+    const r = authorityWorkflow({}, { factsOnly: true })
+    try {
+      if (kind === "missing") {
+        rmSync(join(r.dir, ".github/scripts/check-triage.sh"))
+      } else if (kind === "crash") {
+        writeFileSync(join(r.dir, ".github/scripts/triage-values.mjs"), "process.exit(2)\n")
+      } else {
+        r.git("rm", ".github/scripts/triage-values.mjs", ".github/scripts/check-triage.sh")
+        r.git("commit", "-qm", "delete installed helpers")
+      }
+      r.run(workflowRun(text, "Decide whether the author maintains this repository"), true)
+      const outputs = r.outputs()
+      const result = r.run(workflowRun(text, "Validate the pull request"), false, {
+        AUTHOR_ASSOCIATION: outputs.association, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
+        ...(kind === "deleted_history" ? { BASE_SHA: r.git("rev-parse", "HEAD") } : {}),
+      })
+      assert.equal(result.status, 1)
+      assert.match(result.stdout, /triage_check_unavailable|validator_unavailable/)
+      noActions(r)
     } finally { r.close() }
   }
 })

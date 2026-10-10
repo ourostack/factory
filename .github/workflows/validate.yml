@@ -305,16 +305,76 @@ jobs:
         run: |
           set -uo pipefail
           result="$RUNNER_TEMP/factory-validate.json"
-          node .github/scripts/triage-values.mjs --validate-pr "$RUNNER_TEMP/desk" "$RUNNER_TEMP/triage-api.json" \
-            --base "$BASE_SHA" --head "$HEAD_SHA" --author-association "$AUTHOR_ASSOCIATION" \
-            --repo "$REPOSITORY" --pr "$PR_NUMBER" \
-            > "$result" 2> /dev/null || true
+          # The introducing PR runs this workflow but checks out its old base.
+          # Never install/execute a candidate helper to bootstrap its own gate.
+          if ! printf '%s' "$BASE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+            || ! printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "factory-validate: triage_check_unavailable"
+            exit 1
+          fi
+          expected_helpers=$'.github/scripts/check-triage.sh\n.github/scripts/triage-values.mjs'
+          if ! base_helpers=$(git ls-tree --name-only "$BASE_SHA" -- .github/scripts/check-triage.sh .github/scripts/triage-values.mjs 2> /dev/null); then
+            echo "factory-validate: triage_check_unavailable"
+            exit 1
+          fi
+          if [ "$base_helpers" = "$expected_helpers" ]; then
+            triage_check_mode=installed
+            node .github/scripts/triage-values.mjs --validate-pr "$RUNNER_TEMP/desk" "$RUNNER_TEMP/triage-api.json" \
+              --base "$BASE_SHA" --head "$HEAD_SHA" --author-association "$AUTHOR_ASSOCIATION" \
+              --repo "$REPOSITORY" --pr "$PR_NUMBER" \
+              > "$result" 2> /dev/null || true
+          elif [ -z "$base_helpers" ]; then
+            # Only a genuinely pre-triage base, not deleted/broken installed
+            # helpers or a shallow/unknown history, can use the old validator.
+            if [ -e .github/scripts/triage-values.mjs ] || [ -L .github/scripts/triage-values.mjs ] \
+              || [ -e .github/scripts/check-triage.sh ] || [ -L .github/scripts/check-triage.sh ] \
+              || [ "$(git rev-parse --is-shallow-repository 2> /dev/null)" != false ] \
+              || ! helper_history=$(git log --format=%H "$BASE_SHA" -- .github/scripts/check-triage.sh .github/scripts/triage-values.mjs 2> /dev/null) \
+              || [ -n "$helper_history" ]; then
+              echo "factory-validate: triage_check_unavailable"
+              exit 1
+            fi
+            if ! tree=$(git merge-tree --write-tree "$BASE_SHA" "$HEAD_SHA" 2> /dev/null) \
+              || ! printf '%s' "$tree" | grep -Eq '^[0-9a-f]{40}$' \
+              || ! git diff --no-renames --name-status -z "$BASE_SHA" "$tree" > "$RUNNER_TEMP/bootstrap-changes" 2> /dev/null; then
+              echo "factory-validate: triage_check_unavailable"
+              exit 1
+            fi
+            while IFS= read -r -d '' status; do
+              if ! IFS= read -r -d '' path; then
+                echo "factory-validate: triage_check_unavailable"
+                exit 1
+              fi
+              case "$status" in
+                A|M|D|T) : ;;
+                *) echo "factory-validate: triage_check_unavailable"; exit 1 ;;
+              esac
+              case "$path" in
+                triage|triage/*|*[[:cntrl:]]*)
+                  echo "factory-validate: triage_check_unavailable (base bootstrap; intake held)"
+                  exit 1 ;;
+              esac
+            done < "$RUNNER_TEMP/bootstrap-changes"
+            if [ -n "$status" ]; then
+              echo "factory-validate: triage_check_unavailable"
+              exit 1
+            fi
+            triage_check_mode=bootstrap_nontriage
+            # Unchanged previous CLI path, no token; ordinary facts and
+            # maintenance still run every previous trusted store check below.
+            node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
+              --base "$BASE_SHA" --head "$HEAD_SHA" --author-association "$AUTHOR_ASSOCIATION" \
+              > "$result" 2> /dev/null || true
+          else
+            echo "factory-validate: triage_check_unavailable"
+            exit 1
+          fi
           if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
             printf 'factory-validate: validator_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           if jq -e '.ok == true' "$result" > /dev/null; then
-            if ! codes=$(bash .github/scripts/check-triage.sh "$BASE_SHA" "$HEAD_SHA" "$TRUSTED_MAINTAINER"); then
+            if [ "$triage_check_mode" = installed ] && ! codes=$(bash .github/scripts/check-triage.sh "$BASE_SHA" "$HEAD_SHA" "$TRUSTED_MAINTAINER"); then
               printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
               stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
               printf '%s\n' "${stable:-triage_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"

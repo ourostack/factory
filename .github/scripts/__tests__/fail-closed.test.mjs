@@ -51,7 +51,9 @@ test("triage trusted checks are independent in validate/merge and main build/pag
     const text = workflow(name)
     assert.match(text, /check-triage\.sh/)
     assert.match(text, /triage_authority_check_unavailable/)
-    assert.doesNotMatch(text, /\[ -[fex] [^\]]*check-triage/)
+    // Installed missing/crashing gates and pristine-base bootstrap are tested
+    // by executed workflow bodies in validate-workflow.test.mjs (S2-1).
+    // An absence-refusal bootstrap predicate is not a skip-on-missing gate.
   }
   const merge = workflow("merge.yml")
   assert.match(merge, /current_actor/)
