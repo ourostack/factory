@@ -7,6 +7,58 @@ import { test } from "node:test"
 
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 import { measured, rollup, unavailable } from "../../../site/scripts/state.mjs"
+import { readFileSync } from "node:fs"
+import { deriveImprovementQueue } from "../../../site/scripts/improvement-queue.mjs"
+
+const triageFixture = JSON.parse(readFileSync(new URL("./fixtures/v12-triage.json", import.meta.url), "utf8"))
+const queueNow = Date.parse("2026-10-10T12:00:00Z")
+const queueDoc = () => deriveImprovementQueue({
+  batches: [{ path: "triage/0123456789abcdef.json", bytes: JSON.stringify(triageFixture.public), committedAtMs: queueNow }],
+  now: queueNow,
+})
+
+test("exact data.improvements closed queue accepts reviewed and unknown absence, never as a measurement", () => {
+  for (const improvements of [queueDoc(), deriveImprovementQueue({ batches: [], now: queueNow })]) {
+    assert.deepEqual(checkNumbers({ ...good(), improvements }), [])
+  }
+})
+
+test("closed queue rejects malformed projection with fixed code at the exact path", () => {
+  const changes = [
+    (q) => { q.private_prose = "PRIVATE_SENTINEL" },
+    (q) => { q.schema = "factory-improvements/2" },
+    (q) => { q.coverage.reviewed = Number.MAX_SAFE_INTEGER + 1 },
+    (q) => { q.coverage.reviewed = -1 },
+    (q) => { q.coverage.more_unreviewed = "unknown" },
+    (q) => { q.rows[0].revision = 0 },
+    (q) => { q.rows[0].ownership = "OWNER" },
+    (q) => { q.rows[0].availability = "ready" },
+    (q) => { q.rows[0].decision = { state: "available", value: "PRIVATE_SENTINEL" } },
+    (q) => { q.rows[0].handoff.authority_limit = "implement" },
+    (q) => { q.rows[0].handoff.annotation_id = "f".repeat(32) },
+    (q) => { q.rows[0].handoff.private_path = "/private/SENTINEL" },
+    (q) => { q.rows.push(structuredClone(q.rows[0])) },
+    (q) => { q.rows[0].context = [{ kind: "issue", ref: "https://github.com/example/project/issues/99", revision: 1, label: "unproved" }] },
+    (q) => { q.reasons = ["PRIVATE_SENTINEL"] },
+    (q) => { q.coverage.state = "unknown" }, // numeric known counts cannot masquerade as unknown
+  ]
+  for (const mutate of changes) {
+    const q = queueDoc()
+    mutate(q)
+    assert.deepEqual(checkNumbers({ improvements: q }), [{ path: "improvements", code: "triage_projection_invalid" }])
+  }
+  for (const q of [null, {}, [], undefined]) assert.deepEqual(checkNumbers({ improvements: q }), [{ path: "improvements", code: "triage_projection_invalid" }])
+})
+
+test("queue schema never exempts measurements or same-named nested subtrees", () => {
+  assert.ok(checkNumbers({ nested: { improvements: queueDoc() } }).length)
+  assert.ok(checkNumbers({ other: queueDoc() }).length)
+  for (const broken of [
+    { state: "measured", value: 1 }, { state: "alien", value: 1, reasons: [] },
+    { state: "measured", value: 1, reasons: [], nested: { value: 9 } },
+  ]) assert.ok(checkNumbers({ improvements: queueDoc(), metric: broken }).length)
+  assert.ok(checkNumbers({ improvements: queueDoc(), nested: { raw: 9 } }).some((v) => v.code === "bare_number"))
+})
 
 const good = () => ({
   schema: "factory-site/3",

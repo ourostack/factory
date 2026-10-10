@@ -26,6 +26,37 @@ Waiting for the next prompt is split by why the agent stopped (Desk's reports; e
 
 ## Data files
 
+### Improvement annotations: inspect, do not execute
+
+`data.json.improvements` and `rollups/improvements.json` contain the same
+`factory-improvements/1` queue. This is a separate closed transport/presentation
+contract, not a stated measurement: bounded integer counts are known only
+under `coverage.state:"known"`; unknown coverage has null counts. The exact
+top-level queue is validated separately by the maintained numbers gate.
+Other measurements retain the stated-number rules above.
+
+No batches means `state:"not_reviewed"`. Highest revisions win; equal-revision
+or shared-public-issue conflicts remain explicit. Omission is never withdrawal.
+Publication freshness is at most 72 hours, not an exact review timestamp;
+incomplete/conflicting coverage is unknown, never summed across machines.
+
+Rows carry `availability`, fixed `gate_explanation`, public `context`, specific
+`decision`/`recommendation`/`safe_continuation` availability, `next_action` and
+`handoff`. With no verified matching public context, decision details are
+private or not published. Current public issue/PR/job sources do not supply
+validated specific decisions or continuations: unavailable fields are
+`{state:"unavailable",reason:"detail_not_published"}`, never guessed from titles.
+Ownership not published is unknown.
+
+The action is “Ask your linked agent to inspect the local annotation.”
+The handoff contains the public opaque annotation ID/revision and public
+basis/pointers, not a canonical card key or local path. Its authority limit is
+`inspect_only_no_new_authority`, even for stale/conflicting rows. Ask the linked
+agent to resolve the acknowledged ID on its own desk, inspect authorized local
+detail and bring a recommendation to the actual decision owner. Missing or
+stale resolution is an honest inability to resolve, not a reason to guess a
+card, publish private details, claim work or begin implementation.
+
 Paths are relative to the site. A file up to {{READ_WHOLE}} is marked small enough to read whole.
 
 {{FILES}}

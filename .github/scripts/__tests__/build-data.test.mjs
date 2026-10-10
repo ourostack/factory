@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createRequire } from "node:module"
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { test } from "node:test"
@@ -85,6 +85,80 @@ test("the build writes data.json and health.json that pass the numbers check", (
   assert.equal(health.facts_by_host[0].files.value, 3)
   assert.equal(health.newest_intake.value, "under_1_day")
   assert.equal(health.factory_build.state, "unavailable")
+})
+
+test("triage queue/data/twin absence and private human handoff stay value identical", async () => {
+  const fx = fixture()
+  assert.equal(build(fx).status, 0)
+  const absent = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(absent.improvements?.state, "not_reviewed")
+  const paired = JSON.parse(readFileSync(new URL("./fixtures/v12-triage.json", import.meta.url), "utf8"))
+  commitCapture(fx.main, "../triage/0123456789abcdef.json", paired.public, new Date().toISOString())
+  const r = build(fx)
+  assert.equal(r.status, 0, r.stderr)
+  const data = JSON.parse(readFileSync(fx.out, "utf8"))
+  assert.equal(data.improvements.rows[0].availability, "private_detail_not_published")
+  assert.equal(data.improvements.rows[0].handoff.authority_limit, "inspect_only_no_new_authority")
+  const { publishData } = await import("../../../site/scripts/publish-files.mjs")
+  publishData({ reports: fx.reports, dist: dirname(fx.out) })
+  assert.deepEqual(JSON.parse(readFileSync(join(dirname(fx.out), "rollups/improvements.json"), "utf8")), data.improvements)
+  for (const sentinel of paired.privacy_sentinels) assert.ok(!JSON.stringify(data.improvements).includes(sentinel))
+})
+
+test("malformed triage on main stops build rather than healthy absence", () => {
+  const fx = fixture()
+  write(join(fx.main, "triage/0123456789abcdef.json"), { schema: "invalid" })
+  const r = build(fx)
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /triage_/)
+})
+
+test("paired released Desk builds with absence and immutable triage fixture publish identical checked JSON twins", () => {
+  if (!process.env.DESK_DIR) {
+    assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1", "paired Desk build required")
+    return
+  }
+  const source = new URL("../../../", import.meta.url).pathname
+  const paired = JSON.parse(readFileSync(new URL("./fixtures/v12-triage.json", import.meta.url), "utf8"))
+  for (const withTriage of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), "paired-triage-build-"))
+    const main = join(dir, "main"), reports = join(dir, "reports"), dist = join(dir, "dist")
+    mkdirSync(join(main, "facts"), { recursive: true })
+    const fact = readdirSync(join(source, "facts")).find((n) => n.endsWith(".json"))
+    writeFileSync(join(main, "facts", fact), readFileSync(join(source, "facts", fact)))
+    writeFileSync(join(main, "factory.json"), readFileSync(join(source, "factory.json")))
+    if (withTriage) {
+      mkdirSync(join(main, "triage"))
+      writeFileSync(join(main, "triage/0123456789abcdef.json"), JSON.stringify(paired.public) + "\n")
+    }
+    execFileSync("git", ["init", "-q", main])
+    execFileSync("git", ["-C", main, "add", "."])
+    execFileSync("git", ["-C", main, "-c", "user.name=x", "-c", "user.email=x@example.invalid", "commit", "-qm", "accepted fixture"])
+    const env = { ...process.env, FACTORY_SITE_OFFLINE: "1", GITHUB_TOKEN: "", GH_TOKEN: "" }
+    try {
+      const d = spawnSync(process.execPath, [
+        join(process.env.DESK_DIR, "plugins/desk/mcp/scripts/factory.js"), "build", "--store", main, "--out", reports,
+      ], { env, encoding: "utf8" })
+      assert.equal(d.status, 0, d.stdout + d.stderr)
+      const out = join(dist, "data.json")
+      const site = spawnSync(process.execPath, [SCRIPT, "--reports", reports, "--main", main, "--out", out,
+        "--pulls-out", join(dir, "pulls.json"), "--pulls-cache", join(dir, "pulls-cache.json")], { env, encoding: "utf8" })
+      assert.equal(site.status, 0, site.stdout + site.stderr)
+      const publish = spawnSync(process.execPath, [join(source, "site/scripts/publish-files.mjs"), "--reports", reports,
+        "--dist", dist, "--template", join(source, "site/src/llms-template.txt"), "--pulls", join(dir, "pulls.json")], { env, encoding: "utf8" })
+      assert.equal(publish.status, 0, publish.stdout + publish.stderr)
+      const data = JSON.parse(readFileSync(out, "utf8"))
+      assert.deepEqual(checkNumbers(data), [])
+      assert.deepEqual(JSON.parse(readFileSync(join(dist, "rollups/improvements.json"), "utf8")), data.improvements)
+      assert.equal(data.improvements.state, withTriage ? "reviewed" : "not_reviewed")
+      if (withTriage) {
+        assert.equal(data.improvements.rows[0].availability, "private_detail_not_published")
+        assert.deepEqual(data.improvements.rows[0].decision, { state: "unavailable", reason: "detail_not_published" })
+        for (const s of paired.privacy_sentinels) assert.ok(!JSON.stringify(data.improvements).includes(s))
+      }
+      assert.match(readFileSync(join(dist, "llms.txt"), "utf8"), /inspect_only_no_new_authority/)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  }
 })
 
 test("sessions with no models are unmeasured, not zero", () => {

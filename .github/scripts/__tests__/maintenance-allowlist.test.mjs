@@ -78,7 +78,7 @@ test("paths corrections/<name>.json and factory.json only: ok", async () => {
 })
 
 test("any path outside the list is refused with maintenance_path", async () => {
-  for (const path of ["intake.json", ".github/workflows/x.yml", "facts/claude-code-s1.json", "labels/j/s.json", "capture.json", "capture/0123456789abcdef.json", "README.md", "corrections/nested/a.json"]) {
+  for (const path of ["triage.json", "triage/0123456789abcdef.json", "intake.json", ".github/workflows/x.yml", "facts/claude-code-s1.json", "labels/j/s.json", "capture.json", "capture/0123456789abcdef.json", "README.md", "corrections/nested/a.json"]) {
     const r = await check({ [path]: path.endsWith(".json") ? { a: 1 } : "changed\n" })
     assert.equal(r.ok, false, path)
     assert.ok(r.codes.includes("maintenance_path"), `${path}: ${r.codes}`)

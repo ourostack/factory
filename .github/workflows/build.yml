@@ -130,6 +130,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Store main: $(git rev-parse HEAD)"
+          node .github/scripts/triage-values.mjs --store .
           node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" build --store . --out _out
 
       - name: Keep a page for every retired job

@@ -127,7 +127,7 @@ jobs:
           # Data paths: a JSON file at any depth under facts/, labels/ or capture/.
           # Anything else, a control character in a path, or a matching error is code.
           code=no
-          data_path='^(facts|labels|capture)/([^/]+/)*[^/]+\.json$'
+          data_path='^((facts|labels|capture)/([^/]+/)*[^/]+\.json|triage/[0-9a-f]{16}\.json)$'
           while IFS= read -r -d '' path; do
             case "$path" in
               *[[:cntrl:]]*) code=yes; break ;;
@@ -253,19 +253,45 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -uo pipefail
+          umask 077
           association=NONE
+          trusted_maintainer=unknown
+          # Only actual PR API identity can authorize triage. The event AUTHOR
+          # remains useful for old contributor behavior, never for triage.
+          if pr=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" 2> /dev/null) \
+            && [ "$(jq -r '.head.sha' <<<"$pr")" = "$HEAD_SHA" ] \
+            && [ "$(jq -r '.number' <<<"$pr")" = "$PR_NUMBER" ]; then
+            AUTHOR=$(jq -r '.user.login' <<<"$pr")
+          else
+            pr=null
+            AUTHOR=-
+          fi
+          permission_json=null
           if printf '%s' "$AUTHOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
-            if permission=$(gh api "repos/$REPOSITORY/collaborators/$AUTHOR/permission" --jq '.permission' 2> /dev/null); then
+            if permission_json=$(gh api "repos/$REPOSITORY/collaborators/$AUTHOR/permission" 2> /dev/null) \
+              && permission=$(jq -er '.permission | select(type == "string")' <<<"$permission_json"); then
               case "$permission" in
-                admin|write) association=COLLABORATOR ;;
+                admin|write|maintain) association=COLLABORATOR; trusted_maintainer=true ;;
+                none|read|triage) trusted_maintainer=false ;;
               esac
             else
               printf 'factory-validate: maintainer_check_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+              permission_json=null
             fi
           fi
+          if [ "$trusted_maintainer" = unknown ]; then
+            printf 'factory-validate: triage_authority_check_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          # Token step writes only its own real API responses in runner temp.
+          jq -n -c --arg repository "$REPOSITORY" --argjson pr "$pr" --argjson permission "$permission_json" \
+            '{repository:$repository,pr:$pr,permission:$permission}' > "$RUNNER_TEMP/triage-api.json"
           echo "association=$association" >> "$GITHUB_OUTPUT"
+          echo "trusted_maintainer=$trusted_maintainer" >> "$GITHUB_OUTPUT"
+          echo "actor=$AUTHOR" >> "$GITHUB_OUTPUT"
           echo "Maintainer association: $association"
 
       - name: Validate the pull request
@@ -273,17 +299,27 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           AUTHOR_ASSOCIATION: ${{ steps.maintainer.outputs.association }}
+          TRUSTED_MAINTAINER: ${{ steps.maintainer.outputs.trusted_maintainer }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -uo pipefail
           result="$RUNNER_TEMP/factory-validate.json"
-          node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
+          node .github/scripts/triage-values.mjs --validate-pr "$RUNNER_TEMP/desk" "$RUNNER_TEMP/triage-api.json" \
             --base "$BASE_SHA" --head "$HEAD_SHA" --author-association "$AUTHOR_ASSOCIATION" \
+            --repo "$REPOSITORY" --pr "$PR_NUMBER" \
             > "$result" 2> /dev/null || true
           if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
             printf 'factory-validate: validator_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           if jq -e '.ok == true' "$result" > /dev/null; then
+            if ! codes=$(bash .github/scripts/check-triage.sh "$BASE_SHA" "$HEAD_SHA" "$TRUSTED_MAINTAINER"); then
+              printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
+              stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
+              printf '%s\n' "${stable:-triage_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
             # The store's own rule on correction records, from the base, for
             # every pull request (maintenance or not): a corrections/*.json
             # file it adds or modifies must pass validateCorrectionRecord.
@@ -294,6 +330,7 @@ jobs:
               stable=$(printf '%s\n' "$codes" | grep -E '^[a-z][a-z0-9_]{0,63}$' || true)
               printf '%s\n' "${stable:-corrections_check_unavailable}" | sed 's/^/factory-rejected: /' | tee -a "$GITHUB_STEP_SUMMARY"
               exit 1
+
             fi
             # The store's own rule on capture records, from the base, for
             # every pull request: a capture/ file it adds or modifies must be
@@ -326,3 +363,33 @@ jobs:
           printf 'factory-validate: failed\n' | tee -a "$GITHUB_STEP_SUMMARY"
           jq -r '[.errors[].code | if type == "string" and test("^[a-z][a-z0-9_]{0,63}$") then . else "unknown_code" end] | unique[] | "factory-rejected: \(.)"' "$result" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 1
+
+      - name: Re-read the actual actor and head after validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ACTOR: ${{ steps.maintainer.outputs.actor }}
+          TRUSTED_MAINTAINER: ${{ steps.maintainer.outputs.trusted_maintainer }}
+        run: |
+          set -euo pipefail
+          if ! current=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER"); then
+            echo "factory-validate: triage_authority_check_unavailable"
+            exit 1
+          fi
+          if [ "$(jq -r '.head.sha' <<<"$current")" != "$HEAD_SHA" ] \
+            || [ "$(jq -r '.user.login' <<<"$current")" != "$ACTOR" ]; then
+            echo "factory-validate: actor/head changed; triage_authority_check_unavailable"
+            exit 1
+          fi
+          if [ "$TRUSTED_MAINTAINER" = true ]; then
+            if ! permission=$(gh api "repos/$REPOSITORY/collaborators/$ACTOR/permission" --jq '.permission'); then
+              echo "factory-validate: triage_authority_check_unavailable"
+              exit 1
+            fi
+            case "$permission" in
+              admin|write|maintain) : ;;
+              *) echo "triage_authority_check_unavailable"; exit 1 ;;
+            esac
+          fi

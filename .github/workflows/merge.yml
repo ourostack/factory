@@ -85,6 +85,7 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
+          umask 077
           summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
           : > "$RUNNER_TEMP/factory-prs.tsv"
 
@@ -123,26 +124,37 @@ jobs:
             fi
             author=$(jq -r '.user.login' <<<"$pr")
             association=NONE
+            trusted_maintainer=unknown
+            permission_json=null
             if printf '%s' "$author" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
-              if permission=$(gh api "repos/$REPOSITORY/collaborators/$author/permission" --jq '.permission' 2> /dev/null); then
+              if permission_json=$(gh api "repos/$REPOSITORY/collaborators/$author/permission" 2> /dev/null) \
+                && permission=$(jq -er '.permission | select(type == "string")' <<<"$permission_json"); then
                 case "$permission" in
-                  admin|write) association=COLLABORATOR ;;
+                  admin|write|maintain) association=COLLABORATOR; trusted_maintainer=true ;;
+                  none|read|triage) trusted_maintainer=false ;;
                 esac
               else
                 summary "factory-merge: #$number maintainer_check_unavailable"
+                permission_json=null
               fi
             fi
+            if [ "$trusted_maintainer" = unknown ]; then
+              summary "factory-merge: #$number triage_authority_check_unavailable"
+            fi
+            jq -n -c --arg repository "$REPOSITORY" --argjson pr "$pr" --argjson permission "$permission_json" \
+              '{repository:$repository,pr:$pr,permission:$permission}' > "$RUNNER_TEMP/triage-api-$number.json"
             if [ "$held" = true ] && [ "$association" = COLLABORATOR ]; then
               summary "factory-merge: #$number is held (draft or labeled hold); left for a maintainer"
               continue
             fi
-            printf '%s\t%s\t%s\t%s\n' "$number" "$association" "$same_repo" "$held" >> "$RUNNER_TEMP/factory-prs.tsv"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$number" "$association" "$same_repo" "$held" "$author" "$trusted_maintainer" >> "$RUNNER_TEMP/factory-prs.tsv"
           done
 
       - name: Validate with Desk main (no token)
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [ ! -s "$RUNNER_TEMP/factory-prs.tsv" ]; then
@@ -152,13 +164,27 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
           base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
-          while IFS=$'\t' read -r number association same_repo held; do
-            node "$RUNNER_TEMP/desk/plugins/desk/mcp/scripts/factory.js" validate-pr \
+          while IFS=$'\t' read -r number association same_repo held actor trusted_maintainer; do
+            node .github/scripts/triage-values.mjs --validate-pr "$RUNNER_TEMP/desk" "$RUNNER_TEMP/triage-api-$number.json" \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
+              --repo "$REPOSITORY" --pr "$number" \
               > "$RUNNER_TEMP/factory-validate-$number.json" 2> /dev/null || true
             result="$RUNNER_TEMP/factory-validate-$number.json"
             # The store's own plugin-name rule, from main, for a data pull
             # request Desk passed; a failure becomes a rejection with its codes.
+            if jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
+              # Run even after Desk refuses: its unavailable authority outcome
+              # must HOLD, never close a PR. Also applies to mixed maintenance.
+              if ! triage_codes=$(bash .github/scripts/check-triage.sh "$base_sha" "$HEAD_SHA" "$trusted_maintainer" 2> /dev/null); then
+                if printf '%s\n' "$triage_codes" | grep -qE '_check_unavailable$' \
+                  || ! printf '%s\n' "$triage_codes" | grep -qE '^[a-z][a-z0-9_]{0,63}$'; then
+                  unavailable_check=$(printf '%s\n' "$triage_codes" | grep -E '^[a-z][a-z0-9_]{0,63}_check_unavailable$' | head -n 1 || true)
+                  jq -n -c --arg code "${unavailable_check:-triage_check_unavailable}" '{unavailable:$code}' > "$result"
+                else
+                  printf '%s' "$triage_codes" | jq -R -s -c '{ok:false,errors:[split("\n")[]|select(length>0)|{code:.}]}' > "$result"
+                fi
+              fi
+            fi
             if jq -e '.ok == true and .maintenance != true' "$result" > /dev/null 2>&1; then
               codes=""
               unavailable_check=""
@@ -228,13 +254,48 @@ jobs:
             failed=1
             return 1
           }
-          while IFS=$'\t' read -r number association same_repo held; do
+          while IFS=$'\t' read -r number association same_repo held actor trusted_maintainer; do
             result="$RUNNER_TEMP/factory-validate-$number.json"
             if ! jq -e '(.ok | type) == "boolean"' "$result" > /dev/null 2>&1; then
               summary "factory-merge: #$number $(jq -r '(.unavailable // "") | if test("^[a-z][a-z0-9_]{0,63}_check_unavailable$") then . else "validator_unavailable" end' "$result" 2> /dev/null || echo validator_unavailable); no action"
               unavailable=1
               continue
             fi
+            if jq -e 'any(.errors[]?; .code == "triage_authority_check_unavailable")' "$result" > /dev/null; then
+              summary "factory-merge: #$number triage_authority_check_unavailable; no action"
+              unavailable=1
+              continue
+            fi
+
+            # Fresh real API read before *any* action. Event and Git identities
+            # cannot authorize a merge or rejection. Unknown leaves it open.
+            if ! current=$(gh api "repos/$REPOSITORY/pulls/$number"); then
+              summary "factory-merge: #$number triage_authority_check_unavailable; no action"
+              unavailable=1; continue
+            fi
+            current_actor=$(jq -r '.user.login' <<<"$current")
+            if [ "$(jq -r '.state' <<<"$current")" != open ] \
+              || [ "$(jq -r '.head.sha' <<<"$current")" != "$HEAD_SHA" ] \
+              || [ "$current_actor" != "$actor" ]; then
+              summary "factory-merge: #$number actor/head changed; no action"
+              continue
+            fi
+            if [ "$trusted_maintainer" != unknown ]; then
+              if ! permission=$(gh api "repos/$REPOSITORY/collaborators/$current_actor/permission" --jq '.permission'); then
+                unavailable=1; summary "factory-merge: #$number triage_authority_check_unavailable; no action"; continue
+              fi
+              current_trusted=unknown
+              case "$permission" in
+                admin|write|maintain) current_trusted=true ;;
+                none|read|triage) current_trusted=false ;;
+              esac
+              if [ "$current_trusted" != "$trusted_maintainer" ]; then
+                unavailable=1; summary "factory-merge: #$number permission changed; triage_authority_check_unavailable; no action"; continue
+              fi
+            fi
+            # Hold and same-repository eligibility are also re-read, not stale.
+            if jq -e '.draft == true or ([.labels[].name] | index("hold") != null)' <<<"$current" > /dev/null; then held=true; fi
+            if [ "$(jq -r '.head.repo.full_name // ""' <<<"$current")" != "$REPOSITORY" ]; then same_repo=false; fi
 
             if jq -e '.ok == true' "$result" > /dev/null; then
               if [ "$held" = true ]; then
