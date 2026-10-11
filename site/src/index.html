@@ -275,9 +275,16 @@
   <div class="wrap">
     <p class="step-label">Step 4 of 4 &middot; Act</p>
     <h1 class="view-title">Improvements</h1>
-    <p class="chart-caption">These are recorded issues and recommendations, not an execution queue. A route alone grants no claim or new authority.</p>
+    <p id="improvement-status" class="lede improvement-status" role="status">Loading the improvement status&hellip;</p>
+    <details class="how-to-read" id="improvement-limits">
+      <summary>How to read this list</summary>
+      <p>These are recorded issues and recommendations, not an execution queue. A route alone grants no claim or new authority. Inspection does not grant authority or create ownership.</p>
+      <p>Reviewed improvements come first, stale or conflicting reviews before recorded decision gates. This is not a savings ranking. Health alarms appear in the health status at the top of every page.</p>
+      <p>Not reviewed yet means no triage review is published. Automated triage is not demonstrated; ownership and private decisions are not published. Empty review data does not prove there are no problems.</p>
+      <p>The public annotation list is not a task-filtered execution queue. Investigation context is retained for inspection; private associations are not inferred.</p>
+      <p>When a cause is worth fixing, Lean takes it on as one problem and writes it up on one page, an <dfn>A3</dfn>, named for the sheet of paper it fits on: the evidence, the cause, a countermeasure, and then a check of whether it worked. A check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet, so none has been checked. To start one, open a cause on <a href="#/causes">Rank causes</a> and copy its A3 prompt.</p>
+    </details>
     <div id="triage-brief"></div>
-    <p class="lede">When a cause is worth fixing, Lean takes it on as one problem and writes it up on one page, an <dfn>A3</dfn>, named for the sheet of paper it fits on: the evidence, the cause, a countermeasure, and then a check of whether it worked. A check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet, so none has been checked. To start one, open a cause on <a href="#/causes">Rank causes</a> and copy its A3 prompt.</p>
     <section class="block" aria-labelledby="problems-title">
       <h2 class="block-title" id="problems-title">Problems in hand</h2>
       <p class="chart-caption">One row per kaizen issue, each with the pull request that answered it, where there is one. A row names the cause it works on only where the site's mapping table links it to one, and gives its check.</p>
