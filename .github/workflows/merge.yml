@@ -126,7 +126,7 @@ jobs:
             association=NONE
             trusted_maintainer=unknown
             permission_json=null
-            if printf '%s' "$author" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+            if [[ ${#author} -le 39 && "$author" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(_[A-Za-z0-9]+)?$ ]]; then
               if permission_json=$(gh api "repos/$REPOSITORY/collaborators/$author/permission" 2> /dev/null) \
                 && permission=$(jq -er '.permission | select(type == "string")' <<<"$permission_json"); then
                 case "$permission" in

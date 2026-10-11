@@ -141,7 +141,7 @@ jobs:
             exit 0
           fi
           maintainer=no
-          if printf '%s' "$AUTHOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+          if [[ ${#AUTHOR} -le 39 && "$AUTHOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(_[A-Za-z0-9]+)?$ ]]; then
             if permission=$(gh api "repos/$REPOSITORY/collaborators/$AUTHOR/permission" --jq '.permission' 2> /dev/null); then
               case "$permission" in
                 admin|write) maintainer=yes ;;
@@ -271,7 +271,7 @@ jobs:
             AUTHOR=-
           fi
           permission_json=null
-          if printf '%s' "$AUTHOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+          if [[ ${#AUTHOR} -le 39 && "$AUTHOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(_[A-Za-z0-9]+)?$ ]]; then
             if permission_json=$(gh api "repos/$REPOSITORY/collaborators/$AUTHOR/permission" 2> /dev/null) \
               && permission=$(jq -er '.permission | select(type == "string")' <<<"$permission_json"); then
               case "$permission" in
