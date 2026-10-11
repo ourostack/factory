@@ -1112,6 +1112,13 @@
     if (o.mode === "working" || o.mode === "share") q.push(`mode=${o.mode}`);
     if (o.over === "task") q.push("over=task");
     if (o.otmode === "all" || o.otmode === "working") q.push(`otmode=${o.otmode}`);
+    // Additive investigation/filter context; legacy mode-only shape and
+    // over-time controls retain their existing URL spelling.
+    const context = routeContext(new URLSearchParams(o.context || {}).toString());
+    for (const [key, value] of Object.entries(context)) {
+      if (key !== "mode") q.push(`${key}=${encodeURIComponent(value)}`);
+    }
+    if ((context.mode === "production" || context.mode === "request") && !q.some((x) => x.startsWith("mode="))) q.push(`mode=${context.mode}`);
     return `#/compare${q.length ? `?${q.join("&")}` : ""}`;
   }
 

@@ -183,7 +183,7 @@
   <div class="wrap">
     <p class="step-label">Step 2 of 4 &middot; Compare tasks</p>
     <h1 class="view-title">Compare tasks</h1>
-    <p class="lede">Each bar is one task, stacked by where its time went. In Lean this is a <dfn>yamazumi</dfn> (stack-up) chart, from the Japanese for &ldquo;pile&rdquo;. The classic yamazumi stacks each operator's work against takt time to balance a production line; this one stacks each task's elapsed time instead: working time first, split by the evaluator's labels, then waiting, split by what it waited on. Every bar uses the same colors and order, so the waste in every task compares at a glance.</p>
+    <p class="lede comparison-question">Which recorded tasks have long windows or interruptions worth inspecting? Compare the selected tasks' existing recorded measures, not factory capacity.</p>
     <p id="compare-lede" class="lede compare-lede">Loading&hellip;</p>
     <section class="block" aria-labelledby="stackup-title">
       <h2 class="block-title" id="stackup-title">Where each task's time went</h2>
@@ -236,7 +236,7 @@
   <div class="wrap">
     <p class="step-label">Step 3 of 4 &middot; Rank causes</p>
     <h1 class="view-title">Rank causes</h1>
-    <p class="lede">Not all waste is equal. Lean ranks the causes of waste by the time they cost, in a <dfn>Pareto chart</dfn>: bars from the largest to the smallest, with a line that adds them up as it goes. The few causes on the left that carry most of the time are the <em>vital few</em>; they are where fixing pays. A cause is a waste plus what caused it, read from the evidence.</p>
+    <p class="lede">Which recorded patterns deserve investigation? Findings describe observed task exposure, not proven root causes or savings. A ranking orders the published evidence; it is not a measure of global worker inactivity.</p>
     <p id="causes-lede" class="lede causes-lede">Loading&hellip;</p>
     <section class="block" aria-labelledby="pareto-title">
       <h2 class="block-title" id="pareto-title">Causes of waste, by time</h2>
@@ -300,6 +300,8 @@
     <p class="lede">When something takes three weeks, almost none of those weeks is anyone working on it. In most processes less than a tenth of the elapsed time adds value; the rest is waiting and moving. So making the work itself 50% faster shortens the whole by only about 5% (<a href="https://www.lean.org/the-lean-post/articles/why-lean-is-a-time-based-strategy/" target="_blank" rel="noopener">Fiume, Lean Enterprise Institute</a>).</p>
     <p>Toyota's Taiichi Ohno summed up his whole system as watching the timeline from order to cash and shrinking it "by removing the non-value-added wastes" (Ohno, <i>Toyota Production System</i>, 1988, <a href="https://www.goodreads.com/quotes/7427458-all-we-are-doing-is-looking-at-the-time-line" target="_blank" rel="noopener">as quoted by Liker and others</a>). Lean is not about working people harder. Toyota's way rests on two pillars, "respect for people and continuous improvement" (<a href="https://en.wikipedia.org/wiki/The_Toyota_Way" target="_blank" rel="noopener">The Toyota Way</a>), and Toyota says its system is "based on the premise of making work easier for workers" (<a href="https://global.toyota/en/company/vision-and-philosophy/production-system/" target="_blank" rel="noopener">Toyota</a>).</p>
     <p>Its method is to make problems impossible to miss (any worker can stop the line, and the andon lights up) and then to go and see the real cause before changing anything (<a href="https://www.lean.org/lexicon-terms/genchi-genbutsu/" target="_blank" rel="noopener">genchi genbutsu, LEI</a>).</p>
+
+    <p>The factory is an open experiment in applying these Lean methods to agentic software work. It is designed so many teams can adopt it alongside their own engineering lifecycle, without replacing it. So far it has been tested only on the desks and agent hosts that publish to this store, so its findings are evidence about those desks, not proof for every setup. Lean value-stream methods are already applied to software delivery elsewhere (<a href="https://dora.dev/guides/value-stream-management/" target="_blank" rel="noopener">DORA: value stream management</a>); this experiment's chosen focus is end-to-end agent work, its interruptions, its quality and checking whether an improvement actually worked.</p>
 
     <h2 class="block-title">Why it matters more with AI agents</h2>
     <p>AI "amplifies what's already there" (<a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" target="_blank" rel="noopener">DORA 2025</a>). An agent that writes code in minutes can still leave a task waiting days for review, rework or a human answer. Speed can even be an illusion: in one study, experienced developers took 19% longer with early-2025 AI tools while believing they had been sped up by about 20% (<a href="https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/" target="_blank" rel="noopener">METR</a>). Measuring where the time actually goes, task by task, is how the factory tells real improvement from the feeling of it. The operator's attention is the scarce resource the factory protects.</p>

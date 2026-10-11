@@ -520,7 +520,7 @@ test("viewer orientation and supported instants do not redefine operator evidenc
   assert.ok(viewerStart >= 0 && viewerEnd > viewerStart)
   const workApp = app.slice(0, viewerStart) + app.slice(viewerEnd)
   // The drawer's button and the cause page's button keep the wording the design gives them, "Copy as a prompt for your agent" and "Start an A3 with your agent": they name the reader's own agent, not the operator.
-  const strings = workApp.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "").replace("Start an A3 with your agent", "").replace("Check or extend the A3 with your agent", "")
+  const strings = workApp.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replaceAll("Copy as a prompt for your agent", "").replaceAll("Start an A3 with your agent", "").replaceAll("Check or extend the A3 with your agent", "")
   assert.doesNotMatch(strings, /\byou(r|rs|rself)?\b/i)
   assert.doesNotMatch(workApp, /dateStyle|toLocaleDateString|toISOString/)
   assert.match(html, /Needs your attention/)
