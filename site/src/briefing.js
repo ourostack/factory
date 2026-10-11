@@ -12,6 +12,8 @@
   const exact = (x, required, optional = []) => x && typeof x === "object" && !Array.isArray(x) && required.every((k) => Object.hasOwn(x, k)) && Object.keys(x).every((k) => [...required, ...optional].includes(k));
   const ID = /^[A-Za-z0-9:_-]{1,128}$/;
   const REASONS = ["monitoring_not_available", "triage_not_reviewed", "triage_not_current"];
+  // Canonical public lifecycle and annotation state are different vocabularies.
+  const TERMINAL_LIFECYCLES = new Set(["closed_confirmed", "closed_unverified"]);
   const emptyCoverage = { state: "unknown", generation: null, scan: null, reviewed: null, unreviewed: null, refused: null, deferred: null, more_unreviewed: null };
   function generationOf(data) {
     const source = /^[0-9a-f]{40}$/.test(data?.reports_commit) ? data.reports_commit : typeof data?.built_at === "string" && Number.isFinite(Date.parse(data.built_at)) ? data.built_at : "unknown";
@@ -53,7 +55,7 @@
               (n.state === "partial" && !["lower", "upper", "unknown"].includes(n.bound))) return bad();
         }
         if (row.ownership === "claimed" && !row.triage) return bad();
-        if (key === "agents" && (row.triage?.state !== "reviewed" || row.triage?.conflict || row.triage?.availability === "stale_or_conflicting" || ["closed", "withdrawn"].includes(row.triage?.lifecycle))) return bad();
+        if (key === "agents" && (row.triage?.state !== "reviewed" || row.triage?.conflict || row.triage?.availability === "stale_or_conflicting" || TERMINAL_LIFECYCLES.has(row.triage?.lifecycle))) return bad();
         if (Object.hasOwn(row, "triage")) {
           if (!row.triage || typeof row.triage !== "object") return bad();
           if (validateQueue && !validateQueue({ schema: "factory-improvements/1", state: "unknown", rows: [row.triage], coverage: emptyCoverage, reasons: [] }).ok) return bad();
@@ -93,7 +95,7 @@
         fresh && r.route === "human_decision" ? "A recorded decision gate needs inspection" : fresh ? "A reviewed improvement has a proposed next step" : "An improvement review needs refreshing",
         r.availability === "private_detail_not_published" ? "Decision details are private or not published." : r.availability === "stale_or_conflicting" ? "This review cannot support execution." : "Verified public evidence is available; specific decision details may not be published.",
         r.next_action, "#/improvements", { ownership: r.ownership, triage: copy(r) });
-      if (fresh && r.ownership === "claimed" && !["closed", "withdrawn"].includes(r.lifecycle)) doc.agents.push(triage);
+      if (fresh && r.ownership === "claimed" && !TERMINAL_LIFECYCLES.has(r.lifecycle)) doc.agents.push(triage);
       else if (fresh && r.route === "human_decision") doc.attention.push(triage);
       else if (doc.investigation.length === 0) doc.investigation.push(triage);
     }

@@ -23,10 +23,11 @@
   let preferences = P.readPreferences(storage, viewerZone);
   let visitPrevious = preferences.previous;
   let currentData = null;
+  let currentHealth = null;
   function setLocalHref(link, value) {
     const route = typeof value === "string" && value.startsWith("#/") ? F.parseRoute(value, () => null) : { view: "missing" };
     if (["missing", "skip", "redirect"].includes(route.view)) return;
-    const safe = value;
+    const safe = F.contextualRoute(value, window.location.hash);
     link.href = safe;
   }
   function saveDisplay(patch) {
@@ -114,9 +115,6 @@
     const doc = data.overview;
     if (!B.validateBriefing(doc).ok) throw new Error("The published briefing is unavailable or malformed; other views remain usable.");
     document.getElementById("overview-published").textContent = `Published data build: ${F.formatInstant(data.built_at, preferences.zone)}. This is not a task finish or acceptance timestamp.`;
-    const line = document.getElementById("status-line");
-    line.className = `status-line ${doc.attention.length ? "status-abnormal" : "status-not_monitored"}`;
-    line.textContent = doc.attention.length ? "Recorded problems need inspection. Their effects, ownership limits and next actions are listed below." : "Monitoring or review evidence is incomplete. Inspect what is available; this is not an all-clear.";
     document.getElementById("overview-state").textContent = doc.state === "attention" ? "Start with the recorded problems below. Monitoring and ownership may still be incomplete." : "Monitoring or review evidence is incomplete. This is not an all-clear.";
     renderBriefRows(document.getElementById("overview-attention"), doc.attention, "No specific attention item is supported by this payload. Missing monitoring does not mean there are no problems.");
     renderBriefRows(document.getElementById("overview-agents"), doc.agents, "No current public claim is available for this briefing. This does not mean local work is unowned.");
@@ -150,13 +148,13 @@
   }
   function renderNavigationContext(route) {
     const node = document.getElementById("navigation-context"); node.innerHTML = "";
-    const context = route.context || F.routeContext(window.location.hash.split("?")[1] || "");
+    const context = F.navigationContext(window.location.hash);
     const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
     const selection = route.select ? `${route.select.kind}:${route.select.from}${route.select.to !== route.select.from ? "-" + route.select.to : ""}` : context.selection || (query.has("selection") ? "unsupported" : null);
     node.hidden = !Object.keys(context).length && !selection;
     if (node.hidden) return;
     node.appendChild(el("span", null, context.cause ? `Investigation context: ${context.cause}. ` : "Navigation context retained. "));
-    if (context.return) {
+    if (context.return && !(route.view === "cause" && F.parseRoute(context.return).cause === route.cause)) {
       const back = el("a", null, "Return to investigation"); setLocalHref(back, F.routeWithContext(context.return, Object.fromEntries(Object.entries(context).filter(([k]) => k !== "return")))); node.appendChild(back);
     }
     if (selection) {
@@ -838,7 +836,7 @@
   function jobLink(id, text) {
     const a = document.createElement("a");
     const safe = F.safeRoute("task", id);
-    if (safe) a.href = safe;
+    if (safe) setLocalHref(a, safe);
     a.textContent = text;
     return a;
   }
@@ -1368,7 +1366,7 @@
         const tr = document.createElement("tr");
         const link = document.createElement("a");
         const safe = F.safeRoute("task", j.id, "session", s.session_id);
-        if (safe) link.href = safe;
+        if (safe) setLocalHref(link, safe);
         link.textContent = `${s.host} · ${s.session_id.slice(0, 8)}`;
         // A session that worked several tasks: its figures are the whole
         // session's, not this task's part, and the row says so.
@@ -1636,7 +1634,7 @@
           const a = el("a", null, l.text);
           // Only an in-page route built by F.safeRoute reaches here.
           const safe = typeof l.href === "string" && /^#\/[0-9A-Za-z_\/-]+$/.test(l.href) ? l.href : null;
-          if (safe) a.href = safe;
+          if (safe) setLocalHref(a, safe);
           a.addEventListener("click", () => drawerEl.close());
           li.appendChild(a);
         }
@@ -3402,7 +3400,7 @@
   function causeLink(key, text) {
     const a = el("a", "cause-link", text || W.causeWords(key));
     const safe = S.isCauseKey(key) ? S.causeRoute(key) : null;
-    if (safe) a.href = safe;
+    if (safe) setLocalHref(a, safe);
     return a;
   }
 
@@ -4560,7 +4558,7 @@
       taken.appendChild(document.createTextNode(". "));
       const act = el("a", null, "See it on Act");
       const safe = F.safeRoute("act");
-      if (safe) act.href = safe;
+      if (safe) setLocalHref(act, safe);
       taken.appendChild(act);
       a3.appendChild(taken);
       a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. One already exists for this cause, so this prompt asks the agent to help check it or extend it rather than start another."));
@@ -4642,7 +4640,7 @@
       li.appendChild(document.createTextNode(` · ${S.hoursWords(s.ms)} · `));
       const a = el("a", null, "open it on the map");
       const safe = F.safeRoute("task", s.job);
-      if (safe) a.href = safe;
+      if (safe) setLocalHref(a, safe);
       li.appendChild(a);
       links.push({ a, s });
       ol.appendChild(li);
@@ -4660,7 +4658,7 @@
       const route = F.safeRoute("task", s.job);
       if (it && route) {
         const safe = `${route}?${it.kind}=${it.n}`;
-        a.href = safe;
+        setLocalHref(a, safe);
         a.textContent = it.kind === "gaps" ? `open wait ${it.n} on the map` : `open burst ${it.n} on the map`;
       }
     }
@@ -4797,7 +4795,7 @@
       const route = F.safeRoute("task", r.job);
       const a = el("a", null, r.item ? `open wait ${r.item.n} on the map` : "open its task");
       const safe = route ? (r.item ? `${route}?${r.item.kind}=${r.item.n}` : route) : null;
-      if (safe) a.href = safe;
+      if (safe) setLocalHref(a, safe);
       if (r.item && r.item.kind === "bursts") a.textContent = `open burst ${r.item.n} on the map`;
       li.appendChild(a);
       const facts = el("span", "why-wait-facts", `${r.counted ? "" : r.overlap ? `Counted as waiting: none, ${r.overlap}. ` : "Counted as waiting: none. "}How the turn ended: ${r.stop}. Decided by: ${r.source}; confidence: ${r.confidence}.${r.reasons.length ? ` Why not known: ${r.reasons.map(W.whyReasonWords).join("; ")}.` : ""}`);
@@ -4931,10 +4929,10 @@
       else a.removeAttribute("aria-current");
     }
     let title = VIEW_TITLE[r.view];
-    if (r.view !== "overview" && data.overview) {
-      const line = document.getElementById("status-line");
-      line.textContent = data.overview.attention?.length ? "Recorded problems need inspection. Overview lists their effects, ownership limits and next actions." : "Monitoring and review evidence may be incomplete. Overview explains the limits.";
-    }
+    // Health is evaluated at browser render time, independently of the
+    // store-built briefing. Never replace a known fault or its details with
+    // a generic monitoring limitation.
+    renderStatusLine(document.getElementById("status-line"), data, currentHealth);
     // Reset primary links before applying this route's validated context.
     for (const link of document.querySelectorAll("nav.steps a")) if (link.dataset.destination) setLocalHref(link, link.dataset.destination);
     renderNavigationContext(r);
@@ -5406,6 +5404,7 @@
     }
     renderHealth(document.getElementById("health-panel"), health, true, "");
     currentData = data;
+    currentHealth = health;
     // (main continues even if the health panel failed: renderHealth contains its own errors)
 
     // The overview: at a glance, the answer, the trend, what to fix next.

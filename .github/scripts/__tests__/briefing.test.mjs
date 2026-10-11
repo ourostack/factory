@@ -126,3 +126,33 @@ test("publisher refuses an invalid overview figure before copying any twin", () 
     assert.equal(existsSync(join(dir, "dist/rollups/overview.json")), false)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+for (const lifecycle of ["closed_confirmed", "closed_unverified"]) {
+  test(`a validated ${lifecycle} public claim is terminal, not current agent work`, () => {
+    const fx = JSON.parse(readFileSync(new URL("./fixtures/v12-triage.json", import.meta.url), "utf8"))
+    const batch = structuredClone(fx.public)
+    Object.assign(batch.rows[0], { lifecycle, ownership: "claimed", route: "agent_ready", gate: null })
+    const queue = deriveImprovementQueue({ batches: [{ path: "triage/0123456789abcdef.json", bytes: JSON.stringify(batch), committedAtMs: now }], now })
+    assert.equal(queue.rows[0].lifecycle, lifecycle, "exercise an accepted Node2 public row, not a made-up lifecycle")
+    const doc = build(base(), queue)
+    assert.equal(doc.agents.length, 0)
+    const row = [...doc.attention, ...doc.investigation].find((r) => r.triage)
+    assert.ok(row)
+    const forged = structuredClone(doc)
+    forged.investigation = forged.investigation.filter((r) => r.id !== row.id)
+    forged.attention = forged.attention.filter((r) => r.id !== row.id)
+    forged.agents.push(row)
+    assert.equal(B.validateBriefing(forged).ok, false, "construction and validation use the same terminal vocabulary")
+    assert.ok(checkNumbers({ overview: forged }).length)
+  })
+}
+
+test("annotation withdrawal is separate from canonical lifecycle and cannot advertise agent work", () => {
+  const fx = JSON.parse(readFileSync(new URL("./fixtures/v12-triage.json", import.meta.url), "utf8"))
+  const batch = structuredClone(fx.public)
+  Object.assign(batch.rows[0], { state: "withdrawn", lifecycle: "claimed", ownership: "claimed", route: null, gate: null })
+  const queue = deriveImprovementQueue({ batches: [{ path: "triage/0123456789abcdef.json", bytes: JSON.stringify(batch), committedAtMs: now }], now })
+  assert.equal(queue.rows[0].state, "withdrawn")
+  assert.equal(queue.rows[0].lifecycle, "claimed")
+  assert.equal(build(base(), queue).agents.length, 0)
+})
