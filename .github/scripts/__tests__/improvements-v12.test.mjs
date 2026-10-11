@@ -190,3 +190,62 @@ test("review_minor_fixes_use_reader_words_and_state_failures", () => {
   // Status options match the page's definitions: "Done" is done; cancelled is its own choice.
   assert.match(app, /\["done", "Done"\], \["cancelled", "Cancelled"\]/)
 })
+
+test("unsupported_emphasis_is_explained_and_mutes_nothing", () => {
+  const bars = [{ job: "a1", segments: [{ key: "value", ms: 5 }, { key: "wait_no_session", cause: "no_session", ms: 7 }] }]
+  // A hand-typed category the chart does not draw (here the bare legacy key) is unsupported.
+  for (const category of ["no_session", "defects", "wait_other_task", "made_up"]) {
+    assert.equal(S.supportedEmphasis(bars, category), null, category)
+    assert.ok(S.emphasizeCategories(bars, category)[0].segments.every((s) => s.emphasized), `${category} mutes nothing`)
+  }
+  assert.equal(S.supportedEmphasis(bars, "wait_no_session"), "wait_no_session")
+  assert.equal(S.supportedEmphasis(bars, undefined), null)
+  // The page says so visibly.
+  const app = appSource()
+  assert.match(app, /compare-emphasis-note/)
+  assert.match(app, /is not a category drawn in this chart, so nothing is emphasized/)
+})
+
+test("improvements_lead_with_one_status_sentence_and_keep_limits_in_how_to_read", () => {
+  const notReviewed = { schema: "factory-improvements/1", state: "not_reviewed", rows: [] }
+  assert.equal(S.improvementStatus({ queue: notReviewed, issues: 8, issuesVerified: true }),
+    "Not reviewed yet: no improvement has been reviewed by triage; 8 published improvement issues are listed below under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: notReviewed, issues: 1, issuesVerified: true }),
+    "Not reviewed yet: no improvement has been reviewed by triage; 1 published improvement issue is listed below under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: notReviewed, issues: 0, issuesVerified: true }),
+    "Not reviewed yet: no improvement has been reviewed by triage; no improvement issue has been published yet.")
+  assert.equal(S.improvementStatus({ queue: notReviewed, issues: 3, issuesVerified: false }),
+    "Not reviewed yet: no improvement has been reviewed by triage; the published improvement issues could not be checked for this build.")
+  // Counts come from the rows the page draws: a malformed row is not counted,
+  // and stale and conflicting rows are named separately.
+  const current = queue({ route: "agent_ready", gate: null }).rows[0]
+  const stale = queue({ state: "stale", age: "stale" }).rows[0]
+  const conflicting = { ...structuredClone(current), conflict: true, availability: "stale_or_conflicting", handoff: { ...structuredClone(current.handoff), availability: "stale_or_conflicting" } }
+  assert.ok(S.improvementPresentation(conflicting), "a conflicting row still draws")
+  const reviewed = { schema: "factory-improvements/1", state: "reviewed", rows: [current, stale, conflicting, { availability: "stale_or_conflicting" }, null] }
+  assert.equal(S.improvementStatus({ queue: reviewed, issues: 8, issuesVerified: true }),
+    "3 reviewed improvements are listed first, those needing a refresh first (1 stale, 1 in conflict); 8 published improvement issues follow under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: { ...reviewed, rows: [current] }, issues: 1, issuesVerified: true }),
+    "1 reviewed improvement is listed first; 1 published improvement issue follows under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: { ...reviewed, rows: [{ availability: "stale_or_conflicting" }] }, issues: 2, issuesVerified: true }),
+    "Reviewed improvements are published but none can be shown; 2 published improvement issues are listed below under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: { ...reviewed, rows: [] }, issues: 2, issuesVerified: true }),
+    "No current reviewed improvement is published; 2 published improvement issues are listed below under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: null, issues: 2, issuesVerified: true }),
+    "Improvement review details are unavailable; 2 published improvement issues are listed below under Problems in hand.")
+
+  const page = html()
+  const act = page.slice(page.indexOf('id="view-act"'), page.indexOf('id="view-why"'))
+  const h1 = act.indexOf("</h1>")
+  // The first thing after the heading is the plain status sentence.
+  assert.match(act.slice(h1 + 5).trimStart(), /^<p id="improvement-status" class="lede improvement-status" role="status">/)
+  const details = act.match(/<details class="how-to-read" id="improvement-limits">\s*<summary>How to read this list<\/summary>([\s\S]*?)<\/details>/)
+  assert.ok(details, "one labeled disclosure holds the limits and the A3 explanation")
+  for (const limit of [/not an execution queue/, /A route alone grants no claim or new authority/, /Inspection does not grant authority or create ownership/, /not a savings ranking/, /Automated triage is not demonstrated; ownership and private decisions are not published/, /not a task-filtered execution queue/, /<dfn>A3<\/dfn>/]) assert.match(details[1], limit)
+  // No caveat paragraph stands between the status sentence and the list.
+  assert.equal((act.slice(0, act.indexOf('id="improvement-limits"')).match(/<p /g) || []).length, 2, "step label and status sentence only")
+  const fn = appSource().slice(appSource().indexOf("function renderPublicImprovements"), appSource().indexOf("async function renderAct"))
+  assert.doesNotMatch(fn, /Inspection does not grant authority|Automated triage is not demonstrated|not a task-filtered execution queue/)
+  // A failed data load replaces "Loading" with an explicit status.
+  assert.match(appSource(), /status\.textContent = "The improvement status could not be loaded/)
+})

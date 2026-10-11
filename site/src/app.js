@@ -4304,6 +4304,12 @@
         else {
           const node = document.getElementById("stackup");
           drawStackup(node, S.emphasizeCategories(bars, current.category), mode, null);
+          if (current.category && !S.supportedEmphasis(bars, current.category)) {
+            const note = el("p", "chart-caption compare-emphasis-note");
+            note.id = "compare-emphasis-note"; note.setAttribute("role", "status");
+            note.textContent = `The requested emphasis "${current.category}" is not a category drawn in this chart, so nothing is emphasized. Choose a category from Category emphasis, or use Clear emphasis.`;
+            node.prepend(note);
+          }
           const legend = node.querySelector(".sb-legend");
           if (legend) {
             const key = el("p", "compact-legend", "Recorded working: value-adding, necessary, classified waste or not labeled. Recorded task interruptions: no recorded task session, work on other tasks or another reported cause. Emphasis is a visual aid, not a new clock.");
@@ -5044,14 +5050,12 @@
   function renderPublicImprovements(node, data) {
     node.innerHTML = "";
     const context = F.navigationContext(location.hash);
+    // The status sentence above says when there is nothing reviewed; the
+    // limits live in "How to read this list".
+    const queue = data.improvements;
+    if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows) || queue.state === "not_reviewed" || !queue.rows.length) return;
     const question = el("h2", "block-title", context.cause ? "What public improvement review can I inspect with this investigation context?" : "Which published improvement needs inspection next?");
     question.id = "improvement-question"; node.appendChild(question);
-    node.appendChild(el("p", "chart-caption", "Inspection does not grant authority or create ownership. Health alarms appear in the health status at the top of every page; this list puts stale or conflicting reviews first, then recorded decision gates. This is not a savings ranking."));
-    const queue = data.improvements;
-    if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows)) return emptyState(node, "Public improvement review details are unavailable.");
-    if (queue.state === "not_reviewed") { node.appendChild(el("p", "chart-empty", "Not reviewed yet. Automated triage is not demonstrated; ownership and private decisions are not published.")); return; }
-    if (!queue.rows.length) { node.appendChild(el("p", "chart-empty", "No current public annotation detail is available. Empty review data does not prove no problems.")); return; }
-    node.appendChild(el("p", "chart-caption", "This public annotation queue is not a task-filtered execution queue. Investigation context is retained for inspection; private associations are not inferred."));
     const rows = queue.rows.map(S.improvementPresentation).filter(Boolean);
     rows.sort((a, b) => Number(b.availability === "stale_or_conflicting") - Number(a.availability === "stale_or_conflicting") || Number(b.route === "human_decision") - Number(a.route === "human_decision"));
     for (const p of rows) {
@@ -5099,6 +5103,8 @@
     unlabeledNote(document.getElementById("act-unlabeled"), data, "act");
     const verified = !(data.kaizen && data.kaizen.verification === "unavailable");
     const rows = S.actRows(data.kaizen_issues, causes);
+    const statusEl = document.getElementById("improvement-status");
+    if (statusEl) statusEl.textContent = S.improvementStatus({ queue: data.improvements, issues: rows.length, issuesVerified: verified });
     if (!rows.length) {
       emptyState(box, verified ? "No kaizen issue has been opened yet." : "Kaizen issues could not be checked for this build (GitHub could not be reached). This says nothing about how many exist.");
     } else {
@@ -5675,6 +5681,8 @@
         document.body.dataset.view = view;
         if (view === "help") renderGuide(document.getElementById("help-stops"), empty);
         for (const id of ["overview-state", "overview-attention", "overview-agents", "overview-investigation", "task-list", "triage-brief"]) emptyState(document.getElementById(id), msg);
+        const status = document.getElementById("improvement-status");
+        if (status) status.textContent = "The improvement status could not be loaded, so no reviewed improvement or published issue is shown.";
       };
       failedRoute(); window.addEventListener("hashchange", failedRoute); window.addEventListener("popstate", failedRoute);
       return;

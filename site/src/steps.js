@@ -1708,12 +1708,37 @@
     for (const k of W.WAIT_KEYS) if (present.has(`wait_${k}`)) out.push([`wait_${k}`, WAIT_LABEL[k] || W.waitCauseLabel(k)]);
     return out;
   }
+  // The requested category when the chart draws it, otherwise null: a
+  // hand-typed or stale category emphasizes nothing rather than muting all.
+  function supportedEmphasis(bars, category) {
+    return typeof category === "string" && emphasisOptions(bars).some(([key]) => key === category) ? category : null;
+  }
   // Retain every task, segment, duration and denominator.
   function emphasizeCategories(rows, category) {
-    const valid = typeof category === "string" && (category === "waiting" || F.SEGMENTS.some((s) => s.key === category) || W.WAIT_KEYS.some((k) => category === `wait_${k}`));
+    const valid = supportedEmphasis(rows, category);
     return arr(rows).map((r) => ({ ...r, segments: arr(r.segments).map((s) => ({
-      ...s, emphasized: !valid || segmentCategory(s) === category || (category === "waiting" && !!s.cause),
+      ...s, emphasized: !valid || segmentCategory(s) === valid || (valid === "waiting" && !!s.cause),
     })) }));
+  }
+  // The one plain sentence that opens Improvements: what triage has
+  // reviewed, then how many published improvement issues follow.
+  function improvementStatus({ queue, issues, issuesVerified }) {
+    const n = Number.isSafeInteger(issues) && issues >= 0 ? issues : 0;
+    const issuesWords = (verb) => !issuesVerified ? "the published improvement issues could not be checked for this build"
+      : n === 0 ? "no improvement issue has been published yet"
+      : `${n} published improvement ${n === 1 ? "issue" : "issues"} ${verb === "follow" ? (n === 1 ? "follows" : "follow") : (n === 1 ? "is listed below" : "are listed below")} under Problems in hand`;
+    const valid = queue && queue.schema === "factory-improvements/1" && Array.isArray(queue.rows);
+    if (!valid) return `Improvement review details are unavailable; ${issuesWords("listed")}.`;
+    if (queue.state === "not_reviewed") return `Not reviewed yet: no improvement has been reviewed by triage; ${issuesWords("listed")}.`;
+    if (!queue.rows.length) return `No current reviewed improvement is published; ${issuesWords("listed")}.`;
+    // Count only the rows the page draws; a conflict is named apart from staleness.
+    const shown = queue.rows.filter((r) => improvementPresentation(r));
+    if (!shown.length) return `Reviewed improvements are published but none can be shown; ${issuesWords("listed")}.`;
+    const conflicting = shown.filter((r) => r.conflict === true).length;
+    const stale = shown.filter((r) => r.conflict !== true && (r.state !== "reviewed" || r.availability === "stale_or_conflicting")).length;
+    const refresh = [stale && `${stale} stale`, conflicting && `${conflicting} in conflict`].filter(Boolean);
+    const k = shown.length;
+    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} listed first${refresh.length ? `, those needing a refresh first (${refresh.join(", ")})` : ""}; ${issuesWords("follow")}.`;
   }
   // Reader-facing names for the public queue's lifecycle identifiers.
   const LIFECYCLE_LABEL = {
@@ -1763,7 +1788,9 @@
     selectTaskPopulation,
     emphasizeCategories,
     emphasisOptions,
+    supportedEmphasis,
     lifecycleLabel,
+    improvementStatus,
     improvementPresentation,
     findingMeaning,
     paretoNames,
