@@ -248,13 +248,14 @@ main:focus, h1:focus { outline: none; }
 }
 .why-link[aria-current="page"] { text-decoration: underline; }
 
-/* At phone width the four steps sit in a two-by-two grid, so nothing
-   scrolls sideways. */
+/* At phone width the four steps sit two to a row, so nothing scrolls
+   sideways. A step whose name no longer fits half the row (larger text)
+   takes a row of its own instead of being cut. */
 @media (max-width: 600px) {
   .topbar-row { gap: 6px 12px; }
   .site-name { flex: 1 1 auto; }
-  .steps { order: 3; flex: 1 1 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .step { justify-content: flex-start; padding: 6px 10px; font-size: 14px; white-space: normal; border-color: var(--border); border-radius: var(--radius); }
+  .steps { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+  .step { flex: 1 1 calc(50% - 3px); min-width: 0; justify-content: flex-start; padding: 6px 10px; font-size: 14px; white-space: normal; overflow-wrap: anywhere; border-color: var(--border); border-radius: var(--radius); }
 }
 
 /* ---------- The status line: quiet when normal, loud when abnormal ---------- */
@@ -686,9 +687,12 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .task-table { width: 100%; min-width: 0 !important; }
 .task-table td { vertical-align: top; }
 
-/* At phone width a table row becomes a stacked list item: each cell says
-   what it is. The row holds a link, so it keeps a hairline divider. */
-@media (max-width: 720px) {
+/* When its holder is narrow for its text (a phone, or larger text) a table
+   row becomes a stacked list item: each cell says what it is. The row holds
+   a link, so it keeps a hairline divider. The switch point is in em, so it
+   moves with the reader's text size: 42.5em is a 720px window at 16px. */
+#jobs-table, #trend, .block:has(> table.task-table) { container-type: inline-size; }
+@container (width <= 42.5em) {
   .task-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .task-table, .task-table tbody, .task-table tr, .task-table td { display: block; width: 100%; }
   .task-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
@@ -701,7 +705,7 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
   .task-table td.task-cell { display: block; text-align: left; font-size: 16px; padding-bottom: 4px; }
   .task-table td.task-cell::before { content: none; }
 }
-@media (min-width: 721px) {
+@container (width > 42.5em) {
   /* A figure stays on one line; its "partial" flag may drop below it, so the number columns do not crowd out the task name. */
   .task-table .outcome, .task-table .top-waste { white-space: nowrap; }
   table.data-table.task-table td.num { white-space: normal; }
@@ -717,7 +721,7 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
    the task table's text cells wrap. */
 #jobs-table, .block:has(> table.data-table) { overflow-x: auto; }
 #jobs-table, .block, .table-wrap { position: relative; }
-@media (min-width: 721px) {
+@container (width > 42.5em) {
   table.data-table.task-table td:not(.num) { white-space: normal; }
   /* A task name (or anonymous key) wraps between words only, in a column wide enough to read. */
   table.data-table.task-table td.task-cell { min-width: 18ch; max-width: 30ch; }
@@ -753,11 +757,14 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 /* The task picker: a compact list, the latest to finish first. */
 .picker { margin: 0 0 22px; font-size: 14px; }
 .picker-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 6px; }
-.picker-label { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); flex: 1 1 260px; }
+/* The search box starts at 8em and grows; with larger text it moves under
+   its label rather than past the window's edge. */
+.picker-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; color: var(--text-secondary); flex: 1 1 260px; min-width: 0; }
 .picker-search {
   font: inherit;
   flex: 1 1 auto;
   min-width: 0;
+  width: 8em;
   max-width: 22em;
   padding: 4px 8px;
   border: 1px solid var(--border);
@@ -1111,13 +1118,16 @@ table.data-table.handoffs-table th { white-space: normal; vertical-align: bottom
    under the name; a waiting cause's "Rank this cause" link has its own
    column, so nothing in one row can run into the next. */
 .tw-legend-buttons { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
-.tw-legend-buttons li { display: grid; grid-template-columns: minmax(min(10em, 100%), 1fr) auto; align-items: start; gap: 0 12px; }
+.tw-legend-buttons li { display: flex; flex-wrap: wrap; align-items: start; gap: 0 12px; }
+.tw-legend-buttons li > .tw-row { flex: 1 1 10em; }
+/* With larger text the link moves under the row rather than off screen. */
+.tw-legend-buttons li > .tw-cause-link { flex: 0 1 auto; min-width: 0; }
 .tw-row { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0 8px; font: inherit; color: inherit; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; cursor: pointer; }
 .tw-row > .swatch { align-self: start; margin-top: 0.3em; }
 .tw-row > .tw-ms { grid-column: 2; white-space: normal; }
 .tw-row:hover { background: var(--surface-1); border-color: var(--border); }
 .tw-row[aria-pressed="true"] { background: color-mix(in srgb, var(--focus) 12%, transparent); border-color: var(--focus); }
-.tw-cause-link { font-size: 13px; white-space: nowrap; padding-top: 4px; }
+.tw-cause-link { font-size: 13px; padding-top: 4px; }
 .tw-name { min-width: 0; }
 .tw-ms { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cause-list { margin: 6px 0 4px; padding-left: 22px; }
