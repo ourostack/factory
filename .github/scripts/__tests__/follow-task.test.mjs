@@ -758,7 +758,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
   assert.deepEqual(readdirSync(join(emptyRoot, "dist")), ["reasons.json"], "only the reason words, which need no report")
   // The workflow prints the map files' size line and publishes walk.js.
   const wf = read(".github/workflows/pages.yml")
-  assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
+  assert.match(wf, /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/preferences\.js site\/src\/briefing\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
   assert.match(read("site/scripts/publish-files.mjs"), /Task map files \(new\)/)
 })
 

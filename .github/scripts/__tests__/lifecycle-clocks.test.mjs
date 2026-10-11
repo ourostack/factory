@@ -221,11 +221,14 @@ test("whole golden legacy facts build retains pinned baseline numbers and report
     const now = JSON.parse(readFileSync(join(current, "data.json"), "utf8"))
     assert.deepEqual(checkNumbers(now), [])
     assert.ok(now.jobs.length > 0 && now.sessions.length > 0)
-    console.log("whole-legacy checked:", now.jobs.length, "jobs;", now.sessions.length, "sessions; only built_at excluded from baseline comparison")
+    console.log("whole-legacy checked:", now.jobs.length, "jobs;", now.sessions.length, "sessions; only built_at and the separately validated additive overview excluded from baseline comparison")
     assert.ok(now.jobs.every((j) => !Object.hasOwn(j, "clocks")), "legacy has no manufactured clock envelope")
     const { built_at: oldStamp, ...oldData } = old
-    const { built_at: nowStamp, ...nowData } = now
-    assert.deepEqual(nowData, oldData, "only the build timestamp may differ")
+    const { built_at: nowStamp, overview: additiveOverview, ...nowData } = now
+    assert.equal(additiveOverview.schema, "factory-overview/1")
+    assert.deepEqual(checkNumbers({ overview: additiveOverview }), [])
+    assert.deepEqual(JSON.parse(readFileSync(join(current, "rollups/overview.json"), "utf8")), additiveOverview)
+    assert.deepEqual(nowData, oldData, "only the build timestamp and separately checked additive overview may differ")
     for (const [sub, names] of [["jobs", readdirSync(join(reports, "jobs")).filter((n) => n.endsWith(".json"))], ["rollups", ["tasks.json", "stackup.json", "by_week.json", "improvements.json"]]]) {
       for (const file of names) {
         if (existsSync(join(baseline, sub, file))) assert.deepEqual(readFileSync(join(current, sub, file)), readFileSync(join(baseline, sub, file)), `${sub}/${file}`)
