@@ -11,14 +11,15 @@ const m = (value) => ({ state: "measured", value, reasons: [] })
 const p = (value, reasons, bound) => ({ state: "partial", value, reasons, ...(bound ? { bound } : {}) })
 const u = (reasons) => ({ state: "unavailable", reasons })
 
-// This allowance is only for these five report reasons, never the closed facts vocabulary.
-const CLOCK_REPORT_REASONS_AHEAD_OF_DESK = [
+// Desk's report now exposes these five clock reasons (Task 4 landed), so the store keeps no ahead-of-Desk allowance:
+// each one must exist in Desk's actual report reason source with the same text the site shows.
+const CLOCK_REPORT_REASONS = [
   "original_request_not_recorded", "work_before_card", "late_work_without_reopen",
   "episode_boundary_not_recorded", "episode_history_incomplete",
 ]
 
-test("clock report reason allowance expires individually when actual Desk report reasons catch up", async () => {
-  for (const reason of CLOCK_REPORT_REASONS_AHEAD_OF_DESK) assert.ok(F.hasReasonText(reason), reason)
+test("clock report reasons match Desk's actual report reason text, with no ahead-of-Desk allowance left", async () => {
+  for (const reason of CLOCK_REPORT_REASONS) assert.ok(F.hasReasonText(reason), reason)
   if (!process.env.DESK_DIR) {
     assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1", "Desk report reasons required")
     return
@@ -26,7 +27,8 @@ test("clock report reason allowance expires individually when actual Desk report
   const report = join(process.env.DESK_DIR, "plugins/desk/mcp/src/factory/pipeline/report.js")
   assert.ok(existsSync(report), "Desk's actual report reason source is required")
   const { REASON_TEXT } = await import(pathToFileURL(report).href)
-  assert.deepEqual(CLOCK_REPORT_REASONS_AHEAD_OF_DESK.filter((r) => Object.hasOwn(REASON_TEXT, r)), [], "Desk now exposes clock reasons: remove caught-up entries from CLOCK_REPORT_REASONS_AHEAD_OF_DESK")
+  assert.deepEqual(CLOCK_REPORT_REASONS.filter((r) => !Object.hasOwn(REASON_TEXT, r)), [], "Desk's report lacks a clock reason the store shows")
+  for (const reason of CLOCK_REPORT_REASONS) assert.equal(F.reasonText(reason), REASON_TEXT[reason], reason)
 })
 
 test("formatClock states provenance and producer direction visibly, refusing unsupported clocks", () => {
