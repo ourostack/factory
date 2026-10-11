@@ -191,7 +191,8 @@ export function measureLayout(opts) {
     // Only the skip link may wait off screen, parked until it has focus.
     const parked = e.matches(".skip-link") && e !== document.activeElement && (r.right <= 0 || r.left >= vw || r.bottom <= 0)
     if (!frame && !parked && (r.right > vw + 1 || r.left < -1)) offscreen.push({ el: name(e), planted: planted(e) })
-    if (!frame && !parked && /^(BUTTON|A|SELECT|INPUT|TEXTAREA|SUMMARY|LABEL)$/.test(e.tagName) && e instanceof HTMLElement) boxes.push({ e, r })
+    // An inline control that wraps is judged by its line boxes, not their union.
+    if (!frame && !parked && /^(BUTTON|A|SELECT|INPUT|TEXTAREA|SUMMARY|LABEL)$/.test(e.tagName) && e instanceof HTMLElement) boxes.push({ e, r, parts: [...e.getClientRects()].filter((q) => q.width > 0 && q.height > 0) })
   }
   // Interactive controls drawn on top of one another (not one inside the other).
   boxes.sort((p, q) => p.r.top - q.r.top)
@@ -202,8 +203,11 @@ export function measureLayout(opts) {
       if (a.e.contains(b.e) || b.e.contains(a.e)) continue
       if (a.e.tagName === "LABEL" && (a.e.control === b.e || a.e.htmlFor === b.e.id)) continue
       if (b.e.tagName === "LABEL" && (b.e.control === a.e || b.e.htmlFor === a.e.id)) continue
-      const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top)
-      if (w > 2 && h > 2 && w * h > 0.2 * Math.min(a.r.width * a.r.height, b.r.width * b.r.height)) controlOverlaps.push({ a: name(a.e), b: name(b.e), planted: planted(a.e) || planted(b.e) })
+      const hit = a.parts.some((p) => b.parts.some((q) => {
+        const w = Math.min(p.right, q.right) - Math.max(p.left, q.left), h = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top)
+        return w > 2 && h > 2 && w * h > 0.2 * Math.min(p.width * p.height, q.width * q.height)
+      }))
+      if (hit) controlOverlaps.push({ a: name(a.e), b: name(b.e), planted: planted(a.e) || planted(b.e) })
     }
   }
   // Labels drawn on top of each other inside one chart.
