@@ -1688,7 +1688,7 @@
           const sel = window.getSelection();
           sel.removeAllRanges();
           sel.addRange(range);
-          status.textContent = "The prompt is selected; copy it with the keyboard.";
+          status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
         }
       });
       box.append(btn, status, payload);
@@ -4163,45 +4163,86 @@
     container.appendChild(wrap);
   }
 
-  function renderComparisonControls(before, data, context) {
+  // The controls are built once and then kept: a filter change adds a
+  // history entry (Back returns to the previous selection) and redraws the
+  // comparison in place, so focus stays on the control the reader changed.
+  // Successive changes while one control keeps focus (arrow keys, typing a
+  // date digit by digit) replace that entry, so Back undoes the whole edit.
+  let comparisonEditing = null;
+  function renderComparisonControls(before, data, context, bars) {
     let node = document.getElementById("compare-population");
     if (!node) { node = el("section", "comparison-controls"); node.id = "compare-population"; before.before(node); }
-    node.innerHTML = "";
     node.setAttribute("aria-label", "Task population and category emphasis");
-    const change = (key, value) => {
+    const navigate = (next, source) => {
+      const hash = F.compareHash({ mode: next.mode || modes.compare, ...overTimeView, context: next });
+      try {
+        if (source && comparisonEditing === source) history.replaceState(null, "", hash);
+        else history.pushState(null, "", hash);
+        comparisonEditing = source || null;
+      } catch (err) {
+        location.hash = hash; // a sandboxed frame may refuse pushState
+        return;
+      }
+      renderNavigationContext(F.parseRoute(location.hash, () => null));
+      renderCompare(data).catch((err) => emptyState(document.getElementById("stackup"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
+    };
+    const change = (key, value, source) => {
       const next = F.navigationContext(location.hash);
       if (value) next[key] = value; else delete next[key];
-      location.hash = F.compareHash({ mode: next.mode || modes.compare, ...overTimeView, context: next });
+      navigate(next, source);
     };
+    const editing = (control) => control.addEventListener("blur", () => { if (comparisonEditing === control.id) comparisonEditing = null; });
+    const sync = (s, key, options) => {
+      const all = [["", "All / none selected"], ...options];
+      if (context[key] && !all.some(([v]) => v === context[key])) all.push([context[key], `Requested: ${context[key]}`]);
+      const signature = JSON.stringify(all);
+      if (s.dataset.options !== signature) {
+        s.replaceChildren(...all.map(([value, text]) => { const o = el("option", null, text); o.value = value; return o; }));
+        s.dataset.options = signature;
+      }
+      s.value = context[key] || "";
+    };
+    const built = node.dataset.built === "1";
     const select = (label, id, key, options) => {
-      const l = el("label", "comparison-control", label);
-      const s = el("select"); s.id = id;
-      for (const [value, text] of [["", "All / none selected"], ...options]) { const o = el("option", null, text); o.value = value; s.appendChild(o); }
-      if (context[key] && ![...s.options].some((o) => o.value === context[key])) { const o = el("option", null, `Requested: ${context[key]}`); o.value = context[key]; s.appendChild(o); }
-      s.value = context[key] || ""; s.addEventListener("change", () => change(key, s.value));
-      l.appendChild(s); node.appendChild(l);
+      let s = document.getElementById(id);
+      if (!built) {
+        const l = el("label", "comparison-control", label);
+        s = el("select"); s.id = id;
+        s.addEventListener("change", () => change(key, s.value, id)); editing(s);
+        l.appendChild(s); node.appendChild(l);
+      }
+      sync(s, key, options);
     };
+    if (!built) node.innerHTML = "";
     select("Task filter", "compare-task", "task", data.jobs.map((j) => [j.id, jobLabel(j)]));
-    select("Recorded lifecycle filter", "compare-status", "status", [["done", "Finished"], ["open", "Still open"], ["accepted", "Accepted"], ["delivered", "Delivered"], ["awaiting_signoff", "Awaiting acceptance"], ["sent_back", "Returned for changes"]]);
+    select("Recorded lifecycle filter", "compare-status", "status", [["done", "Done"], ["cancelled", "Cancelled"], ["open", "Still open"], ["accepted", "Accepted"], ["delivered", "Delivered"], ["awaiting_signoff", "Awaiting acceptance"], ["sent_back", "Returned for changes"]]);
     select("Recorded elapsed evidence filter", "compare-evidence", "evidence", [["measured", "Measured"], ["partial", "Partial"], ["unavailable", "Unavailable"]]);
     for (const [key, label] of [["from", "Exact finish day from (UTC)"], ["to", "Exact finish day through (UTC)"]]) {
-      const l = el("label", "comparison-control", label); const input = el("input"); input.type = "date"; input.id = `compare-${key}`; input.value = context[key] || "";
-      input.addEventListener("change", () => change(key, input.value)); l.appendChild(input); node.appendChild(l);
+      let input = document.getElementById(`compare-${key}`);
+      if (!built) {
+        const l = el("label", "comparison-control", label); input = el("input"); input.type = "date"; input.id = `compare-${key}`;
+        input.addEventListener("change", () => change(key, input.value, input.id)); editing(input); l.appendChild(input); node.appendChild(l);
+      }
+      if (document.activeElement !== input) input.value = context[key] || "";
     }
-    select("Category emphasis (does not filter tasks)", "compare-category", "category", [["waiting", "Recorded task interruptions"], ...F.SEGMENTS.map((s) => [s.key, s.label])]);
-    const actions = el("div", "comparison-actions");
-    const clear = (label, keys) => {
-      const b = el("button", null, label); b.type = "button";
-      b.addEventListener("click", () => {
-        const next = F.navigationContext(location.hash); for (const k of keys) delete next[k];
-        location.hash = F.compareHash({ mode: next.mode || modes.compare, ...overTimeView, context: next });
-      });
-      actions.appendChild(b);
-    };
-    clear("Clear filters", ["task", "status", "from", "to", "evidence"]); clear("Clear emphasis", ["category"]);
-    const findings = el("a", null, "Inspect findings for this selection"); setLocalHref(findings, "#/causes"); actions.appendChild(findings);
-    node.appendChild(actions);
-    const scope = el("p", "comparison-scope"); scope.id = "compare-scope"; scope.setAttribute("role", "status"); node.appendChild(scope);
+    select("Category emphasis (does not filter tasks)", "compare-category", "category", S.emphasisOptions(bars));
+    if (!built) {
+      const actions = el("div", "comparison-actions");
+      const clear = (label, keys) => {
+        const btn = el("button", null, label); btn.type = "button";
+        btn.addEventListener("click", () => {
+          const next = F.navigationContext(location.hash); for (const k of keys) delete next[k];
+          navigate(next);
+        });
+        actions.appendChild(btn);
+      };
+      clear("Clear filters", ["task", "status", "from", "to", "evidence"]); clear("Clear emphasis", ["category"]);
+      const findings = el("a", "comparison-findings", "Inspect findings for this selection"); actions.appendChild(findings);
+      node.appendChild(actions);
+      const scope = el("p", "comparison-scope"); scope.id = "compare-scope"; scope.setAttribute("role", "status"); node.appendChild(scope);
+      node.dataset.built = "1";
+    }
+    setLocalHref(node.querySelector(".comparison-findings"), "#/causes");
   }
 
   async function renderCompare(data) {
@@ -4217,9 +4258,7 @@
     const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs.filter((r) => selectedIds.has(r.job)) : null;
     const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => jobLabel(j) });
     const all = !taskRows && !stackRows ? [] : S.stackBars(selectedJobs, stackRows, taskRows, opts("all"));
-    const intro = document.querySelector("#view-compare > .wrap > .lede");
-    if (intro) { intro.classList.add("comparison-question"); intro.textContent = "Which recorded tasks have long windows or interruptions worth inspecting? Compare the selected tasks' existing recorded measures, not factory capacity."; }
-    renderComparisonControls(ledeEl, data, context);
+    renderComparisonControls(ledeEl, data, context, all);
     safely("compare-lede", () => {
       ledeEl.textContent = "Recorded task windows can overlap. Their working share is not agent utilization or global idle time. Original-request and corrected production clocks are unavailable; acceptance is not presented as a production bucket.";
       let conclusion = document.getElementById("comparison-conclusion");
@@ -4235,7 +4274,13 @@
       const scope = document.getElementById("compare-scope");
       scope.dataset.n = String(selectedJobs.length);
       scope.dataset.signature = JSON.stringify(all.map((b) => [b.job, b.total_ms, b.segments.map((s) => [s.key, s.ms])]));
-      scope.textContent = `${selectedJobs.length} of ${data.jobs.length} recorded tasks selected. Percentages use each included task's own recorded elapsed window, not global utilization or capacity. Date filters include exact UTC finish days only; bounded/undated tasks are excluded. Category emphasis changes no totals or denominators.`;
+      const inexact = context.from || context.to
+        ? S.selectTaskPopulation(data.jobs, { ...context, from: undefined, to: undefined }).filter((j) => F.finishDay(j.finish_date).kind !== "on").length
+        : 0;
+      const dateNote = context.from || context.to
+        ? ` The date filter excluded ${inexact} ${inexact === 1 ? "task" : "tasks"} without an exact UTC finish day (open, bounded or undated), because their finish day cannot be placed inside the range.`
+        : " Date filters include exact UTC finish days only.";
+      scope.textContent = `${selectedJobs.length} of ${data.jobs.length} recorded tasks selected. Percentages use each included task's own recorded elapsed window, not global utilization or capacity.${dateNote} Category emphasis changes no totals or denominators.`;
     });
     const draw = () => {
       const mode = modes.compare;
@@ -4572,8 +4617,7 @@
 
   let whySplitOn = true;
   async function renderCauses(data) {
-    const intro = document.querySelector("#view-causes > .wrap > .lede");
-    if (intro) intro.textContent = "Which recorded patterns deserve investigation? Findings describe observed task exposure, not proven root causes or savings. A ranking orders the published evidence; it is not a measure of global worker inactivity.";
+    const intro = document.querySelector("#view-causes > .wrap > .lede") || document.getElementById("causes-lede");
     let conclusion = document.querySelector("#view-causes .findings-conclusion");
     if (!conclusion) { conclusion = el("p", "findings-conclusion"); intro.after(conclusion); }
     conclusion.textContent = "Start with the largest recorded category, inspect its limits and stretches, then choose a countermeasure and a check.";
@@ -4682,9 +4726,10 @@
     }
     const h1 = el("h1", "view-title cause-title");
     h1.appendChild(causeSwatch(key));
-    h1.appendChild(document.createTextNode(key === "waiting:other_task" ? "Recorded work on other tasks" : key === "waiting:no_session" ? "No recorded task session" : d.label));
+    const heading = key === "waiting:other_task" ? "Recorded work on other tasks" : key === "waiting:no_session" ? "No recorded task session" : d.label;
+    h1.appendChild(document.createTextNode(heading));
     box.appendChild(h1);
-    document.title = `${d.label} · The factory`;
+    document.title = `${heading} · The factory`;
     if (d.state === "absent") {
       box.appendChild(el("p", "lede", "The causes file is not published yet, so this cause cannot be shown. No figure is shown rather than a zero."));
       return;
@@ -4765,7 +4810,7 @@
         const sel = window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
-        status.textContent = "The prompt is selected; copy it with the keyboard.";
+        status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
       }
     });
     pbox.append(btn, status, payload);
@@ -4897,7 +4942,7 @@
         const sel = window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
-        status.textContent = "The prompt is selected; copy it with the keyboard.";
+        status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
       }
     });
     pbox.append(btn, status, pre);
@@ -5001,7 +5046,7 @@
     const context = F.navigationContext(location.hash);
     const question = el("h2", "block-title", context.cause ? "What public improvement review can I inspect with this investigation context?" : "Which published improvement needs inspection next?");
     question.id = "improvement-question"; node.appendChild(question);
-    node.appendChild(el("p", "chart-caption", "Inspection does not grant authority or create ownership. Start with real health alarms, then stale/conflicting reviews and recorded decision gates. This is not a savings ranking."));
+    node.appendChild(el("p", "chart-caption", "Inspection does not grant authority or create ownership. Health alarms appear in the health status at the top of every page; this list puts stale or conflicting reviews first, then recorded decision gates. This is not a savings ranking."));
     const queue = data.improvements;
     if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows)) return emptyState(node, "Public improvement review details are unavailable.");
     if (queue.state === "not_reviewed") { node.appendChild(el("p", "chart-empty", "Not reviewed yet. Automated triage is not demonstrated; ownership and private decisions are not published.")); return; }
@@ -5010,28 +5055,35 @@
     const rows = queue.rows.map(S.improvementPresentation).filter(Boolean);
     rows.sort((a, b) => Number(b.availability === "stale_or_conflicting") - Number(a.availability === "stale_or_conflicting") || Number(b.route === "human_decision") - Number(a.route === "human_decision"));
     for (const p of rows) {
-      const item = el("section", "improvement-row");
-      item.appendChild(el("h3", null, p.route === "human_decision" ? "Recorded decision gate — inspect acknowledged context" : p.availability === "stale_or_conflicting" ? "Review needs refreshing" : "Reviewed improvement — inspect the proposed route"));
-      item.appendChild(el("p", null, `Published lifecycle: ${p.lifecycle || "not recorded"}. ${p.verification}`));
-      item.appendChild(el("p", "improvement-owner", p.ownership === "claimed" ? "A public claim is recorded; current execution is not established by this page." : "Ownership not published."));
-      item.appendChild(el("p", null, p.gate_explanation));
-      item.appendChild(el("p", null, p.availability === "private_detail_not_published" ? "Decision details are private or not published. Specific decision, recommendation and continuation are unavailable." : p.availability === "stale_or_conflicting" ? "Stale or conflicting evidence cannot support execution." : "Verified public context is available; a specific decision, recommendation and continuation remain unavailable."));
-      for (const c of p.context) item.appendChild(safeLink(c.label, c.ref));
-      item.appendChild(el("p", "improvement-next", p.next_action));
-      const prompt = `Inspect acknowledged improvement annotation ${p.handoff.annotation_id}, revision ${p.handoff.revision}, in ${p.handoff.data_path}. Resolve authorized local detail with the linked agent. Do not guess private associations, claim work, start implementation or publish private detail. Authority limit: ${p.handoff.authority_limit}. Investigation context: ${JSON.stringify(context)}. Public handoff: ${JSON.stringify(p.handoff)}`;
-      const button = el("button", "copy-prompt", "Copy as a prompt for your agent"); button.type = "button";
-      const status = el("p", "improvement-copy-status"); status.setAttribute("role", "status");
-      const details = el("details", "improvement-prompt"); const pre = el("pre", "copy-prompt", prompt); pre.tabIndex = 0;
-      details.append(el("summary", null, "Inspect the agent prompt and public basis"), pre);
-      button.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(prompt); status.textContent = "Copied."; }
-        catch {
-          details.open = true; pre.focus(); const range = document.createRange(); range.selectNodeContents(pre);
-          const selected = window.getSelection(); selected.removeAllRanges(); selected.addRange(range);
-          status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
-        }
-      });
-      item.append(button, status, details); node.appendChild(item);
+      // One malformed row says so in its own place; the rest still draw.
+      try {
+        const item = el("section", "improvement-row");
+        item.appendChild(el("h3", null, p.route === "human_decision" ? "Recorded decision gate — inspect acknowledged context" : p.availability === "stale_or_conflicting" ? "Review needs refreshing" : "Reviewed improvement — inspect the proposed route"));
+        item.appendChild(el("p", null, `Published lifecycle: ${S.lifecycleLabel(p.lifecycle)}. ${p.verification}`));
+        item.appendChild(el("p", "improvement-owner", p.ownership === "claimed" ? "A public claim is recorded; current execution is not established by this page." : "Ownership not published."));
+        item.appendChild(el("p", null, p.gate_explanation));
+        item.appendChild(el("p", null, p.availability === "private_detail_not_published" ? "Decision details are private or not published. Specific decision, recommendation and continuation are unavailable." : p.availability === "stale_or_conflicting" ? "Stale or conflicting evidence cannot support execution." : "Verified public context is available; a specific decision, recommendation and continuation remain unavailable."));
+        for (const c of p.context) item.appendChild(safeLink(c.label, c.ref));
+        item.appendChild(el("p", "improvement-next", p.next_action));
+        const prompt = `Inspect acknowledged improvement annotation ${p.handoff.annotation_id}, revision ${p.handoff.revision}, in ${p.handoff.data_path}. Resolve authorized local detail with the linked agent. Do not guess private associations, claim work, start implementation or publish private detail. Authority limit: ${p.handoff.authority_limit}. Investigation context: ${JSON.stringify(context)}. Public handoff: ${JSON.stringify(p.handoff)}`;
+        const button = el("button", "copy-prompt", "Copy as a prompt for your agent"); button.type = "button";
+        const status = el("p", "improvement-copy-status"); status.setAttribute("role", "status");
+        const details = el("details", "improvement-prompt"); const pre = el("pre", "copy-prompt", prompt); pre.tabIndex = 0;
+        details.append(el("summary", null, "Inspect the agent prompt and public basis"), pre);
+        button.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(prompt); status.textContent = "Copied."; }
+          catch {
+            details.open = true; pre.focus(); const range = document.createRange(); range.selectNodeContents(pre);
+            const selected = window.getSelection(); selected.removeAllRanges(); selected.addRange(range);
+            status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
+          }
+        });
+        item.append(button, status, details); node.appendChild(item);
+      } catch (err) {
+        const broken = el("section", "improvement-row improvement-row-error");
+        broken.appendChild(el("p", "chart-empty", `This improvement could not be shown (${err && err.message ? err.message : "an error"}). Other improvements are unaffected; no ownership or execution state is inferred.`));
+        node.appendChild(broken);
+      }
     }
     if (!rows.length) node.appendChild(el("p", "chart-empty", "Public annotation presentation is unavailable; no ownership or execution state is inferred."));
   }
@@ -5040,7 +5092,7 @@
     const seq = ++stepSeq;
     const box = document.getElementById("problems");
     const triageNode = document.getElementById("triage-brief");
-    renderPublicImprovements(triageNode, data);
+    safely("triage-brief", () => renderPublicImprovements(triageNode, data));
     const causes = await walkFile("rollups/causes.json");
     if (seq !== stepSeq) return;
     box.innerHTML = "";

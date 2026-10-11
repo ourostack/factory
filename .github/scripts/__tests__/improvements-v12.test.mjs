@@ -114,3 +114,79 @@ test("why_lean_is_an_open_experiment_not_a_uniqueness_claim", () => {
   assert.match(why, /href="https:\/\/dora\.dev\/guides\/value-stream-management\/"/, "names the existing application of Lean to software delivery")
   assert.doesNotMatch(why, /\b(unique|uniquely|the first (factory|method|to)|the only (factory|method|one)|no one else|nobody else|industry borrows no)\b/i, "no unsupported uniqueness claim")
 })
+
+const html = () => readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+const appSource = () => readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+
+test("static_comparison_and_findings_intros_ask_the_question_without_takt_or_savings", () => {
+  const page = html()
+  const lede = (view) => {
+    const at = page.indexOf(`id="view-${view}"`)
+    const m = page.slice(at).match(/<p class="lede[^"]*">([\s\S]*?)<\/p>/)
+    return m[1]
+  }
+  // The static text is what a reader sees while data loads, and permanently if data.json fails.
+  assert.match(lede("compare"), /Which recorded tasks have long windows or interruptions worth inspecting\?/)
+  assert.doesNotMatch(lede("compare"), /takt|yamazumi/i)
+  assert.match(lede("causes"), /Which recorded patterns deserve investigation\?/)
+  assert.doesNotMatch(lede("causes"), /fixing pays|vital few|savings? (are|is) proven/i)
+  // No runtime rewrite is needed once the static intro is right.
+  assert.doesNotMatch(appSource(), /intro\.textContent = "Which recorded/)
+})
+
+test("emphasis_options_match_drawn_segments_with_reader_labels", () => {
+  const bars = [
+    { job: "a1", segments: [{ key: "value", ms: 5 }, { key: "defects", ms: 2 }, { key: "wait_no_session", cause: "no_session", ms: 7 }, { key: "wait_other_task", cause: "other_task", ms: 3 }] },
+    { job: "b2", segments: [{ key: "value", ms: 1 }, { key: "wait_next_prompt_asked", cause: "next_prompt", ms: 4 }, { key: "wait_no_session", cause: "no_session", ms: 2 }] },
+  ]
+  const options = S.emphasisOptions(bars)
+  const keys = options.map(([k]) => k)
+  assert.deepEqual(keys, ["waiting", "value", "defects", "wait_next_prompt", "wait_other_task", "wait_no_session"])
+  assert.equal(new Set(keys).size, keys.length, "no duplicate option")
+  const label = (k) => options.find(([key]) => key === k)[1]
+  assert.equal(label("wait_no_session"), "No recorded task session")
+  assert.equal(label("wait_other_task"), "Recorded work on other tasks")
+  assert.equal(label("waiting"), "Recorded task interruptions")
+  assert.ok(!keys.includes("no_session") && !keys.includes("support"), "only categories the chart draws")
+  assert.deepEqual(S.emphasisOptions(null), [])
+  // Each offered option highlights exactly its own drawn segments.
+  const emph = (k) => S.emphasizeCategories(bars, k).flatMap((b) => b.segments.filter((s) => s.emphasized).map((s) => `${b.job}:${s.key}`))
+  assert.deepEqual(emph("wait_no_session"), ["a1:wait_no_session", "b2:wait_no_session"])
+  assert.deepEqual(emph("wait_next_prompt"), ["b2:wait_next_prompt_asked"])
+  for (const k of keys) assert.ok(emph(k).length > 0, `${k} highlights something`)
+})
+
+test("filter_changes_keep_the_reader_in_place", () => {
+  const app = appSource()
+  const start = app.indexOf("function renderComparisonControls")
+  const body = app.slice(start, app.indexOf("async function renderCompare", start))
+  // A filter change adds a history entry (Back still works) without a full route, which would move focus to the heading and scroll to the top.
+  assert.match(body, /history\.pushState\(/)
+  // Arrow keys or a date typed digit by digit on one focused control make one Back step, not one per intermediate value.
+  assert.match(body, /if \(source && comparisonEditing === source\) history\.replaceState\(null, "", hash\);/)
+  // Only a frame that refuses pushState falls back to a hash navigation.
+  assert.equal((body.match(/location\.hash =/g) || []).length, 1)
+  assert.match(body, /catch \(err\) \{\s*location\.hash = hash; \/\/ a sandboxed frame may refuse pushState/)
+})
+
+test("review_minor_fixes_use_reader_words_and_state_failures", () => {
+  // Lifecycle identifiers become reader-facing labels.
+  assert.equal(S.lifecycleLabel("closed_unverified"), "Closed, result not confirmed")
+  assert.equal(S.lifecycleLabel("closed_confirmed"), "Closed, result confirmed")
+  assert.equal(S.lifecycleLabel("verifying"), "Checking the result")
+  assert.equal(S.lifecycleLabel(null), "Not recorded")
+  assert.equal(S.lifecycleLabel("made_up"), "Not recorded")
+  const app = appSource()
+  assert.doesNotMatch(app, /Published lifecycle: \$\{p\.lifecycle/)
+  assert.doesNotMatch(app, /Start with real health alarms/, "the list shows no alarms, so the caption must not promise them")
+  // The cause page's tab title uses the same reader-facing name as its heading.
+  assert.doesNotMatch(app, /document\.title = `\$\{d\.label\} · The factory`;\n    if \(d\.state === "absent"\)/)
+  // A failed copy says so before offering the selected text.
+  assert.doesNotMatch(app, /status\.textContent = "The prompt is selected; copy it with the keyboard\."/)
+  // One malformed Improvements row renders its own error instead of blanking the view.
+  const fn = app.slice(app.indexOf("function renderPublicImprovements"), app.indexOf("async function renderAct"))
+  assert.match(fn, /This improvement could not be shown/)
+  assert.match(app, /safely\("triage-brief", \(\) => renderPublicImprovements\(/)
+  // Status options match the page's definitions: "Done" is done; cancelled is its own choice.
+  assert.match(app, /\["done", "Done"\], \["cancelled", "Cancelled"\]/)
+})

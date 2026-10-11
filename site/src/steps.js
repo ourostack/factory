@@ -1694,12 +1694,34 @@
       return true;
     });
   }
+  // The category a drawn segment belongs to: `wait_<cause>` for an
+  // interruption (whatever its finer key), its own key otherwise.
+  const segmentCategory = (s) => (s && s.cause ? `wait_${s.cause}` : s && s.key);
+  const WAIT_LABEL = { no_session: "No recorded task session", other_task: "Recorded work on other tasks" };
+  // Emphasis choices are exactly the categories the chart draws, in its
+  // stacking order, with the reader-facing interruption names.
+  function emphasisOptions(bars) {
+    const present = new Set(arr(bars).flatMap((b) => arr(b && b.segments).map(segmentCategory)));
+    const out = [];
+    if (W.WAIT_KEYS.some((k) => present.has(`wait_${k}`))) out.push(["waiting", "Recorded task interruptions"]);
+    for (const seg of F.SEGMENTS) if (seg.key !== "waiting" && seg.key !== "no_session" && present.has(seg.key)) out.push([seg.key, seg.label]);
+    for (const k of W.WAIT_KEYS) if (present.has(`wait_${k}`)) out.push([`wait_${k}`, WAIT_LABEL[k] || W.waitCauseLabel(k)]);
+    return out;
+  }
   // Retain every task, segment, duration and denominator.
   function emphasizeCategories(rows, category) {
     const valid = typeof category === "string" && (category === "waiting" || F.SEGMENTS.some((s) => s.key === category) || W.WAIT_KEYS.some((k) => category === `wait_${k}`));
     return arr(rows).map((r) => ({ ...r, segments: arr(r.segments).map((s) => ({
-      ...s, emphasized: !valid || s.key === category || (category === "waiting" && !!s.cause),
+      ...s, emphasized: !valid || segmentCategory(s) === category || (category === "waiting" && !!s.cause),
     })) }));
+  }
+  // Reader-facing names for the public queue's lifecycle identifiers.
+  const LIFECYCLE_LABEL = {
+    open: "Open", claimed: "Claimed", shipped: "Shipped", verifying: "Checking the result",
+    closed_confirmed: "Closed, result confirmed", closed_unverified: "Closed, result not confirmed",
+  };
+  function lifecycleLabel(lifecycle) {
+    return Object.hasOwn(LIFECYCLE_LABEL, lifecycle) ? LIFECYCLE_LABEL[lifecycle] : "Not recorded";
   }
   // Consumes the Node2 validated public projection, never local prose.
   function improvementPresentation(row) {
@@ -1740,6 +1762,8 @@
     walkOrder,
     selectTaskPopulation,
     emphasizeCategories,
+    emphasisOptions,
+    lifecycleLabel,
     improvementPresentation,
     findingMeaning,
     paretoNames,
