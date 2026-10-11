@@ -596,3 +596,14 @@ test("unknown maintainer permission does not revoke legacy contributor facts int
     assert.ok(r.requests().some((c) => c.endpoint.endsWith("/merge")))
   } finally { r.close() }
 })
+
+// The rendered-browser gate needs a real browser that root provisions. It is
+// never run by a workflow (no pull request's code drives a browser under a
+// token) and no workflow installs a browser or browser package for it.
+test("no workflow runs the rendered-browser gate or installs a browser", () => {
+  const dir = new URL("../../workflows/", import.meta.url)
+  for (const f of readdirSync(dir).filter((n) => n.endsWith(".yml"))) {
+    const body = readFileSync(new URL(f, dir), "utf8")
+    assert.doesNotMatch(body, /verify-v12-browser|playwright|puppeteer|chromium|npx /i, f)
+  }
+})
