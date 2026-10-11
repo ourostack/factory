@@ -65,6 +65,10 @@
 
   // A task is in progress until its card says done or cancelled.
   const CLOSED = new Set(["done", "cancelled"]);
+  // Known open card lifecycles (the canonical job statuses before done or
+  // cancelled, plus the route filter's legacy "doing"). A missing or
+  // unknown status is not evidence that a task is still open.
+  const OPEN_LIFECYCLE = new Set(["drafting", "processing", "validating", "collaborating", "paused", "blocked", "doing"]);
   function isOpen(status, leadN) {
     if (has(leadN, "censored") || has(leadN, "open_job")) return true;
     return typeof status === "string" ? !CLOSED.has(status) : false;
@@ -1665,8 +1669,79 @@
     return { waiting, working, working_state: tc ? tc.state : "unavailable", working_reasons: tc && tc.state === "unavailable" ? arr(tc.reasons) : [] };
   }
 
+  function findingMeaning(key) {
+    if (String(key).startsWith("waiting:")) {
+      const label = key === "waiting:other_task" ? "Recorded work on other tasks" : key === "waiting:no_session" ? "No recorded task session" : "Recorded task interruption";
+      return `${label}. This is a category in the legacy recorded task window, not evidence that the factory or every worker was idle. Corrected production pauses require producer boundaries; inspect worker evidence rather than infer them here.`;
+    }
+    return causeMeaning(key);
+  }
+
+  // Reader-only population selection, not a clock or accounting producer.
+  function selectTaskPopulation(rows, filters) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters || {})) if (typeof v === "string") q.set(k, v);
+    const f = F.routeContext(q.toString());
+    return arr(rows).filter((r) => {
+      if (!r || typeof r.id !== "string") return false;
+      if (f.task && r.id !== f.task) return false;
+      if (f.status && (["accepted", "delivered", "awaiting_signoff", "sent_back", "in_progress"].includes(f.status) ? r.outcome !== f.status : f.status === "open" ? !OPEN_LIFECYCLE.has(r.status) : r.status !== f.status)) return false;
+      if (f.evidence && (!r.lead_time_ms || r.lead_time_ms.state !== f.evidence)) return false;
+      if (f.from || f.to) {
+        const day = F.finishDay(r.finish_date);
+        if (day.kind !== "on" || (f.from && day.key < f.from) || (f.to && day.key > f.to)) return false;
+      }
+      return true;
+    });
+  }
+  // Retain every task, segment, duration and denominator.
+  function emphasizeCategories(rows, category) {
+    const valid = typeof category === "string" && (category === "waiting" || F.SEGMENTS.some((s) => s.key === category) || W.WAIT_KEYS.some((k) => category === `wait_${k}`));
+    return arr(rows).map((r) => ({ ...r, segments: arr(r.segments).map((s) => ({
+      ...s, emphasized: !valid || s.key === category || (category === "waiting" && !!s.cause),
+    })) }));
+  }
+  // Consumes the Node2 validated public projection, never local prose.
+  function improvementPresentation(row) {
+    const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
+    const pointer = (p) => exact(p, ["kind", "ref", "revision"]) && Number.isSafeInteger(p.revision) && p.revision >= 1 &&
+      (p.kind === "job" ? /^[0-9a-f]{32}$/.test(p.ref) : ["issue", "pr"].includes(p.kind) && F.safeGithubUrl(p.ref) === p.ref);
+    if (!row || !/^[0-9a-f]{32}$/.test(row.id) || !row.handoff ||
+        !Number.isSafeInteger(row.revision) || row.revision < 1 ||
+        ![null, "agent_ready", "investigate", "human_decision"].includes(row.route) ||
+        ![null, "intent", "scope", "approval", "voice", "spend", "account", "irreversible"].includes(row.gate) ||
+        ![null, "open", "claimed", "shipped", "verifying", "closed_confirmed", "closed_unverified"].includes(row.lifecycle) ||
+        !exact(row.handoff, ["annotation_id", "revision", "basis", "route", "gate", "availability", "evidence", "data_path", "authority_limit"]) ||
+        row.handoff.annotation_id !== row.id || row.handoff.revision !== row.revision || row.handoff.data_path !== "rollups/improvements.json" ||
+        row.handoff.route !== row.route || row.handoff.gate !== row.gate || row.handoff.availability !== row.availability ||
+        !exact(row.handoff.basis, ["generation", "evidence_revisions"]) || !/^[0-9a-f]{32}$/.test(row.handoff.basis.generation) ||
+        !Array.isArray(row.handoff.basis.evidence_revisions) || !row.handoff.basis.evidence_revisions.every(pointer) ||
+        !Array.isArray(row.handoff.evidence) || !row.handoff.evidence.every(pointer) ||
+        !Array.isArray(row.context) || typeof row.gate_explanation !== "string" || typeof row.next_action !== "string" ||
+        row.handoff.authority_limit !== "inspect_only_no_new_authority" ||
+        !["private_detail_not_published", "verified_public_context", "stale_or_conflicting"].includes(row.availability) ||
+        !["claimed", "not_published"].includes(row.ownership) ||
+        ["decision", "recommendation", "safe_continuation"].some((k) => !exact(row[k], ["state", "reason"]) || row[k].state !== "unavailable" || row[k].reason !== "detail_not_published")) return null;
+    const copy = (v) => JSON.parse(JSON.stringify(v));
+    const stale = row.state !== "reviewed" || row.conflict || row.availability === "stale_or_conflicting";
+    const verification = stale ? "Insufficient current evidence: stale or conflicting"
+      : ({
+        open: "Result not published or checked", claimed: "Result not published or checked",
+        shipped: "Shipped; result not yet checked", verifying: "Checking the result; improvement not established",
+        closed_confirmed: "Confirmed in the published lifecycle; no savings inferred",
+        closed_unverified: "Closed without a confirmed result",
+      })[row.lifecycle] || "Result not published or checked";
+    const out = { id: row.id, state: row.state, route: row.route, lifecycle: row.lifecycle, ownership: row.ownership, verification };
+    for (const key of ["availability", "gate_explanation", "context", "decision", "recommendation", "safe_continuation", "next_action", "handoff"]) out[key] = copy(row[key]);
+    return out;
+  }
+
   return {
     walkOrder,
+    selectTaskPopulation,
+    emphasizeCategories,
+    improvementPresentation,
+    findingMeaning,
     paretoNames,
     unsplitOf,
     unsplitNote,

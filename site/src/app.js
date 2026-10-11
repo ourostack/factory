@@ -3485,7 +3485,8 @@
         for (const x of document.querySelectorAll(`#${viewId} .mode-btn[data-mode]`)) x.setAttribute("aria-pressed", String(x.dataset.mode === modes[which]));
         // The mode goes in the URL, so a link or a reload opens this view.
         try {
-          history.replaceState(null, "", which === "compare" ? F.compareHash({ mode: modes.compare, ...overTimeView }) : `#/${which}${modes[which] !== "all" ? `?mode=${modes[which]}` : ""}`);
+          history.replaceState(null, "", which === "compare" ? F.compareHash({ mode: modes.compare, ...overTimeView, context: F.navigationContext(location.hash) }) : F.routeWithContext(`#/${which}`, { ...F.navigationContext(location.hash), mode: modes[which] }));
+          renderNavigationContext(F.parseRoute(location.hash, () => null));
         } catch (err) {
           /* a sandboxed frame may refuse; the mode still applies */
         }
@@ -3511,7 +3512,7 @@
   // An SVG link to an in-page route (a task or a cause), with its label.
   function svgLink(href, label) {
     const a = svg("a", { class: "chart-link" });
-    if (typeof href === "string" && /^#\/[0-9A-Za-z_\/:.-]+$/.test(href)) a.setAttribute("href", href);
+    if (typeof href === "string" && /^#\/[0-9A-Za-z_\/:.-]+$/.test(href)) a.setAttribute("href", F.contextualRoute(href, location.hash));
     a.setAttribute("aria-label", label);
     return a;
   }
@@ -3617,6 +3618,7 @@
           const fill = s.key === "unsplit" ? "url(#hatch-unsplit)" : s.cause ? (s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${s.cause})`) : s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, false);
           const look = F.segmentLook(s);
           const r = svg("rect", { x: x0, y: top, width: barW, height: Math.max(0, h), class: look.cls });
+          if (s.emphasized === false) r.classList.add("category-muted");
           r.style.fill = fill;
           if (look.stroke) {
             r.style.stroke = look.stroke;
@@ -4161,40 +4163,120 @@
     container.appendChild(wrap);
   }
 
+  function renderComparisonControls(before, data, context) {
+    let node = document.getElementById("compare-population");
+    if (!node) { node = el("section", "comparison-controls"); node.id = "compare-population"; before.before(node); }
+    node.innerHTML = "";
+    node.setAttribute("aria-label", "Task population and category emphasis");
+    const change = (key, value) => {
+      const next = F.navigationContext(location.hash);
+      if (value) next[key] = value; else delete next[key];
+      location.hash = F.compareHash({ mode: next.mode || modes.compare, ...overTimeView, context: next });
+    };
+    const select = (label, id, key, options) => {
+      const l = el("label", "comparison-control", label);
+      const s = el("select"); s.id = id;
+      for (const [value, text] of [["", "All / none selected"], ...options]) { const o = el("option", null, text); o.value = value; s.appendChild(o); }
+      if (context[key] && ![...s.options].some((o) => o.value === context[key])) { const o = el("option", null, `Requested: ${context[key]}`); o.value = context[key]; s.appendChild(o); }
+      s.value = context[key] || ""; s.addEventListener("change", () => change(key, s.value));
+      l.appendChild(s); node.appendChild(l);
+    };
+    select("Task filter", "compare-task", "task", data.jobs.map((j) => [j.id, jobLabel(j)]));
+    select("Recorded lifecycle filter", "compare-status", "status", [["done", "Finished"], ["open", "Still open"], ["accepted", "Accepted"], ["delivered", "Delivered"], ["awaiting_signoff", "Awaiting acceptance"], ["sent_back", "Returned for changes"]]);
+    select("Recorded elapsed evidence filter", "compare-evidence", "evidence", [["measured", "Measured"], ["partial", "Partial"], ["unavailable", "Unavailable"]]);
+    for (const [key, label] of [["from", "Exact finish day from (UTC)"], ["to", "Exact finish day through (UTC)"]]) {
+      const l = el("label", "comparison-control", label); const input = el("input"); input.type = "date"; input.id = `compare-${key}`; input.value = context[key] || "";
+      input.addEventListener("change", () => change(key, input.value)); l.appendChild(input); node.appendChild(l);
+    }
+    select("Category emphasis (does not filter tasks)", "compare-category", "category", [["waiting", "Recorded task interruptions"], ...F.SEGMENTS.map((s) => [s.key, s.label])]);
+    const actions = el("div", "comparison-actions");
+    const clear = (label, keys) => {
+      const b = el("button", null, label); b.type = "button";
+      b.addEventListener("click", () => {
+        const next = F.navigationContext(location.hash); for (const k of keys) delete next[k];
+        location.hash = F.compareHash({ mode: next.mode || modes.compare, ...overTimeView, context: next });
+      });
+      actions.appendChild(b);
+    };
+    clear("Clear filters", ["task", "status", "from", "to", "evidence"]); clear("Clear emphasis", ["category"]);
+    const findings = el("a", null, "Inspect findings for this selection"); setLocalHref(findings, "#/causes"); actions.appendChild(findings);
+    node.appendChild(actions);
+    const scope = el("p", "comparison-scope"); scope.id = "compare-scope"; scope.setAttribute("role", "status"); node.appendChild(scope);
+  }
+
   async function renderCompare(data) {
     const seq = ++stepSeq;
     const ledeEl = document.getElementById("compare-lede");
     const [tasks, stack, byWeek] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile("rollups/by_week.json")]);
     if (seq !== stepSeq) return;
-    const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
-    const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs : null;
+    const context = F.navigationContext(location.hash);
+    const selectedJobs = S.selectTaskPopulation(data.jobs, context);
+    const selectedIds = new Set(selectedJobs.map((j) => j.id));
+    const filtered = ["task", "status", "from", "to", "evidence"].some((k) => context[k]);
+    const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs.filter((r) => selectedIds.has(r.job)) : null;
+    const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs.filter((r) => selectedIds.has(r.job)) : null;
     const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => jobLabel(j) });
-    const all = !taskRows && !stackRows ? [] : S.stackBars(data.jobs, stackRows, taskRows, opts("all"));
+    const all = !taskRows && !stackRows ? [] : S.stackBars(selectedJobs, stackRows, taskRows, opts("all"));
+    const intro = document.querySelector("#view-compare > .wrap > .lede");
+    if (intro) { intro.classList.add("comparison-question"); intro.textContent = "Which recorded tasks have long windows or interruptions worth inspecting? Compare the selected tasks' existing recorded measures, not factory capacity."; }
+    renderComparisonControls(ledeEl, data, context);
     safely("compare-lede", () => {
-      ledeEl.textContent = S.compareLede(all, taskRows, F.reasonText).text;
+      ledeEl.textContent = "Recorded task windows can overlap. Their working share is not agent utilization or global idle time. Original-request and corrected production clocks are unavailable; acceptance is not presented as a production bucket.";
+      let conclusion = document.getElementById("comparison-conclusion");
+      if (!conclusion) { conclusion = el("p", "comparison-conclusion"); conclusion.id = "comparison-conclusion"; }
+      document.getElementById("compare-population").before(conclusion);
+      conclusion.innerHTML = "";
+      const candidate = all.filter((b) => b.state !== "no_data" && Number.isFinite(b.total_ms)).sort((a, b) => b.total_ms - a.total_ms)[0];
+      if (!selectedJobs.length) conclusion.textContent = "No recorded task matches these filters. Clear filters or choose a different recorded population.";
+      else if (!candidate) conclusion.textContent = "The selected tasks have no comparable recorded window yet. Inspect their evidence before choosing an improvement.";
+      else {
+        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
+      }
+      const scope = document.getElementById("compare-scope");
+      scope.dataset.n = String(selectedJobs.length);
+      scope.dataset.signature = JSON.stringify(all.map((b) => [b.job, b.total_ms, b.segments.map((s) => [s.key, s.ms])]));
+      scope.textContent = `${selectedJobs.length} of ${data.jobs.length} recorded tasks selected. Percentages use each included task's own recorded elapsed window, not global utilization or capacity. Date filters include exact UTC finish days only; bounded/undated tasks are excluded. Category emphasis changes no totals or denominators.`;
     });
     const draw = () => {
       const mode = modes.compare;
+      const current = F.navigationContext(location.hash);
+      const unavailable = ["production", "request"].includes(current.mode);
       document.getElementById("stackup-caption").textContent =
         mode === "working"
           ? "Agent working time only, for the tasks whose working time the evaluator has labeled, in finish order, linear from zero at their own scale. Waiting is left out, so defects, rework and necessary steps, where agent-side fixes live, show. Select a bar to follow its task."
           : mode === "share"
             ? "Each task's own lead time as 100%, on a 0 to 100% axis, with the same parts in the same order, so a 20-minute task's make-up compares with a 200-hour one's. Each bar is labeled with the share agents were working. A task whose split is not known is one hatched bar, never 100% of one part. Select a bar to follow its task."
             : "The whole lead time of each task, linear from zero. Left to right: every finished task (done or cancelled) by finish day (UTC), the latest on the right, with any finished task that has no finish day after the dated ones; then tasks still open, by when work began. Select a bar to follow its task.";
-      const view = !all.length || mode !== "working" ? null : S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working")));
+      const view = !all.length || mode !== "working" ? null : S.workingView(S.stackBars(selectedJobs, stackRows, taskRows, opts("working")));
       const bars = !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
       const leftOut = document.getElementById("stackup-left-out");
       leftOut.textContent = view ? view.text : "";
       leftOut.hidden = !(view && view.text);
       safely("stackup", () => {
-        if (!all.length) emptyState(document.getElementById("stackup"), "The walk's stack-up and task files are not published yet, so no bar is drawn rather than a zero.");
+        if (unavailable) emptyState(document.getElementById("stackup"), "This requested clock mode is unavailable: no approved producer supplies its boundaries. Choose a recorded task measure instead; no legacy chart is relabeled as production or original-request accounting.");
+        else if (!all.length) emptyState(document.getElementById("stackup"), selectedJobs.length ? "Recorded task comparison data is not published yet." : "No selected task has a bar. Clear filters to inspect recorded tasks.");
         else if (view && !bars.length) emptyState(document.getElementById("stackup"), "No task's working time is labeled yet, so there is nothing to compare in agent working time.");
-        else drawStackup(document.getElementById("stackup"), bars, mode, S.mostWaste(bars, mode));
+        else {
+          const node = document.getElementById("stackup");
+          drawStackup(node, S.emphasizeCategories(bars, current.category), mode, null);
+          const legend = node.querySelector(".sb-legend");
+          if (legend) {
+            const key = el("p", "compact-legend", "Recorded working: value-adding, necessary, classified waste or not labeled. Recorded task interruptions: no recorded task session, work on other tasks or another reported cause. Emphasis is a visual aid, not a new clock.");
+            legend.before(key);
+            const detail = el("details", "comparison-taxonomy"); detail.appendChild(el("summary", null, "Full taxonomy and evidence marks"));
+            legend.before(detail); detail.appendChild(legend);
+          }
+        }
       });
     };
     wireModes("view-compare", "compare", draw);
     draw();
-    const ot = S.overTime(byWeek, { jobs: data.jobs, taskRows, nameOf: (j) => jobLabel(j) });
+    const ot = S.overTime(filtered ? null : byWeek, { jobs: selectedJobs, taskRows, nameOf: (j) => jobLabel(j) });
+    const overtime = document.getElementById("over-time");
+    if (!overtime.parentElement.classList.contains("comparison-history")) {
+      const detail = el("details", "comparison-history"); detail.appendChild(el("summary", null, "Recorded changes over time (additional evidence)"));
+      overtime.before(detail); detail.appendChild(overtime);
+    }
     const OT_CAPTION = {
       share: "Each week's lead time as 100%, in the stack-up's colors and order, so a week of 5 tasks and a week of 1 compare: working time by label from the base up, then waiting by what it waited on.",
       all: "Hours of all elapsed time per finish week, linear from zero: a week with more or longer tasks is taller, so compare shapes with care or switch to the share of lead time.",
@@ -4206,7 +4288,7 @@
       working: "Each finished task with a finish day whose working time is labeled, earliest on the left, in hours of agent working time. Select a bar to follow its task.",
     };
     const drawRest = () => {
-      const none = ot.state === "absent" ? "The weekly file (rollups/by_week.json) is not published yet, so no week is drawn rather than a zero." : ot.state === "empty" ? "No finished task has a finish day yet, so no week can be drawn." : null;
+      const none = filtered ? "Selected-population weekly aggregates are not available; global weeks are not recomputed or relabeled. Clear filters to inspect the published all-task weeks." : ot.state === "absent" ? "The weekly file (rollups/by_week.json) is not published yet, so no week is drawn rather than a zero." : ot.state === "empty" ? "No finished task has a finish day yet, so no week can be drawn." : null;
       const baseEl = document.getElementById("over-time-base");
       baseEl.replaceChildren();
       if (ot.state !== "absent") {
@@ -4231,7 +4313,7 @@
         const box = document.getElementById("ot-bars");
         if (none) return emptyState(box, none);
         if (!byTask) return drawWeekBars(box, ot, mode);
-        const base = mode === "working" ? S.workingView(S.stackBars(data.jobs, stackRows, taskRows, opts("working"))).bars : all;
+        const base = mode === "working" ? S.workingView(S.stackBars(selectedJobs, stackRows, taskRows, opts("working"))).bars : all;
         const dated = S.eachTaskBars(base);
         const bars = mode === "share" ? S.shareBars(dated, taskRows) : dated;
         if (!bars.length) return emptyState(box, "No finished task with a finish day has a bar in this mode yet.");
@@ -4246,7 +4328,7 @@
     };
     const setHash = () => {
       try {
-        history.replaceState(null, "", F.compareHash({ mode: modes.compare, ...overTimeView }));
+        history.replaceState(null, "", F.compareHash({ mode: modes.compare, ...overTimeView, context: F.navigationContext(location.hash) }));
       } catch (err) {
         /* a sandboxed frame may refuse; the choice still applies */
       }
@@ -4266,7 +4348,7 @@
       };
     }
     drawRest();
-    const drawTable = () => safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "Not published yet.")));
+    const drawTable = () => safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "No selected task comparison is available.")));
     drawTable();
     lastStepRender = () => {
       draw();
@@ -4490,6 +4572,11 @@
 
   let whySplitOn = true;
   async function renderCauses(data) {
+    const intro = document.querySelector("#view-causes > .wrap > .lede");
+    if (intro) intro.textContent = "Which recorded patterns deserve investigation? Findings describe observed task exposure, not proven root causes or savings. A ranking orders the published evidence; it is not a measure of global worker inactivity.";
+    let conclusion = document.querySelector("#view-causes .findings-conclusion");
+    if (!conclusion) { conclusion = el("p", "findings-conclusion"); intro.after(conclusion); }
+    conclusion.textContent = "Start with the largest recorded category, inspect its limits and stretches, then choose a countermeasure and a check.";
     const seq = ++stepSeq;
     const [doc, tasks, stack] = await Promise.all([walkFile("rollups/causes.json"), walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
     if (seq !== stepSeq) return;
@@ -4541,8 +4628,26 @@
       syncToggle();
       const m = modes.causes === "working" ? working || all : all;
       document.getElementById("pareto-caption").textContent = all.state === "absent" ? "" : S.paretoCaption(m);
-      safely("pareto", () => drawPareto(document.getElementById("pareto"), m));
-      safely("pareto-table", () => drawParetoTable(document.getElementById("pareto-table"), m));
+      const context = F.navigationContext(location.hash);
+      const filtered = ["task", "status", "from", "to", "evidence"].some((k) => context[k]);
+      const unavailable = filtered ? "A selected-population ranking is not published. Inspect a specific finding's selected task evidence or clear task filters to inspect the published all-task ranking." : null;
+      if (!filtered && m.bars?.length) {
+        const first = m.bars[0];
+        const label = first.key === "waiting:other_task" ? "Recorded work on other tasks" : first.key === "waiting:no_session" ? "No recorded task session" : first.label;
+        conclusion.textContent = `Investigate ${label}: ${W.pctWords(first.share)} of the published ranked task exposure. This denominator is the ranking's included categories, not elapsed factory capacity; partial and shared-task limits remain in the evidence note.`;
+      }
+      safely("pareto", () => unavailable ? emptyState(document.getElementById("pareto"), unavailable) : drawPareto(document.getElementById("pareto"), m));
+      safely("pareto-table", () => unavailable ? emptyState(document.getElementById("pareto-table"), unavailable) : drawParetoTable(document.getElementById("pareto-table"), m));
+      if (filtered) {
+        const clear = el("button", "findings-clear", "Clear task filters for the published ranking"); clear.type = "button";
+        clear.addEventListener("click", () => {
+          const next = F.navigationContext(location.hash); for (const k of ["task", "status", "from", "to", "evidence"]) delete next[k];
+          location.hash = F.routeWithContext("#/causes", next);
+        });
+        document.getElementById("pareto").appendChild(clear);
+        document.getElementById("causes-lede").textContent = "Selected evidence context is retained. No global aggregate is shown as a selected-population measure.";
+        document.getElementById("pareto-note").textContent = "Clear task filters for the published all-task denominator. Category emphasis and navigation context do not create evidence.";
+      }
     };
     wireModes("view-causes", "causes", draw);
     draw();
@@ -4563,14 +4668,21 @@
     const nameOf = (job) => (byId.has(job) ? jobLabel(byId.get(job)) : F.jobLabel(localNames, job));
     const promptNameOf = (job) => W.promptName(F.taskName(localNames, byId.get(job) || { id: job }));
     const d = S.causeDetail(doc, key, { taskRows: tasks && tasks.jobs, stackRows: stack && stack.jobs, nameOf, promptNameOf });
+    const context = F.navigationContext(location.hash);
+    const filtered = ["task", "status", "from", "to", "evidence"].some((k) => context[k]);
+    if (filtered) {
+      const ids = new Set(S.selectTaskPopulation(data.jobs, context).map((j) => j.id));
+      d.tasks = d.tasks.filter((t) => ids.has(t.job)); d.spans = d.spans.filter((s) => ids.has(s.job));
+    }
     box.innerHTML = "";
+    const improvements = el("a", "finding-improvements", "Inspect this finding in Improvements"); setLocalHref(improvements, "#/improvements"); box.appendChild(improvements);
     if (d.why) {
       await renderWhyCause(box, d, { seq, byId, nameOf, doc });
       return;
     }
     const h1 = el("h1", "view-title cause-title");
     h1.appendChild(causeSwatch(key));
-    h1.appendChild(document.createTextNode(d.label));
+    h1.appendChild(document.createTextNode(key === "waiting:other_task" ? "Recorded work on other tasks" : key === "waiting:no_session" ? "No recorded task session" : d.label));
     box.appendChild(h1);
     document.title = `${d.label} · The factory`;
     if (d.state === "absent") {
@@ -4583,7 +4695,7 @@
     }
     const lede = el("p", "lede");
     const rankWords = `${F.ordinal(d.all.rank)} of ${d.all.of} causes`;
-    lede.textContent = `${S.causeMeaning(key)} Across the ${d.n} tasks the ranking counts, it cost ${S.hoursWords(d.ms)} (counted per task), ${W.pctWords(d.all.share)} of all the time ranked: ${rankWords}${d.working ? `, and ${F.ordinal(d.working.rank)} of ${d.working.of} once waiting is left out` : ""}. ${d.jobs === 1 ? "One task has it." : `${d.jobs} tasks have it.`}`;
+    lede.textContent = filtered ? `${S.findingMeaning(key)} Showing available evidence from the selected task population. A selected-population cause total/ranking is not published, so no global total is relabeled here.` : `${S.findingMeaning(key)} The published ranking counts ${d.n} tasks. Recorded task exposure on this category is ${S.hoursWords(d.ms)} (counted per task), ${W.pctWords(d.all.share)} of the ranked recorded task exposure: ${rankWords}. ${d.jobs} tasks have recorded evidence for it. This is not a factory idle clock or proven savings.`;
     box.appendChild(lede);
     // Waiting for the next prompt, by why the agent stopped: each class
     // with its time and page, or why it is not split.
@@ -4611,7 +4723,7 @@
     const existing = S.causeIssues(S.actRows(data.kaizen_issues, doc), key);
     const a3 = el("section", "block a3-block");
     a3.setAttribute("aria-labelledby", "a3-title");
-    const a3h = el("h2", "block-title", existing.length ? "Its A3" : "Start an A3");
+    const a3h = el("h2", "block-title", existing.length ? "Its one-page improvement plan (A3)" : "Start a one-page improvement plan (A3)");
     a3h.id = "a3-title";
     a3.appendChild(a3h);
     if (existing.length) {
@@ -4634,18 +4746,20 @@
       a3.appendChild(taken);
       a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. One already exists for this cause, so this prompt asks the agent to help check it or extend it rather than start another."));
     } else a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt hands the agent this cause, its time, its largest tasks and its data, and asks it to draft one. When a countermeasure is agreed, file it as a kaizen issue; it appears on Act on the next build."));
-    const text = S.a3Prompt(d, { route: absolute(S.causeRoute(key)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt"), existing });
+    const text = `Inspection context: ${JSON.stringify(F.navigationContext(location.hash))}. ${filtered ? "Ranking figures below are the published all-task context, not recomputed selected-population totals. " : ""}` + S.a3Prompt(d, { route: absolute(F.contextualRoute(S.causeRoute(key), location.hash)), dataUrl: absolute("rollups/causes.json"), indexUrl: absolute("llms.txt"), existing });
     const pbox = el("div", "drawer-prompt");
     const btn = el("button", "copy-prompt", existing.length ? "Check or extend the A3 with your agent" : "Start an A3 with your agent");
     btn.type = "button";
     const status = el("span", "copy-status");
     status.setAttribute("role", "status");
     const pre = el("p", "prompt-text", text);
+    const payload = el("details", "finding-prompt"); payload.append(el("summary", null, "Inspect the agent prompt"), pre);
     btn.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(text);
         status.textContent = "Copied. Paste it to the agent.";
       } catch (err) {
+        payload.open = true;
         const range = document.createRange();
         range.selectNodeContents(pre);
         const sel = window.getSelection();
@@ -4654,7 +4768,7 @@
         status.textContent = "The prompt is selected; copy it with the keyboard.";
       }
     });
-    pbox.append(btn, status, pre);
+    pbox.append(btn, status, payload);
     a3.appendChild(pbox);
     box.appendChild(a3);
 
@@ -4686,7 +4800,7 @@
         tr.appendChild(c);
       }
       tr.appendChild(el("td", "num", t.ms === null ? "not stated" : `${t.bound === "lower" ? "at least " : ""}${S.hoursWords(t.ms)}`));
-      tr.appendChild(el("td", "num", t.ms === null || !(d.ms > 0) ? "—" : W.pctWords(t.ms / d.ms)));
+      tr.appendChild(el("td", "num", filtered ? "Selected-scope share unavailable" : t.ms === null || !(d.ms > 0) ? "—" : W.pctWords(t.ms / d.ms)));
       tb.appendChild(tr);
     }
     table.appendChild(tb);
@@ -4719,6 +4833,8 @@
     if (!d.spans.length) ss.appendChild(el("p", "chart-empty", "Desk lists no stretch for this cause."));
     else ss.appendChild(ol);
     box.appendChild(ss);
+    // Evidence first, then affected tasks, then the optional improvement plan.
+    box.appendChild(ts); box.appendChild(a3);
     // Each task's map file says which of its items holds the stretch.
     const jobs = [...new Set(d.spans.map((s) => s.job))];
     const maps = await Promise.all(jobs.map((j) => walkFile(mapPath(j))));
@@ -4880,13 +4996,51 @@
 
   // ----------------------------------------------------------- step 4: act
 
+  function renderPublicImprovements(node, data) {
+    node.innerHTML = "";
+    const context = F.navigationContext(location.hash);
+    const question = el("h2", "block-title", context.cause ? "What public improvement review can I inspect with this investigation context?" : "Which published improvement needs inspection next?");
+    question.id = "improvement-question"; node.appendChild(question);
+    node.appendChild(el("p", "chart-caption", "Inspection does not grant authority or create ownership. Start with real health alarms, then stale/conflicting reviews and recorded decision gates. This is not a savings ranking."));
+    const queue = data.improvements;
+    if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows)) return emptyState(node, "Public improvement review details are unavailable.");
+    if (queue.state === "not_reviewed") { node.appendChild(el("p", "chart-empty", "Not reviewed yet. Automated triage is not demonstrated; ownership and private decisions are not published.")); return; }
+    if (!queue.rows.length) { node.appendChild(el("p", "chart-empty", "No current public annotation detail is available. Empty review data does not prove no problems.")); return; }
+    node.appendChild(el("p", "chart-caption", "This public annotation queue is not a task-filtered execution queue. Investigation context is retained for inspection; private associations are not inferred."));
+    const rows = queue.rows.map(S.improvementPresentation).filter(Boolean);
+    rows.sort((a, b) => Number(b.availability === "stale_or_conflicting") - Number(a.availability === "stale_or_conflicting") || Number(b.route === "human_decision") - Number(a.route === "human_decision"));
+    for (const p of rows) {
+      const item = el("section", "improvement-row");
+      item.appendChild(el("h3", null, p.route === "human_decision" ? "Recorded decision gate — inspect acknowledged context" : p.availability === "stale_or_conflicting" ? "Review needs refreshing" : "Reviewed improvement — inspect the proposed route"));
+      item.appendChild(el("p", null, `Published lifecycle: ${p.lifecycle || "not recorded"}. ${p.verification}`));
+      item.appendChild(el("p", "improvement-owner", p.ownership === "claimed" ? "A public claim is recorded; current execution is not established by this page." : "Ownership not published."));
+      item.appendChild(el("p", null, p.gate_explanation));
+      item.appendChild(el("p", null, p.availability === "private_detail_not_published" ? "Decision details are private or not published. Specific decision, recommendation and continuation are unavailable." : p.availability === "stale_or_conflicting" ? "Stale or conflicting evidence cannot support execution." : "Verified public context is available; a specific decision, recommendation and continuation remain unavailable."));
+      for (const c of p.context) item.appendChild(safeLink(c.label, c.ref));
+      item.appendChild(el("p", "improvement-next", p.next_action));
+      const prompt = `Inspect acknowledged improvement annotation ${p.handoff.annotation_id}, revision ${p.handoff.revision}, in ${p.handoff.data_path}. Resolve authorized local detail with the linked agent. Do not guess private associations, claim work, start implementation or publish private detail. Authority limit: ${p.handoff.authority_limit}. Investigation context: ${JSON.stringify(context)}. Public handoff: ${JSON.stringify(p.handoff)}`;
+      const button = el("button", "copy-prompt", "Copy as a prompt for your agent"); button.type = "button";
+      const status = el("p", "improvement-copy-status"); status.setAttribute("role", "status");
+      const details = el("details", "improvement-prompt"); const pre = el("pre", "copy-prompt", prompt); pre.tabIndex = 0;
+      details.append(el("summary", null, "Inspect the agent prompt and public basis"), pre);
+      button.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(prompt); status.textContent = "Copied."; }
+        catch {
+          details.open = true; pre.focus(); const range = document.createRange(); range.selectNodeContents(pre);
+          const selected = window.getSelection(); selected.removeAllRanges(); selected.addRange(range);
+          status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
+        }
+      });
+      item.append(button, status, details); node.appendChild(item);
+    }
+    if (!rows.length) node.appendChild(el("p", "chart-empty", "Public annotation presentation is unavailable; no ownership or execution state is inferred."));
+  }
+
   async function renderAct(data) {
     const seq = ++stepSeq;
     const box = document.getElementById("problems");
     const triageNode = document.getElementById("triage-brief");
-    if (data.improvements?.state === "not_reviewed") emptyState(triageNode, "Not reviewed yet. Automated triage is not demonstrated by this queue; ownership and private decisions are not published.");
-    else if (B.validateBriefing(data.overview).ok) renderBriefRows(triageNode, [...data.overview.attention, ...data.overview.agents, ...data.overview.investigation].filter((r) => r.triage), "No current public annotation detail is available.");
-    else emptyState(triageNode, "Improvement review details are unavailable. Inspect the existing public issues below.");
+    renderPublicImprovements(triageNode, data);
     const causes = await walkFile("rollups/causes.json");
     if (seq !== stepSeq) return;
     box.innerHTML = "";
