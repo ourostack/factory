@@ -448,6 +448,8 @@ export async function main(argv = process.argv.slice(2)) {
     // An evidence item on a task's value-stream map opens the drawer in
     // place. (A cause page's evidence link navigates to the task instead, so
     // its opener is no longer on screen.)
+    // Ladder steps also open evidence but record no selection, so both keys
+    // are tried on the same value-stream box.
     const drawerCheck = async (page, key = "Enter", nth = 0) => {
       await open(page, ROUTES.find((r) => r.name === "task"))
       const item = page.locator('#vsm [aria-label$="Opens the evidence."]').nth(nth)
@@ -469,7 +471,7 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 1280 })
       try {
         await check("keyboard_enter_selects_evidence_escape_closes_and_returns_focus", () => drawerCheck(page, "Enter", 0))
-        await check("keyboard_space_selects_evidence_escape_closes_and_returns_focus", () => drawerCheck(page, "Space", 1))
+        await check("keyboard_space_selects_evidence_escape_closes_and_returns_focus", () => drawerCheck(page, "Space", 0))
         await check("keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", async () => {
           await open(page, ROUTES.find((r) => r.name === "compare"))
           await page.focus("#compare-status")
