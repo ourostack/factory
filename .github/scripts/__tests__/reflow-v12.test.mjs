@@ -95,6 +95,11 @@ test("a wrapped chart row repeats no element id", () => {
   assert.match(app, /removeAttribute\("id"\)/)
 })
 
+test("Over time stays closed below the conclusion, its summary stating the one-line takeaway", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /Over time: \$\{ot\.trend\.words\}/)
+})
+
 test("a table that fits only by wrapping keeps whichever is shorter, the table or the cards", () => {
   const app = read("site/src/app.js")
   assert.match(app, /const asTable = h\.getBoundingClientRect\(\)\.height;\n\s+h\.classList\.add\("stacked"\);\n\s+if \(h\.getBoundingClientRect\(\)\.height >= asTable\) h\.classList\.remove\("stacked"\);/)

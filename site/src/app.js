@@ -4498,6 +4498,9 @@
       const detail = el("details", "comparison-history"); detail.appendChild(el("summary", null, "Recorded changes over time (additional evidence)"));
       overtime.before(detail); detail.appendChild(overtime);
     }
+    // Closed below the conclusion; its summary states the one-line takeaway (every week stays in the table).
+    const otSummary = overtime.parentElement.querySelector(":scope > summary");
+    if (otSummary) otSummary.textContent = ot && ot.state !== "absent" && ot.trend && ot.trend.words ? `Over time: ${ot.trend.words}` : "Recorded changes over time (additional evidence)";
     const OT_CAPTION = {
       share: "Each week's lead time as 100%, in the stack-up's colors and order, so a week of 5 tasks and a week of 1 compare: working time by label from the base up, then waiting by what it waited on.",
       all: "Hours of all elapsed time per finish week, linear from zero: a week with more or longer tasks is taller, so compare shapes with care or switch to the share of lead time.",
