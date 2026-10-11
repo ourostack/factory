@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -105,15 +105,35 @@ test("the command refuses missing, relative or in-repository paths before launch
   const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", timeout: 20000 })
   const none = run()
   assert.equal(none.status, 2)
-  assert.match(none.stderr, /--site <absolute-dist> --out <protected-dir> --playwright-module <absolute-module>/)
+  assert.match(none.stderr, /--site <absolute-dist> --baseline-site <absolute-dist> --out <protected-dir> --playwright-module <absolute-module>/)
   const tmp = mkdtempSync(join(tmpdir(), "gate-"))
-  assert.equal(run("--site", "dist", "--out", tmp, "--playwright-module", "/x.mjs").status, 2, "relative site")
-  const inRepo = run("--site", tmp, "--out", join(ROOT, "site", "gate-output"), "--playwright-module", "/x.mjs")
+  assert.equal(run("--site", "dist", "--baseline-site", tmp, "--out", tmp, "--playwright-module", "/x.mjs").status, 2, "relative site")
+  const inRepo = run("--site", tmp, "--baseline-site", tmp, "--out", join(ROOT, "site", "gate-output"), "--playwright-module", "/x.mjs")
   assert.equal(inRepo.status, 2)
   assert.match(inRepo.stderr, /outside any Git work tree/)
-  const noSite = run("--site", join(tmp, "missing"), "--out", join(tmp, "out"), "--playwright-module", "/x.mjs")
+  const noSite = run("--site", join(tmp, "missing"), "--baseline-site", tmp, "--out", join(tmp, "out"), "--playwright-module", "/x.mjs")
   assert.equal(noSite.status, 2)
-  assert.match(noSite.stderr, /index\.html/)
+  assert.match(noSite.stderr, /--site must be a built site with index\.html/)
+  // The height budget needs the build this release replaces.
+  const noBase = run("--site", tmp, "--out", join(tmp, "out"), "--playwright-module", "/x.mjs")
+  assert.equal(noBase.status, 2)
+  assert.match(noBase.stderr, /--baseline-site must be an absolute path/)
+  const site = join(tmp, "site")
+  mkdirSync(site)
+  writeFileSync(join(site, "index.html"), "<!doctype html>")
+  writeFileSync(join(site, "data.json"), "{}")
+  const badBase = run("--site", site, "--baseline-site", join(tmp, "missing"), "--out", join(tmp, "out"), "--playwright-module", "/x.mjs")
+  assert.equal(badBase.status, 2)
+  assert.match(badBase.stderr, /--baseline-site must be a built site with index\.html/)
+})
+
+test("space and structure: wide screens keep tables, heights stay within budget of the baseline, cards keep table roles", () => {
+  for (const name of ["wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  assert.deepEqual({ ...G.HEIGHT_BUDGET }, { 390: 1.5, 1280: 1.15 })
+  assert.deepEqual([...G.HEIGHT_ROUTES], ["compare", "overview"])
+  const source = readFileSync(SCRIPT, "utf8")
+  assert.match(source, /serve\(args\.baseline\)/)
+  for (const role of ["table", "row", "columnheader", "cell"]) assert.match(source, new RegExp(`"${role}"`))
 })
 
 test("the gate is run by a person or agent with a provisioned browser, never by CI, and adds no dependency", () => {

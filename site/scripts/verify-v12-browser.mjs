@@ -2,7 +2,8 @@
 // The factory site's rendered-browser gate (v1.2, internal task 13U).
 //
 //   node site/scripts/verify-v12-browser.mjs --site <absolute-dist> \
-//     --out <protected-dir> --playwright-module <absolute-module>
+//     --baseline-site <absolute-dist> --out <protected-dir> \
+//     --playwright-module <absolute-module>
 //
 // It serves one exact static build (the Pages artifact: index.html, the
 // scripts, data.json and the published files) from an owned loopback server
@@ -83,9 +84,18 @@ export const REQUIRED_CHECKS = Object.freeze([
   "json_twins_match_data_and_rendered_meaning", "chart_equivalents_compare_over_time_open",
   "clipboard_failure_is_stated_with_a_selected_complete_prompt", "clipboard_success_copies_exactly_the_shown_prompt",
   "private_decision_fixture_agrees_across_queue_overview_and_page",
+  "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
 ])
 
-const USAGE = "usage: node site/scripts/verify-v12-browser.mjs --site <absolute-dist> --out <protected-dir> --playwright-module <absolute-module>"
+// Spec 4.5: a wide screen uses its room for information. Against the
+// baseline build (the one this release replaces), Compare and Overview at
+// normal text may grow at most this much: wrapping that replaces a sideways
+// scroll or a cut-off name costs some height on a phone, and almost none on
+// a desktop.
+export const HEIGHT_BUDGET = Object.freeze({ 1280: 1.15, 390: 1.5 })
+export const HEIGHT_ROUTES = Object.freeze(["compare", "overview"])
+
+const USAGE = "usage: node site/scripts/verify-v12-browser.mjs --site <absolute-dist> --baseline-site <absolute-dist> --out <protected-dir> --playwright-module <absolute-module>"
 
 // --------------------------------------------------------------- layout
 
@@ -317,13 +327,13 @@ export function parseArgs(argv) {
   const args = {}
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1]
-    if (!["--site", "--out", "--playwright-module"].includes(k) || typeof v !== "string") return { error: USAGE }
+    if (!["--site", "--baseline-site", "--out", "--playwright-module"].includes(k) || typeof v !== "string") return { error: USAGE }
     args[k.slice(2)] = v
   }
-  for (const k of ["site", "out", "playwright-module"]) if (!args[k] || !isAbsolute(args[k])) return { error: `${USAGE}\n--${k} must be an absolute path` }
+  for (const k of ["site", "baseline-site", "out", "playwright-module"]) if (!args[k] || !isAbsolute(args[k])) return { error: `${USAGE}\n--${k} must be an absolute path` }
   if (insideGitWorkTree(args.out)) return { error: `--out must be outside any Git work tree (screenshots and reports are not committed): ${args.out}` }
-  if (!existsSync(join(args.site, "index.html")) || !existsSync(join(args.site, "data.json"))) return { error: `--site must be a built site with index.html and data.json: ${args.site}` }
-  return { site: normalize(args.site), out: normalize(args.out), playwright: args["playwright-module"] }
+  for (const k of ["site", "baseline-site"]) if (!existsSync(join(args[k], "index.html")) || !existsSync(join(args[k], "data.json"))) return { error: `--${k} must be a built site with index.html and data.json: ${args[k]}` }
+  return { site: normalize(args.site), baseline: normalize(args["baseline-site"]), out: normalize(args.out), playwright: args["playwright-module"] }
 }
 
 // ------------------------------------------------------------------- run
@@ -687,6 +697,75 @@ export async function main(argv = process.argv.slice(2)) {
           if (!r.word || !r.glyph || r.blank) throw new Error(JSON.stringify(r))
         })
       } finally { await context.close() }
+    }
+
+    // 5b. Space and structure. At 1280 px and normal text no table becomes
+    // cards; Compare and Overview stay within HEIGHT_BUDGET of the baseline
+    // build; a table that does become cards keeps its table roles, which
+    // display: block would otherwise drop in some browsers.
+    {
+      const baseServer = await serve(args.baseline)
+      const baseUrl = `http://127.0.0.1:${baseServer.address().port}/`
+      const height = async (page, at, route) => {
+        await page.goto(at + route.hash)
+        await settle(page, route.view)
+        await page.waitForTimeout(600)
+        return page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(document.documentElement.scrollHeight))))
+      }
+      try {
+        await check("wide_screen_tables_stay_tables_at_normal_text", async () => {
+          const { context, page } = await newPage({ width: 1280, height: 900 })
+          try {
+            const cards = []
+            for (const route of ROUTES) {
+              await open(page, route)
+              await page.waitForTimeout(300)
+              cards.push(...await page.evaluate((rn) => [...document.querySelectorAll(".stacked")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => `${rn}: ${(h.closest("[id]") || h).id || "table"}`), route.name))
+            }
+            if (cards.length) throw new Error(`tables shown as cards at 1280 px: ${cards.join("; ")}`)
+            return { routes: ROUTES.length }
+          } finally { await context.close() }
+        })
+        await check("page_height_within_budget_of_baseline", async () => {
+          const over = [], heights = {}
+          for (const width of Object.keys(HEIGHT_BUDGET).map(Number)) {
+            const { context, page } = await newPage({ width, height: 900 })
+            try {
+              for (const name of HEIGHT_ROUTES) {
+                const route = ROUTES.find((r) => r.name === name)
+                const site = await height(page, url, route), base = await height(page, baseUrl, route)
+                heights[`${name}_${width}`] = { site, baseline: base, ratio: Math.round((site / base) * 100) / 100 }
+                if (site > base * HEIGHT_BUDGET[width]) over.push(`${name} at ${width} px: ${site} px vs baseline ${base} px (budget ${HEIGHT_BUDGET[width]}x)`)
+              }
+            } finally { await context.close() }
+          }
+          if (over.length) throw new Error(over.join("; "))
+          return heights
+        })
+        await check("stacked_tables_keep_table_roles", async () => {
+          const { context, page } = await newPage({ width: 390, height: 844, scale: 2 })
+          try {
+            await open(page, ROUTES.find((r) => r.name === "compare"), 2)
+            await page.waitForTimeout(300)
+            const r = await page.evaluate(() => {
+              const holders = [...document.querySelectorAll(".stacked")].filter((h) => h.getBoundingClientRect().height > 0)
+              const bad = []
+              for (const h of holders) {
+                const t = h.querySelector(":scope > table")
+                if (!t || t.getAttribute("role") !== "table") { bad.push("table without role=table"); continue }
+                for (const tr of t.rows) if (tr.getAttribute("role") !== "row") bad.push("row without role=row")
+                for (const c of t.querySelectorAll("thead th")) if (c.getAttribute("role") !== "columnheader") bad.push(`heading "${c.textContent.trim().slice(0, 20)}" without role=columnheader`)
+                for (const c of t.querySelectorAll("tbody td, tbody th")) if (!["cell", "rowheader"].includes(c.getAttribute("role"))) bad.push("body cell without role=cell")
+                for (const c of t.querySelectorAll("tbody td")) if (!c.dataset.label && c.textContent.trim()) bad.push("body cell without its column label")
+              }
+              return { holders: holders.length, bad: [...new Set(bad)] }
+            })
+            if (!r.holders) throw new Error("no table became cards at 390 px with doubled text, so the roles were not exercised")
+            if (r.bad.length) throw new Error(r.bad.join("; "))
+            return { stacked: r.holders }
+          } finally { await context.close() }
+        })
+      } finally { await new Promise((resolve) => baseServer.close(resolve)) }
     }
 
     // 6. Long names, bounded values and a 26-week lookback stay readable.

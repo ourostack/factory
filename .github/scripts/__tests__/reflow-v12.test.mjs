@@ -24,11 +24,11 @@ test("a table that does not fit its holder becomes stacked cards instead of scro
   const app = read("site/src/app.js")
   assert.match(app, /function fitTables\(/)
   // Measured with the cards undone, so a holder that has grown wide enough goes back to a table.
-  assert.match(app, /classList\.remove\("stacked"\)/)
+  assert.match(app, /classList\.remove\("stacked", "fit-wrap"\)/)
   assert.match(app, /new MutationObserver\(scheduleFit\)/)
   const css = read("site/src/styles.css")
   assert.match(css, /\.stacked > table\.data-table > thead \{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset\(50%\); \}/)
-  assert.match(css, /\.stacked > table\.data-table td::before, \.stacked > table\.data-table tbody th::before \{ content: attr\(data-label\);/)
+  assert.match(css, /\.stacked > table\.data-table td::before, \.stacked > table\.data-table tbody th::before \{ content: attr\(data-label\) ": ";/)
 })
 
 test("long public task names wrap in Compare's phone table; none is cut with an ellipsis", () => {
@@ -59,4 +59,45 @@ test("weekly labels are thinned to what fits; the table keeps every week", () =>
   const kept = S.thinnedLabels(26, 4)
   assert.equal(kept[kept.length - 1], 25, "the latest week keeps its label")
   assert.ok(kept.every((k, i) => i === 0 || k - kept[i - 1] >= 4 || k === 25))
+})
+
+test("a body cell's column accounts for row spans above it", () => {
+  // Row 1: a cell spanning two rows, then two cells; row 2 starts in column 1.
+  assert.deepEqual(S.bodyCellColumns([[{ rowSpan: 2 }, {}, {}], [{}, {}]]), [[0, 1, 2], [1, 2]])
+  assert.deepEqual(S.bodyCellColumns([[{ colSpan: 2 }, {}], [{}, {}, {}]]), [[0, 2], [0, 1, 2]])
+  assert.deepEqual(S.bodyCellColumns([]), [])
+})
+
+test("a table first wraps its text to fit; only a table that still cannot fit becomes cards, which keep table semantics", () => {
+  const app = read("site/src/app.js")
+  // Wrapping is tried before cards.
+  assert.match(app, /classList\.add\("fit-wrap"\)/)
+  assert.ok(app.indexOf('classList.add("fit-wrap")') < app.indexOf('classList.add("stacked")'))
+  // Cards keep the table's structure for screen readers that drop it when display changes.
+  for (const role of ["table", "rowgroup", "row", "cell", "columnheader", "rowheader"]) assert.match(app, new RegExp(`"${role}"`))
+  const css = read("site/src/styles.css")
+  assert.doesNotMatch(css, /table\.data-table td, table\.data-table th \{ min-width: 60px; \}/)
+  assert.match(css, /\.fit-wrap > table\.data-table td, \.fit-wrap > table\.data-table th \{/)
+  // On a wide holder the cards sit side by side, each value on its label's line.
+  assert.match(css, /@container \(width > 560px\) \{\n  \.stacked > table\.data-table > tbody \{ display: grid;/)
+})
+
+test("the phone steps break between words, never inside one", () => {
+  const css = read("site/src/styles.css")
+  const phone = css.slice(css.indexOf("@media (max-width: 600px) {\n  .topbar-row"))
+  const block = phone.slice(0, phone.indexOf("\n}\n"))
+  assert.doesNotMatch(block, /overflow-wrap: anywhere/)
+  assert.doesNotMatch(block, /\.step \{[^}]*min-width: 0/)
+})
+
+test("a wrapped chart row repeats no element id", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /removeAttribute\("id"\)/)
+})
+
+test("a table that fits only by wrapping keeps whichever is shorter, the table or the cards", () => {
+  const app = read("site/src/app.js")
+  assert.match(app, /const asTable = h\.getBoundingClientRect\(\)\.height;\n\s+h\.classList\.add\("stacked"\);\n\s+if \(h\.getBoundingClientRect\(\)\.height >= asTable\) h\.classList\.remove\("stacked"\);/)
+  const css = read("site/src/styles.css")
+  assert.match(css, /minmax\(min\(100%, 300px\), 1fr\)/, "cards grid by pixels, so doubled text still gets several columns")
 })

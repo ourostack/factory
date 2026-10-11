@@ -255,7 +255,7 @@ main:focus, h1:focus { outline: none; }
   .topbar-row { gap: 6px 12px; }
   .site-name { flex: 1 1 auto; }
   .steps { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
-  .step { flex: 1 1 calc(50% - 3px); min-width: 0; justify-content: flex-start; padding: 6px 10px; font-size: 14px; white-space: normal; overflow-wrap: anywhere; border-color: var(--border); border-radius: var(--radius); }
+  .step { flex: 1 1 calc(50% - 3px); justify-content: flex-start; padding: 6px 10px; font-size: 14px; white-space: normal; border-color: var(--border); border-radius: var(--radius); }
 }
 
 /* ---------- The status line: quiet when normal, loud when abnormal ---------- */
@@ -1331,7 +1331,6 @@ table.data-table.ot-table td:first-child { white-space: nowrap; }
 .fe-hollow { fill: var(--page-plane); }
 .sb-table td:first-child { white-space: normal; min-width: 14em; max-width: 24em; }
 .sb-table td.sb-note { white-space: normal; min-width: 12em; color: var(--text-secondary); }
-table.data-table td, table.data-table th { min-width: 60px; }
 .pareto-bar { stroke-width: 0; }
 .pareto-name { font-size: 11.5px; fill: var(--text-secondary); }
 .pareto-line { fill: none; stroke: var(--text-primary); stroke-width: 1.6; }
@@ -1364,6 +1363,8 @@ table.data-table.sb-compact { min-width: 0; font-size: 13px; }
 table.data-table.sb-compact th, table.data-table.sb-compact td { padding: 5px 6px; }
 /* The task's name takes the room the two figures leave and wraps there (spec 4.3). */
 table.data-table.sb-compact td:first-child { width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* The two figures' headings wrap between words, so the name keeps the most room. */
+table.data-table.sb-compact th { white-space: normal; }
 table.data-table.sb-compact th:first-child, table.data-table.sb-compact td:first-child { padding-left: 0; }
 table.data-table.sb-compact th:last-child, table.data-table.sb-compact td:last-child { padding-right: 0; }
 details.full-table { margin-top: 10px; }
@@ -1524,15 +1525,31 @@ table.data-table.task-list-table td, table.data-table.task-list-table th { white
   .task-list-table td::before { content: attr(data-label) ": "; display: block; font-weight: 600; font-size: .8rem; }
 }
 
-/* ---------- Tables that do not fit become stacked cards ----------
-   app.js adds .stacked to a table's holder when the table is wider than it;
-   each cell then shows its column heading above its value. */
+/* ---------- Tables that do not fit wrap, then become stacked cards ----------
+   First, a wide table's text cells wrap (fit-wrap). Each column keeps a
+   text-sized minimum, so a table only stays a table while every column has
+   room for a few words; long identifiers may break inside the word. */
+.fit-wrap > table.data-table td, .fit-wrap > table.data-table th { min-width: 3.5em; max-width: none; white-space: normal !important; overflow-wrap: normal; }
+.fit-wrap > table.data-table td { overflow-wrap: anywhere; }
+.fit-wrap > table.data-table td:first-child { min-width: 6em; }
+.fit-wrap > table.data-table td.num .num-value { white-space: nowrap; }
+.table-wrap { container-type: inline-size; }
+
+/* app.js adds .stacked to a table's holder when the wrapped table is still
+   wider than it. Each row becomes a card and each cell starts with its
+   column heading, on the same line as its value. app.js keeps the table
+   roles (table, row, cell, columnheader) so screen readers keep the
+   structure that display: block would drop. */
 .stacked > table.data-table { min-width: 0 !important; width: 100%; }
 .stacked > table.data-table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .stacked > table.data-table, .stacked > table.data-table > tbody, .stacked > table.data-table > tbody > tr, .stacked > table.data-table > tbody > tr > td, .stacked > table.data-table > tbody > tr > th, .stacked > table.data-table > tfoot, .stacked > table.data-table > tfoot > tr, .stacked > table.data-table > tfoot > tr > td { display: block; width: 100% !important; max-width: none; }
 .stacked > table.data-table > caption { display: block; text-align: left; }
 .stacked > table.data-table tr { border-bottom: 1px solid var(--border); padding: 8px 0; }
-.stacked > table.data-table td, .stacked > table.data-table tbody th { border: 0; padding: 2px 0; text-align: left; white-space: normal !important; overflow-wrap: anywhere; min-width: 0 !important; }
-.stacked > table.data-table td::before, .stacked > table.data-table tbody th::before { content: attr(data-label); display: block; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.stacked > table.data-table td, .stacked > table.data-table tbody th { border: 0; padding: 1px 0; text-align: left; white-space: normal !important; overflow-wrap: anywhere; min-width: 0 !important; }
+.stacked > table.data-table td::before, .stacked > table.data-table tbody th::before { content: attr(data-label) ": "; color: var(--text-secondary); font-size: .8em; font-weight: 600; }
 .stacked > table.data-table td:not([data-label])::before, .stacked > table.data-table tbody th:not([data-label])::before, .stacked > table.data-table td[data-label=""]::before { content: none; }
+/* On a wide holder the cards sit side by side. */
+@container (width > 560px) {
+  .stacked > table.data-table > tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 0 24px; }
+}
 

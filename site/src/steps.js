@@ -1731,6 +1731,23 @@
     }
     return out;
   }
+  // The column each body cell starts in, honoring row and column spans.
+  function bodyCellColumns(rows) {
+    const taken = [];
+    return (Array.isArray(rows) ? rows : []).map((cells, r) => {
+      const busy = taken[r] || new Set();
+      let col = 0;
+      return (Array.isArray(cells) ? cells : []).map((c) => {
+        while (busy.has(col)) col++;
+        const start = col;
+        const cs = Number.isSafeInteger(c && c.colSpan) && c.colSpan > 0 ? c.colSpan : 1;
+        const rs = Number.isSafeInteger(c && c.rowSpan) && c.rowSpan > 0 ? c.rowSpan : 1;
+        for (let k = 1; k < rs; k++) { taken[r + k] = taken[r + k] || new Set(); for (let j = 0; j < cs; j++) taken[r + k].add(start + j); }
+        col += cs;
+        return start;
+      });
+    });
+  }
   // A column chart too wide for its frame wraps into rows of whole columns:
   // as many as fit in a row, never fewer than one.
   function chartRows(n, colW, avail) {
@@ -1823,6 +1840,7 @@
     improvementStatus,
     improvementPresentation,
     columnLabels,
+    bodyCellColumns,
     chartRows,
     labelStride,
     thinnedLabels,

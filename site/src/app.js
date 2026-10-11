@@ -216,31 +216,54 @@
   }
 
   // ------------------------------------------------- tables that reflow
-  // No table scrolls sideways (spec 4.5). A table wider than its holder is
-  // shown as stacked cards, each value named by its column heading; it is
-  // measured with the cards undone, so a holder that grows wide enough (or
-  // text that shrinks) brings the table back.
+  // No table scrolls sideways (spec 4.5). A table wider than its holder
+  // first lets its text cells wrap; only a table that still cannot fit is
+  // shown as stacked cards, each value named by its column heading. Both are
+  // measured undone, so a holder that grows wide enough (or text that
+  // shrinks) brings the plain table back. Cards keep the table's structure
+  // as roles, since a browser may drop table semantics when display changes.
   const TABLE_HOLDERS = ".table-wrap, #jobs-table, #trend, .block:has(> table.data-table)";
+  function labelTable(table) {
+    table.setAttribute("role", "table");
+    const head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
+    const labels = head ? S.columnLabels([...head.cells].map((c) => ({ text: c.textContent, span: c.colSpan }))) : [];
+    for (const group of [table.tHead, ...table.tBodies, table.tFoot]) {
+      if (!group) continue;
+      group.setAttribute("role", "rowgroup");
+      const rows = [...group.rows];
+      const cols = S.bodyCellColumns(rows.map((tr) => [...tr.cells].map((c) => ({ colSpan: c.colSpan, rowSpan: c.rowSpan }))));
+      rows.forEach((tr, r) => {
+        tr.setAttribute("role", "row");
+        [...tr.cells].forEach((cell, k) => {
+          cell.setAttribute("role", group === table.tHead ? "columnheader" : cell.tagName === "TH" ? "rowheader" : "cell");
+          if (group !== table.tHead && !cell.dataset.label && labels[cols[r][k]]) cell.dataset.label = labels[cols[r][k]];
+        });
+      });
+    }
+  }
   function fitTables() {
     const holders = [...document.querySelectorAll(TABLE_HOLDERS)].filter((h) => h.querySelector(":scope > table.data-table"));
     for (const h of holders) {
-      const table = h.querySelector(":scope > table.data-table");
-      const head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
-      if (head && !table.dataset.labelled) {
-        const labels = S.columnLabels([...head.cells].map((c) => ({ text: c.textContent, span: c.colSpan })));
-        for (const body of table.tBodies) for (const tr of body.rows) {
-          let col = 0;
-          for (const cell of tr.cells) {
-            if (!cell.dataset.label && labels[col]) cell.dataset.label = labels[col];
-            col += cell.colSpan || 1;
-          }
-        }
-        table.dataset.labelled = "1";
-      }
-      h.classList.remove("stacked");
+      labelTable(h.querySelector(":scope > table.data-table"));
+      h.classList.remove("stacked", "fit-wrap");
     }
-    const over = holders.filter((h) => h.clientWidth > 0 && h.scrollWidth > h.clientWidth + 1);
-    for (const h of over) h.classList.add("stacked");
+    const overflows = (h) => h.clientWidth > 0 && h.scrollWidth > h.clientWidth + 1;
+    const wide = holders.filter(overflows);
+    for (const h of wide) h.classList.add("fit-wrap");
+    for (const h of wide.filter(overflows)) h.classList.add("stacked");
+    // A table that fits only by wrapping, or by squeezing its first (text)
+    // column below a few words' width, can still be a tall ribbon of broken
+    // lines. It keeps whichever layout is shorter: the table or the cards.
+    const narrowFirst = (h) => {
+      const td = h.querySelector(":scope > table.data-table > tbody > tr > td:first-child");
+      return !!td && td.getBoundingClientRect().width < 6 * (parseFloat(getComputedStyle(td).fontSize) || 16);
+    };
+    for (const h of holders) {
+      if (h.classList.contains("stacked") || !(h.classList.contains("fit-wrap") || narrowFirst(h))) continue;
+      const asTable = h.getBoundingClientRect().height;
+      h.classList.add("stacked");
+      if (h.getBoundingClientRect().height >= asTable) h.classList.remove("stacked");
+    }
   }
   let fitPending = false;
   function scheduleFit() {
@@ -1581,7 +1604,12 @@
       else if (label) part.setAttribute("aria-label", `${label} Drawn in ${rows.length} rows.`);
       for (const c of children) {
         const col = c.getAttribute && c.getAttribute("data-col");
-        if (col === null || col === undefined) part.appendChild(c.cloneNode(true));
+        if (col === null || col === undefined) {
+          // A repeated decoration carries no id, so no id appears twice.
+          const copy = c.cloneNode(true);
+          if (copy.nodeType === 1) for (const n of [copy, ...copy.querySelectorAll("[id]")]) n.removeAttribute("id");
+          part.appendChild(copy);
+        }
         else if (keep.has(col)) part.appendChild(c);
       }
       const line = row.cloneNode(false);
@@ -1590,7 +1618,11 @@
           const frame = c.cloneNode(false);
           frame.appendChild(part);
           line.appendChild(frame);
-        } else line.appendChild(c.cloneNode(true));
+        } else {
+          const copy = c.cloneNode(true);
+          for (const n of [copy, ...copy.querySelectorAll("[id]")]) n.removeAttribute("id");
+          line.appendChild(copy);
+        }
       }
       line.classList.add("chart-row-wrapped");
       return line;
@@ -3679,11 +3711,12 @@
       return;
     }
     const phone = container.clientWidth < 600;
-    const H = phone ? 220 : 280;
+    let H = phone ? 220 : 280;
     // Text-sized room grows with the reader's text size.
     const k = chartTextScale(container);
     const axisW = Math.round(SB.axisW * k);
-    const labelH = Math.round(SB.labelH * k);
+    let labelH = Math.round(SB.labelH * k);
+    let nameLen = 18;
     // "Share of each task": every bar is its own lead time as 0 to 100%, so
     // the bars are full height and their labels need room above them.
     const share = mode === "share";
@@ -3691,10 +3724,13 @@
     const avail = Math.max(120, container.clientWidth - axisW - 4);
     // A few bars (agent working time mode) get wider columns; a column always
     // holds its two rotated lines (name and finish day) at the text's size.
-    const minCol = Math.ceil(Math.max(phone ? 28 : 26, 26 * k));
+    const minCol = Math.ceil(Math.max(24, 24 * k));
     const colW = Math.max(minCol, Math.min(Math.max(minCol, bars.length <= 12 ? 64 : 40), Math.floor(avail / bars.length)));
     // Bars that do not fit one row wrap into rows (never a sideways scroll).
     const rowsOf = S.chartRows(bars.length, colW, avail - 12);
+    // Several rows on a phone are each shorter, so the chart stays near one screen's worth per two rows.
+    // Their rotated names are shorter too (the full name is on each bar's link).
+    if (rowsOf.length > 1 && phone) { H = 140; nameLen = 12; labelH = Math.round(84 * k); }
     const rowOf = (i) => rowsOf.findIndex((r) => r.includes(i));
     const plotW = colW * bars.length + 8;
     const drawn = bars.filter((b) => b.state !== "no_data" && typeof b.total_ms === "number");
@@ -3777,7 +3813,7 @@
       const lx = x0 + barW / 2 + (dated ? 9 : 4) * k;
       const ly = T + H + 8 * k;
       const name = svg("text", { x: lx, y: ly, class: "sb-name", "text-anchor": "end", transform: `rotate(-90 ${lx} ${ly})` });
-      name.textContent = clip(b.name, 18);
+      name.textContent = clip(b.name, nameLen);
       a.appendChild(name);
       if (dated) {
         const dx = lx - 11 * k;
