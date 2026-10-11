@@ -160,12 +160,7 @@
     if (selection) {
       node.appendChild(el("p", null, selection === "unsupported" ? "The requested selection is unsupported. No substitute item was selected." : `Selection requested: ${selection}. If its evidence is no longer present, it is unavailable—not another item.`));
       const clear = el("button", null, "Clear selection"); clear.type = "button";
-      clear.addEventListener("click", () => {
-        const [path, query = ""] = window.location.hash.split("?");
-        const q = new URLSearchParams(query);
-        for (const key of ["selection", "bursts", "gaps", "stretch", "prompt", "pr"]) q.delete(key);
-        window.location.hash = path + (q.toString() ? "?" + q.toString() : "");
-      });
+      clear.addEventListener("click", clearEvidenceSelection);
       node.appendChild(clear);
     }
     if (["production", "request"].includes(context.mode)) node.appendChild(el("p", null, "This requested clock mode is unavailable until an approved producer supplies its boundaries. Existing charts below retain their legacy labels and meanings; they are not substituted production or original-request clocks."));
@@ -175,6 +170,21 @@
       link.dataset.destination = path;
       setLocalHref(link, F.routeWithContext(path, context));
     }
+  }
+  function clearEvidenceSelection(replace) {
+    for (const n of document.querySelectorAll("#vsm .is-hl")) n.classList.remove("is-hl");
+    const root = document.querySelector("#vsm .vsm");
+    if (root) root.dataset.hl = "";
+    for (const b of document.querySelectorAll(".task-summary button[aria-pressed], #time-went .tw-part")) b.setAttribute("aria-pressed", "false");
+    const [path, query = ""] = window.location.hash.split("?");
+    const q = new URLSearchParams(query);
+    for (const key of ["selection", "bursts", "gaps", "stretch", "prompt", "pr"]) q.delete(key);
+    const next = path + (q.toString() ? "?" + q.toString() : "");
+    if (replace === true) {
+      // Show is a selection action, not a navigation/reload of this task.
+      history.replaceState(null, "", next);
+      renderNavigationContext(F.parseRoute(next, () => null));
+    } else window.location.hash = next;
   }
   function rememberSelection(kind, from, to = from) {
     if (!Number.isInteger(from) || from < 1) return;
@@ -855,9 +865,9 @@
 
   const OUTCOME_WORD = {
     accepted: "Accepted",
-    sent_back: "Sent back",
-    awaiting_signoff: "Waiting for an answer",
-    delivered: "Delivered, no sign-off",
+    sent_back: "Returned for changes",
+    awaiting_signoff: "Awaiting acceptance",
+    delivered: "Delivered; no acceptance recorded",
     in_progress: "In progress",
     cancelled: "Cancelled",
     unknown: "Status not recorded",
@@ -1263,16 +1273,18 @@
         : tn.kind === "unnamed"
           ? `Its pull requests' titles could not be read for this build. Task key ${j.id}.`
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
-    container.appendChild(el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
+    const reference = el("details", "task-reference");
+    reference.append(el("summary", null, "Task reference and finish-date evidence"), el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
+    container.appendChild(reference);
 
     // One line on sign-off (the operator's recorded acceptance or return of
     // a delivery): the outcome says it, and a sign-off figure is added only
     // when one is recorded.
     const status = el("p", "task-status");
     status.appendChild(outcomeNode(j));
-    if (j.signoff.state === "unavailable") status.appendChild(el("span", "muted", ` (sign-off is the operator's recorded acceptance or return of a delivery; ${F.describe(j.signoff, "text").reason})`));
+    if (j.signoff.state === "unavailable") status.appendChild(el("span", "muted", ` (${F.describe(j.signoff, "text").reason.replace(/\bsign-off\b/g, "acceptance")})`));
     else {
-      status.appendChild(document.createTextNode(" · sign-off: "));
+      status.appendChild(document.createTextNode(" · Acceptance record: "));
       status.appendChild(cellNum(j.signoff, "text"));
     }
     if (j.outcome === "accepted" || j.outcome === "sent_back") status.appendChild(el("span", "muted", " (recorded by the agent on the operator's word)"));
@@ -1588,22 +1600,33 @@
     drawerBody.innerHTML = "";
     // Which task this is, and when it finished (UTC), under the title.
     if (x.job) drawerBody.appendChild(el("p", "drawer-task", `${jobLabel(x.job)} · ${finishSentence(x.job, "short")}`));
+    const readable = W.readableDrawer(content);
     const what = el("p", "drawer-what");
     // A wait wears its cause's own swatch, as on the bar, the legend and Rank causes.
     // A wait whose why is known wears its class's swatch.
     what.appendChild(content.mark ? clockGlyph(content.mark, { why: content.why }) : content.why ? whySwatch(content.why) : content.cause ? waitSwatch(content.cause) : swatch(content.segment));
-    what.appendChild(document.createTextNode(content.rows.length ? content.rows[0][1] : ""));
+    what.appendChild(document.createTextNode(content.title));
     drawerBody.appendChild(what);
     const dl = el("dl", "drawer-facts");
-    for (const [label, text] of content.rows.slice(1)) {
+    for (const [label, text] of readable.facts) {
       const d = el("div");
       d.appendChild(el("dt", null, label));
       d.appendChild(el("dd", null, text));
       dl.appendChild(d);
     }
     drawerBody.appendChild(dl);
+    if (readable.technical.length) {
+      const technical = el("details", "drawer-technical");
+      technical.appendChild(el("summary", null, "Technical details and evidence state"));
+      const facts = el("dl", "drawer-facts");
+      for (const [label, text] of readable.technical) {
+        const d = el("div"); d.append(el("dt", null, label), el("dd", null, text)); facts.appendChild(d);
+      }
+      technical.appendChild(facts); drawerBody.appendChild(technical);
+    }
     if (content.evidence && content.evidence.length) {
-      drawerBody.appendChild(el("h3", "drawer-sub", `The evidence it rests on (${content.evidence.length} interval${content.evidence.length === 1 ? "" : "s"})`));
+      const evidence = el("details", "drawer-evidence");
+      evidence.appendChild(el("summary", null, `Evidence intervals (${content.evidence.length})`));
       const table = el("table", "data-table drawer-table");
       tableHead(table, [["Kind", ""], ["Tool kind", ""], ["Outcome", ""], ["Lane", ""], ["Length", "num"]]);
       const tb = document.createElement("tbody");
@@ -1615,8 +1638,8 @@
       table.appendChild(tb);
       const wrap = el("div", "table-wrap");
       wrap.appendChild(table);
-      drawerBody.appendChild(wrap);
-      if (content.evidence.length > 60) drawerBody.appendChild(el("p", "chart-caption", `The first 60 of ${content.evidence.length} are listed; the data file holds every one.`));
+      evidence.appendChild(wrap); drawerBody.appendChild(evidence);
+      if (content.evidence.length > 60) evidence.appendChild(el("p", "chart-caption", `The first 60 of ${content.evidence.length} are listed; the data file holds every one.`));
     } else if (content.evidence) {
       // Nothing to list: say so rather than leave a gap.
     }
@@ -1643,19 +1666,23 @@
       drawerBody.appendChild(ul);
     }
     if (x.prompt) {
-      const text = W.promptText({ ...x.prompt, route: absolute(x.prompt.route), dataUrl: absolute(x.prompt.dataPath), indexUrl: absolute("llms.txt") });
+      const selectedRoute = x.prompt.route + (x.prompt.select ? `?${x.prompt.select}` : "");
+      const text = W.promptText({ ...x.prompt, select: null, route: absolute(F.contextualRoute(selectedRoute, location.hash)), dataUrl: absolute(x.prompt.dataPath), indexUrl: absolute("llms.txt") });
       const box = el("div", "drawer-prompt");
       const btn = el("button", "copy-prompt", "Copy as a prompt for your agent");
       btn.type = "button";
       const status = el("span", "copy-status");
       status.setAttribute("role", "status");
       const pre = el("p", "prompt-text", text);
+      const payload = el("details", "prompt-payload");
+      payload.append(el("summary", null, "Inspect the agent prompt"), pre);
       btn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(text);
           status.textContent = "Copied.";
         } catch (err) {
           // No clipboard (an insecure page or a refused permission): select the text so it can be copied by hand.
+          payload.open = true;
           const range = document.createRange();
           range.selectNodeContents(pre);
           const sel = window.getSelection();
@@ -1664,7 +1691,7 @@
           status.textContent = "The prompt is selected; copy it with the keyboard.";
         }
       });
-      box.append(btn, status, pre);
+      box.append(btn, status, payload);
       drawerBody.appendChild(box);
     }
     if (!drawerEl.open) drawerEl.showModal();
@@ -1691,10 +1718,11 @@
     const count = el("p", "picker-count");
     head.appendChild(count);
     // Sort by finish day (UTC): newest first by default.
-    const sortBox = el("div", "picker-sort mode-toggle");
-    sortBox.setAttribute("role", "group");
-    sortBox.setAttribute("aria-label", "Sort by finish day");
-    sortBox.appendChild(el("span", null, "Finished (UTC):"));
+    const sortBox = el("div", "picker-sort");
+    sortBox.appendChild(el("span", null, "Sort by finish day (UTC):"));
+    const sortControls = el("div", "mode-toggle");
+    sortControls.setAttribute("role", "group");
+    sortControls.setAttribute("aria-label", "Sort by finish day");
     let sortDir = "newest";
     const sortBtns = [["newest", "newest first"], ["oldest", "oldest first"]].map(([dir, text]) => {
       const b = el("button", "mode-btn", text);
@@ -1705,13 +1733,13 @@
         for (const x of sortBtns) x.setAttribute("aria-pressed", String(x === b));
         draw();
       });
-      sortBox.appendChild(b);
+      sortControls.appendChild(b);
       return b;
     });
-    head.appendChild(sortBox);
+    sortBox.appendChild(sortControls); head.appendChild(sortBox);
     const jobById = new Map(jobs.map((j) => [j.id, j]));
     wrap.appendChild(head);
-    const list = el("ul", "picker-list");
+    const list = el("div", "picker-list");
     list.id = "picker-list";
     wrap.appendChild(list);
     const fig = (n, kind) => {
@@ -1725,33 +1753,35 @@
     const draw = () => {
       const rows = S.sortPicker(W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value), (id) => F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : null), sortDir);
       list.innerHTML = "";
+      const table = el("table", "data-table picker-table");
+      tableHead(table, [["Task", ""], ["Recorded lifecycle", ""], ["Finish day (UTC)", ""], ["Recorded elapsed", ""], ["Work / elapsed", ""]]);
+      table.querySelector("thead").className = "picker-columns";
+      const body = el("tbody"); table.appendChild(body); list.appendChild(table);
       count.textContent = `${rows.length} of ${jobs.length} tasks`;
       let group = null;
       for (const r of rows) {
         if (r.group !== group) {
           group = r.group;
-          list.appendChild(el("li", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open, the latest to start first"));
+          const heading = el("tr"); const cell = el("th", "picker-group", group === "finished" ? `Finished, the ${sortDir === "oldest" ? "earliest" : "latest"} first` : "Still open, the latest to start first");
+          cell.colSpan = 5; heading.appendChild(cell); body.appendChild(heading);
         }
-        const li = document.createElement("li");
-        const a = el("a", "picker-row");
+        const tr = el("tr", "picker-row");
+        const a = el("a", "picker-name", r.name);
         const safe = F.safeRoute("task", r.id);
-        if (safe) a.href = safe;
+        if (safe) setLocalHref(a, safe);
         if (r.id === current) a.setAttribute("aria-current", "page");
-        const name = el("span", "picker-name", r.name);
-        if (!/\b[0-9a-f]{8}\b/.test(r.name)) name.appendChild(el("span", "picker-key", ` ${r.short}`));
-        a.appendChild(name);
-        const meta = el("span", "picker-meta");
-        meta.appendChild(el("span", null, r.status || "status unknown"));
-        if (r.finish && r.finish.kind !== "open") meta.appendChild(el("span", "picker-finish", r.finish.day ? `finished ${r.finish.words}` : r.finish.words));
-        meta.appendChild(el("span", null, `lead ${fig(r.lead, "duration")}`));
-        meta.appendChild(el("span", null, `flow ${r.feText || "no data"}`));
-        if (r.unlabeled) meta.appendChild(el("span", "picker-badge picker-badge-none", "not labeled yet"));
-        if (r.badge) meta.appendChild(el("span", `picker-badge picker-badge-${r.badge === "partial" ? "partial" : "none"}`, r.badge));
-        a.appendChild(meta);
-        li.appendChild(a);
-        list.appendChild(li);
+        plainCell(tr, "Task", a);
+        plainCell(tr, "Recorded lifecycle", outcomeNode(jobById.get(r.id)));
+        plainCell(tr, "Finish day (UTC)", el("span", null, r.finish ? r.finish.words : "Not recorded"));
+        const elapsed = el("span", null, fig(r.lead, "duration"));
+        if (r.badge) elapsed.appendChild(el("span", "picker-badge", ` · ${r.badge}`));
+        plainCell(tr, "Recorded elapsed", elapsed);
+        const flow = el("span", null, r.feText || "no data");
+        if (r.unlabeled) flow.appendChild(el("span", "picker-badge", " · not labeled yet"));
+        plainCell(tr, "Work / elapsed", flow);
+        body.appendChild(tr);
       }
-      if (!rows.length) list.appendChild(el("li", "chart-empty", "No task matches."));
+      if (!rows.length) list.appendChild(el("p", "chart-empty", "No task matches."));
     };
     input.addEventListener("input", draw);
     draw();
@@ -1787,12 +1817,7 @@
       if (typeof p === "string") container.appendChild(document.createTextNode(p));
       else if (p.term) container.appendChild(el("dfn", null, p.text));
       else {
-        const b = el("button", "lede-num", p.text);
-        b.type = "button";
-        b.dataset.hl = p.key;
-        b.setAttribute("aria-pressed", "false");
-        b.title = "Highlight this on the map";
-        b.addEventListener("click", () => onToken(p, b));
+        const b = el("strong", "lede-figure", p.text);
         // Punctuation right after a number stays on its line.
         const next = parts[k + 1];
         const m = typeof next === "string" ? /^[.,;:]/.exec(next) : null;
@@ -1889,7 +1914,7 @@
       sessionsOf(it)
         .map((sid) => ({ sid, route: F.safeRoute("task", j.id, "session", sid) }))
         .filter((x) => x.route)
-        .map((x) => ({ text: `Open session ${x.sid.slice(0, 8)} to scale`, href: x.route }));
+        .map((x) => ({ text: `Open this session's timeline (${x.sid.slice(0, 8)})`, href: x.route }));
     const open = (opener, thing) => {
       const it = thing.item;
       if (it && it.type === "box") rememberSelection("bursts", it.burst_range[0], it.burst_range[1]);
@@ -2279,7 +2304,7 @@
     if (thing.kind === "prompt") {
       const sid = String(thing.mark.turn.session || "");
       const route = F.safeRoute("task", j.id, "session", sid);
-      if (route) links.push({ text: `Open session ${sid.slice(0, 8)} to scale`, href: route });
+      if (route) links.push({ text: `Open this session's timeline (${sid.slice(0, 8)})`, href: route });
     } else if (W.validPr(thing.pr.repo, thing.pr.number)) {
       links.push({ text: `Pull request ${thing.pr.repo}#${thing.pr.number} on GitHub`, href: `https://github.com/${thing.pr.repo}/pull/${thing.pr.number}`, external: true });
     }
@@ -2793,6 +2818,16 @@
     const seq = ++walkSeq;
     const j = renderTaskHead(document.getElementById("task-head"), data.jobs, id);
     const ledeEl = document.getElementById("task-lede");
+    let summaryEl = document.getElementById("task-summary");
+    if (!summaryEl) {
+      summaryEl = el("section", "task-summary"); summaryEl.id = "task-summary";
+      summaryEl.setAttribute("aria-label", "Task conclusion and recorded figures");
+      ledeEl.before(summaryEl);
+      const reading = el("details", "task-reading-details");
+      reading.appendChild(el("summary", null, "Measure definitions, bounds and classification"));
+      ledeEl.before(reading); reading.appendChild(ledeEl);
+    }
+    summaryEl.innerHTML = "";
     const vsmEl = document.getElementById("vsm");
     const twEl = document.getElementById("time-went");
     renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
@@ -2813,12 +2848,14 @@
     // One waiting figure for the lede, the map's summary and the bar.
     const idle = W.idleSplit(row, map);
     let drawn = null;
-    // Every control that lights part of the map: the lede's numbers and the
-    // parts of "Where this task's time went". One is pressed at a time.
+    // Reading figures is inert. Only explicitly labeled controls highlight
+    // evidence; opening a drawer and navigating to a session remain separate.
     const tokens = [];
+    let selectedSummary = null;
     const light = (tok, btn) => {
       if (!drawn) return;
       const on = drawn.highlight(tok);
+      selectedSummary = on ? tok : null;
       for (const b of tokens) b.setAttribute("aria-pressed", String(on && b === btn));
       if (on) drawn.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
     };
@@ -2833,6 +2870,38 @@
     });
     safely("task-lede", () => {
       renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
+      const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled });
+      summaryEl.appendChild(el("p", "task-conclusion", summary.conclusion));
+      const figures = el("dl", "task-summary-figures");
+      for (const f of summary.figures) {
+        const cell = el("div");
+        cell.append(el("dt", null, f.label), el("dd", null, f.text));
+        if (f.details) {
+          const limits = el("details", "figure-limits");
+          limits.append(el("summary", null, "Evidence limits"), el("p", null, f.details));
+          cell.appendChild(limits);
+        }
+        if (drawn) {
+          const b = el("button", "journey-show", `Show ${f.label.toLowerCase()} on this task's journey`);
+          b.type = "button"; b.setAttribute("aria-pressed", "false");
+          b.addEventListener("click", () => {
+            clearEvidenceSelection(true);
+            light(f.token, b);
+          });
+          tokens.push(b); cell.appendChild(b);
+        }
+        figures.appendChild(cell);
+      }
+      summaryEl.appendChild(figures);
+      if (drawn) {
+        const clear = el("button", "journey-clear", "Clear selection"); clear.type = "button";
+        clear.addEventListener("click", () => { selectedSummary = null; clearEvidenceSelection(); });
+        summaryEl.appendChild(clear);
+      }
+      if (summary.classification) summaryEl.appendChild(el("p", "chart-caption", summary.classification));
+      const definitions = el("details", "task-definitions");
+      definitions.append(el("summary", null, "What do these measures mean?"), el("p", null, "Recorded elapsed is the existing task window, not original-request or production elapsed. Recorded working is activity captured for this task, not all agents' utilization. Work / elapsed is the working share of that window (flow efficiency). The evaluator classifies work as value-adding, necessary or waste; missing labels do not prove waste."));
+      summaryEl.appendChild(definitions);
       // The finish day leads; the next sentence then starts "It took" (M3).
       ledeEl.prepend(el("span", "lede-finish", finishSentence(j)));
       const next = ledeEl.childNodes[1];
@@ -2846,7 +2915,8 @@
       }
       // The operator's own time on this task (A1 I2).
       ledeEl.appendChild(el("span", "lede-operator", ` ${W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore).text}`));
-      tokens.push(...ledeEl.querySelectorAll(".lede-num"));
+      const caption = document.querySelector(".vsm-block > .chart-caption");
+      if (caption) caption.textContent = "Detailed recorded timeline (legacy map): boxes show recorded activity; pauses, operator prompts and pull requests have distinct shapes and text labels. This map is not to scale and its folding can change with available width. Open an item for evidence; use its separate session link for a time-scaled timeline. New production grouping is not available.";
     });
     safely("time-went", () => {
       renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle, light });
@@ -2857,6 +2927,7 @@
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
+      if (drawn && selectedSummary) drawn.highlight(selectedSummary);
     });
     if (select) safely("vsm", () => {
       if (!drawn || !drawn.select(select)) {

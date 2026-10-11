@@ -1085,6 +1085,61 @@
     }[key] || null;
   }
 
+  // A short reading of the existing stated rollup. This deliberately reuses
+  // the lede's bound-aware figures, not a new clock or inferred work union.
+  function taskSummary(row, reasonText, opts) {
+    const o = opts || {};
+    const model = lede(row, reasonText, o);
+    if (model.state !== "ok") return { conclusion: ledeText(model), figures: [], classification: "" };
+    const names = { lead: "Recorded elapsed", working: "Recorded working", waiting: "Recorded waiting" };
+    const idle = o.idle || idleSplit(row, null);
+    const sources = { lead: row.lead_time_ms, working: row.working_ms, waiting: idle, value: row.value_in_working_ms };
+    const textOf = (p) => {
+      const n = sources[p.key];
+      const q = n && n.state === "partial" && n.bound === null ? ""
+        : n && n.state === "partial" && n.bound === "upper" ? "at most "
+        : n && n.state === "partial" && n.bound === "lower" ? "at least " : p.q || "";
+      let text = `${q}${p.text}`;
+      let details = "";
+      if (n && n.state === "partial") {
+        const baseWords = typeof reasonText === "function" ? reasonText : (r) => String(r).replace(/_/g, " ");
+        const words = (r) => n.bound === null && r === "censored" ? "the task is still open" : baseWords(r);
+        const reasons = (n.reasons || []).map(words).join("; ");
+        text += ` (${saysNoDirection(n) ? "direction not known" : n.bound === "unknown" ? "not bounded" : "partial"}${p.key === "lead" && has(n, "card_dates_shorter_than_work") ? "; since first recorded session" : ""})`;
+        details = [saysNoDirection(n) ? noDirectionWords(n, words) : "", reasons].filter(Boolean).join("; ");
+      }
+      return { text, details };
+    };
+    const figures = model.parts.filter((p) => p && typeof p === "object" && names[p.key])
+      .map((p) => ({ label: names[p.key], ...textOf(p), token: p }));
+    const lead = stated(row.lead_time_ms), work = stated(row.working_ms);
+    const exact = lead.state === "measured" && work.state === "measured" && idle.state === "measured";
+    const conclusion = exact
+      ? idle.value > work.value ? "Waiting is the largest recorded part of this task's elapsed time. Inspect its evidence before deciding what to change."
+        : "Recorded working time is at least as large as recorded waiting. This does not show whether the work was necessary or waste."
+      : "The recorded window or its work split is incomplete. Keep the bounds in view before comparing tasks.";
+    const value = model.parts.find((p) => p && typeof p === "object" && p.key === "value");
+    const classification = value ? `Evaluator-labeled value-adding work: ${textOf(value).text}.${row.labels_from_shared_session ? " Labels come from a shared session; this classification is partial." : ""} Classification describes work, not capture completeness.`
+      : "Work is not labeled or its value-adding share is not recorded. Unclassified work is not automatically waste.";
+    return { conclusion, figures, classification };
+  }
+
+  // Reader-facing facts first; all original reference/technical rows remain
+  // available without mutating the evidence model used by handoffs.
+  function readableDrawer(content) {
+    const labels = {
+      "Working time": "Recorded work", Length: "Duration",
+      "On the task clock": "Position from task start",
+      "What it is": "Interpretation", "Short waits inside": "Contains short pauses",
+    };
+    const priority = ["Recorded work", "Duration", "Position from task start", "Interpretation", "Contains short pauses", "Waited on", "Value-adding, as labeled", "Defects, as labeled", "Share"];
+    const rows = (content.rows || []).map(([label, text]) => [labels[label] || label, text]);
+    return {
+      facts: priority.flatMap((label) => rows.filter((r) => r[0] === label)),
+      technical: rows.filter((r) => !priority.includes(r[0])),
+    };
+  }
+
   // ------------------------------------------------------------ the picker
 
   // The picker's rows: every task, the latest to finish first, with its
@@ -1342,15 +1397,19 @@
     const range = (r, one, many) => (r ? (r[0] === r[1] ? `${one} ${r[0]}` : `${many} ${r[0]}–${r[1]}`) : "");
     if (thing.kind === "box" || (thing.kind === "ladder" && it.type === "box" && !(thing.seg && thing.seg.folded))) {
       const fold = typeof c.fold_ms === "number" && c.fold_ms > 0 && c.fold_ms !== Infinity ? `the waits shorter than ${durationWords(c.fold_ms)} between them` : "the waits between them";
+      const ws = stated(it.working_state || it.working_ms);
+      const workText = ws.state === "unavailable" ? `not recorded (${(ws.reasons || []).map(words).join("; ") || "no recorded working duration"}); the legacy layout uses burst spans`
+        : ws.state === "measured" ? `${durationWords(ws.value)} (${share(ws.value)})`
+        : `${ws.bound === "upper" ? "at most " : ws.bound === null ? "" : "at least "}${durationWords(ws.value)} (partial${saysNoDirection(ws) ? `; ${noDirectionWords(ws, words)}` : ""}; ${(ws.reasons || []).map(words).join("; ") || "incomplete recorded work"})`;
       const rows = [
         ["Which", `Work box ${it.box_no}${nOf}: ${range(it.burst_range, "burst", "bursts")}`],
         ["What it is", it.count === 1 ? "One work burst: a run of agent activity with no idle stretch of 15 minutes or more and no operator turn inside it" : `${it.count} work bursts, folded into one box with ${fold}`],
         ["On the task clock", clockWords(it.start_ms, it.end_ms, c.origin_ms)],
-        ["Working time", `${durationWords(it.working_ms)} (${share(it.working_ms)})`],
+        ["Working time", workText],
         ["Value-adding, as labeled", labeledWords(it.value_ms, words)],
         ["Defects, as labeled", stated(it.defect_stretches).state === "unavailable" ? labeledWords(it.defect_stretches, words) : reworkWords(it) || "none"],
       ];
-      if (it.inner_wait_ms > 0) rows.push(["Short waits inside", `${durationWords(it.inner_wait_ms)}${it.folded_count ? `, including ${it.folded_count} folded wait${it.folded_count === 1 ? "" : "s"}` : ""}`]);
+      if (it.inner_wait_ms > 0) rows.push(["Short waits inside", `${durationWords(it.inner_wait_ms)}${it.folded_count ? `, including ${it.folded_count} folded wait${it.folded_count === 1 ? "" : "s"}` : ""}${ws.state !== "measured" ? " (legacy map residual; incomplete work makes this pause total uncertain)" : ""}`]);
       return { title: boxTitle(it), segment: "support", rows, evidence: [] };
     }
     const ms = thing.kind === "ladder" && thing.seg && thing.seg.folded ? it.inner_wait_ms : it.duration_ms;
@@ -2903,6 +2962,8 @@
     clockTick,
     drawer,
     promptText,
+    taskSummary,
+    readableDrawer,
     clockListStates,
     clockAt,
     placeOnMap,

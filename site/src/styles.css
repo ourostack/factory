@@ -799,6 +799,38 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .picker-badge { font-size: 12px; color: var(--text-muted); font-style: italic; }
 .picker-badge::before { content: "· "; font-style: normal; }
 
+/* Read the numbers; choose a separate, named action to inspect evidence. */
+.task-conclusion { font-size: 1.1rem; line-height: 1.6; font-weight: 600; max-width: 65ch; }
+.task-summary { margin: 1.25rem 0; }
+.task-summary-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
+.task-summary-figures > div { padding: .9rem; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
+.task-summary-figures dt { color: var(--text-secondary); margin-bottom: .4rem; }
+.task-summary-figures dd { margin: 0 0 .75rem; overflow-wrap: anywhere; font-weight: 600; }
+.journey-show, .journey-clear { font: inherit; font-size: .85rem; padding: .5rem .7rem; white-space: normal; text-align: left; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-1); color: var(--text-primary); cursor: pointer; }
+.journey-show[aria-pressed="true"] { outline: 2px solid var(--focus); }
+.task-definitions, .task-reading-details, .drawer-technical, .drawer-evidence { margin: 1rem 0; }
+.task-reading-details .task-lede { max-width: 70ch; margin-top: 1rem; }
+.prompt-payload { margin-top: .75rem; }
+.prompt-payload .prompt-text { overflow-wrap: anywhere; }
+/* The in-task picker has real headings, and mobile cells carry those labels. */
+.picker-list { max-height: 22rem; }
+table.data-table.picker-table { min-width: 0; width: 100%; table-layout: fixed; }
+table.data-table.picker-table th, table.data-table.picker-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; padding: .8rem; }
+.picker-table th:first-child, .picker-table td:first-child { width: 32%; }
+.picker-table .picker-row { display: table-row; }
+.picker-table .picker-row:has([aria-current="page"]) { background: var(--surface-1); }
+.picker-table .picker-name { display: block; line-height: 1.6; }
+.picker-table .picker-badge::before { content: ""; }
+.picker-table .picker-group { text-align: left; }
+@media (max-width: 639px) {
+  .picker-table, .picker-table tbody, .picker-table tr, .picker-table td { display: block; width: 100% !important; }
+  .picker-table .picker-row { display: block; padding: .8rem; }
+  .picker-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .picker-table td { padding: .3rem 0; }
+  .picker-table td::before { content: attr(data-label) ": "; display: block; font-size: .8rem; font-weight: 600; color: var(--text-secondary); }
+  .picker-table .picker-group { display: block; width: 100% !important; }
+}
+
 /* ---------- The value stream map ---------- */
 .vsm { margin: 18px 0 10px; }
 .vsm-wide {

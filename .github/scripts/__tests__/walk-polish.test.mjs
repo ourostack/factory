@@ -356,13 +356,15 @@ test("the status line is one line whose alarm words open their glossary entries,
   assert.match(app, /const safe = F\.glossaryRoute\(t\.term\);/)
 })
 
-test("the picker starts at the top with a skip link before it, and the sign-off line is said once (M-8, M-11)", () => {
+test("the picker starts at the top with a skip link before it, and the acceptance line is said once (M-8, M-11)", () => {
   const app = read("site/src/app.js")
   assert.match(app, /el\("a", "skip-map", "Skip to the map"\)/)
   assert.ok(app.indexOf('container.appendChild(skip);') < app.indexOf('container.appendChild(wrap);', app.indexOf('container.appendChild(skip);')), "the skip link comes before the list in Tab order")
   assert.match(app, /list\.scrollTop = 0;/)
   assert.doesNotMatch(app, /cur\.parentElement\.offsetTop/)
-  assert.match(app, /sign-off is the operator's recorded acceptance or return of a delivery; /)
+  // 11U uses acceptance language; the underlying signoff record is retained.
+  assert.equal((app.match(/el\("p", "task-status"\)/g) || []).length, 1)
+  assert.match(app, /Acceptance record: /)
   // A shared session's row says its figures are the whole session's (M-4).
   assert.match(app, / shared with \$\{others\} other task\$\{others === 1 \? "" : "s"\}; these figures are the whole session's/)
 })
