@@ -70,20 +70,79 @@
 <header class="topbar">
   <div class="wrap topbar-row">
     <a class="site-name" href="#/">The factory</a>
-    <nav class="steps" aria-label="The four steps of the walk">
-      <a class="step" data-step="task" href="#/"><span class="step-n" aria-hidden="true">1</span>Follow a task</a>
-      <a class="step" data-step="compare" href="#/compare"><span class="step-n" aria-hidden="true">2</span>Compare tasks</a>
-      <a class="step" data-step="causes" href="#/causes"><span class="step-n" aria-hidden="true">3</span>Rank causes</a>
-      <a class="step" data-step="act" href="#/act"><span class="step-n" aria-hidden="true">4</span>Act</a>
+    <nav class="steps" aria-label="Primary navigation">
+      <a class="step" data-step="overview" href="#/">Overview</a>
+      <a class="step" data-step="tasks" href="#/tasks">Tasks</a>
+      <a class="step" data-step="compare" href="#/compare">Compare</a>
+      <a class="step" data-step="act" href="#/improvements">Improvements</a>
     </nav>
     <a class="why-link" data-step="why" href="#/why">Why Lean?</a>
+    <a class="why-link" data-step="help" href="#/help">Help</a>
   </div>
   <div class="wrap">
     <p id="status-line" class="status-line" aria-live="polite">Loading the store&hellip;</p>
+    <div class="display-preferences">
+      <label for="display-zone">Display time zone</label>
+      <select id="display-zone" aria-describedby="zone-note"></select>
+      <span id="preferences-status" role="status"></span>
+    </div>
+    <p id="zone-note" class="chart-caption">Supported instants use your display zone. Finish days and finish weeks remain UTC; durations do not change.</p>
+    <div id="navigation-context" class="navigation-context" hidden aria-live="polite"></div>
   </div>
 </header>
 
 <main id="main" tabindex="-1">
+
+<div id="view-overview" class="view" hidden>
+  <div class="wrap briefing-wrap">
+    <p class="step-label">Factory briefing</p>
+    <h1 class="view-title">What needs a closer look?</h1>
+    <p class="lede">Start with the work that needs attention, then follow its evidence. This is an open experiment in understanding agent work—not a measure of people or factory-wide utilization.</p>
+    <p class="chart-caption">Website briefing and evidence navigation. New production accounting and automated triage remain pending unless published evidence explicitly supports them.</p>
+    <p id="overview-changes" class="visit-note"></p>
+    <p id="overview-published" class="chart-caption"></p>
+    <p id="overview-state" role="status">Loading the published briefing&hellip;</p>
+    <div class="briefing-columns">
+      <section class="block" aria-labelledby="attention-title">
+        <h2 class="block-title" id="attention-title">Needs your attention</h2>
+        <div id="overview-attention"><p>Loading&hellip;</p></div>
+      </section>
+      <section class="block" aria-labelledby="agents-title">
+        <h2 class="block-title" id="agents-title">Agents have this</h2>
+        <div id="overview-agents"><p>Loading&hellip;</p></div>
+      </section>
+      <section class="block" aria-labelledby="investigation-title">
+        <h2 class="block-title" id="investigation-title">Worth investigating</h2>
+        <div id="overview-investigation"><p>Loading&hellip;</p></div>
+      </section>
+    </div>
+    <section id="overview-guide" class="block guide" aria-labelledby="guide-title">
+      <h2 id="guide-title" class="block-title">A short guide, if you need one</h2>
+      <div id="guide-stops"></div>
+      <button type="button" id="dismiss-guide">Dismiss guide</button>
+      <p class="chart-caption">Optional. Replay it from Help at any time.</p>
+    </section>
+    <details class="more-details"><summary>What these summaries can—and cannot—say</summary><p>Missing capture is not zero work. A task-flow ratio is not agent utilization. A proposed improvement route is not ownership or execution authority. Acceptance stays separate from delivery; finish days and weeks have UTC-day precision.</p><a href="#/why">Read Why Lean?</a></details>
+    <p><a href="rollups/overview.json">Read this briefing as JSON</a></p>
+  </div>
+</div>
+
+<div id="view-tasks" class="view" hidden>
+  <div class="wrap">
+    <h1 class="view-title">Tasks</h1>
+    <p class="lede">Choose recorded work to inspect its evidence. Overall elapsed and recorded working time keep their existing meanings; new production clocks may not be available.</p>
+    <div id="task-list"><p>Loading recorded tasks&hellip;</p></div>
+  </div>
+</div>
+
+<div id="view-help" class="view" hidden>
+  <div class="wrap prose">
+    <h1 class="view-title">Find your way through the factory</h1>
+    <p class="lede">Three optional stops. You can use any destination directly.</p>
+    <div id="help-stops"></div>
+    <p><a href="#/why">Why Lean?</a> explains the ideas behind the experiment. You do not need the glossary before inspecting the work.</p>
+  </div>
+</div>
 
 <!-- ============ STEP 1: FOLLOW A TASK ============ -->
 <div id="view-task" class="view">
@@ -215,7 +274,9 @@
 <div id="view-act" class="view" hidden>
   <div class="wrap">
     <p class="step-label">Step 4 of 4 &middot; Act</p>
-    <h1 class="view-title">Act</h1>
+    <h1 class="view-title">Improvements</h1>
+    <p class="chart-caption">These are recorded issues and recommendations, not an execution queue. A route alone grants no claim or new authority.</p>
+    <div id="triage-brief"></div>
     <p class="lede">When a cause is worth fixing, Lean takes it on as one problem and writes it up on one page, an <dfn>A3</dfn>, named for the sheet of paper it fits on: the evidence, the cause, a countermeasure, and then a check of whether it worked. A check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet, so none has been checked. To start one, open a cause on <a href="#/causes">Rank causes</a> and copy its A3 prompt.</p>
     <section class="block" aria-labelledby="problems-title">
       <h2 class="block-title" id="problems-title">Problems in hand</h2>
@@ -493,6 +554,8 @@
   <div id="drawer-body"></div>
 </dialog>
 <script src="format.js"></script>
+<script src="preferences.js"></script>
+<script src="briefing.js"></script>
 <script src="walk.js"></script>
 <script src="steps.js"></script>
 <script src="app.js"></script>

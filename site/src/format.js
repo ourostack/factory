@@ -758,7 +758,7 @@
   // sub-causes of waiting for the next prompt by why the agent stopped,
   // "waiting:next_prompt:<why>" (Desk D5; the classes of addendum §4).
   const CAUSE_ID = /^(?:[a-z][a-z_]{0,40}:[a-z0-9][a-z0-9_.-]{0,60}|waiting:next_prompt:(?:stopped_short|question|error_limit|interrupted|decision|approval|acceptance|not_known))$/;
-  const PAGES = ["compare", "causes", "act", "why", "about", "store"];
+  const PAGES = ["overview", "tasks", "compare", "causes", "act", "why", "about", "store", "help"];
   // The first site's in-page sections, and where each one lives now.
   const OLD_ANCHORS = {
     answer: "#/store",
@@ -789,13 +789,98 @@
     return to >= from ? { kind: m[1], from, to } : null;
   }
 
+  function routeContext(query) {
+    const out = {};
+    const q = new URLSearchParams(query);
+    const one = (key, check) => { const values = q.getAll(key); if (values.length === 1 && check(values[0])) out[key] = values[0]; };
+    one("cause", (v) => CAUSE_ID.test(v));
+    one("task", (v) => ROUTE_ID.test(v));
+    one("mode", (v) => ["all", "working", "share", "production", "request"].includes(v));
+    one("category", (v) => CAUSE_ID.test(v) || /^[a-z][a-z0-9_:-]{0,60}$/.test(v));
+    one("status", (v) => ["done", "cancelled", "doing", "open", "in_progress", "accepted", "delivered", "awaiting_signoff", "sent_back"].includes(v));
+    const day = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(Date.parse(v + "T00:00:00Z")) && new Date(v + "T00:00:00Z").toISOString().slice(0, 10) === v;
+    one("from", day); one("to", day);
+    if (out.from && out.to && out.from > out.to) { delete out.from; delete out.to; }
+    one("evidence", (v) => ["measured", "partial", "unavailable"].includes(v));
+    one("selection", (v) => /^(bursts|gaps|stretch|prompt|pr):[1-9][0-9]{0,5}(?:-[1-9][0-9]{0,5})?$/.test(v));
+    one("return", (v) => localDestination(v));
+    return out;
+  }
+  function routeWithContext(route, selectors) {
+    if (!localDestination(route)) throw new TypeError("unsupported local route");
+    const q = new URLSearchParams();
+    for (const [key, value] of Object.entries(selectors || {})) if (typeof value === "string") q.set(key, value);
+    const valid = routeContext(q.toString());
+    const encoded = new URLSearchParams(valid).toString();
+    return route + (encoded ? "?" + encoded : "");
+  }
+  function navigationContext(hash) {
+    const route = parseRoute(hash, () => null);
+    if (["missing", "redirect", "skip"].includes(route.view)) return {};
+    const at = typeof hash === "string" ? hash.indexOf("?") : -1;
+    const context = routeContext(at >= 0 ? hash.slice(at + 1) : "");
+    if (route.job) context.task = route.job;
+    if (route.select) {
+      const s = route.select;
+      context.selection = `${s.kind}:${s.from}${s.to !== s.from ? "-" + s.to : ""}`;
+    }
+    // A normal cause URL already identifies the investigation. Query
+    // selectors are not required and cannot contradict its validated path.
+    if (route.view === "cause" && CAUSE_ID.test(route.cause)) {
+      context.cause = route.cause;
+      context.return = `#/causes/${route.cause}`;
+    }
+    return context;
+  }
+  function contextualRoute(target, sourceHash) {
+    if (typeof target !== "string") throw new TypeError("unsupported local route");
+    const at = target.indexOf("?");
+    const path = at >= 0 ? target.slice(0, at) : target;
+    if (!localDestination(path)) throw new TypeError("unsupported local route");
+    const targetRoute = parseRoute(target, () => null);
+    const sourcePath = typeof sourceHash === "string" ? sourceHash.split("?")[0] : "";
+    const context = navigationContext(sourceHash);
+    // Evidence IDs belong to a particular view. Carry investigation/filter
+    // context, but never silently select a task gap in another task/session.
+    if (["task", "session"].includes(targetRoute.view) && path !== sourcePath) delete context.selection;
+    Object.assign(context, routeContext(at >= 0 ? target.slice(at + 1) : ""));
+    // Explicit legacy evidence links keep their own selection when adding
+    // context; mixing "&cause" into the old one-key parser would lose it.
+    if (targetRoute.select) {
+      const s = targetRoute.select;
+      context.selection = `${s.kind}:${s.from}${s.to !== s.from ? "-" + s.to : ""}`;
+    }
+    if (targetRoute.job) context.task = targetRoute.job;
+    if (targetRoute.view === "cause") {
+      context.cause = targetRoute.cause;
+      context.return = `#/causes/${targetRoute.cause}`;
+    }
+    return routeWithContext(path, context);
+  }
   function parseRoute(hash, jobOfSession) {
+    const base = parseRouteBase(hash, jobOfSession);
+    const at = typeof hash === "string" ? hash.indexOf("?") : -1;
+    const context = at >= 0 ? routeContext(hash.slice(at + 1)) : {};
+    if (base.view !== "missing" && Object.keys(context).length) {
+      // A legacy mode-only URL keeps its old return shape. New context is
+      // additive when an investigation/filter/selection selector is present.
+      if (Object.keys(context).some((k) => k !== "mode") || ["production", "request"].includes(context.mode) || ["overview", "tasks", "help"].includes(base.view) || hash.startsWith("#/improvements")) base.context = context;
+      if (base.context && ["compare", "causes"].includes(base.view) && context.mode && ["all", "working", "share"].includes(context.mode)) base.mode = context.mode;
+      if (context.selection) {
+        const [kind, numbers] = context.selection.split(":");
+        const select = parseSelect(`${kind}=${numbers}`);
+        if (select && ((base.view === "task" && kind !== "stretch") || (base.view === "session" && kind === "stretch"))) base.select = select;
+      }
+    }
+    return base;
+  }
+  function parseRouteBase(hash, jobOfSession) {
     const full = typeof hash === "string" ? hash : "";
     const qi = full.startsWith("#/") ? full.indexOf("?") : -1;
     const h = qi >= 0 ? full.slice(0, qi) : full;
     const select = qi >= 0 ? parseSelect(full.slice(qi + 1)) : null;
     const lookup = typeof jobOfSession === "function" ? jobOfSession : () => null;
-    if (h === "" || h === "#" || h === "#/") return { view: "task", job: null };
+    if (h === "" || h === "#" || h === "#/") return { view: "overview" };
     if (h === "#main") return { view: "skip" };
     let m = /^#job-(.+)$/.exec(h);
     if (m) return ROUTE_ID.test(m[1]) ? { view: "redirect", to: `#/task/${m[1]}` } : { view: "missing" };
@@ -809,11 +894,13 @@
     if (m) return Object.prototype.hasOwnProperty.call(OLD_ANCHORS, m[1]) ? { view: "redirect", to: OLD_ANCHORS[m[1]] } : { view: "missing" };
     if (!h.startsWith("#/")) return { view: "missing" };
     const parts = h.slice(2).replace(/\/+$/, "").split("/");
+    if (parts.length === 1 && parts[0] === "improvements") return { view: "act" };
     if (parts[0] === "task") {
       if (parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "task", job: parts[1], ...(select && select.kind !== "stretch" ? { select } : {}) };
       if (parts.length === 4 && parts[2] === "session" && ROUTE_ID.test(parts[1]) && ROUTE_ID.test(parts[3])) return { view: "session", job: parts[1], session: parts[3], ...(select && select.kind === "stretch" ? { select } : {}) };
       return { view: "missing" };
     }
+
     if (parts[0] === "session" && parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "session", job: null, session: parts[1] };
     // One cause of Rank causes: "#/causes/waiting:next_prompt" (a pasted
     // link may arrive with its colon encoded).
@@ -856,6 +943,16 @@
   // the routed view's name, or null when the hash is not yet a view (a skip
   // link, an old anchor to redirect, a page that does not exist), in which
   // case the page shows only "Loading the store…".
+  function localDestination(value) {
+    return typeof value === "string" && value.startsWith("#/") && !value.includes("?") && !["missing", "redirect", "skip"].includes(parseRouteBase(value).view);
+  }
+  function formatInstant(value, zone) {
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return `UTC day: ${value}`;
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) return "Time not published";
+    try {
+      return new Intl.DateTimeFormat("en-GB", { timeZone: zone, year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).format(new Date(value));
+    } catch { return "Display time zone not supported"; }
+  }
   function loadingView(hash) {
     const r = parseRoute(hash, () => null);
     if (r.view === "skip" || r.view === "redirect") return null;
@@ -1292,6 +1389,6 @@
     return { cls, stroke: null };
   }
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, yieldCaption, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { glossaryRoute, loadingView, parseRoute, parseSelect, routeWithContext, routeContext, navigationContext, contextualRoute, localDestination, formatInstant, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, yieldCaption, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, formatClock, clockIssues, lifecycleClockIssues, CLOCK_KEYS, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

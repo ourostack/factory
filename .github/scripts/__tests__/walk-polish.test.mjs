@@ -461,8 +461,10 @@ test("the final review's fixes: one legend shape, a padded Pareto frame, the pic
 // ------------------------------------------- the live tour's polish fixes (S7)
 
 test("a cold load of a deep link shows the routed step's own shell, and an unrouted hash shows none", () => {
-  assert.equal(F.loadingView(""), "task")
-  assert.equal(F.loadingView("#/"), "task")
+  assert.equal(F.loadingView(""), "overview")
+  assert.equal(F.loadingView("#/"), "overview")
+  assert.equal(F.loadingView("#/tasks"), "tasks")
+  assert.equal(F.loadingView("#/task/abc123"), "task")
   assert.equal(F.loadingView("#/act"), "act")
   assert.equal(F.loadingView("#/causes"), "causes")
   assert.equal(F.loadingView("#/compare?mode=share"), "compare")
@@ -472,7 +474,7 @@ test("a cold load of a deep link shows the routed step's own shell, and an unrou
   // Not yet a view: only the status line's "Loading the store…" shows.
   for (const h of ["#main", "#job-abc123", "#nonsense", "#/nope"]) assert.equal(F.loadingView(h), null, h)
   const app = read("site/src/app.js")
-  assert.match(app, /async function main\(\) \{\n    showLoadingShell\(\);/, "the shell is chosen before any fetch")
+  assert.match(app, /async function main\(\) \{\n    setupPreferences\(\);\n    showLoadingShell\(\);/, "display preferences and the routed shell are prepared before any fetch")
 })
 
 test("every pair of neighbouring waiting causes differs clearly, in light and in dark", () => {

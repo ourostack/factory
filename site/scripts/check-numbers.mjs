@@ -18,6 +18,7 @@ import { validateImprovementQueue } from "./improvement-queue.mjs";
 // The page's own words for each reason. A reason with no words would reach
 // a reader as a code, so it fails the build here.
 const { hasReasonText, lifecycleClockIssues } = createRequire(import.meta.url)("../src/format.js");
+const { validateBriefing } = createRequire(import.meta.url)("../src/briefing.js");
 
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
@@ -215,6 +216,15 @@ export function checkNumbers(data) {
       // contract, not a measurement. All other paths keep the existing walk.
       if (top && k === "improvements") {
         if (!validateImprovementQueue(v).ok) bad("improvements", "triage_projection_invalid");
+        continue;
+      }
+      if (top && k === "overview") {
+        if (!validateBriefing(v, validateImprovementQueue).ok) bad("overview", "overview_projection_invalid");
+        else for (const group of ["attention", "agents", "investigation"]) {
+          v[group].forEach((row, i) => {
+            if (row.number) stated(row.number, `overview.${group}[${i}].number`, false);
+          });
+        }
         continue;
       }
       if (k === "template") {

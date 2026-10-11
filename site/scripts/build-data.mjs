@@ -51,6 +51,7 @@ const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
 // The table that links a kaizen issue to the cause it works on (steps.js),
 // written into data.json so agents read the mapping as data.
 const { kaizenCauseOf, readLifecycleClocks } = createRequire(import.meta.url)("../src/steps.js");
+const { buildBriefing } = createRequire(import.meta.url)("../src/briefing.js");
 import { checkByWeek, checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
@@ -63,7 +64,7 @@ import { buildByWeek } from "./by-week.mjs";
 import { taskNames } from "./task-names.mjs";
 import { createPullReader, maxLookups, prAnchor, prKey, pullsDoc } from "./pr-clock.mjs";
 import { readTriageBatches } from "../../.github/scripts/triage-values.mjs";
-import { deriveImprovementQueue } from "./improvement-queue.mjs";
+import { deriveImprovementQueue, validateImprovementQueue } from "./improvement-queue.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -1009,6 +1010,8 @@ const data = {
   labeled_waste: labeledWaste(jobs),
   fix_next: fixNext({ jobs, outcomes, kaizenIssues, andonIssues, capture: captureCoverage, loop: loopHealth }),
 };
+
+data.overview = buildBriefing({ data, improvements: data.improvements, previous: null, now: Date.parse(builtAt), validateQueue: validateImprovementQueue });
 
 // The site's own health, built beside the data.
 const buildRuns = await ghGet(

@@ -1,7 +1,6 @@
-// The Lean walk's shell: routes and old-link redirects, the task that #/
-// opens, task names, finish order, the three-state status line, the bar
-// scale rule, the published data files and llms.txt, and the page's own
-// rules (no decorative cards, no "you", no calendar dates).
+// The consumer shell: Overview at #/, explicit Tasks and legacy task/session
+// routes, task names, finish order, status, bar scaling and public files.
+// Viewer orientation/preferences are separate from operator/work evidence.
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
@@ -26,10 +25,12 @@ const write = (path, text) => {
 
 // ------------------------------------------------------------------ routes
 
-test("each route names its view, and #/ is the task that finished last", () => {
-  assert.deepEqual(F.parseRoute(""), { view: "task", job: null })
-  assert.deepEqual(F.parseRoute("#/"), { view: "task", job: null })
-  assert.deepEqual(F.parseRoute("#"), { view: "task", job: null })
+test("Overview is the default, Tasks is explicit, and task evidence keeps its exact route", () => {
+  assert.deepEqual(F.parseRoute(""), { view: "overview" })
+  assert.deepEqual(F.parseRoute("#/"), { view: "overview" })
+  assert.deepEqual(F.parseRoute("#"), { view: "overview" })
+  assert.deepEqual(F.parseRoute("#/tasks"), { view: "tasks" })
+  assert.deepEqual(F.parseRoute("#/improvements"), { view: "act" })
   assert.deepEqual(F.parseRoute("#/task/abc_12-x"), { view: "task", job: "abc_12-x" })
   assert.deepEqual(F.parseRoute("#/task/abc/session/s-1"), { view: "session", job: "abc", session: "s-1" })
   assert.deepEqual(F.parseRoute("#/session/s-1"), { view: "session", job: null, session: "s-1" })
@@ -503,16 +504,34 @@ test("no decorative cards: no stat tiles, takeaway cards, pipeline steps or char
   assert.doesNotMatch(about, /only as counts|No when|shows no calendar date/)
 })
 
-test("public copy says the operator, not you, and shows no calendar date", () => {
+test("viewer orientation and supported instants do not redefine operator evidence or UTC day precision", () => {
   const html = read("site/src/index.html")
-  const text = html.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ")
+  // The new first-visit briefing addresses the viewer. Keep the old operator
+  // wording guard on the retained work/evidence/learning surfaces, rather
+  // than banning the approved heading "Needs your attention".
+  const legacyStart = html.indexOf("<!-- ============ STEP 1: FOLLOW A TASK")
+  const legacyEnd = html.indexOf("<footer")
+  assert.ok(legacyStart >= 0 && legacyEnd > legacyStart)
+  const text = html.slice(legacyStart, legacyEnd).replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ")
   assert.doesNotMatch(text, /\byou(r|rs|rself)?\b/i)
   const app = read("site/src/app.js")
+  const viewerStart = app.indexOf("  const B = window.FactoryBriefing;")
+  const viewerEnd = app.indexOf("  function num(")
+  assert.ok(viewerStart >= 0 && viewerEnd > viewerStart)
+  const workApp = app.slice(0, viewerStart) + app.slice(viewerEnd)
   // The drawer's button and the cause page's button keep the wording the design gives them, "Copy as a prompt for your agent" and "Start an A3 with your agent": they name the reader's own agent, not the operator.
-  const strings = app.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "").replace("Start an A3 with your agent", "").replace("Check or extend the A3 with your agent", "")
+  const strings = workApp.match(/"[^"\n]*"|`[^`\n]*`/g).join("\n").replace("Copy as a prompt for your agent", "").replace("Start an A3 with your agent", "").replace("Check or extend the A3 with your agent", "")
   assert.doesNotMatch(strings, /\byou(r|rs|rself)?\b/i)
-  assert.doesNotMatch(app, /dateStyle/)
-  assert.doesNotMatch(app, /toLocaleDateString|toISOString/)
+  assert.doesNotMatch(workApp, /dateStyle|toLocaleDateString|toISOString/)
+  assert.match(html, /Needs your attention/)
+  // A published UTC day is not a local midnight instant; supported display
+  // instants can convert zones without changing task/acceptance precision.
+  assert.equal(F.formatInstant("2026-10-11", "America/Los_Angeles"), "UTC day: 2026-10-11")
+  assert.equal(F.finishDay({ state: "measured", value: "2026-10-11", reasons: [] }).key, "2026-10-11")
+  assert.match(F.formatInstant("2026-03-08T09:30:00Z", "America/Los_Angeles"), /01:30/)
+  assert.match(F.formatInstant("2026-03-08T10:30:00Z", "America/Los_Angeles"), /03:30/)
+  const unknownRequest = { class: "unavailable", state: "unavailable", reasons: ["original_request_not_recorded"], basis: ["original_request_not_recorded"], so_far: false }
+  assert.deepEqual(checkNumbers({ arbitrary: unknownRequest }).map((v) => v.code).includes("bad_basis"), true, "a Clock never gains a generic measurement exemption")
 })
 
 test("Why Lean? gives the eight wastes as our mapping, the glossary, and its sources inline", () => {

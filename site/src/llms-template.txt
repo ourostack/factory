@@ -60,3 +60,12 @@ card, publish private details, claim work or begin implementation.
 Paths are relative to the site. A file up to {{READ_WHOLE}} is marked small enough to read whole.
 
 {{FILES}}
+### Factory briefing and evidence navigation (consumer milestone)
+
+`#/` is Overview; `#/tasks`, `#/compare`, `#/improvements` and `#/why` are directly usable. `#/help` replays the optional three-stop guide. Existing task/session/cause links and `#/act` remain supported. This consumer milestone does not demonstrate new production accounting or active automation.
+
+`data.json.overview` and `rollups/overview.json` are identical `factory-overview/1` projections with `generation`, `attention`, `agents`, `investigation`, `changes`, `state` and `reasons`. The overview is a closed public presentation contract checked separately at this exact top-level path; other measurements remain governed by the stated-number checks. Work/quality, collection and improvement-system problems remain distinct. Alarms precede suggested investigations. Missing monitoring is unknown, never all-clear. A triage route cannot create ownership, activity or execution authority.
+
+Rows expose a public ID, family, title, observed-impact limitation, ownership availability, next action and validated local destination; optional figures retain number states. Triage context is copied from the validated Node2 queue, with its opaque public handoff and inspection-only authority. Private decision/recommendation/continuation remain unavailable. Do not infer them from gate codes or issue titles.
+
+Display preferences are versioned and origin-local. Browser storage failure does not break navigation or imply persistence. Since-last-visit text compares only compatible bounded public briefing snapshots, never a complete change history. Selected IANA zones apply only to supported instants. Published finish days and finish weeks remain UTC; relative offsets and durations are invariant. Missing lifecycle clocks are unavailable, not legacy lead relabeled as production.
