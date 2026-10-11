@@ -142,11 +142,20 @@ test("paired legacy Desk fixture build and synthetic clock projection preserve e
     run([join(process.env.DESK_DIR, "plugins/desk/mcp/scripts/factory.js"), "build", "--store", main, "--out", reports])
     const build = () => run([join(source, "site/scripts/build-data.mjs"), "--reports", reports, "--main", main, "--out", join(dist, "data.json")])
     build()
-    const legacy = JSON.parse(readFileSync(join(dist, "data.json"), "utf8"))
+    const produced = JSON.parse(readFileSync(join(dist, "data.json"), "utf8"))
     publishData({ reports, dist })
     const files = readdirSync(join(reports, "jobs")).filter((n) => n.endsWith(".json"))
     assert.ok(files.length > 0, "the actual legacy fixture must produce jobs")
-    const oldMaps = new Map(files.filter((f) => existsSync(join(dist, "map", f))).map((f) => [f, JSON.parse(readFileSync(join(dist, "map", f), "utf8"))]))
+    // Desk now produces clocks for every job; the store carries the producer's envelope unchanged and checks it.
+    assert.deepEqual(checkNumbers(produced), [])
+    const reportClocks = new Map(files.map((f) => { const r = JSON.parse(readFileSync(join(reports, "jobs", f), "utf8")); return [String(r.job?.id || r.timeline?.job || r.job || ""), r.clocks] }))
+    for (const row of produced.jobs) {
+      assert.ok(Object.hasOwn(row, "clocks"), `${row.id} carries Desk's clocks`)
+      assert.deepEqual(row.clocks, reportClocks.get(String(row.id)), `${row.id} clocks equal its report twin`)
+    }
+    const legacy = { jobs: produced.jobs.map(({ clocks, ...row }) => row) }
+    const stripClocks = ({ clocks, ...rest }) => rest
+    const oldMaps = new Map(files.filter((f) => existsSync(join(dist, "map", f))).map((f) => [f, stripClocks(JSON.parse(readFileSync(join(dist, "map", f), "utf8")))]))
     for (const c of fixture.cases) {
       // Synthetic reader input only: not evidence that the held Desk producer ran.
       for (const file of files) {
@@ -222,9 +231,15 @@ test("whole golden legacy facts build retains pinned baseline numbers and report
     assert.deepEqual(checkNumbers(now), [])
     assert.ok(now.jobs.length > 0 && now.sessions.length > 0)
     console.log("whole-legacy checked:", now.jobs.length, "jobs;", now.sessions.length, "sessions; only built_at and the separately validated additive overview excluded from baseline comparison")
-    assert.ok(now.jobs.every((j) => !Object.hasOwn(j, "clocks")), "legacy has no manufactured clock envelope")
+    // Desk now produces clocks for every job: each row carries its report twin's envelope unchanged,
+    // and the baseline (pre-clock) store code is compared with that additive envelope set aside.
+    for (const j of now.jobs) {
+      assert.ok(Object.hasOwn(j, "clocks"), `${j.id} carries Desk's clocks`)
+      assert.deepEqual(j.clocks, JSON.parse(readFileSync(join(reports, "jobs", `${j.id}.json`), "utf8")).clocks, `${j.id} clocks equal its report twin`)
+    }
     const { built_at: oldStamp, ...oldData } = old
-    const { built_at: nowStamp, overview: additiveOverview, ...nowData } = now
+    const { built_at: nowStamp, overview: additiveOverview, ...nowRest } = now
+    const nowData = { ...nowRest, jobs: nowRest.jobs.map(({ clocks, ...row }) => row) }
     assert.equal(additiveOverview.schema, "factory-overview/1")
     assert.deepEqual(checkNumbers({ overview: additiveOverview }), [])
     assert.deepEqual(JSON.parse(readFileSync(join(current, "rollups/overview.json"), "utf8")), additiveOverview)
