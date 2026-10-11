@@ -14,6 +14,180 @@
   // number formatter on this page.
 
   const F = window.FactoryFormat;
+  const B = window.FactoryBriefing;
+  const P = window.FactoryPreferences;
+  let storage = null;
+  try { storage = window.localStorage; } catch { /* fully usable without persistence */ }
+  let viewerZone = "UTC";
+  try { viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* UTC is explicit fallback */ }
+  let preferences = P.readPreferences(storage, viewerZone);
+  let visitPrevious = preferences.previous;
+  let currentData = null;
+  function setLocalHref(link, value) {
+    const route = typeof value === "string" && value.startsWith("#/") ? F.parseRoute(value, () => null) : { view: "missing" };
+    if (["missing", "skip", "redirect"].includes(route.view)) return;
+    const safe = value;
+    link.href = safe;
+  }
+  function saveDisplay(patch) {
+    const result = P.savePreferences(storage, patch);
+    preferences = { ...preferences, ...patch, persistent: result.saved };
+    const node = document.getElementById("preferences-status");
+    if (node) node.textContent = result.saved ? "Preferences saved on this browser." : "Preferences are not saved: browser storage is unavailable.";
+    return result;
+  }
+  function setupPreferences() {
+    const select = document.getElementById("display-zone");
+    const zones = [...new Set([preferences.zone, viewerZone, "America/Los_Angeles", "UTC"])].filter(P.validZone);
+    for (const zone of zones) {
+      const option = el("option", null, zone === "America/Los_Angeles" ? "Pacific Time (America/Los_Angeles)" : zone);
+      option.value = zone;
+      select.appendChild(option);
+    }
+    select.value = preferences.zone;
+    select.addEventListener("change", () => {
+      saveDisplay({ zone: select.value });
+      if (currentData) routeSafely(currentData);
+    });
+    document.getElementById("preferences-status").textContent = preferences.persistent ? "Display preferences stay on this browser." : "Preferences are not saved: browser storage is unavailable.";
+    document.getElementById("dismiss-guide").addEventListener("click", () => {
+      saveDisplay({ dismissed: true });
+      document.getElementById("overview-guide").hidden = true;
+    });
+  }
+  function renderGuide(node, data) {
+    node.innerHTML = "";
+    const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+    const first = F.landingChoice(jobs).job;
+    const stops = [
+      ["Understand a task", first ? "Inspect one task's recorded work, waits and evidence." : "No recorded task is available yet. The task list explains the absence.", first ? F.safeRoute("task", first.id) : "#/tasks"],
+      ["Inspect a finding", "A ranked pattern is a question to investigate, not a proven cause.", "#/causes"],
+      ["Hand off an improvement", "Inspect recorded issues and review limits before asking your linked agent to act.", "#/improvements"],
+    ];
+    const list = el("ol", "guide-stops");
+    for (const [title, body, href] of stops) {
+      const li = el("li");
+      const link = el("a", null, title); setLocalHref(link, href);
+      li.append(link, el("p", null, body)); list.appendChild(li);
+    }
+    node.appendChild(list);
+  }
+  function renderBriefRows(node, rows, empty) {
+    node.innerHTML = "";
+    if (!rows.length) { emptyState(node, empty); return; }
+    const list = el("ul", "briefing-list");
+    const families = { production: "Work and quality", collection: "Evidence collection", improvement_system: "Improvement system" };
+    for (const row of rows) {
+      const li = el("li", "briefing-item");
+      li.appendChild(el("p", "briefing-family", families[row.family]));
+      li.appendChild(el("h3", null, row.title));
+      li.appendChild(el("p", null, row.impact));
+      if (row.number) {
+        const observed = el("p", null, "Published affected count: ");
+        observed.appendChild(num(row.number, "count")); li.appendChild(observed);
+      }
+      li.appendChild(el("p", "briefing-owner", row.ownership === "claimed" ? "A claim is recorded in the public projection." : "Ownership not published."));
+      if (row.triage) {
+        const t = row.triage;
+        li.appendChild(el("p", null, t.gate_explanation));
+        for (const c of t.context) li.appendChild(safeLink(c.label, c.ref));
+        const details = el("details", "more-details");
+        details.appendChild(el("summary", null, "Evidence and decision availability"));
+        details.appendChild(el("p", null, "Specific decision, recommendation and safe continuation are unavailable unless a verified public structured source publishes them."));
+        const prompt = `Inspect the acknowledged improvement annotation ${t.handoff.annotation_id}, revision ${t.handoff.revision}, from ${t.handoff.data_path}. Resolve it on your linked desk and inspect authorized local detail. Bring findings and a recommendation to the actual decision owner. Do not guess a card, publish private details, claim work or start implementation. Authority limit: ${t.handoff.authority_limit}. Public handoff: ${JSON.stringify(t.handoff)}`;
+        const pre = el("pre", "copy-prompt", prompt); pre.tabIndex = 0;
+        const button = el("button", null, "Copy as a prompt for your agent"); button.type = "button";
+        const status = el("p", null); status.setAttribute("role", "status");
+        button.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(prompt); status.textContent = "Copied."; }
+          catch { status.textContent = "Copy failed. Select the prompt text below and copy it manually."; pre.focus(); }
+        });
+        details.append(button, status, pre); li.appendChild(details);
+      }
+      li.appendChild(el("p", "briefing-action", row.next_action));
+      const link = el("a", null, row.href === "#/tasks" ? "Inspect recorded tasks" : row.href === "#/causes" ? "Inspect findings" : "Open Improvements");
+      setLocalHref(link, row.href); li.appendChild(link); list.appendChild(li);
+    }
+    node.appendChild(list);
+  }
+  function renderOverview(data) {
+    const doc = data.overview;
+    if (!B.validateBriefing(doc).ok) throw new Error("The published briefing is unavailable or malformed; other views remain usable.");
+    document.getElementById("overview-published").textContent = `Published data build: ${F.formatInstant(data.built_at, preferences.zone)}. This is not a task finish or acceptance timestamp.`;
+    const line = document.getElementById("status-line");
+    line.className = `status-line ${doc.attention.length ? "status-abnormal" : "status-not_monitored"}`;
+    line.textContent = doc.attention.length ? "Recorded problems need inspection. Their effects, ownership limits and next actions are listed below." : "Monitoring or review evidence is incomplete. Inspect what is available; this is not an all-clear.";
+    document.getElementById("overview-state").textContent = doc.state === "attention" ? "Start with the recorded problems below. Monitoring and ownership may still be incomplete." : "Monitoring or review evidence is incomplete. This is not an all-clear.";
+    renderBriefRows(document.getElementById("overview-attention"), doc.attention, "No specific attention item is supported by this payload. Missing monitoring does not mean there are no problems.");
+    renderBriefRows(document.getElementById("overview-agents"), doc.agents, "No current public claim is available for this briefing. This does not mean local work is unowned.");
+    renderBriefRows(document.getElementById("overview-investigation"), doc.investigation, "Inspect evidence coverage before choosing an improvement.");
+    const change = B.visitChanges(doc, visitPrevious);
+    const note = document.getElementById("overview-changes");
+    note.textContent = change.state === "comparable" ? `${change.added} briefing items appeared and ${change.removed} are no longer in this published snapshot. This is a snapshot comparison, not a complete change history.` :
+      change.state === "same_generation" ? "This is the same published report generation as your last successful overview visit. No complete change history is available." :
+      change.previous_visit ? `Your last successful overview visit was ${F.formatInstant(change.previous_visit, preferences.zone)}. Comparable previous evidence is unavailable; showing the present state.` :
+      "First visit, or no usable saved visit. Start with the briefing; the short guide below is optional.";
+    renderGuide(document.getElementById("guide-stops"), data);
+    document.getElementById("overview-guide").hidden = preferences.dismissed;
+    saveDisplay({ previous: B.snapshot(doc, new Date().toISOString()) });
+  }
+  function renderTaskList(data) {
+    const node = document.getElementById("task-list"); node.innerHTML = "";
+    if (!data.jobs.length) return emptyState(node, "No tasks are recorded in this payload yet; this does not prove no work occurred.");
+    const table = el("table", "data-table task-list-table");
+    tableHead(table, [["Task", ""], ["Recorded lifecycle", ""], ["Finish day (UTC)", ""], ["Overall recorded elapsed", ""], ["Recorded working", ""]]);
+    const body = el("tbody");
+    for (const j of data.jobs) {
+      const tr = el("tr"); const name = el("a", null, jobLabel(j)); setLocalHref(name, F.safeRoute("task", j.id));
+      plainCell(tr, "Task", name);
+      plainCell(tr, "Recorded lifecycle", el("span", null, ({ accepted: "Accepted", awaiting_signoff: "Awaiting acceptance", sent_back: "Returned for changes", delivered: "Delivered", in_progress: "In progress" })[j.outcome] || "Not recorded"));
+      plainCell(tr, "Finish day (UTC)", el("span", null, F.finishDay(j.finish_date).words + " (UTC day)"));
+      plainCell(tr, "Overall recorded elapsed", num(j.lead_time_ms, "duration"));
+      plainCell(tr, "Recorded working", num(j.active_time_ms, "duration"));
+      body.appendChild(tr);
+    }
+    table.appendChild(body); node.appendChild(table);
+  }
+  function renderNavigationContext(route) {
+    const node = document.getElementById("navigation-context"); node.innerHTML = "";
+    const context = route.context || F.routeContext(window.location.hash.split("?")[1] || "");
+    const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
+    const selection = route.select ? `${route.select.kind}:${route.select.from}${route.select.to !== route.select.from ? "-" + route.select.to : ""}` : context.selection || (query.has("selection") ? "unsupported" : null);
+    node.hidden = !Object.keys(context).length && !selection;
+    if (node.hidden) return;
+    node.appendChild(el("span", null, context.cause ? `Investigation context: ${context.cause}. ` : "Navigation context retained. "));
+    if (context.return) {
+      const back = el("a", null, "Return to investigation"); setLocalHref(back, F.routeWithContext(context.return, Object.fromEntries(Object.entries(context).filter(([k]) => k !== "return")))); node.appendChild(back);
+    }
+    if (selection) {
+      node.appendChild(el("p", null, selection === "unsupported" ? "The requested selection is unsupported. No substitute item was selected." : `Selection requested: ${selection}. If its evidence is no longer present, it is unavailable—not another item.`));
+      const clear = el("button", null, "Clear selection"); clear.type = "button";
+      clear.addEventListener("click", () => {
+        const [path, query = ""] = window.location.hash.split("?");
+        const q = new URLSearchParams(query);
+        for (const key of ["selection", "bursts", "gaps", "stretch", "prompt", "pr"]) q.delete(key);
+        window.location.hash = path + (q.toString() ? "?" + q.toString() : "");
+      });
+      node.appendChild(clear);
+    }
+    if (["production", "request"].includes(context.mode)) node.appendChild(el("p", null, "This requested clock mode is unavailable until an approved producer supplies its boundaries. Existing charts below retain their legacy labels and meanings; they are not substituted production or original-request clocks."));
+    // Main navigation carries inspection context, never a remote return URL.
+    for (const link of document.querySelectorAll("nav.steps a")) {
+      const path = link.dataset.destination || link.getAttribute("href").split("?")[0];
+      link.dataset.destination = path;
+      setLocalHref(link, F.routeWithContext(path, context));
+    }
+  }
+  function rememberSelection(kind, from, to = from) {
+    if (!Number.isInteger(from) || from < 1) return;
+    const [path, query = ""] = window.location.hash.split("?");
+    if (!F.localDestination(path)) return;
+    const context = F.routeContext(query);
+    context.selection = `${kind}:${from}${to !== from ? "-" + to : ""}`;
+    const next = F.routeWithContext(path, context);
+    history.replaceState(null, "", next);
+    renderNavigationContext(F.parseRoute(next, () => null));
+  }
 
   function num(number, kind, opts) {
     return F.render(document, number, kind, opts);
@@ -1720,6 +1894,8 @@
         .map((x) => ({ text: `Open session ${x.sid.slice(0, 8)} to scale`, href: x.route }));
     const open = (opener, thing) => {
       const it = thing.item;
+      if (it && it.type === "box") rememberSelection("bursts", it.burst_range[0], it.burst_range[1]);
+      else if (it && it.type === "wait") rememberSelection("gaps", it.gap_range[0], it.gap_range[1]);
       const content = W.drawer(thing, ctxDrawer);
       const route = F.safeRoute("task", j.id) || "#/";
       openDrawer(opener, content, {
@@ -2684,7 +2860,13 @@
     lastMapRender = () => safely("vsm", () => {
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
     });
-    if (select && drawn) safely("vsm", () => drawn.select(select));
+    if (select) safely("vsm", () => {
+      if (!drawn || !drawn.select(select)) {
+        const node = document.getElementById("navigation-context");
+        node.hidden = false;
+        node.appendChild(el("p", "selection-unavailable", "The requested evidence selection is no longer available in this task. No substitute item was selected."));
+      }
+    });
   }
 
   let lastMapWidth = 0;
@@ -4632,6 +4814,10 @@
   async function renderAct(data) {
     const seq = ++stepSeq;
     const box = document.getElementById("problems");
+    const triageNode = document.getElementById("triage-brief");
+    if (data.improvements?.state === "not_reviewed") emptyState(triageNode, "Not reviewed yet. Automated triage is not demonstrated by this queue; ownership and private decisions are not published.");
+    else if (B.validateBriefing(data.overview).ok) renderBriefRows(triageNode, [...data.overview.attention, ...data.overview.agents, ...data.overview.investigation].filter((r) => r.triage), "No current public annotation detail is available.");
+    else emptyState(triageNode, "Improvement review details are unavailable. Inspect the existing public issues below.");
     const causes = await walkFile("rollups/causes.json");
     if (seq !== stepSeq) return;
     box.innerHTML = "";
@@ -4710,8 +4896,8 @@
     }, 150);
   });
 
-  const VIEWS = ["task", "session", "compare", "causes", "cause", "act", "why", "about", "store", "missing"];
-  const VIEW_TITLE = { task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", cause: "Rank causes", act: "Act", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
+  const VIEWS = ["overview", "tasks", "help", "task", "session", "compare", "causes", "cause", "act", "why", "about", "store", "missing"];
+  const VIEW_TITLE = { overview: "Factory briefing", tasks: "Tasks", help: "Help", task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", cause: "Rank causes", act: "Improvements", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
   let routedOnce = false;
 
   function route(data) {
@@ -4745,6 +4931,16 @@
       else a.removeAttribute("aria-current");
     }
     let title = VIEW_TITLE[r.view];
+    if (r.view !== "overview" && data.overview) {
+      const line = document.getElementById("status-line");
+      line.textContent = data.overview.attention?.length ? "Recorded problems need inspection. Overview lists their effects, ownership limits and next actions." : "Monitoring and review evidence may be incomplete. Overview explains the limits.";
+    }
+    // Reset primary links before applying this route's validated context.
+    for (const link of document.querySelectorAll("nav.steps a")) if (link.dataset.destination) setLocalHref(link, link.dataset.destination);
+    renderNavigationContext(r);
+    if (r.view === "overview") safely("overview-state", () => renderOverview(data));
+    if (r.view === "tasks") safely("task-list", () => renderTaskList(data));
+    if (r.view === "help") renderGuide(document.getElementById("help-stops"), data);
     if (drawerEl && drawerEl.open) drawerEl.close();
     if (r.view === "task") {
       // #/ opens on a task with something to teach and waste labels; the
@@ -5173,6 +5369,7 @@
   }
 
   async function main() {
+    setupPreferences();
     showLoadingShell();
     let health = null;
     try {
@@ -5194,9 +5391,21 @@
         const node = document.getElementById(id);
         if (node) emptyState(node, msg);
       }
+      const empty = { jobs: [], sessions: [], improvements: null };
+      currentData = empty;
+      const failedRoute = () => {
+        const r = F.parseRoute(window.location.hash, () => null);
+        const view = ["why", "about", "help", "missing"].includes(r.view) ? r.view : VIEWS.includes(r.view) ? r.view : "missing";
+        for (const v of VIEWS) document.getElementById(`view-${v}`).hidden = v !== view;
+        document.body.dataset.view = view;
+        if (view === "help") renderGuide(document.getElementById("help-stops"), empty);
+        for (const id of ["overview-state", "overview-attention", "overview-agents", "overview-investigation", "task-list", "triage-brief"]) emptyState(document.getElementById(id), msg);
+      };
+      failedRoute(); window.addEventListener("hashchange", failedRoute); window.addEventListener("popstate", failedRoute);
       return;
     }
     renderHealth(document.getElementById("health-panel"), health, true, "");
+    currentData = data;
     // (main continues even if the health panel failed: renderHealth contains its own errors)
 
     // The overview: at a glance, the answer, the trend, what to fix next.
@@ -5209,6 +5418,7 @@
     // so one that throws says so in its place and the rest still draw.
     routeSafely(data);
     window.addEventListener("hashchange", () => routeSafely(data));
+    window.addEventListener("popstate", () => routeSafely(data));
     safely("answer-tiles", () => renderAnswer(document.getElementById("answer-tiles"), data.outcomes));
     safely("trend", () => renderTrend(document.getElementById("trend"), data.trend));
 

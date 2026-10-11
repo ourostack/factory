@@ -1431,3 +1431,35 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 .pareto-names { margin: 4px 0 8px; padding-left: 1.6em; font-size: 0.85rem; color: var(--text-secondary); }
 .pareto-names li { margin: 2px 0; }
 .ot-unsplit { font-size: 10px; }
+.display-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; padding-bottom: .35rem; }
+.display-preferences select { max-width: 100%; min-width: 0; padding: .4rem; font: inherit; }
+.display-preferences [role="status"] { font-size: .8rem; color: var(--text-muted); }
+.briefing-wrap { max-width: 1280px; }
+.briefing-wrap .lede, .visit-note { max-width: 70ch; }
+.briefing-columns { display: grid; grid-template-columns: 1fr; gap: 0 2rem; }
+.briefing-columns > * { min-width: 0; }
+.briefing-list { list-style: none; margin: 0; padding: 0; }
+.briefing-item { padding: 1rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.briefing-item h3 { margin: .2rem 0 .6rem; font-size: 1.1rem; }
+.briefing-family { font-size: .8rem; font-weight: 600; color: var(--text-muted); }
+.briefing-item p { margin: .5rem 0; max-width: 65ch; }
+.briefing-action { font-weight: 600; }
+.guide-stops { padding-left: 1.5rem; }
+.guide-stops li { padding: .6rem 0; }
+.guide-stops p { margin: .3rem 0; }
+.guide button, .navigation-context button, .briefing-item button { min-height: 44px; padding: .5rem .75rem; font: inherit; cursor: pointer; }
+.navigation-context { padding: .7rem 0; overflow-wrap: anywhere; }
+.navigation-context a { margin-right: 1rem; }
+.navigation-context p { margin: .35rem 0; }
+.copy-prompt { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; font-size: .85rem; }
+table.data-table.task-list-table { width: 100%; min-width: 0; table-layout: fixed; }
+table.data-table.task-list-table td, table.data-table.task-list-table th { white-space: normal; overflow-wrap: anywhere; padding: .8rem; vertical-align: top; }
+.task-list-table td:first-child, .task-list-table th:first-child { width: 35%; }
+@media (min-width: 1000px) { .briefing-columns { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .task-list-table, .task-list-table tbody, .task-list-table tr, .task-list-table td { display: block; width: 100% !important; }
+  .task-list-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .task-list-table tr { margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .task-list-table td { padding: .35rem 0; }
+  .task-list-table td::before { content: attr(data-label) ": "; display: block; font-weight: 600; font-size: .8rem; }
+}

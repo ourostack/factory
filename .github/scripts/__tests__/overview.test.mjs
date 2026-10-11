@@ -16,6 +16,31 @@ import { createRequire } from "node:module"
 
 const F = createRequire(import.meta.url)("../../../site/src/format.js")
 
+test("overview default and validated context preserve legacy callback routes without unsafe return URLs", () => {
+  assert.equal(F.parseRoute("#/", () => null).view, "overview")
+  assert.equal(F.parseRoute("#/tasks").view, "tasks")
+  assert.equal(F.parseRoute("#/improvements").view, "act")
+  assert.equal(F.parseRoute("#session-root", () => "job").to, "#/task/job/session/root")
+  assert.equal(typeof F.routeWithContext, "function")
+  const href = F.routeWithContext("#/improvements", { cause: "waiting:next_prompt", task: "job", mode: "working", selection: "gaps:2", return: "#/causes/waiting:next_prompt" })
+  const route = F.parseRoute(href, () => null)
+  assert.equal(route.context.cause, "waiting:next_prompt")
+  assert.equal(route.context.return, "#/causes/waiting:next_prompt")
+  assert.equal(route.context.selection, "gaps:2")
+  assert.ok(!F.routeWithContext("#/compare", { return: "https://evil.invalid", cause: "<script>", from: "2026-02-30" }).includes("evil"))
+  assert.throws(() => F.routeWithContext("javascript:alert(1)", {}), TypeError)
+  assert.equal(F.parseRoute("#/unknown").view, "missing")
+})
+
+test("selected IANA zone converts supported instants across Pacific DST, never finish days or durations", () => {
+  assert.equal(typeof F.formatInstant, "function")
+  assert.match(F.formatInstant("2026-03-08T09:30:00Z", "America/Los_Angeles"), /01:30/)
+  assert.match(F.formatInstant("2026-03-08T10:30:00Z", "America/Los_Angeles"), /03:30/)
+  assert.match(F.formatInstant("2026-11-01T08:30:00Z", "America/Los_Angeles"), /01:30/)
+  assert.equal(F.formatInstant("2026-10-11", "America/Los_Angeles"), "UTC day: 2026-10-11")
+  assert.equal(F.finishDay({ state: "measured", value: "2026-10-11", reasons: [] }).key, "2026-10-11")
+})
+
 const read = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8")
 const stretch = (start, end, cls, waste = null, confidence) => ({ start_ms: start, end_ms: end, class: cls, waste, ...(confidence ? { confidence } : {}) })
 
@@ -326,17 +351,19 @@ test("the private-names overlay names tasks as text, and a missing or malformed 
   assert.doesNotMatch(app, /innerHTML = [^"']/)
   // The public build never produces or names the file.
   for (const p of [".github/workflows/pages.yml", "site/scripts/build-data.mjs"]) assert.doesNotMatch(read(p), /local-names/, p)
-  assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
+  assert.match(read(".github/workflows/pages.yml"), /cp site\/src\/index\.html site\/src\/styles\.css site\/src\/format\.js site\/src\/preferences\.js site\/src\/briefing\.js site\/src\/walk\.js site\/src\/steps\.js site\/src\/app\.js site\/dist\//)
 })
 
-test("the page is the four-step walk, with Why Lean?, About and the store's numbers, and a guide on how to read it", () => {
+test("the briefing navigation preserves all evidence views, Why Lean, About and the store's numbers", () => {
   const html = read("site/src/index.html")
   for (const id of ["status-line", "view-task", "view-session", "view-compare", "view-causes", "view-act", "view-cause", "view-why", "view-about", "view-store", "jobs-table", "stackup", "fe-dots", "stackup-table", "pareto", "pareto-table", "cause-detail", "problems", "alarm-owners", "guide"]) assert.match(html, new RegExp(`id="${id}"`), id)
   assert.match(html, /recorded by the agent through Desk's sign-off tool|on the operator's word/)
   assert.doesNotMatch(html, /witnessed/)
-  // The tabs, in the walk's order, then the Why Lean? link.
+  // The usable consumer destinations, then Why Lean and Help. Legacy
+  // evidence views remain directly reachable rather than compulsory stops.
   const at = (t) => html.indexOf(t)
-  assert.ok(at(">Follow a task<") < at(">Compare tasks<") && at(">Compare tasks<") < at(">Rank causes<") && at(">Rank causes<") < at(">Act<") && at(">Act<") < at(">Why Lean?<"))
+  assert.ok(at(">Overview<") < at(">Tasks<") && at(">Tasks<") < at(">Compare<") && at(">Compare<") < at(">Improvements<") && at(">Improvements<") < at(">Why Lean?<"))
+  for (const id of ["view-overview", "view-tasks", "view-help", "overview-attention", "overview-agents", "overview-investigation"]) assert.match(html, new RegExp(`id="${id}"`))
   // "Declared" is explained in the guide, now on the About page.
   assert.match(html, /"Declared" means taken from the task card/)
 })

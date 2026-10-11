@@ -18,9 +18,11 @@ const require = createRequire(import.meta.url);
 const { slimMap } = require("../src/walk.js");
 const { reasonTable } = require("../src/format.js");
 const { readLifecycleClocks } = require("../src/steps.js");
+const { validateBriefing } = require("../src/briefing.js");
 import { prClock } from "./pr-clock.mjs";
 import { forRollupFile } from "./finish-date.mjs";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
+import { checkNumbers } from "./check-numbers.mjs";
 
 // A file at or under this size is small enough for an agent to read whole.
 export const READ_WHOLE_BYTES = 256 * 1024;
@@ -118,7 +120,14 @@ export function readPulls(path) {
 export function publishData({ reports, dist, pulls = null }) {
   const dataPath = join(dist, "data.json");
   let improvements;
-  if (existsSync(dataPath)) improvements = JSON.parse(readFileSync(dataPath, "utf8")).improvements;
+  let overview;
+  if (existsSync(dataPath)) {
+    const data = JSON.parse(readFileSync(dataPath, "utf8"));
+    improvements = data.improvements;
+    overview = data.overview;
+  }
+  if (overview !== undefined && (!validateBriefing(overview, validateImprovementQueue).ok || checkNumbers({ overview }).length)) throw new Error("overview_projection_invalid");
+  if (overview === undefined && (existsSync(join(reports, "rollups/overview.json")) || existsSync(join(dist, "rollups/overview.json")))) throw new Error("overview_projection_invalid");
   if (improvements !== undefined && !validateImprovementQueue(improvements).ok) throw new Error("triage_projection_invalid");
   if (improvements === undefined && (existsSync(join(reports, "rollups/improvements.json")) ||
       existsSync(join(dist, "rollups/improvements.json")))) throw new Error("triage_projection_invalid");
@@ -137,7 +146,7 @@ export function publishData({ reports, dist, pulls = null }) {
   const copied = [];
   for (const [sub, depth] of [["jobs", 1], ["rollups", 0]]) {
     for (const rel of jsonFiles(join(reports, sub), depth)) {
-      if (sub === "rollups" && rel === "improvements.json") continue; // only the checked data twin below
+      if (sub === "rollups" && ["improvements.json", "overview.json"].includes(rel)) continue; // checked data twins only
       const to = join(dist, sub, rel);
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(join(reports, sub, rel), to);
@@ -150,6 +159,12 @@ export function publishData({ reports, dist, pulls = null }) {
   // One projection is the source of both twins. Never publish a stale reports
   // queue over the freshly checked main-branch queue in data.json.
   if (existsSync(dataPath)) {
+    if (overview !== undefined) {
+      const path = join(dist, "rollups", "overview.json");
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(overview), "utf8");
+      copied.push("rollups/overview.json");
+    }
     if (improvements !== undefined) {
       const path = join(dist, "rollups", "improvements.json");
       mkdirSync(dirname(path), { recursive: true });
@@ -218,6 +233,7 @@ export function sizeLine(files, label = "Published data files") {
 // it was published in this build.
 const GROUPS = [
   { title: "Start here: the whole site in one file", match: (p) => p === "data.json", what: () => "every number on the page, each with its state (measured, partial or no data), reasons and, when partial, its bound; jobs[] holds each task's name, finish date and finish order; kaizen_issues (the problems in hand, each with the `cause` key it works on when one is known) and alarm_issues (who owns each alarm) are step 4, Act" },
+  { title: "Factory briefing", match: (p) => p === "rollups/overview.json", what: () => "the exact factory-overview/1 data.overview twin: attention, public claims, one investigation and explicit monitoring/review limitations; triage handoffs are inspection-only, not execution authority; automation and new production accounting may be pending" },
   { title: "Reading the reasons", match: (p) => p === "reasons.json", what: () => "every reason code a figure can carry (censored, log_truncated, card_dates_shorter_than_work, …) with the plain words the page shows for it" },
   { title: "Step 1, follow a task: each task's answer", match: (p) => p === "rollups/tasks.json", what: () => "one row per task, keyed by `job`: its lead time, working time, idle time and its split by what it waited on (`waiting_by_waited_on_ms`), top causes and longest wait, as stated numbers in milliseconds (keys and codes, not the page's sentences; reasons.json gives the words), plus the store's `name` (null for a private task), `finish_order`, `finish_group`, `finish_basis` and `finish_date` (the UTC day the task finished, and the basis it rests on)" },
   { title: "Step 1, follow a task: one task's map", match: (p) => /^map\/[^/]+\.json$/.test(p), what: (p) => `the work bursts, waits, card status changes, operator prompts (each with its why), the waits before them, and pull requests with their opened and merged times on the task clock, of task ${p.slice(4, 12)}: what its value stream map draws; every time is an offset on the task clock (factory.site.map/2), and each operator prompt's \`day\` is its UTC day where a measured clock anchor ties the task to the calendar, else null; each pull request time states whether it is measured or partial (and which way), and is not placed when the task's clock anchor may be off by more than 15 minutes, the gap that splits two work bursts, or rests on one pull request nothing confirms (anchor_unconfirmed)` },
