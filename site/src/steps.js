@@ -1729,11 +1729,16 @@
       : `${n} published improvement ${n === 1 ? "issue" : "issues"} ${verb === "follow" ? (n === 1 ? "follows" : "follow") : (n === 1 ? "is listed below" : "are listed below")} under Problems in hand`;
     const valid = queue && queue.schema === "factory-improvements/1" && Array.isArray(queue.rows);
     if (!valid) return `Improvement review details are unavailable; ${issuesWords("listed")}.`;
-    if (queue.state === "not_reviewed") return `No improvement has been reviewed by triage yet; ${issuesWords("listed")}.`;
+    if (queue.state === "not_reviewed") return `Not reviewed yet: no improvement has been reviewed by triage; ${issuesWords("listed")}.`;
     if (!queue.rows.length) return `No current reviewed improvement is published; ${issuesWords("listed")}.`;
-    const stale = queue.rows.filter((r) => r && r.availability === "stale_or_conflicting").length;
-    const k = queue.rows.length;
-    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} listed first${stale ? `, stale or conflicting first (${stale} of them)` : ""}; ${issuesWords("follow")}.`;
+    // Count only the rows the page draws; a conflict is named apart from staleness.
+    const shown = queue.rows.filter((r) => improvementPresentation(r));
+    if (!shown.length) return `Reviewed improvements are published but none can be shown; ${issuesWords("listed")}.`;
+    const conflicting = shown.filter((r) => r.conflict === true).length;
+    const stale = shown.filter((r) => r.conflict !== true && (r.state !== "reviewed" || r.availability === "stale_or_conflicting")).length;
+    const refresh = [stale && `${stale} stale`, conflicting && `${conflicting} in conflict`].filter(Boolean);
+    const k = shown.length;
+    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} listed first${refresh.length ? `, those needing a refresh first (${refresh.join(", ")})` : ""}; ${issuesWords("follow")}.`;
   }
   // Reader-facing names for the public queue's lifecycle identifiers.
   const LIFECYCLE_LABEL = {

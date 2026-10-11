@@ -209,16 +209,26 @@ test("unsupported_emphasis_is_explained_and_mutes_nothing", () => {
 test("improvements_lead_with_one_status_sentence_and_keep_limits_in_how_to_read", () => {
   const notReviewed = { schema: "factory-improvements/1", state: "not_reviewed", rows: [] }
   assert.equal(S.improvementStatus({ queue: notReviewed, issues: 8, issuesVerified: true }),
-    "No improvement has been reviewed by triage yet; 8 published improvement issues are listed below under Problems in hand.")
+    "Not reviewed yet: no improvement has been reviewed by triage; 8 published improvement issues are listed below under Problems in hand.")
   assert.equal(S.improvementStatus({ queue: notReviewed, issues: 1, issuesVerified: true }),
-    "No improvement has been reviewed by triage yet; 1 published improvement issue is listed below under Problems in hand.")
+    "Not reviewed yet: no improvement has been reviewed by triage; 1 published improvement issue is listed below under Problems in hand.")
   assert.equal(S.improvementStatus({ queue: notReviewed, issues: 0, issuesVerified: true }),
-    "No improvement has been reviewed by triage yet; no improvement issue has been published yet.")
+    "Not reviewed yet: no improvement has been reviewed by triage; no improvement issue has been published yet.")
   assert.equal(S.improvementStatus({ queue: notReviewed, issues: 3, issuesVerified: false }),
-    "No improvement has been reviewed by triage yet; the published improvement issues could not be checked for this build.")
-  const reviewed = { schema: "factory-improvements/1", state: "reviewed", rows: [{ availability: "stale_or_conflicting" }, { availability: "private_detail_not_published" }] }
+    "Not reviewed yet: no improvement has been reviewed by triage; the published improvement issues could not be checked for this build.")
+  // Counts come from the rows the page draws: a malformed row is not counted,
+  // and stale and conflicting rows are named separately.
+  const current = queue({ route: "agent_ready", gate: null }).rows[0]
+  const stale = queue({ state: "stale", age: "stale" }).rows[0]
+  const conflicting = { ...structuredClone(current), conflict: true, availability: "stale_or_conflicting", handoff: { ...structuredClone(current.handoff), availability: "stale_or_conflicting" } }
+  assert.ok(S.improvementPresentation(conflicting), "a conflicting row still draws")
+  const reviewed = { schema: "factory-improvements/1", state: "reviewed", rows: [current, stale, conflicting, { availability: "stale_or_conflicting" }, null] }
   assert.equal(S.improvementStatus({ queue: reviewed, issues: 8, issuesVerified: true }),
-    "2 reviewed improvements are listed first, stale or conflicting first (1 of them); 8 published improvement issues follow under Problems in hand.")
+    "3 reviewed improvements are listed first, those needing a refresh first (1 stale, 1 in conflict); 8 published improvement issues follow under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: { ...reviewed, rows: [current] }, issues: 1, issuesVerified: true }),
+    "1 reviewed improvement is listed first; 1 published improvement issue follows under Problems in hand.")
+  assert.equal(S.improvementStatus({ queue: { ...reviewed, rows: [{ availability: "stale_or_conflicting" }] }, issues: 2, issuesVerified: true }),
+    "Reviewed improvements are published but none can be shown; 2 published improvement issues are listed below under Problems in hand.")
   assert.equal(S.improvementStatus({ queue: { ...reviewed, rows: [] }, issues: 2, issuesVerified: true }),
     "No current reviewed improvement is published; 2 published improvement issues are listed below under Problems in hand.")
   assert.equal(S.improvementStatus({ queue: null, issues: 2, issuesVerified: true }),
