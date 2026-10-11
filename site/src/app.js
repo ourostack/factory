@@ -4304,6 +4304,12 @@
         else {
           const node = document.getElementById("stackup");
           drawStackup(node, S.emphasizeCategories(bars, current.category), mode, null);
+          if (current.category && !S.supportedEmphasis(bars, current.category)) {
+            const note = el("p", "chart-caption compare-emphasis-note");
+            note.id = "compare-emphasis-note"; note.setAttribute("role", "status");
+            note.textContent = `The requested emphasis "${current.category}" is not a category drawn in this chart, so nothing is emphasized. Choose a category from Category emphasis, or use Clear emphasis.`;
+            node.prepend(note);
+          }
           const legend = node.querySelector(".sb-legend");
           if (legend) {
             const key = el("p", "compact-legend", "Recorded working: value-adding, necessary, classified waste or not labeled. Recorded task interruptions: no recorded task session, work on other tasks or another reported cause. Emphasis is a visual aid, not a new clock.");

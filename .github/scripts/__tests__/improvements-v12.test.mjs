@@ -190,3 +190,18 @@ test("review_minor_fixes_use_reader_words_and_state_failures", () => {
   // Status options match the page's definitions: "Done" is done; cancelled is its own choice.
   assert.match(app, /\["done", "Done"\], \["cancelled", "Cancelled"\]/)
 })
+
+test("unsupported_emphasis_is_explained_and_mutes_nothing", () => {
+  const bars = [{ job: "a1", segments: [{ key: "value", ms: 5 }, { key: "wait_no_session", cause: "no_session", ms: 7 }] }]
+  // A hand-typed category the chart does not draw (here the bare legacy key) is unsupported.
+  for (const category of ["no_session", "defects", "wait_other_task", "made_up"]) {
+    assert.equal(S.supportedEmphasis(bars, category), null, category)
+    assert.ok(S.emphasizeCategories(bars, category)[0].segments.every((s) => s.emphasized), `${category} mutes nothing`)
+  }
+  assert.equal(S.supportedEmphasis(bars, "wait_no_session"), "wait_no_session")
+  assert.equal(S.supportedEmphasis(bars, undefined), null)
+  // The page says so visibly.
+  const app = appSource()
+  assert.match(app, /compare-emphasis-note/)
+  assert.match(app, /is not a category drawn in this chart, so nothing is emphasized/)
+})

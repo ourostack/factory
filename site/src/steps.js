@@ -1708,11 +1708,16 @@
     for (const k of W.WAIT_KEYS) if (present.has(`wait_${k}`)) out.push([`wait_${k}`, WAIT_LABEL[k] || W.waitCauseLabel(k)]);
     return out;
   }
+  // The requested category when the chart draws it, otherwise null: a
+  // hand-typed or stale category emphasizes nothing rather than muting all.
+  function supportedEmphasis(bars, category) {
+    return typeof category === "string" && emphasisOptions(bars).some(([key]) => key === category) ? category : null;
+  }
   // Retain every task, segment, duration and denominator.
   function emphasizeCategories(rows, category) {
-    const valid = typeof category === "string" && (category === "waiting" || F.SEGMENTS.some((s) => s.key === category) || W.WAIT_KEYS.some((k) => category === `wait_${k}`));
+    const valid = supportedEmphasis(rows, category);
     return arr(rows).map((r) => ({ ...r, segments: arr(r.segments).map((s) => ({
-      ...s, emphasized: !valid || segmentCategory(s) === category || (category === "waiting" && !!s.cause),
+      ...s, emphasized: !valid || segmentCategory(s) === valid || (valid === "waiting" && !!s.cause),
     })) }));
   }
   // Reader-facing names for the public queue's lifecycle identifiers.
@@ -1763,6 +1768,7 @@
     selectTaskPopulation,
     emphasizeCategories,
     emphasisOptions,
+    supportedEmphasis,
     lifecycleLabel,
     improvementPresentation,
     findingMeaning,
