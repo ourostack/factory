@@ -41,30 +41,64 @@ test("the gate covers every primary and legacy route", () => {
   assert.ok(G.SCREENSHOT_VARIANTS.some((v) => v.theme === "dark") && G.SCREENSHOT_VARIANTS.some((v) => v.scale === 2))
 })
 
-const clean = { doc: { scrollWidth: 390, clientWidth: 390, bodyScrollWidth: 390 }, frames: [], clipped: [], offscreen: [], overlaps: [] }
+const clean = { doc: { scrollWidth: 390, clientWidth: 390, bodyScrollWidth: 390 }, frames: [], clipped: [], clippedY: [], offscreen: [], overlaps: [], controlOverlaps: [] }
 const codes = (m) => G.assessLayout(m).map((p) => p.code)
 
-test("only labeled bounded precision frames may scroll; the document never overflows", () => {
+test("only an explicitly marked, visibly labeled, bounded precision-timeline frame may pan; the document never overflows", () => {
   assert.deepEqual(codes(clean), [])
   assert.deepEqual(codes({ ...clean, doc: { ...clean.doc, scrollWidth: 391 } }), [], "one pixel of rounding is tolerated")
   assert.deepEqual(codes({ ...clean, doc: { ...clean.doc, scrollWidth: 392 } }), ["document_overflow"])
   assert.deepEqual(codes({ ...clean, doc: { ...clean.doc, bodyScrollWidth: 500 } }), ["document_overflow"])
-  const frame = { el: "div.chart-frame", labelled: true, bounded: true }
+  const frame = { el: "div.lanes", precision: true, labelled: true, bounded: true }
   assert.deepEqual(codes({ ...clean, frames: [frame] }), [])
+  // A captioned table or a labeled chart that scrolls is not a precision timeline: it must reflow.
+  assert.deepEqual(codes({ ...clean, frames: [{ ...frame, precision: false }] }), ["sideways_scroll"])
   assert.deepEqual(codes({ ...clean, frames: [{ ...frame, labelled: false }] }), ["frame_unlabelled"])
   assert.deepEqual(codes({ ...clean, frames: [{ ...frame, bounded: false }] }), ["frame_unbounded"])
   // A labeled frame never excuses document overflow.
   assert.deepEqual(codes({ ...clean, frames: [frame], doc: { ...clean.doc, scrollWidth: 900 } }), ["document_overflow"])
   assert.deepEqual(codes({ ...clean, clipped: [{ el: "button", text: "Clear" }] }), ["clipped"])
+  assert.deepEqual(codes({ ...clean, clippedY: [{ el: "p", text: "Two lines" }] }), ["clipped_vertical"])
   assert.deepEqual(codes({ ...clean, offscreen: [{ el: "a" }] }), ["offscreen_control"])
   assert.deepEqual(codes({ ...clean, overlaps: [{ chart: "pareto", a: "x", b: "y" }] }), ["overlapping_labels"])
+  assert.deepEqual(codes({ ...clean, controlOverlaps: [{ a: "button", b: "a" }] }), ["overlapping_controls"])
 })
 
-test("the gate must catch every planned negative control", () => {
-  for (const name of ["injected_document_overflow", "overflow_hidden_clipping", "overlapping_labels", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim"]) {
-    assert.ok(G.NEGATIVE_CONTROLS.includes(name), name)
-  }
+test("each problem says whether it is on a planted element, so a negative control proves it caught its own defect", () => {
+  const p = G.assessLayout({ ...clean, clipped: [{ el: "button", text: "x", planted: true }, { el: "td", text: "y" }] })
+  assert.deepEqual(p.map((x) => x.planted), [true, false])
+  const o = G.assessLayout({ ...clean, overlaps: [{ chart: "c", a: "x", b: "y", planted: true }], controlOverlaps: [{ a: "a", b: "b", planted: true }], clippedY: [{ el: "p", planted: true }], frames: [{ el: "div", precision: false, labelled: true, bounded: true, planted: true }] })
+  assert.ok(o.every((x) => x.planted === true))
+  const source = readFileSync(SCRIPT, "utf8")
+  assert.match(source, /data-gate-planted/)
+  // The off-screen exemption covers only the parked skip link.
+  assert.match(source, /\.skip-link/)
+})
+
+test("the gate must catch every planned negative control, and each control is actually run", () => {
+  const names = ["injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls", "unmarked_scroll_frame",
+    "missing_chart_equivalent", "broken_focus_return", "false_copied_claim"]
+  assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
+  const source = readFileSync(SCRIPT, "utf8")
+  for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
   for (const chart of ["stackup", "pareto", "ot-bars", "fe-dots", "swimlane"]) assert.ok(G.CHART_EQUIVALENTS[chart], chart)
+})
+
+test("routes that promise a chart must draw it, with an equivalent table that has body rows", () => {
+  assert.deepEqual(G.EXPECTED_CHARTS, { compare: ["stackup"], findings: ["pareto"], session: ["swimlane"] })
+})
+
+test("every required check is recorded by name, and a run that skips one fails", () => {
+  const required = ["keyboard_enter_selects_evidence_escape_closes_and_returns_focus", "keyboard_space_selects_evidence_escape_closes_and_returns_focus",
+    "keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", "tab_order_follows_the_page_on_primary_routes", "filter_change_updates_aggregates_and_coverage",
+    "clear_selection_without_the_original_link", "storage_denied_keeps_the_site_usable", "storage_methods_throwing_keep_the_site_usable",
+    "data_fetch_failure_says_so_and_navigation_works", "render_error_is_isolated", "json_twins_match_data_and_rendered_meaning"]
+  for (const name of required) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  const source = readFileSync(SCRIPT, "utf8")
+  for (const name of G.REQUIRED_CHECKS) assert.ok(source.includes(`check("${name}"`), `${name} is a check in the source`)
+  assert.match(source, /gate_ran_every_required_check/)
+  // The Space check waits for the selection instead of reading the address at once.
+  assert.match(source, /waitForFunction\(\(\) => location\.hash\.includes\("selection="\)/)
 })
 
 test("the command refuses missing, relative or in-repository paths before launching a browser", () => {
