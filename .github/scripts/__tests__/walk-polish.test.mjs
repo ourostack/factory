@@ -443,11 +443,13 @@ test("the site never turns Desk's bound: null into a direction; only an absent b
 
 test("the final review's fixes: one legend shape, a padded Pareto frame, the picker's single partial, two new glossary entries", () => {
   const css = read("site/src/styles.css")
-  assert.match(css, /\.tw-legend-buttons li \{ display: grid; grid-template-columns: minmax\(min\(10em, 100%\), 1fr\) auto;/, "the cause link has its own column")
+  // The cause link sits beside the row, and moves under it when larger text leaves no room (spec 4.5).
+  assert.match(css, /\.tw-legend-buttons li \{ display: flex; flex-wrap: wrap;/, "the cause link wraps under its row rather than leaving the page")
   assert.match(css, /\.tw-row > \.tw-ms \{ grid-column: 2;/, "every row puts its figure under its name")
   const app = read("site/src/app.js")
-  assert.match(app, /const plotW = colW \* n \+ \(phone \? rightW : 8\);/)
-  assert.match(app, /share \? \(phone \? "% of lead time" : "% of each task's lead time"\)/)
+  // The Pareto frame no longer pans (its bars wrap into rows), so it needs no end padding for a pinned axis.
+  assert.match(app, /const plotW = colW \* n \+ 8;/)
+  assert.match(app, /share \? \(phone \|\| k > 1 \? "% of lead time" : "% of each task's lead time"\)/)
   const html = read("site/src/index.html")
   assert.match(html, /<dt id="g-work-burst">Work burst<\/dt>/)
   assert.match(html, /<dt id="g-rework">Rework<\/dt>/)

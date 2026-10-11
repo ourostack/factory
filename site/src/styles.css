@@ -1247,7 +1247,8 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 
 /* ---------- Steps 2 to 4: compare, rank, act ---------- */
 .compare-lede, .causes-lede { color: var(--text-primary); }
-.mode-toggle { display: inline-flex; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+/* The choices wrap onto a second line rather than run past the page. */
+.mode-toggle { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .mode-btn, .ot-btn { font: inherit; font-size: 14px; padding: 6px 12px; min-height: 36px; background: var(--surface-1); color: var(--text-secondary); border: 0; cursor: pointer; }
 .mode-btn + .mode-btn, .ot-btn + .ot-btn { border-left: 1px solid var(--border); }
 .mode-btn[aria-pressed="true"], .ot-btn[aria-pressed="true"] { background: var(--text-primary); color: var(--page-plane); font-weight: 600; }
@@ -1361,8 +1362,8 @@ table.data-table td, table.data-table th { min-width: 60px; }
 /* Compare's phone table: three columns that fit the screen. */
 table.data-table.sb-compact { min-width: 0; font-size: 13px; }
 table.data-table.sb-compact th, table.data-table.sb-compact td { padding: 5px 6px; }
-/* The task's name takes the room the two figures leave, cut with an ellipsis. */
-table.data-table.sb-compact td:first-child { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The task's name takes the room the two figures leave and wraps there (spec 4.3). */
+table.data-table.sb-compact td:first-child { width: 100%; white-space: normal; overflow-wrap: anywhere; }
 table.data-table.sb-compact th:first-child, table.data-table.sb-compact td:first-child { padding-left: 0; }
 table.data-table.sb-compact th:last-child, table.data-table.sb-compact td:last-child { padding-right: 0; }
 details.full-table { margin-top: 10px; }
@@ -1394,7 +1395,10 @@ details.full-table[open] > summary::before, details.unlabeled-list[open] > summa
 .act-head { margin: 0 0 4px; font-weight: 600; }
 .act-ref { font-weight: 450; color: var(--text-muted); font-size: 14px; }
 .act-facts { margin: 0; display: grid; gap: 2px; font-size: 14px; }
-.act-facts > div { display: grid; grid-template-columns: minmax(7.5em, 10em) minmax(0, 1fr); gap: 10px; }
+/* The term and its value sit side by side; with larger text the value moves under the term. */
+.act-facts > div { display: flex; flex-wrap: wrap; gap: 0 10px; }
+.act-facts dt { flex: 0 0 auto; width: min(10em, 100%); }
+.act-facts dd { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
 .act-facts dt { color: var(--text-secondary); }
 .act-facts dd { margin: 0; }
 .owner-list li { margin-bottom: 4px; }
@@ -1519,3 +1523,16 @@ table.data-table.task-list-table td, table.data-table.task-list-table th { white
   .task-list-table td { padding: .35rem 0; }
   .task-list-table td::before { content: attr(data-label) ": "; display: block; font-weight: 600; font-size: .8rem; }
 }
+
+/* ---------- Tables that do not fit become stacked cards ----------
+   app.js adds .stacked to a table's holder when the table is wider than it;
+   each cell then shows its column heading above its value. */
+.stacked > table.data-table { min-width: 0 !important; width: 100%; }
+.stacked > table.data-table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.stacked > table.data-table, .stacked > table.data-table > tbody, .stacked > table.data-table > tbody > tr, .stacked > table.data-table > tbody > tr > td, .stacked > table.data-table > tbody > tr > th, .stacked > table.data-table > tfoot, .stacked > table.data-table > tfoot > tr, .stacked > table.data-table > tfoot > tr > td { display: block; width: 100% !important; max-width: none; }
+.stacked > table.data-table > caption { display: block; text-align: left; }
+.stacked > table.data-table tr { border-bottom: 1px solid var(--border); padding: 8px 0; }
+.stacked > table.data-table td, .stacked > table.data-table tbody th { border: 0; padding: 2px 0; text-align: left; white-space: normal !important; overflow-wrap: anywhere; min-width: 0 !important; }
+.stacked > table.data-table td::before, .stacked > table.data-table tbody th::before { content: attr(data-label); display: block; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.stacked > table.data-table td:not([data-label])::before, .stacked > table.data-table tbody th:not([data-label])::before, .stacked > table.data-table td[data-label=""]::before { content: none; }
+
