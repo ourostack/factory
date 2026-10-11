@@ -132,7 +132,8 @@ export function measureLayout(opts) {
     for (let n = e; n && n !== document.body; n = n.parentElement) {
       const cs = getComputedStyle(n)
       if (hiddenStyle(cs) || n.hidden) return false
-      if (n.tagName === "DETAILS" && !n.open && n !== e && !e.closest("summary")) return false
+      // A closed disclosure shows only its own summary.
+      if (n.tagName === "DETAILS" && !n.open && n !== e) { const own = n.querySelector(":scope > summary"); if (!own || !own.contains(e)) return false }
     }
     return true
   }
