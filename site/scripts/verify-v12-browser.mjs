@@ -72,6 +72,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls",
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
+  "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -81,11 +82,12 @@ export const REQUIRED_CHECKS = Object.freeze([
   "filter_change_updates_aggregates_and_coverage", "clear_selection_without_the_original_link",
   "guide_never_blocks_the_page", "touch_targets_are_at_least_24px", "status_and_legends_carry_non_color_markers",
   "storage_denied_keeps_the_site_usable", "storage_methods_throwing_keep_the_site_usable",
-  "data_fetch_failure_says_so_and_navigation_works", "render_error_is_isolated", "production_and_request_modes_are_unavailable_not_relabelled",
+  "data_fetch_failure_says_so_and_navigation_works", "render_error_is_isolated", "production_and_request_modes_follow_published_clocks",
   "json_twins_match_data_and_rendered_meaning", "chart_equivalents_compare_over_time_open",
   "clipboard_failure_is_stated_with_a_selected_complete_prompt", "clipboard_success_copies_exactly_the_shown_prompt",
   "private_decision_fixture_agrees_across_queue_overview_and_page",
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
+  "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -95,6 +97,60 @@ export const REQUIRED_CHECKS = Object.freeze([
 // a desktop.
 export const HEIGHT_BUDGET = Object.freeze({ 1280: 1.15, 390: 1.5 })
 export const HEIGHT_ROUTES = Object.freeze(["compare", "overview"])
+
+// Doubled text has its own budget against a fixed reference: the same page
+// of the same build at normal text, so neither the baseline nor the data
+// moves it. Text alone grows up to four times at doubled size on a phone
+// (twice the line height, half the words per line); charts and controls grow
+// less. A page past these multiples grows faster than its text.
+export const TEXT2X_HEIGHT_BUDGET = Object.freeze({ 1280: 2.5, 390: 3.25 })
+
+// Heights over their budget, as reader sentences. `heights` maps
+// "<route>_<width>" to { site, reference }; `budget` maps width to a multiple.
+export function assessHeights(heights, budget) {
+  const over = []
+  for (const [key, h] of Object.entries(heights)) {
+    const i = key.lastIndexOf("_"), name = key.slice(0, i), width = Number(key.slice(i + 1))
+    if (h.site > h.reference * budget[width]) over.push(`${name} at ${width} px: ${h.site} px vs reference ${h.reference} px (budget ${budget[width]}x)`)
+  }
+  return over
+}
+
+// Spec 4.3: a task page leads with its conclusion. It must start within the
+// first screen (this height) at every width and text size, judged on its own,
+// not against a baseline.
+export const FIRST_SCREEN = Object.freeze({ height: 900 })
+export function assessFirstScreen(m) {
+  if (!m || !m.found) return "no task conclusion is shown"
+  if (m.top >= FIRST_SCREEN.height) return `the task conclusion starts at ${m.top} px, below the first screen (${FIRST_SCREEN.height} px)`
+  return null
+}
+// Runs in the page.
+export function measureConclusion() {
+  const c = [...document.querySelectorAll("#view-task .task-conclusion")].find((e) => e.getBoundingClientRect().height > 0)
+  return c ? { found: true, top: Math.round(c.getBoundingClientRect().top + window.scrollY), planted: !!document.querySelector("[data-gate-planted]") } : { found: false, top: 0 }
+}
+// Runs in the page: tables shown as cards (a .stacked holder that is visible).
+export function findCardTables() {
+  return [...document.querySelectorAll(".stacked")].filter((h) => h.getBoundingClientRect().height > 0)
+    .map((h) => ({ el: (h.closest("[id]") || h).id || "table", planted: !!h.closest("[data-gate-planted]") }))
+}
+// Runs in the page: each table shown as cards keeps its table roles.
+export function checkTableRoles() {
+  const holders = [...document.querySelectorAll(".stacked")].filter((h) => h.getBoundingClientRect().height > 0)
+  const bad = []
+  for (const h of holders) {
+    const planted = !!h.closest("[data-gate-planted]")
+    const add = (what) => bad.push({ what, planted })
+    const t = h.querySelector(":scope > table")
+    if (!t || t.getAttribute("role") !== "table") { add("table without role=table"); continue }
+    for (const tr of t.rows) if (tr.getAttribute("role") !== "row") add("row without role=row")
+    for (const c of t.querySelectorAll("thead th")) if (c.getAttribute("role") !== "columnheader") add(`heading "${c.textContent.trim().slice(0, 20)}" without role=columnheader`)
+    for (const c of t.querySelectorAll("tbody td, tbody th")) if (!["cell", "rowheader"].includes(c.getAttribute("role"))) add("body cell without role=cell")
+    for (const c of t.querySelectorAll("tbody td")) if (!c.dataset.label && c.textContent.trim()) add("body cell without its column label")
+  }
+  return { holders: holders.length, bad }
+}
 
 const USAGE = "usage: node site/scripts/verify-v12-browser.mjs --site <absolute-dist> --baseline-site <absolute-dist> --out <protected-dir> --playwright-module <absolute-module>"
 
@@ -736,7 +792,7 @@ export async function main(argv = process.argv.slice(2)) {
             for (const route of ROUTES) {
               await open(page, route)
               await page.waitForTimeout(300)
-              cards.push(...await page.evaluate((rn) => [...document.querySelectorAll(".stacked")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => `${rn}: ${(h.closest("[id]") || h).id || "table"}`), route.name))
+              cards.push(...(await page.evaluate(findCardTables)).map((c) => `${route.name}: ${c.el}`))
             }
             if (cards.length) throw new Error(`tables shown as cards at 1280 px: ${cards.join("; ")}`)
             return { routes: ROUTES.length }
@@ -750,11 +806,29 @@ export async function main(argv = process.argv.slice(2)) {
               for (const name of HEIGHT_ROUTES) {
                 const route = ROUTES.find((r) => r.name === name)
                 const site = await height(page, url, route), base = await height(page, baseUrl, route)
-                heights[`${name}_${width}`] = { site, baseline: base, ratio: Math.round((site / base) * 100) / 100 }
-                if (site > base * HEIGHT_BUDGET[width]) over.push(`${name} at ${width} px: ${site} px vs baseline ${base} px (budget ${HEIGHT_BUDGET[width]}x)`)
+                heights[`${name}_${width}`] = { site, reference: base, ratio: Math.round((site / base) * 100) / 100 }
               }
             } finally { await context.close() }
           }
+          over.push(...assessHeights(heights, HEIGHT_BUDGET).map((o) => o.replace("vs reference", "vs baseline")))
+          if (over.length) throw new Error(over.join("; "))
+          return heights
+        })
+        await check("page_height_within_budget_at_doubled_text", async () => {
+          const heights = {}
+          for (const width of Object.keys(TEXT2X_HEIGHT_BUDGET).map(Number)) {
+            for (const scale of [1, 2]) {
+              const { context, page } = await newPage({ width, height: 900, scale })
+              try {
+                for (const name of HEIGHT_ROUTES) {
+                  const h = await height(page, url, ROUTES.find((r) => r.name === name))
+                  const k = `${name}_${width}`
+                  heights[k] = { ...heights[k], [scale === 1 ? "reference" : "site"]: h }
+                }
+              } finally { await context.close() }
+            }
+          }
+          const over = assessHeights(heights, TEXT2X_HEIGHT_BUDGET)
           if (over.length) throw new Error(over.join("; "))
           return heights
         })
@@ -763,19 +837,8 @@ export async function main(argv = process.argv.slice(2)) {
           try {
             await open(page, ROUTES.find((r) => r.name === "compare"), 2)
             await page.waitForTimeout(300)
-            const r = await page.evaluate(() => {
-              const holders = [...document.querySelectorAll(".stacked")].filter((h) => h.getBoundingClientRect().height > 0)
-              const bad = []
-              for (const h of holders) {
-                const t = h.querySelector(":scope > table")
-                if (!t || t.getAttribute("role") !== "table") { bad.push("table without role=table"); continue }
-                for (const tr of t.rows) if (tr.getAttribute("role") !== "row") bad.push("row without role=row")
-                for (const c of t.querySelectorAll("thead th")) if (c.getAttribute("role") !== "columnheader") bad.push(`heading "${c.textContent.trim().slice(0, 20)}" without role=columnheader`)
-                for (const c of t.querySelectorAll("tbody td, tbody th")) if (!["cell", "rowheader"].includes(c.getAttribute("role"))) bad.push("body cell without role=cell")
-                for (const c of t.querySelectorAll("tbody td")) if (!c.dataset.label && c.textContent.trim()) bad.push("body cell without its column label")
-              }
-              return { holders: holders.length, bad: [...new Set(bad)] }
-            })
+            const r = await page.evaluate(checkTableRoles)
+            r.bad = [...new Set(r.bad.map((x) => x.what))]
             if (!r.holders) throw new Error("no table became cards at 390 px with doubled text, so the roles were not exercised")
             if (r.bad.length) throw new Error(r.bad.join("; "))
             return { stacked: r.holders }
@@ -783,6 +846,25 @@ export async function main(argv = process.argv.slice(2)) {
         })
       } finally { await new Promise((resolve) => baseServer.close(resolve)) }
     }
+
+    // 5c. The task page leads with its conclusion: it starts within the first
+    // screen at every width and both text sizes, judged absolutely.
+    await check("conclusion_starts_within_the_first_screen", async () => {
+      const late = []
+      for (const scale of TEXT_SCALES) {
+        const { context, page } = await newPage({ width: 1440, height: FIRST_SCREEN.height, scale })
+        try {
+          await open(page, ROUTES.find((r) => r.name === "task"), scale)
+          for (let i = WIDTHS.length - 1; i >= 0; i--) {
+            await page.setViewportSize({ width: WIDTHS[i], height: FIRST_SCREEN.height })
+            const why = assessFirstScreen(await page.evaluate(measureConclusion))
+            if (why) late.push({ width: WIDTHS[i], scale, why })
+          }
+        } finally { await context.close() }
+      }
+      if (late.length) throw new Error(`${late.length} width and text-size pairs: ${late.slice(0, 3).map((l) => `${l.width} px at ${l.scale}x text: ${l.why}`).join("; ")}`)
+      return { widths: WIDTHS.length, text_scales: TEXT_SCALES }
+    })
 
     // 6. Long names, bounded values and a 26-week lookback stay readable.
     {
@@ -875,14 +957,26 @@ export async function main(argv = process.argv.slice(2)) {
         await settle(page, "tasks")
       } finally { await context.close() }
     })
-    await check("production_and_request_modes_are_unavailable_not_relabelled", async () => {
+    await check("production_and_request_modes_follow_published_clocks", async () => {
+      // Each mode draws a bar exactly for the tasks whose clock Desk published
+      // with a value; the rest say why, and nothing is drawn as a zero or
+      // relabelled from the legacy lead time. A drawn sum is task exposure.
+      const jobs = Array.isArray(targets.data && targets.data.jobs) ? targets.data.jobs : []
+      const valued = (key) => jobs.filter((j) => { const n = j && j.clocks && j.clocks[key]; return n && n.state !== "unavailable" && typeof n.value === "number" }).length
       const { context, page } = await newPage({ width: 768 })
       try {
-        for (const mode of ["production", "request"]) {
+        for (const [mode, key] of [["production", "production_ms"], ["request", "request_to_delivery_ms"]]) {
           await page.goto(url + `#/compare?mode=${mode}`)
           await settle(page, "compare")
-          if (!/unavailable/i.test(await page.locator("#stackup").innerText())) throw new Error(`${mode} not marked unavailable`)
-          if (await page.locator("#stackup .sb-col").count()) throw new Error(`${mode} draws legacy bars`)
+          const r = await page.evaluate(() => ({
+            drawn: [...document.querySelectorAll("#stackup .sb-col")].filter((c) => (c.querySelector(".sb-value") || {}).textContent).length,
+            text: document.getElementById("stackup").innerText,
+            view: document.getElementById("view-compare").innerText,
+          }))
+          const expected = valued(key)
+          if (r.drawn !== expected) throw new Error(`${mode}: ${r.drawn} bars with a value, the data publishes ${expected}`)
+          if (expected < jobs.length && !/not available/i.test(r.text)) throw new Error(`${mode}: tasks without the clock are not said to be unavailable`)
+          if (expected > 0 && !/task exposure/i.test(r.view)) throw new Error(`${mode}: the summed time is not labelled task exposure`)
         }
       } finally { await context.close() }
     })
@@ -1060,6 +1154,40 @@ export async function main(argv = process.argv.slice(2)) {
           await plant('<a href="#/compare" style="display:inline-block;width:24px;height:24px"></a>')
           await mustBeClean("unnamed_link")
         }, /^planted unnamed_link/)
+        await expectFailure("cards_at_wide_screen", async () => {
+          await openFresh()
+          await page.setViewportSize({ width: 1280, height: 900 })
+          try {
+            if ((await page.evaluate(findCardTables)).length) throw new Error("cards already shown before planting")
+            await plant('<div class="stacked"><table><tbody><tr><td>planted</td></tr></tbody></table></div>')
+            const hit = (await page.evaluate(findCardTables)).filter((c) => c.planted)
+            if (hit.length) throw new Error(`planted cards at 1280 px: ${hit.length}`)
+          } finally { await page.setViewportSize({ width: 390, height: 900 }) }
+        }, /^planted cards/)
+        await expectFailure("stacked_table_without_roles", async () => {
+          await openFresh()
+          await plant('<div class="stacked"><table><thead><tr><th>Name</th></tr></thead><tbody><tr><td>planted</td></tr></tbody></table></div>')
+          const hit = (await page.evaluate(checkTableRoles)).bad.filter((b) => b.planted)
+          if (hit.length) throw new Error(`planted table roles: ${hit.map((b) => b.what).join("; ")}`)
+        }, /^planted table roles/)
+        await expectFailure("page_height_over_budget", async () => {
+          await openFresh()
+          const reference = await page.evaluate(() => document.documentElement.scrollHeight)
+          if (assessHeights({ compare_390: { site: reference, reference } }, HEIGHT_BUDGET).length) throw new Error("over budget before planting")
+          await plant(`<div style="height:${reference}px"></div>`)
+          const site = await page.evaluate(() => document.documentElement.scrollHeight)
+          const over = assessHeights({ compare_390: { site, reference } }, HEIGHT_BUDGET)
+          if (over.length) throw new Error(`planted height: ${over[0]}`)
+        }, /^planted height/)
+        await expectFailure("conclusion_below_first_screen", async () => {
+          await page.goto("about:blank")
+          await open(page, ROUTES.find((r) => r.name === "task"))
+          const before = assessFirstScreen(await page.evaluate(measureConclusion))
+          if (before) throw new Error(`before planting: ${before}`)
+          await page.evaluate(() => { const d = document.createElement("div"); d.dataset.gatePlanted = "1"; d.style.height = "1200px"; const head = document.getElementById("task-head"); head.parentNode.insertBefore(d, head) })
+          const why = assessFirstScreen(await page.evaluate(measureConclusion))
+          if (why) throw new Error(`planted conclusion: ${why}`)
+        }, /^planted conclusion/)
         await expectFailure("overlapping_controls", async () => {
           await openFresh()
           await plant('<div style="position:relative;height:40px"><button style="position:absolute;left:0;top:0;width:120px">First control</button><button style="position:absolute;left:20px;top:4px;width:120px">Second control</button></div>')
