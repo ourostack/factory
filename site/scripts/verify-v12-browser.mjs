@@ -270,7 +270,8 @@ export function assessSharePairs(pairs) {
     // "~" and "(direction not known)" both say the direction is open, so the
     // figure and any at least or at most are what must agree.
     const bar = (r.bar === "<1%" ? "under 1%" : r.bar.replace(/^([≥≤~])/, (m) => sign[m])).replace(/^about /, "")
-    const words = r.words.replace(/ \((?:partial, )?direction not known\)$| \(partial\)$| so far$| \(could be (?:higher|lower)\)$/, "").replace(/^about /, "")
+    // At the edge the words say the one way off; the label's sign says the same.
+    const words = r.words.replace(/^(.*) \(could be lower\)$/, "at most $1").replace(/^(.*) \(could be higher\)$/, "at least $1").replace(/ \((?:partial, )?direction not known\)$| \(partial\)$| so far$/, "").replace(/^about /, "")
     if (bar !== words) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", the words "${r.words}"`)
     // An open direction is said on both, or on neither.
     const open = (t) => /^about |direction not known\)$/.test(t)
