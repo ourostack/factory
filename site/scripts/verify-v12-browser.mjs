@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place",
+  "caveat_in_the_conclusion_place", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -89,6 +89,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "private_decision_fixture_agrees_across_queue_overview_and_page",
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
+  "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under",
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -99,15 +100,9 @@ export const REQUIRED_CHECKS = Object.freeze([
 export const HEIGHT_BUDGET = Object.freeze({ 1280: 1.15, 390: 1.5 })
 export const HEIGHT_ROUTES = Object.freeze(["compare", "overview"])
 
-// Doubled text has its own budget against a fixed reference: the same page
-// of the same build at normal text, so neither the baseline nor the data
-// moves it. Text alone grows up to four times at doubled size on a phone
-// (twice the line height, half the words per line), which bounds these
-// multiples from above. The multiples themselves are fitted tripwires, not
-// values derived from the spec: each sits just above the tallest page
-// measured when it was set (Compare: 3.02x at 390 px, 2.44x at 1280 px), so
-// an unrelated change can trip them, and a trip means "look", not "wrong".
-export const TEXT2X_HEIGHT_BUDGET = Object.freeze({ 1280: 2.5, 390: 3.25 })
+// Doubled text has the same budget, against the baseline build's page at
+// doubled text, so shortening the normal-text page can never trip it. The
+// ratio to the same page at normal text is reported, not judged.
 
 // Heights over their budget, as reader sentences. `heights` maps
 // "<route>_<width>" to { site, reference }; `budget` maps width to a multiple.
@@ -128,21 +123,122 @@ export function assessHeights(heights, budget) {
 // most of a phone's screen, so the conclusion must start within two screens.
 export const FIRST_SCREEN = Object.freeze({ phone: 640, phoneMaxWidth: 480, wide: 900, text2xScreens: 2 })
 export function firstScreenHeight(width) { return width <= FIRST_SCREEN.phoneMaxWidth ? FIRST_SCREEN.phone : FIRST_SCREEN.wide }
-// A sentence that qualifies figures rather than concluding from them.
-export const CAVEAT_PATTERN = /\bincomplete\b|keep the bounds in view|not an all-clear|may still be/i
-// Each covered page and the element that holds its conclusion sentence.
-export const CONCLUSIONS = Object.freeze({ task: "#view-task .task-conclusion", compare: "#comparison-conclusion", overview: "#overview-conclusion" })
+// Each covered page's view. The page marks its conclusion sentence with
+// data-role="conclusion" and any caveat with data-role="caveat"; the first
+// marked sentence in the view must be the conclusion. The marker decides,
+// never the wording.
+export const CONCLUSIONS = Object.freeze({ task: "#view-task", compare: "#view-compare", overview: "#view-overview" })
 export function assessFirstScreen(m, width, scale = 1) {
   if (!m || !m.found) return "no conclusion is shown"
-  if (CAVEAT_PATTERN.test(m.text || "")) return `the conclusion's place holds a caveat, not a conclusion: "${String(m.text).slice(0, 80)}"`
+  if (m.role !== "conclusion") return `the conclusion's place holds a caveat, not a conclusion: "${String(m.text).slice(0, 80)}"`
   const limit = firstScreenHeight(width) * (scale === 2 ? FIRST_SCREEN.text2xScreens : 1)
   if (m.top >= limit) return `the conclusion starts at ${m.top} px, below the first screen (${limit} px at ${width} px wide${scale === 2 ? ", two screens with doubled text" : ""})`
   return null
 }
-// Runs in the page: where the conclusion starts and what it says.
-export function measureConclusion(selector) {
-  const c = [...document.querySelectorAll(selector)].find((e) => e.getBoundingClientRect().height > 0 && (e.textContent || "").trim() && !/^Loading/.test(e.textContent.trim()))
-  return c ? { found: true, top: Math.round(c.getBoundingClientRect().top + window.scrollY), text: c.textContent.trim() } : { found: false, top: 0, text: "" }
+// Runs in the page: the first marked sentence in the view, where it starts,
+// what it is marked as and what it says.
+export function measureConclusion(scope) {
+  const c = [...document.querySelectorAll(`${scope} [data-role="conclusion"], ${scope} [data-role="caveat"]`)].find((e) => e.getBoundingClientRect().height > 0 && (e.textContent || "").trim() && !/^Loading/.test(e.textContent.trim()))
+  return c ? { found: true, role: c.dataset.role, top: Math.round(c.getBoundingClientRect().top + window.scrollY), text: c.textContent.trim() } : { found: false, role: null, top: 0, text: "" }
+}
+
+// A duration's form, from a bar label ("≥2.2d", "<1s", "400ms") or a
+// sentence ("at least 2.2 days so far", "under a second"): its bound, its
+// number as written and its unit; null when the text holds none. The first
+// duration in the text wins.
+const UNIT_NAME = { d: "days", day: "days", h: "hours", hour: "hours", m: "minutes", minute: "minutes", s: "seconds", second: "seconds", ms: "milliseconds", millisecond: "milliseconds" }
+const BOUND_OF = { "≥": "lower", "at least": "lower", "≤": "upper", "at most": "upper", "~": "about", about: "about", "<": "under", under: "under" }
+export function durationForm(text) {
+  const t = String(text || "")
+  const hits = []
+  const w = t.match(/(at least |at most |about |under )?(\d[\d,]*(?:\.\d+)?) (day|hour|minute|second|millisecond)s?\b/i)
+  if (w) hits.push({ at: w.index, bound: w[1] ? BOUND_OF[w[1].trim().toLowerCase()] : null, value: w[2].replace(/,/g, ""), unit: UNIT_NAME[w[3].toLowerCase()] })
+  const sh = t.match(/(?:^|[^\w.])([≥≤~<])?(\d[\d,]*(?:\.\d+)?)(ms|d|h|m|s)(?![\w])/)
+  if (sh) hits.push({ at: sh.index, bound: sh[1] ? BOUND_OF[sh[1]] : null, value: sh[2].replace(/,/g, ""), unit: UNIT_NAME[sh[3]] })
+  const sec = t.match(/\bunder a second\b/i)
+  if (sec) hits.push({ at: sec.index, bound: "under", value: "1", unit: "seconds" })
+  if (!hits.length) return null
+  const { bound, value, unit } = hits.sort((a, b) => a.at - b.at)[0]
+  return { bound, value, unit }
+}
+// Each task's figure has one form: its bar label, table cell, tooltip and
+// accessible label agree in bound, number and unit. Rows are
+// { job, label, cell, tip, aria }; a missing field is not compared.
+export function assessTaskForms(rows) {
+  const out = []
+  for (const r of rows || []) {
+    const base = durationForm(r.label)
+    if (!base) continue
+    for (const [key, name] of [["cell", "table cell"], ["tip", "tooltip"], ["aria", "accessible label"]]) {
+      if (r[key] === null || r[key] === undefined) continue
+      const f = durationForm(r[key])
+      if (!f || f.bound !== base.bound || f.value !== base.value || f.unit !== base.unit) out.push(`${r.job}: the ${name} reads "${String(r[key]).slice(0, 60)}", the bar label "${r.label}"`)
+    }
+  }
+  return out
+}
+// The axis, the summed task exposure and the lead sentence compare
+// magnitudes, so they share one unit (the view's, from its largest value).
+export function assessViewUnits(r) {
+  const axisWord = r && r.axis ? String(r.axis).split(/\s+/)[0].toLowerCase() : null
+  const parts = [
+    ["lead sentence", r && r.lead ? (durationForm(r.lead) || {}).unit : null],
+    ["axis", ["days", "hours", "minutes"].includes(axisWord) ? axisWord : null],
+    ["sum", r && r.sum ? (durationForm(r.sum) || {}).unit : null],
+  ].filter(([, u]) => u)
+  if (parts.length < 2) return null
+  const [baseName, baseUnit] = parts[0]
+  const off = parts.slice(1).filter(([, u]) => u !== baseUnit).map(([n, u]) => `the ${n} in ${u}, the ${baseName} in ${baseUnit}`)
+  return off.length ? off.join("; ") : null
+}
+// A bound sign or word followed by "<" or "under" says two things at once.
+export function boundsBeforeUnder(texts) {
+  const out = []
+  for (const t of texts || []) for (const x of String(t || "").matchAll(/(≥|≤|~|\bat least|\bat most|\babout)\s*(<|under\b)/gi)) out.push(x[0])
+  return out
+}
+// Runs in the page: Compare's view-unit figures, each drawn task's figures
+// (bar label, table cell in this mode's column, tooltip, accessible label)
+// and every text a reader can meet (page text, accessible labels, tooltips).
+export function compareFigures() {
+  const view = document.getElementById("view-compare")
+  const tip = document.getElementById("tooltip")
+  const after = (t) => { const i = t.lastIndexOf(": "); return i >= 0 ? t.slice(i + 2) : t }
+  const jobOf = (href) => ((href || "").match(/#\/task\/([^?/&]+)/) || [])[1] || null
+  const mode = new URLSearchParams(location.hash.split("?")[1] || "").get("mode") || "all"
+  const column = { all: /^Lead time$/, working: /^Working$/, production: /^Production time$/, request: /^Request to delivery$/ }[mode]
+  const cells = new Map()
+  let columnShown = false
+  if (column) for (const table of view.querySelectorAll("#stackup-table table, #stackup .clock-modes-table")) {
+    const head = table.tHead ? table.tHead.rows[0] : table.rows[0]
+    const idx = head ? [...head.cells].findIndex((c) => column.test(c.textContent.trim())) : -1
+    if (idx < 0) continue
+    columnShown = true
+    for (const tr of table.tBodies[0] ? table.tBodies[0].rows : []) {
+      const a = tr.querySelector("a[href*='#/task/']"), td = tr.cells[idx], job = a && jobOf(a.getAttribute("href"))
+      if (job && td && !cells.has(job)) cells.set(job, td.textContent.trim())
+    }
+  }
+  const rows = [], tips = []
+  for (const a of view.querySelectorAll("#stackup a.sb-col")) {
+    const v = a.querySelector(".sb-value")
+    const label = v ? v.textContent.trim().replace(/\*$/, "") : ""
+    a.dispatchEvent(new FocusEvent("focus"))
+    const strong = tip ? tip.querySelector(".tt-row strong") : null
+    if (tip) tips.push(tip.innerText)
+    a.dispatchEvent(new FocusEvent("blur"))
+    if (!label) continue
+    const job = jobOf(a.getAttribute("href"))
+    const aria = (a.getAttribute("aria-label") || "").replace(/\. Follow this task\.$/, "")
+    rows.push({ job, label, aria: after(aria), tip: strong ? strong.textContent.trim() : null, cell: cells.has(job) ? cells.get(job) : null })
+  }
+  const one = (sel) => { const e = view.querySelector(sel); return e ? e.textContent.trim() : null }
+  const conclusion = one("#comparison-conclusion")
+  return {
+    mode, rows, cells: cells.size, column: columnShown,
+    axis: one("#stackup .axis-title"), sum: one("#stackup .clock-exposure"), lead: conclusion ? after(conclusion) : null,
+    texts: [view.innerText, ...[...view.querySelectorAll("[aria-label]")].map((e) => e.getAttribute("aria-label")), ...tips],
+  }
 }
 // Runs in the page: tables shown as cards (a .stacked holder that is visible).
 export function findCardTables() {
@@ -829,20 +925,24 @@ export async function main(argv = process.argv.slice(2)) {
           return heights
         })
         await check("page_height_within_budget_at_doubled_text", async () => {
+          // Against the baseline build at doubled text, with the normal-text
+          // budget; the ratio to this page at normal text is reported only.
           const heights = {}
-          for (const width of Object.keys(TEXT2X_HEIGHT_BUDGET).map(Number)) {
-            for (const scale of [1, 2]) {
+          for (const width of Object.keys(HEIGHT_BUDGET).map(Number)) {
+            for (const scale of [2, 1]) {
               const { context, page } = await newPage({ width, height: 900, scale })
               try {
                 for (const name of HEIGHT_ROUTES) {
-                  const h = await height(page, url, ROUTES.find((r) => r.name === name))
-                  const k = `${name}_${width}`
-                  heights[k] = { ...heights[k], [scale === 1 ? "reference" : "site"]: h }
+                  const route = ROUTES.find((r) => r.name === name), k = `${name}_${width}`
+                  if (scale === 2) {
+                    const site = await height(page, url, route), base = await height(page, baseUrl, route)
+                    heights[k] = { site, reference: base, ratio: Math.round((site / base) * 100) / 100 }
+                  } else heights[k].text2x_over_text1x = Math.round((heights[k].site / (await height(page, url, route))) * 100) / 100
                 }
               } finally { await context.close() }
             }
           }
-          const over = assessHeights(heights, TEXT2X_HEIGHT_BUDGET)
+          const over = assessHeights(heights, HEIGHT_BUDGET).map((o) => o.replace("vs reference", "vs the baseline's doubled text"))
           if (over.length) throw new Error(over.join("; "))
           return heights
         })
@@ -871,7 +971,7 @@ export async function main(argv = process.argv.slice(2)) {
           const { context, page } = await newPage({ width: 1440, height: firstScreenHeight(1440), scale })
           try {
             await open(page, ROUTES.find((r) => r.name === name), scale)
-            await page.waitForFunction((sel) => { const e = document.querySelector(sel); return e && e.textContent.trim() && !/^Loading/.test(e.textContent.trim()) }, selector, { timeout: 15000 }).catch(() => {})
+            await page.waitForFunction((sel) => { const e = document.querySelector(`${sel} [data-role="conclusion"]`); return e && e.textContent.trim() && !/^Loading/.test(e.textContent.trim()) }, selector, { timeout: 15000 }).catch(() => {})
             for (let i = WIDTHS.length - 1; i >= 0; i--) {
               await page.setViewportSize({ width: WIDTHS[i], height: firstScreenHeight(WIDTHS[i]) })
               const m = await page.evaluate(measureConclusion, selector)
@@ -1000,6 +1100,54 @@ export async function main(argv = process.argv.slice(2)) {
           if (expected > 0 && !/task exposure/i.test(r.view)) throw new Error(`${mode}: the summed time is not labelled task exposure`)
         }
       } finally { await context.close() }
+    })
+    // Compare's figures, read once per mode and width for the three checks
+    // below: page text, accessible labels and tooltips.
+    let compareRead = null
+    const readCompare = async () => {
+      if (compareRead) return compareRead
+      const out = []
+      for (const width of [1280, 390]) {
+        const { context, page } = await newPage({ width })
+        try {
+          for (const mode of ["all", "working", "production", "request"]) {
+            await page.goto(url + `#/compare?mode=${mode}`)
+            await settle(page, "compare")
+            out.push({ width, ...(await page.evaluate(compareFigures)) })
+          }
+        } finally { await context.close() }
+      }
+      return (compareRead = out)
+    }
+    await check("compare_axis_sum_and_lead_share_one_unit", async () => {
+      const seen = {}
+      for (const r of await readCompare()) {
+        const why = assessViewUnits(r)
+        if (why) throw new Error(`${r.mode} at ${r.width} px: ${why}`)
+        seen[`${r.mode}_${r.width}`] = { axis: r.axis, sum: r.sum ? (durationForm(r.sum) || {}).unit : null, lead: r.lead ? (durationForm(r.lead) || {}).unit : null }
+      }
+      return seen
+    })
+    await check("compare_task_figures_match_everywhere", async () => {
+      const seen = {}
+      for (const r of await readCompare()) {
+        const off = assessTaskForms(r.rows)
+        if (off.length) throw new Error(`${r.mode} at ${r.width} px: ${off.length} figures differ: ${off.slice(0, 3).join("; ")}`)
+        if (r.column && r.rows.length && !r.rows.some((x) => x.cell !== null)) throw new Error(`${r.mode} at ${r.width} px: a table column is shown but no bar matched a cell`)
+        seen[`${r.mode}_${r.width}`] = { bars: r.rows.length, with_table_cell: r.rows.filter((x) => x.cell !== null).length, with_tooltip: r.rows.filter((x) => x.tip !== null).length }
+      }
+      // A mode may draw no bar (no task has that clock), but the check must read some.
+      if (!Object.values(seen).some((x) => x.bars > 0)) throw new Error("no bar with a value was read in any mode")
+      return seen
+    })
+    await check("compare_no_bound_before_under", async () => {
+      const seen = {}
+      for (const r of await readCompare()) {
+        const bad = boundsBeforeUnder(r.texts)
+        if (bad.length) throw new Error(`${r.mode} at ${r.width} px: ${[...new Set(bad)].slice(0, 4).join(", ")}`)
+        seen[`${r.mode}_${r.width}`] = { texts: r.texts.length }
+      }
+      return seen
     })
 
     // 8. JSON twins agree with each other and with what the page says.
@@ -1214,10 +1362,37 @@ export async function main(argv = process.argv.slice(2)) {
           await open(page, ROUTES.find((r) => r.name === "task"))
           const before = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (before) throw new Error(`before planting: ${before}`)
-          await page.evaluate(() => { const c = document.querySelector("#view-task .task-conclusion"); c.dataset.gatePlanted = "1"; c.textContent = "The recorded window or its work split is incomplete. Keep the bounds in view before comparing tasks." })
+          // A caveat-marked sentence takes the conclusion's place, ahead of it.
+          await page.evaluate(() => { const c = document.querySelector('#view-task [data-role="conclusion"]'); const p = document.createElement("p"); p.dataset.gatePlanted = "1"; p.dataset.role = "caveat"; p.textContent = "Keep the bounds in view before comparing tasks."; c.before(p) })
           const why = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (why) throw new Error(`planted caveat: ${why}`)
         }, /^planted caveat: .*caveat/)
+        await expectFailure("view_unit_mismatch_on_compare", async () => {
+          await openFresh()
+          const before = await page.evaluate(compareFigures)
+          if (assessViewUnits(before)) throw new Error(`before planting: ${assessViewUnits(before)}`)
+          const other = (before.axis || "").toLowerCase().startsWith("hours") ? "Days elapsed" : "Hours elapsed"
+          await page.evaluate((t) => { const a = document.querySelector("#stackup .axis-title"); a.dataset.gatePlanted = "1"; a.textContent = t }, other)
+          const why = assessViewUnits(await page.evaluate(compareFigures))
+          if (why) throw new Error(`planted view unit: ${why}`)
+        }, /^planted view unit: the axis in/)
+        await expectFailure("task_figure_differs_on_compare", async () => {
+          await openFresh()
+          const before = assessTaskForms((await page.evaluate(compareFigures)).rows)
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          // One bar's label changes form; its table cell, tooltip and accessible label do not.
+          await page.evaluate(() => { const v = [...document.querySelectorAll("#stackup .sb-value")].find((e) => e.textContent.trim()); v.dataset.gatePlanted = "1"; v.textContent = "≥999h" })
+          const off = assessTaskForms((await page.evaluate(compareFigures)).rows)
+          if (off.length) throw new Error(`planted task figure: ${off[0]}`)
+        }, /^planted task figure: .*the (table cell|tooltip|accessible label) reads/)
+        await expectFailure("bound_before_under_on_compare", async () => {
+          await openFresh()
+          const before = boundsBeforeUnder((await page.evaluate(compareFigures)).texts)
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          await page.evaluate(() => { const a = document.querySelector("#stackup a.sb-col"); a.dataset.gatePlanted = "1"; a.setAttribute("aria-label", `${a.getAttribute("aria-label")} (at least under 0.01 days)`) })
+          const bad = boundsBeforeUnder((await page.evaluate(compareFigures)).texts)
+          if (bad.length) throw new Error(`planted bound: ${bad[0]}`)
+        }, /^planted bound: at least under/)
         await expectFailure("overlapping_controls", async () => {
           await openFresh()
           await plant('<div style="position:relative;height:40px"><button style="position:absolute;left:0;top:0;width:120px">First control</button><button style="position:absolute;left:20px;top:4px;width:120px">Second control</button></div>')

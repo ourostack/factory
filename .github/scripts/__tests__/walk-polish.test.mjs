@@ -216,7 +216,7 @@ test("the share mode lives in the URL and the page draws it on a 0 to 100% axis"
   assert.match(html, /<button type="button" class="mode-btn" data-mode="share" aria-pressed="false">Share of each task<\/button>/)
   const app = read("site/src/app.js")
   assert.match(app, /const scale = share \? \{ unit: "share", per: 1, max_ms: 1, ticks: \[0, 0\.25, 0\.5, 0\.75, 1\] \}/)
-  assert.match(app, /mode === "share" \? S\.shareBars\(all, taskRows\) : all/)
+  assert.match(app, /mode === "share" \? S\.shareBars\(allU, taskRows\) : allU/)
   assert.match(read("site/src/llms-template.txt"), /`\?mode=share`/)
 })
 

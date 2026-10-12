@@ -63,14 +63,14 @@ test("the lede: partial, counted from the first session, with working and value-
   const model = W.lede(row, F.reasonText, { idle: idle825(row) })
   assert.equal(model.state, "ok")
   const text = W.ledeText(model)
-  assert.match(text, /^This task took at least 54 hours, counted from its first session because its card \(its record on the desk\) was created after work began\./)
+  assert.match(text, /^This task took at least 2.2 days, counted from its first session because its card \(its record on the desk\) was created after work began\./)
   assert.match(text, /Agents were working for 17 hours of it; the evaluator \(an independent agent that labels the work\) judged under a second of that work value-adding/)
   // One cause covers 95% or more: one sentence, one number (I3).
   // 4 of its minutes have no recorded cause, so it is "nearly all", never "all" (R5).
-  assert.match(text, /Most of the 54 hours was waiting, not work: 36 hours, nearly all of it \(99% of the waiting\) while the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.match(text, /Most of the 2.2 days was waiting, not work: 36 hours, nearly all of it \(99% of the waiting\) while the agent had stopped and was waiting for the operator's next prompt\./)
   // When one cause is all of it, the sentence says so without a share.
   const whole = W.idleSplit(row, { bursts: [{ start_ms: 0, end_ms: 62609950, working_ms: 62609950 }], gaps: [{ start_ms: 62609950, end_ms: 193344986, waited_on: "next_prompt" }] })
-  assert.match(W.ledeText(W.lede(row, F.reasonText, { idle: whole })), /Most of the 54 hours was waiting, not work: for 36 hours the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.match(W.ledeText(W.lede(row, F.reasonText, { idle: whole })), /Most of the 2.2 days was waiting, not work: for 36 hours the agent had stopped and was waiting for the operator's next prompt\./)
   assert.doesNotMatch(text, /in all/)
   assert.match(text, /The longest single wait was 19 hours, also for the next prompt\./)
   // Flow efficiency is defined in place; a lead time that is a lower bound makes it an upper bound.
@@ -186,15 +186,17 @@ test("the lede degrades honestly: no tasks file, or no row for this task, is sai
   assert.doesNotMatch(W.ledeText(noRow), /\d/)
 })
 
-test("durations in words and in short labels use hours up to three days", () => {
+test("durations in words and in short labels use hours below two days, then days", () => {
   assert.equal(W.durationWords(400), "under a second")
   assert.equal(W.durationWords(40000), "40 seconds")
   assert.equal(W.durationWords(12 * M), "12 minutes")
   assert.equal(W.durationWords(4.26 * H), "4.3 hours")
-  assert.equal(W.durationWords(53.7 * H), "54 hours")
+  assert.equal(W.durationWords(47.4 * H), "47 hours")
+  assert.equal(W.durationWords(53.7 * H), "2.2 days")
   assert.equal(W.durationWords(4.5 * 24 * H), "4.5 days")
   assert.equal(W.durationShort(0), "0s")
-  assert.equal(W.durationShort(48 * H), "48h")
+  assert.equal(W.durationShort(47 * H), "47h")
+  assert.equal(W.durationShort(48 * H), "2d")
   assert.equal(W.durationShort(80 * H), "3.3d")
 })
 

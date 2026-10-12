@@ -84,7 +84,7 @@ test("agent working time mode shows only tasks with labeled working time, at the
   assert.ok(v.bars.every((b) => b.group === "finished" && b.state === "ok"))
   assert.ok(Math.max(...v.bars.map((b) => b.total_ms)) < 20 * H, "the scale fits the labeled tasks, not the open ones")
   assert.equal(v.left_out, 23)
-  assert.match(v.text, /^23 tasks are left out because none of their working time is labeled yet: 8 still open hold \d+ hours of working time not labeled yet, the most in “Task 1f0ae588” \(258 hours\); 1 done but not labeled yet holds 3\.6 hours; 14 have no working time measured\. The table below lists every task\.$/)
+  assert.match(v.text, /^23 tasks are left out because none of their working time is labeled yet: 8 still open hold [\d.]+ days of working time not labeled yet, the most in “Task 1f0ae588” \(10.7 days\); 1 done but not labeled yet holds 3\.6 hours; 14 have no working time measured\. The table below lists every task\.$/)
   // A bar whose working time is all "not labeled yet" is left out; one with any label stays.
   const a = rows("a")
   const o = rows("o", { status: "processing", leadN: p(8 * H, ["censored"]) })
@@ -351,8 +351,8 @@ test("on a phone, Compare's table is three columns (task, lead time, waiting), w
   assert.equal(rowsC.length, 31)
   const first = rowsC[0]
   assert.deepEqual(Object.keys(first), ["job", "name", "href", "lead", "waiting"])
-  assert.equal(first.lead, "100h")
-  assert.equal(first.waiting, "100h")
+  assert.equal(first.lead, "4.2d")
+  assert.equal(first.waiting, "4.2d")
   assert.ok(rowsC.some((r) => r.lead.startsWith("≥") && /^[≤~≥]?\d/.test(r.waiting)))
   assert.ok(rowsC.some((r) => r.lead === "no data" && r.waiting === "not known"))
   assert.equal(S.fullTableSummary(31), "Every figure, as a table (31 tasks)")

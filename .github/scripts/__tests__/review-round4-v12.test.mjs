@@ -80,7 +80,6 @@ test("the task page leads with a conclusion; the caveat follows it and is never 
   const s = W.taskSummary(row, F.reasonText, { idle: { state: "partial", value: 9 * H, bound: "lower", by: [] } })
   assert.doesNotMatch(s.conclusion, /incomplete|keep the bounds/i)
   assert.match(s.caveat, /incomplete/)
-  assert.ok(G.CAVEAT_PATTERN.test(s.caveat) && !G.CAVEAT_PATTERN.test(s.conclusion))
   // At least 9 hours waiting against at least 1 hour of work does not rank them: the conclusion says so.
   assert.match(s.conclusion, /cannot yet say whether waiting or working/)
   const ranked = W.taskSummary({ ...row, working_ms: p(H, "upper") }, F.reasonText, { idle: { state: "partial", value: 9 * H, bound: "lower", by: [] } })
@@ -132,13 +131,14 @@ test("the first-screen check is per width, wants the conclusion sentence, and co
   assert.equal(G.firstScreenHeight(480), 640)
   assert.equal(G.firstScreenHeight(481), 900)
   assert.deepEqual(Object.keys(G.CONCLUSIONS).sort(), ["compare", "overview", "task"])
-  assert.equal(G.assessFirstScreen({ found: true, top: 600, text: "Waiting is the largest recorded part." }, 390), null)
-  assert.match(G.assessFirstScreen({ found: true, top: 700, text: "Waiting is the largest." }, 390), /below the first screen \(640 px/)
-  assert.equal(G.assessFirstScreen({ found: true, top: 700, text: "Waiting is the largest." }, 800), null)
-  assert.match(G.assessFirstScreen({ found: true, top: 10, text: "The recorded window or its work split is incomplete." }, 800), /caveat/)
+  assert.equal(G.assessFirstScreen({ found: true, role: "conclusion", top: 600, text: "Waiting is the largest recorded part." }, 390), null)
+  assert.match(G.assessFirstScreen({ found: true, role: "conclusion", top: 700, text: "Waiting is the largest." }, 390), /below the first screen \(640 px/)
+  assert.equal(G.assessFirstScreen({ found: true, role: "conclusion", top: 700, text: "Waiting is the largest." }, 800), null)
+  assert.match(G.assessFirstScreen({ found: true, role: "caveat", top: 10, text: "The recorded window or its work split is incomplete." }, 800), /caveat/)
   assert.match(G.assessFirstScreen({ found: false }, 800), /no conclusion/)
   const source = readFileSync(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)), "utf8")
-  assert.match(source, /fitted tripwires/)
+  // Doubled text is budgeted against the baseline, so no fitted tripwire remains.
+  assert.doesNotMatch(source, /TEXT2X_HEIGHT_BUDGET/)
 })
 
 test("Overview and Compare lead with their conclusion, right under the heading", () => {
@@ -148,7 +148,6 @@ test("Overview and Compare lead with their conclusion, right under the heading",
   assert.equal(B.conclusionWords({ state: "attention", attention: [item("a"), item("b")], investigation: [] }), "2 items need your attention first, led by: a.")
   assert.equal(B.conclusionWords({ state: "limited", attention: [], investigation: [item("Deliveries are waiting for an answer")] }), "Nothing is flagged for your attention first; 1 recorded pattern is worth investigating: Deliveries are waiting for an answer.")
   assert.equal(B.conclusionWords({ state: "limited", attention: [], investigation: [] }), "Nothing in this briefing is flagged for attention or investigation.")
-  for (const s of ["One item needs your attention first: x.", "Nothing in this briefing is flagged for attention or investigation."]) assert.ok(!G.CAVEAT_PATTERN.test(s))
   const html = read("site/src/index.html")
   const after = (view, id) => { const v = html.slice(html.indexOf(`id="view-${view}"`)); return v.slice(v.indexOf("</h1>") + 5).trimStart().startsWith(`<p id="${id}"`) }
   assert.ok(after("overview", "overview-conclusion"), "the Overview's conclusion follows its heading")
