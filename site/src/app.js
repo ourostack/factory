@@ -253,7 +253,8 @@
     for (const h of wide.filter(overflows)) h.classList.add("stacked");
     // A table that fits only by wrapping, or by squeezing its first (text)
     // column below a few words' width, can still be a tall ribbon of broken
-    // lines. It keeps whichever layout is shorter: the table or the cards.
+    // lines. It becomes cards only when they are clearly shorter (by a fifth);
+    // otherwise a table that fits stays a table.
     const narrowFirst = (h) => {
       const td = h.querySelector(":scope > table.data-table > tbody > tr > td:first-child");
       return !!td && td.getBoundingClientRect().width < 6 * (parseFloat(getComputedStyle(td).fontSize) || 16);
@@ -262,7 +263,7 @@
       if (h.classList.contains("stacked") || !(h.classList.contains("fit-wrap") || narrowFirst(h))) continue;
       const asTable = h.getBoundingClientRect().height;
       h.classList.add("stacked");
-      if (h.getBoundingClientRect().height >= asTable) h.classList.remove("stacked");
+      if (h.getBoundingClientRect().height > asTable * 0.8) h.classList.remove("stacked");
     }
   }
   let fitPending = false;

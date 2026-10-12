@@ -100,9 +100,9 @@ test("Over time stays closed below the conclusion, its summary stating the one-l
   assert.match(app, /Over time: \$\{ot\.trend\.words\}/)
 })
 
-test("a table that fits only by wrapping keeps whichever is shorter, the table or the cards", () => {
+test("a table that fits only by wrapping becomes cards only when they are clearly shorter", () => {
   const app = read("site/src/app.js")
-  assert.match(app, /const asTable = h\.getBoundingClientRect\(\)\.height;\n\s+h\.classList\.add\("stacked"\);\n\s+if \(h\.getBoundingClientRect\(\)\.height >= asTable\) h\.classList\.remove\("stacked"\);/)
+  assert.match(app, /const asTable = h\.getBoundingClientRect\(\)\.height;\n\s+h\.classList\.add\("stacked"\);\n\s+if \(h\.getBoundingClientRect\(\)\.height > asTable \* 0\.8\) h\.classList\.remove\("stacked"\);/)
   const css = read("site/src/styles.css")
   assert.match(css, /minmax\(min\(100%, 300px\), 1fr\)/, "cards grid by pixels, so doubled text still gets several columns")
 })
