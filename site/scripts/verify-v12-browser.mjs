@@ -23,6 +23,7 @@
 
 import { createHash } from "node:crypto"
 import { createServer } from "node:http"
+import { loadavg } from "node:os"
 import { existsSync, statSync } from "node:fs"
 import { mkdir, readFile, readdir, stat, writeFile, chmod } from "node:fs/promises"
 import { createRequire } from "node:module"
@@ -73,7 +74,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "loading_marker_never_clears",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -653,23 +654,66 @@ export function trackRequests(page) {
   return open
 }
 // How long a route may take to settle against the local server. Every
-// settle() is timed and recorded; pages_settle_within_budget fails a route
-// over budget, so a slow view cannot pass by being slow but finished.
+// settle() is timed and recorded with the kind of page it ran in (width,
+// height, text scale, theme) and whether it followed a navigation or an
+// action on the page. A navigation over budget is timed again, twice, in the
+// same kind of page, back to back with main's same route (the baseline
+// build), and the faster time of each is kept. pages_settle_within_budget
+// then passes it only when the re-timed route is within budget (a spike), or
+// main is itself over budget in this run (the machine is busy) and the route
+// is at most SETTLE_RATIO times main's. On a quiet machine the budget is a
+// hard limit. A settle that followed an action cannot be replayed from its
+// URL, so it is never excused: over budget, it fails.
 export const SETTLE_BUDGET_MS = 5000
+export const SETTLE_RATIO = 2
 const SETTLE_TIMES = []
+// One re-timing per route and kind of page: { ms, main_ms }, the faster of
+// two runs each.
+export const settleKey = (t) => [t.where, t.width, t.height, t.scale, t.theme].join("|")
+const RETIMES = new Map()
 // A page whose settle times go to its own list instead (a control's page).
 const SINKS = new WeakMap()
-export function assessSettle(times, budget = SETTLE_BUDGET_MS) {
-  return (times || []).filter((t) => t.ms > budget).map((t) => `${t.view}${t.where ? ` (${t.where})` : ""}: ${(t.ms / 1000).toFixed(1)} s`)
+// Each page's text scale and theme, and whether the check altered it (an
+// init script, or a route override that plants or holds back data).
+const PAGE_KIND = new WeakMap()
+// The URL each page's last goto asked for and where it landed, until a
+// settle reads it. A settle is a navigation only when the page is still there.
+const NAVIGATED = new WeakMap()
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`
+const kindWords = (t) => (t.width ? ` at ${t.width} px${t.scale && t.scale !== 1 ? `, text ${t.scale}x` : ""}${t.theme && t.theme !== "light" ? `, ${t.theme}` : ""}` : "")
+const settleName = (t) => `${t.view}${t.where ? ` (${t.where})` : ""}${kindWords(t)}`
+// Why a settle cannot be re-timed from its URL in a fresh page, or null.
+const unrepeatable = (t) => (t.after === "interaction" ? "after an action on the page" : t.altered ? "on a page the check altered" : null)
+const excusedBy = (t, budget, retimes) => {
+  if (unrepeatable(t)) return null
+  const r = retimes.get(settleKey(t))
+  if (!r) return null
+  if (r.ms <= budget) return "within budget when re-timed"
+  return r.main_ms > budget && r.ms <= SETTLE_RATIO * r.main_ms ? "main was over budget too" : null
 }
+export function assessSettle(times, budget = SETTLE_BUDGET_MS, retimes = new Map()) {
+  return (times || [])
+    .filter((t) => t.ms > budget && !excusedBy(t, budget, retimes))
+    .map((t) => { const r = retimes.get(settleKey(t)); return `${settleName(t)}: ${secs(t.ms)}, ${unrepeatable(t) ? `${unrepeatable(t)}, so not re-timed` : r ? `re-timed ${secs(r.ms)} (main ${secs(r.main_ms)})` : "not re-timed"}` })
+}
+// Every route that went over budget and was excused, with why.
+export function settleExcused(times, budget = SETTLE_BUDGET_MS, retimes = RETIMES) {
+  return (times || []).filter((t) => t.ms > budget && excusedBy(t, budget, retimes)).map((t) => ({ ...t, retimed_ms: retimes.get(settleKey(t)).ms, main_ms: retimes.get(settleKey(t)).main_ms, because: excusedBy(t, budget, retimes) }))
+}
+export const excusedWarning = (x) => `warning: ${settleName(x)} settled in ${secs(x.ms)}, over the ${SETTLE_BUDGET_MS / 1000} s budget, and was excused: ${x.because} (re-timed ${secs(x.retimed_ms)}, main ${secs(x.main_ms)})`
 // The body of pages_settle_within_budget: throws when no route was timed or
-// any route is over budget; the slow-file control runs this same function.
-export function settleBudget(times, budget = SETTLE_BUDGET_MS) {
+// a route over budget is not excused by its re-timing; the slow-file controls
+// run this same function.
+export function settleBudget(times, budget = SETTLE_BUDGET_MS, retimes = RETIMES) {
   if (!times.length) throw new Error("no route was timed")
-  const over = assessSettle(times, budget)
+  const over = assessSettle(times, budget, retimes)
   if (over.length) throw new Error(`${over.length} of ${times.length} over ${budget / 1000} s: ${over.slice(0, 5).join("; ")}`)
   const sorted = [...times].sort((a, b) => a.ms - b.ms)
-  return { settled: times.length, budget_ms: budget, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse() }
+  return { settled: times.length, after_an_action: times.filter((t) => t.after === "interaction").length, on_an_altered_page: times.filter((t) => t.altered).length, budget_ms: budget, ratio: SETTLE_RATIO, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse(), over_budget_excused: settleExcused(times, budget, retimes), load: loadavg() }
+}
+// Two URLs for the same page: the same once parsed.
+export function sameUrl(a, b) {
+  try { return new URL(a).href === new URL(b).href } catch { return a === b }
 }
 // A view is ready when it is shown, no request is in flight, nothing in it
 // is marked as loading (aria-busy, or the site's shared is-loading class,
@@ -698,7 +742,15 @@ async function settle(page, view, timeout = 20000, networkTimeout = 60000) {
       if (idleSince === null) idleSince = Date.now()
       if (now === last && now >= 0) {
         const ms = Date.now() - t0
-        ;(SINKS.get(page) || SETTLE_TIMES).push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, "") })
+        const size = page.viewportSize() || {}
+        const kind = PAGE_KIND.get(page) || {}
+        // A navigation is a settle at the URL the last goto asked for, with no
+        // settle since. Anything else followed an action on the page: no
+        // goto, or a goto and then a click that moved the page on.
+        const asked = NAVIGATED.get(page)
+        NAVIGATED.delete(page)
+        const after = asked !== undefined && (sameUrl(asked.asked, page.url()) || (asked.landed !== null && sameUrl(asked.landed, page.url()))) ? "navigation" : "interaction"
+        ;(SINKS.get(page) || SETTLE_TIMES).push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, ""), width: size.width, height: size.height, scale: kind.scale, theme: kind.theme, after, altered: !!kind.altered })
         return ms
       }
       last = now
@@ -714,7 +766,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (args.error) { process.stderr.write(args.error + "\n"); return 2 }
   await mkdir(args.out, { recursive: true })
   const cases = [], screenshots = []
-  const resources = { pid: process.pid, server: null, server_closed: false, browser_closed: false }
+  const resources = { pid: process.pid, server: null, server_closed: false, browser_closed: false, load_at_start: loadavg() }
   const record = (name, passed, extra = {}) => { cases.push({ name, passed, ...extra }); if (!passed) process.stderr.write(`FAIL ${name}: ${extra.error || JSON.stringify(extra.problems || "").slice(0, 400)}\n`) }
   const check = async (name, fn) => {
     try { const details = await fn(); record(name, true, details ? { details } : {}) }
@@ -748,6 +800,17 @@ export async function main(argv = process.argv.slice(2)) {
       for (const s of init) await context.addInitScript(s.fn, s.arg)
       const page = await context.newPage()
       trackRequests(page)
+      const kind = { scale, theme, altered: init.length > 0 }
+      PAGE_KIND.set(page, kind)
+      // The settle after a goto, at the URL it asked for, is a navigation.
+      const goto = page.goto.bind(page)
+      // `landed` is where the page stood when the goto resolved: the site's
+      // own redirect of a legacy route is part of the navigation.
+      page.goto = async (to, ...a) => { const nav = { asked: to, landed: null }; NAVIGATED.set(page, nav); const r = await goto(to, ...a); nav.landed = page.url(); return r }
+      // A route override changes what the page loads, so its settles cannot
+      // be re-timed in a fresh page.
+      const route = page.route.bind(page)
+      page.route = (...a) => { kind.altered = true; return route(...a) }
       page.setDefaultTimeout(15000)
       const errors = []
       page.on("pageerror", (e) => errors.push(String(e)))
@@ -1521,6 +1584,33 @@ export async function main(argv = process.argv.slice(2)) {
     // 10. Negative controls: each injected defect must make the real check
     // fail on the planted element itself (data-gate-planted), so a defect
     // the page already has can never stand in for the one injected.
+    // A route timed on this build or on main (the baseline build), in the
+    // kind of page `t` settled in, into its own list. `delay` holds one data
+    // file back, for the slowdown controls.
+    let mainServer = null
+    const timeRoute = async (onMain, t, delay = 0) => {
+      if (onMain && !mainServer) { mainServer = await serve(args.baseline); resources.main_server = `http://127.0.0.1:${mainServer.address().port}/` }
+      const { context, page } = await newPage({ width: t.width || 1280, height: t.height || 900, scale: t.scale || 1, theme: t.theme || "light" })
+      const sink = []
+      SINKS.set(page, sink)
+      try {
+        if (delay) await page.route("**/rollups/causes.json", async (r) => { await new Promise((ok) => setTimeout(ok, delay)); await r.continue() })
+        await page.goto((onMain ? resources.main_server : url) + t.where)
+        await settle(page, t.view)
+      } finally { await context.close() }
+      return sink[0].ms
+    }
+    // A route re-timed twice on this build and on main, alternating, so a
+    // spike of load falls on both; the faster of each is kept.
+    const retime = async (t, delay = 0, mainDelay = 0) => {
+      const here = [], main = []
+      for (let i = 0; i < 2; i++) { here.push(await timeRoute(false, t, delay)); main.push(await timeRoute(true, t, mainDelay)) }
+      return { ms: Math.min(...here), main_ms: Math.min(...main), load: loadavg() }
+    }
+    // The re-timing of each navigation over budget that has none yet.
+    const retimeOver = async (times) => {
+      for (const t of times) if (t.ms > SETTLE_BUDGET_MS && t.after !== "interaction" && !t.altered && !RETIMES.has(settleKey(t))) RETIMES.set(settleKey(t), await retime(t))
+    }
     const expectFailure = async (name, fn, mustMatch) => {
       let failed = false, why = ""
       try { await fn() } catch (e) { why = String(e && e.message || e).slice(0, 300); failed = mustMatch.test(why) }
@@ -1720,8 +1810,54 @@ export async function main(argv = process.argv.slice(2)) {
             await settle(slow.page, "cause")
           } finally { await slow.context.close() }
           if (!sink.length) throw new Error("the slow page was not timed")
-          settleBudget([...SETTLE_TIMES, ...sink])
-        }, /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\): 1\d\.\d s/)
+          // Re-timed like any route over budget, with the file still late.
+          await retimeOver(SETTLE_TIMES)
+          // The re-timing holds the same file back, so the page's one
+          // alteration is replayed and the route is judged on its times.
+          const slowed = { ...sink[0], altered: false }
+          settleBudget([...SETTLE_TIMES, slowed], SETTLE_BUDGET_MS, new Map([...RETIMES, [settleKey(slowed), await retime(slowed, 10000)]]))
+        }, /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\) at 1280 px: 1\d\.\d s, re-timed 1\d\.\d s \(main \d+\.\d s\)/)
+        await expectFailure("slowdown_3x_over_budget", async () => {
+          // Main is held back 2.5 s; this build three times main's time.
+          // Re-timed back to back it is still over the budget, and main is
+          // not, so it must fail.
+          const t = { view: "cause", where: routeHash(ROUTES.find((x) => x.name === "cause"), targets), width: 1280, height: 900, scale: 1, theme: "light", after: "navigation" }
+          const main = await timeRoute(true, t, 2500)
+          const r = await retime(t, 3 * main, 2500)
+          if (r.ms < 3 * r.main_ms) throw new Error(`not a 3x slowdown: ${secs(r.ms)} against main ${secs(r.main_ms)}`)
+          settleBudget([{ ...t, ms: r.ms }], SETTLE_BUDGET_MS, new Map([[settleKey(t), r]]))
+        }, /^1 of 1 over 5 s: cause \(#\/causes\/[^)]*\) at 1280 px: \d+\.\d s, re-timed \d+\.\d s \(main [2-4]\.\d s\)/)
+        await expectFailure("slow_after_action", async () => {
+          // A view opened by an action on the page (not a goto) with its data
+          // 6 s late. A fast re-timing of its URL must not excuse it.
+          const acted = await newPage({ width: 1280 })
+          const sink = []
+          SINKS.set(acted.page, sink)
+          try {
+            await acted.page.goto(url + "#/tasks")
+            await settle(acted.page, "tasks")
+            await acted.page.route("**/*.json", async (r) => { await new Promise((ok) => setTimeout(ok, 6000)); await r.continue() })
+            await acted.page.evaluate((job) => { location.hash = `#/task/${job}` }, targets.task)
+            await settle(acted.page, "task")
+          } finally { await acted.context.close() }
+          const t = sink[sink.length - 1]
+          if (!t || t.after !== "interaction") throw new Error(`the settle after the action was recorded as ${t ? t.after : "nothing"}`)
+          if (sink[0].after !== "navigation") throw new Error(`the settle after the goto was recorded as ${sink[0].after}`)
+          if (t.ms <= SETTLE_BUDGET_MS) throw new Error(`the action was not slow: ${secs(t.ms)}`)
+          // A goto, then a click that moves the page on, then one settle: the
+          // page is no longer where the goto asked, so that is an action too.
+          const clicked = await newPage({ width: 1280 })
+          const sink2 = []
+          SINKS.set(clicked.page, sink2)
+          try {
+            await clicked.page.goto(url + "#/")
+            await clicked.page.waitForSelector('a[href="#/tasks"]')
+            await clicked.page.evaluate(() => { location.hash = "#/tasks" })
+            await settle(clicked.page, "tasks")
+          } finally { await clicked.context.close() }
+          if (!sink2.length || sink2[0].after !== "interaction") throw new Error(`a settle after a goto and a click was recorded as ${sink2.length ? sink2[0].after : "nothing"}`)
+          settleBudget([t], SETTLE_BUDGET_MS, new Map([[settleKey(t), { ms: 600, main_ms: 590 }]]))
+        }, /^1 of 1 over 5 s: task \(#\/task\/[^)]*\) at 1280 px: \d+\.\d s, after an action on the page, so not re-timed/)
         await expectFailure("loading_marker_never_clears", async () => {
           // A loading marker left in a settled view must keep settle() from passing.
           const stuck = await newPage({ width: 1280 })
@@ -1772,6 +1908,10 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 390, init: [rejecting, lie] })
       try { await clipboardFailure(page) } finally { await context.close() }
     }, /status after a refused copy/)
+    // Every route over budget is re-timed beside main, in this run, for
+    // pages_settle_within_budget below.
+    await retimeOver(SETTLE_TIMES)
+    if (mainServer) await new Promise((resolve) => mainServer.close(resolve))
   } catch (e) {
     record("gate_run", false, { error: String(e && e.stack || e) })
   } finally {
@@ -1781,10 +1921,14 @@ export async function main(argv = process.argv.slice(2)) {
   }
   // Every route settled within its budget (a control's page is timed into its own list).
   await check("pages_settle_within_budget", async () => settleBudget(SETTLE_TIMES))
+  // An excused route passes, so it is said aloud: a main that stays over
+  // budget would otherwise be excused run after run with no one told.
+  for (const x of settleExcused(SETTLE_TIMES)) process.stderr.write(excusedWarning(x) + "\n")
   // A run proves every required check and every negative control ran.
   const ran = new Set(cases.map((c) => c.name))
   const missing = [...REQUIRED_CHECKS, ...NEGATIVE_CONTROLS.map((n) => `negative_control_${n}`)].filter((n) => !ran.has(n))
   record("gate_ran_every_required_check", missing.length === 0, missing.length ? { error: `not run: ${missing.join(", ")}` } : { details: { required: REQUIRED_CHECKS.length + NEGATIVE_CONTROLS.length } })
+  resources.load_at_end = loadavg()
   const report = {
     passed: cases.filter((c) => c.passed).length,
     failed: cases.filter((c) => !c.passed).length,
