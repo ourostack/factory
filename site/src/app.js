@@ -1568,6 +1568,15 @@
   const W = window.FactoryWalk;
   const SECOND_MS = 1000;
   const SVG_NS = "http://www.w3.org/2000/svg";
+  // What a part of a view shows while its data loads. The shared class (and
+  // aria-busy) say it is loading, so a reader's tools and the browser gate
+  // need not match the words.
+  function loadingNote(tag = "p") {
+    const n = el(tag, "chart-empty is-loading", "Loading…");
+    n.setAttribute("aria-busy", "true");
+    return n;
+  }
+
   const walkFiles = new Map();
 
   // One published file, fetched once. Resolves to null when it is missing or
@@ -2869,6 +2878,7 @@
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       btn.textContent = "Loading…";
+      btn.classList.add("is-loading");
       const details = (await Promise.all(mine.map(walkFile))).filter(Boolean);
       btn.remove();
       const list = el("ul", "stretch-list");
@@ -2951,7 +2961,7 @@
     // A class's figure says "at least" while some of the waiting is not classified.
     const segLabel = (s) => (s.why === "not_known" && s.reasons && s.reasons.length ? `${s.label} (${s.reasons.map(W.whyReasonWords).join("; ")})` : s.label);
     // A class of the next-prompt split states its floor and its ceiling.
-    const segMs = (s) => (s.why && typeof s.ceiling_ms === "number" ? W.boundedWords(s.ms, s.ceiling_ms, W.durationWords) : W.qualified(s.why ? W.qualOf(s) : "", s.ms));
+    const segMs = (s) => (s.why && typeof s.ceiling_ms === "number" ? W.boundedWords(s.ms, s.ceiling_ms, W.durationWords) : W.qualified(s.why ? W.qualOf(s) : s.q || "", s.ms));
     const partWords = (s) => `${segLabel(s)}: ${segMs(s)}, ${W.pctWords(s.share)} of the lead time`;
     const track = el("div", "tw-bar");
     track.setAttribute("role", "group");
@@ -3069,7 +3079,7 @@
       renderPicker(document.getElementById("task-picker"), data.jobs, null, id);
       return;
     }
-    ledeEl.textContent = "Loading…";
+    ledeEl.replaceChildren(loadingNote("span"));
     const [tasks, stack, map] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile(mapPath(j.id))]);
     if (seq !== walkSeq) return;
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
@@ -3354,7 +3364,7 @@
       emptyState(container, "This session's task is not known, so its swimlane cannot be placed on a task clock.");
       return;
     }
-    container.appendChild(el("p", "chart-empty", "Loading…"));
+    container.appendChild(loadingNote());
     const map = await walkFile(mapPath(j.id));
     if (seq !== walkSeq) return;
     container.innerHTML = "";
@@ -5135,7 +5145,7 @@
     const seq = ++stepSeq;
     const box = document.getElementById("cause-detail");
     box.innerHTML = "";
-    box.appendChild(el("p", "chart-empty", "Loading…"));
+    box.appendChild(loadingNote());
     const [doc, tasks, stack] = await Promise.all([walkFile("rollups/causes.json"), walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json")]);
     if (seq !== stepSeq) return;
     const byId = new Map(data.jobs.map((j) => [j.id, j]));
@@ -5426,7 +5436,7 @@
     wsh.id = "why-waits-title";
     ws.appendChild(wsh);
     const body = el("div");
-    body.appendChild(el("p", "chart-empty", "Loading…"));
+    body.appendChild(loadingNote());
     ws.appendChild(body);
     box.appendChild(ws);
     // Every task that may hold a stop of this class, not only those with

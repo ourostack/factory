@@ -37,8 +37,8 @@ test("formatClock states provenance and producer direction visibly, refusing uns
   assert.match(F.formatClock(c), /at least 1m/)
   assert.match(F.formatClock(c), /declared/)
   assert.match(F.formatClock(c), /so far/)
-  // 65 seconds as an upper bound rounds up.
-  assert.match(F.formatClock({ ...c, bound: "upper" }), /at most 2m/)
+  // 65 seconds as an upper bound: minutes and seconds keep it within 10% (round 9).
+  assert.match(F.formatClock({ ...c, bound: "upper" }), /at most 1m 5s/)
   const opposing = { ...c, bound: null, bound_reason: "bound_reasons_conflict" }
   assert.match(F.formatClock(opposing), /Direction not known/)
   for (const bad of [null, {}, { ...c, basis: ["unknown"] }, { ...c, bound: "unknown" }, { ...c, class: "unavailable" }]) assert.throws(() => F.formatClock(bad), TypeError)
@@ -65,7 +65,7 @@ test("the formatter refuses anything that is not a stated number", () => {
 test("a measured number shows plainly, and a measured zero is a zero", () => {
   assert.equal(F.toText(m(0), "count"), "0")
   assert.equal(F.toText(m(1234), "count"), "1,234")
-  assert.equal(F.toText(m(65000), "duration"), "1m")
+  assert.equal(F.toText(m(65000), "duration"), "1m 5s")
   assert.equal(F.toText(m(0.5), "pct"), "50%")
   assert.equal(F.toText(m(43531), "compact"), "43.5K")
   assert.equal(F.toText(m(7200000), "hours"), "2.0")

@@ -31,14 +31,22 @@
   // ------------------------------------------------------------ durations
 
   // A duration as a number and a unit, shared by durationWords and
-  // durationShort so both forms always agree. `bound` says which way the
-  // figure may be wrong: "lower" (an "at least" figure) rounds down, "upper"
-  // (an "at most" figure) rounds up, so rounding never overstates what is
-  // known; true ("about") and none round to nearest. The unit comes from the
-  // rounded value, so 59.6 seconds carries to 1 minute, 59.6 minutes to
-  // 1 hour and 47.96 hours to 2 days. Returns { n, unit } with unit "ms",
-  // "s", "m", "h" or "d", or null for a positive time under a second with no
-  // bound (it reads "under a second"; a bound never meets "under").
+  // durationShort so both forms always agree (format.js describe follows the
+  // same rule). The step keeps any rounding within about 10% of the figure:
+  //   under 1 minute       whole seconds          37s
+  //   1 to 10 minutes      minutes and seconds    1m 5s
+  //   10 to 60 minutes     whole minutes          13m
+  //   1 to 10 hours        tenths of an hour      4.3h
+  //   10 to 48 hours       whole hours            33h
+  //   48 hours and up      tenths of a day        2.3d
+  // `bound` says which way the figure may be wrong: "lower" (an "at least"
+  // figure) rounds down, "upper" (an "at most" figure) rounds up, so rounding
+  // never overstates what is known; true ("about") and none round to
+  // nearest. The step comes from the rounded value, so 59.6 seconds carries
+  // to 1 minute and 59.6 minutes to 1 hour. Returns { n, unit } with unit
+  // "ms", "s", "m", "h" or "d" (and `s`, the seconds, from 1 to 10 minutes),
+  // or null for a positive time under a second with no bound (it reads
+  // "under a second"; a bound never meets "under").
   function durationParts(ms, bound) {
     const x = Math.max(0, Number(ms) || 0);
     const round = (v, step) => {
@@ -52,46 +60,53 @@
       const n = Math.max(bound === "lower" ? 0 : 1, round(x, 1));
       if (n < 1000) return { n, unit: "ms" };
     }
-    if (x < MINUTE) {
-      const n = round(x / SECOND, 1);
-      if (n < 60) return { n, unit: "s" };
+    if (x < 10 * MINUTE) {
+      const t = round(x / SECOND, 1);
+      if (t < 60) return { n: t, unit: "s" };
+      if (t < 600) return { n: Math.floor(t / 60), unit: "m", s: t % 60 };
     }
     if (x < HOUR) {
       const n = round(x / MINUTE, 1);
       if (n < 60) return { n, unit: "m" };
     }
+    if (x < 10 * HOUR) {
+      const n = round(x / HOUR, 0.1);
+      if (n < 10) return { n, unit: "h" };
+    }
     if (x < 48 * HOUR) {
-      const h = x / HOUR;
-      const n = round(h, h >= 10 ? 1 : 0.1);
+      const n = round(x / HOUR, 1);
       if (n < 48) return { n, unit: "h" };
     }
     return { n: round(x / DAY, 0.1), unit: "d" };
   }
   const UNIT_WORD = { ms: "millisecond", s: "second", m: "minute", h: "hour", d: "day" };
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   // A duration in words, for sentences: "under a second", "40 seconds",
-  // "12 minutes", "4.3 hours", "47 hours" (hours below two days), "4.5 days".
-  // `bounded` is set when an "at least", "at most" or "about" goes in front:
-  // "lower", "upper" or true (see durationParts). A bound never meets
-  // "under", so a bounded time under a second reads in milliseconds.
+  // "1 minute 5 seconds", "12 minutes", "4.3 hours", "47 hours" (hours below
+  // two days), "4.5 days". `bounded` is set when an "at least", "at most" or
+  // "about" goes in front: "lower", "upper" or true (see durationParts). A
+  // bound never meets "under", so a bounded time under a second reads in
+  // milliseconds.
   function durationWords(ms, bounded) {
     const x = Math.max(0, Number(ms) || 0);
     // A true zero is "none"; only a positive time under a second is "under a second".
     if (x === 0) return "none";
     const p = durationParts(x, bounded);
     if (!p) return "under a second";
-    return `${p.n} ${UNIT_WORD[p.unit]}${p.n === 1 ? "" : "s"}`;
+    return `${plural(p.n, UNIT_WORD[p.unit])}${p.s ? ` ${plural(p.s, "second")}` : ""}`;
   }
 
   // A duration in a few characters, for labels on marks: "<1s", "40s",
-  // "12m", "4.3h", "47h" (hours below two days, as in durationWords), "4.5d".
-  // `bounded` as in durationWords: "≥400ms", never "≥<1s".
+  // "1m 5s", "12m", "4.3h", "47h" (hours below two days, as in
+  // durationWords), "4.5d". `bounded` as in durationWords: "≥400ms", never
+  // "≥<1s".
   function durationShort(ms, bounded) {
     const x = Math.max(0, Number(ms) || 0);
     if (x === 0) return "0s";
     const p = durationParts(x, bounded);
     if (!p) return "<1s";
-    return `${p.n}${p.unit}`;
+    return `${p.n}${p.unit}${p.s ? ` ${p.s}s` : ""}`;
   }
 
   function pctWords(share) {
@@ -1074,7 +1089,8 @@
     if (labeled > working + SECOND) {
       // The labels cover more than the working time, so some of them fall in
       // idle time: no split by label is drawn rather than one that is wrong.
-      workSegs = [{ key: "working_unsplit", label: "Working, not split by label", ms: working, state: workN.state }];
+      // The whole working time, so it carries the working time's qualifier.
+      workSegs = [{ key: "working_unsplit", label: "Working, not split by label", ms: working, state: workN.state, q: qualifierOf(workN) }];
       notes.push("This task's labels also cover idle time, so its working time is not split by label here.");
     } else if (working - labeled > SECOND) {
       workSegs = [...work, { key: "not_labeled", label: "Not labeled yet", ms: working - labeled, state: "measured" }];
@@ -1181,11 +1197,12 @@
     const sources = { lead: row.lead_time_ms, working: row.working_ms, waiting: idle, value: row.value_in_working_ms };
     const textOf = (p) => {
       const n = sources[p.key];
-      const q = n && n.state === "partial" && n.bound === null ? ""
-        : n && n.state === "partial" && n.bound === "upper" ? "at most "
-        : n && n.state === "partial" && n.bound === "lower" ? "at least " : p.q || "";
+      // A partial figure reads as everywhere else on the page: its qualifier
+      // and the duration rounded the way it reads (qualified), so the card
+      // says "about 400 milliseconds" where the time bar does.
+      const partial = n && n.state === "partial" && typeof n.value === "number";
       // A lower bound of zero says nothing a reader can use (statedText says the same).
-      let text = n && n.state === "partial" && n.bound !== "upper" && n.value === 0 ? "none recorded" : `${q}${p.text}`;
+      let text = partial && n.bound === "lower" && n.value === 0 ? "none recorded" : partial ? qualified(qualifierOf(n), n.value) : `${p.q || ""}${p.text}`;
       let details = "";
       if (n && n.state === "partial") {
         const baseWords = typeof reasonText === "function" ? reasonText : (r) => String(r).replace(/_/g, " ");
@@ -3012,6 +3029,7 @@
   }
 
   return {
+    durationParts,
     durationWords,
     durationShort,
     pctWords,

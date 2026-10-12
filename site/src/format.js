@@ -203,19 +203,34 @@
     return hasReasonText(code) ? REASON_TEXT[code] : String(code).replace(/_/g, " ");
   }
 
+  // A duration's short form, one rule with walk.js durationParts: whole
+  // seconds under a minute, minutes and seconds to 10 minutes, whole minutes
+  // to an hour, tenths of an hour to 10 hours, whole hours to 48, then
+  // tenths of a day, so rounding stays within about 10% of the figure. A
+  // lower bound rounds down, an upper bound up, anything else to nearest;
+  // the step comes from the rounded value (59.6 seconds is "1m").
+  function durationText(v, bound) {
+    const x = Math.max(0, v);
+    if (x === 0) return "0s";
+    if (x < 1000) return "<1s";
+    const round = (k, step) => {
+      const q = k / step;
+      const r = bound === "lower" ? Math.floor(q + 1e-9) : bound === "upper" ? Math.ceil(q - 1e-9) : Math.round(q);
+      return Math.round(r * step * 10) / 10;
+    };
+    if (x < 600000) {
+      const t = round(x / 1000, 1);
+      if (t < 60) return `${t}s`;
+      if (t < 600) return `${Math.floor(t / 60)}m${t % 60 ? ` ${t % 60}s` : ""}`;
+    }
+    if (x < 3600000) { const n = round(x / 60000, 1); if (n < 60) return `${n}m`; }
+    const hr = x / 3600000;
+    if (hr < 10) { const n = round(hr, 0.1); if (n < 10) return `${n}h`; }
+    if (hr < 48) { const n = round(hr, 1); if (n < 48) return `${n}h`; }
+    return `${round(hr / 24, 0.1)}d`;
+  }
   const KINDS = {
-    duration(v) {
-      const x = Math.max(0, v);
-      if (x === 0) return "0s";
-      if (x < 1000) return "<1s";
-      const sec = x / 1000;
-      if (sec < 60) return `${Math.round(sec)}s`;
-      const min = sec / 60;
-      if (min < 60) return `${Math.round(min)}m`;
-      const hr = min / 60;
-      if (hr < 48) return `${hr.toFixed(1)}h`;
-      return `${(hr / 24).toFixed(1)}d`;
-    },
+    duration: (v) => durationText(v, null),
     hours: (v) => (v / 3600000).toFixed(1),
     count: (v) => v.toLocaleString("en-US"),
     compact(v) {
@@ -237,16 +252,10 @@
   function directed(kind, v, bound) {
     const r = (k) => (bound === "lower" ? Math.floor(k + 1e-9) : Math.ceil(k - 1e-9));
     const tenth = (k) => (r(k * 10) / 10).toFixed(1);
-    if (kind === "duration") {
-      const x = Math.max(0, v);
-      if (x === 0) return "0s";
-      if (x < 60000) { const n = r(x / 1000); if (n < 60) return `${n}s`; }
-      if (x < 3600000) { const n = r(x / 60000); if (n < 60) return `${n}m`; }
-      const hr = x / 3600000;
-      if (hr < 48) { const n = r(hr * 10) / 10; if (n < 48) return `${n.toFixed(1)}h`; }
-      return `${tenth(hr / 24)}d`;
-    }
-    if (kind === "hours") return tenth(v / 3600000);
+    if (kind === "duration") return durationText(v, bound);
+    // Bounded hours take the duration rule's steps: tenths below 10 hours,
+    // whole hours from 10.
+    if (kind === "hours") { const h = v / 3600000; const t = r(h * 10) / 10; return t < 10 ? t.toFixed(1) : String(r(h)); }
     if (kind === "pct") return `${r(v * 100)}%`;
     if (kind === "pct1") return `${tenth(v * 100)}%`;
     if (kind === "compact") {
