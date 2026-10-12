@@ -1131,9 +1131,10 @@ export async function main(argv = process.argv.slice(2)) {
       for (const r of await readCompare()) {
         const off = assessTaskForms(r.rows)
         if (off.length) throw new Error(`${r.mode} at ${r.width} px: ${off.length} figures differ: ${off.slice(0, 3).join("; ")}`)
-        if (!r.rows.length) throw new Error(`${r.mode} at ${r.width} px: no bar with a value was read`)
         seen[`${r.mode}_${r.width}`] = { bars: r.rows.length, with_table_cell: r.rows.filter((x) => x.cell !== null).length, with_tooltip: r.rows.filter((x) => x.tip !== null).length }
       }
+      // A mode may draw no bar (no task has that clock), but the check must read some.
+      if (!Object.values(seen).some((x) => x.bars > 0)) throw new Error("no bar with a value was read in any mode")
       return seen
     })
     await check("compare_no_bound_before_under", async () => {

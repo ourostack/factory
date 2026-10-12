@@ -69,7 +69,8 @@
     if (x < SECOND && bounded) return `${Math.max(1, Math.round(x))}ms`;
     if (x < SECOND) return "<1s";
     if (x < MINUTE) return `${Math.round(x / SECOND)}s`;
-    if (x < HOUR) return `${Math.round(x / MINUTE)}m`;
+    // As in durationWords: 59.6 minutes rounds to "1h", never "60m".
+    if (x < HOUR) return Math.round(x / MINUTE) === 60 ? "1h" : `${Math.round(x / MINUTE)}m`;
     if (x < 48 * HOUR) {
       const h = x / HOUR;
       return `${h >= 10 ? Math.round(h) : (Math.round(h * 10) / 10).toString()}h`;

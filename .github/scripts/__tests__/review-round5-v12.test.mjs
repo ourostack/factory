@@ -39,6 +39,9 @@ test("a per-task figure has one form: days from 48 hours, then hours, minutes an
   assert.equal(W.durationWords(400, true), "400 milliseconds")
   assert.equal(W.durationShort(400, true), "400ms")
   assert.equal(W.durationWords(0.2, true), "1 millisecond")
+  // A figure that rounds up to the next unit does so in both forms.
+  assert.equal(W.durationWords(59.6 * 60000), "1 hour")
+  assert.equal(W.durationShort(59.6 * 60000), "1h")
   // The view unit drops to the per-task form rather than "under" behind a bound.
   assert.equal(S.unitWords(60000, "days"), "under 0.01 days")
   assert.equal(S.unitWords(60000, "days", true), "1 minute")
