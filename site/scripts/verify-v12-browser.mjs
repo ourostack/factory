@@ -834,8 +834,9 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page, errors } = await newPage({ width: 390, init: [init] })
       try {
         await open(page, ROUTES[0])
-        const status = await page.locator("#preferences-status").innerText()
-        if (!/not saved|unavailable/i.test(status)) throw new Error(`preferences status: ${status}`)
+        // Said where the reader sees it without opening the time zone control.
+        const status = await page.locator("#display-settings > summary").innerText()
+        if (!/not saved|unavailable/i.test(status)) throw new Error(`the visible time zone control does not say preferences are not saved: ${status}`)
         await page.selectOption("#display-zone", { index: 1 }).catch(() => {})
         await page.getByRole("link", { name: "Tasks", exact: true }).first().click()
         await settle(page, "tasks")

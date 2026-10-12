@@ -105,6 +105,9 @@ test("the display time zone lives in a compact control and never changes without
   const header = html.slice(0, html.indexOf('<main'))
   assert.doesNotMatch(header, /Supported instants use your display zone/)
   assert.match(html, /<details id="display-settings" class="display-settings">/)
+  // Storage that cannot keep preferences is said on the visible summary line.
+  assert.match(html, /<summary>Time zone: <span id="zone-current">[^<]*<\/span><span id="zone-saved"><\/span><\/summary>/)
+  assert.match(read("site/src/app.js"), /not saved: browser storage is unavailable\)/)
   const P = require("../../../site/src/preferences.js")
   const store = new Map()
   const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) }

@@ -1556,7 +1556,7 @@ table.data-table.task-list-table td, table.data-table.task-list-table th { white
 
 /* Reader-defect fixes (cold walk, 2026-10-12). */
 .display-settings { margin: 0 0 .4rem; font-size: .9rem; }
-.display-settings > summary { cursor: pointer; display: inline-flex; align-items: center; gap: .3rem; min-height: 32px; color: var(--text-secondary); }
+.display-settings > summary { cursor: pointer; min-height: 32px; padding: 4px 0; box-sizing: border-box; color: var(--text-secondary); overflow-wrap: anywhere; }
 .display-settings[open] > summary { margin-bottom: .3rem; }
 .display-settings .chart-caption { margin: .2rem 0 .4rem; }
 .map-selection { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; margin: .2rem 0 .6rem; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }

@@ -39,7 +39,14 @@
     preferences = { ...preferences, ...patch, persistent: result.saved };
     const node = document.getElementById("preferences-status");
     if (node) node.textContent = result.saved ? "Preferences saved on this browser." : "Preferences are not saved: browser storage is unavailable.";
+    showSaved(result.saved);
     return result;
+  }
+  // The compact header control says so when preferences cannot be kept, so
+  // a reader never has to open it to learn that.
+  function showSaved(saved) {
+    const mark = document.getElementById("zone-saved");
+    if (mark) mark.textContent = saved ? "" : " (not saved: browser storage is unavailable)";
   }
   function setupPreferences() {
     const select = document.getElementById("display-zone");
@@ -61,6 +68,7 @@
       if (currentData) routeSafely(currentData);
     });
     document.getElementById("preferences-status").textContent = preferences.persistent ? "Display preferences stay on this browser." : "Preferences are not saved: browser storage is unavailable.";
+    showSaved(preferences.persistent);
     document.getElementById("dismiss-guide").addEventListener("click", () => {
       saveDisplay({ dismissed: true });
       document.getElementById("overview-guide").hidden = true;
