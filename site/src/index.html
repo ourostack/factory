@@ -81,12 +81,15 @@
   </div>
   <div class="wrap">
     <p id="status-line" class="status-line" aria-live="polite">Loading the store&hellip;</p>
-    <div class="display-preferences">
-      <label for="display-zone">Display time zone</label>
-      <select id="display-zone" aria-describedby="zone-note"></select>
-      <span id="preferences-status" role="status"></span>
-    </div>
-    <p id="zone-note" class="chart-caption">Supported instants use your display zone. Finish days and finish weeks remain UTC; durations do not change.</p>
+    <details id="display-settings" class="display-settings">
+      <summary>Time zone: <span id="zone-current">UTC</span><span id="zone-saved"></span></summary>
+      <div class="display-preferences">
+        <label for="display-zone">Display time zone</label>
+        <select id="display-zone" aria-describedby="zone-note"></select>
+        <span id="preferences-status" role="status"></span>
+      </div>
+      <p id="zone-note" class="chart-caption">Times of day use this zone. Finish days and weeks stay UTC, and durations do not change.</p>
+    </details>
     <div id="navigation-context" class="navigation-context" hidden aria-live="polite"></div>
   </div>
 </header>
@@ -148,12 +151,12 @@
 <div id="view-task" class="view">
   <div class="wrap">
     <p class="step-label">Step 1 of 4 &middot; Follow a task</p>
-    <div id="task-picker"></div>
     <p id="landing-note" class="chart-caption landing-note" hidden></p>
     <div id="task-head"></div>
     <p id="task-lede" class="lede task-lede">Loading&hellip;</p>
     <section class="block vsm-block" aria-labelledby="vsm-title">
       <h2 class="block-title" id="vsm-title">The value stream map</h2>
+      <p class="map-selection" id="map-selection" hidden><span id="map-selection-text">An item on the map is selected.</span> <button type="button" id="map-clear">Clear selection</button></p>
       <p class="chart-caption">A value stream map draws one piece of work from start to finish. Each box is a burst of agent work inside a session (one run of an agent harness, such as one Claude Code conversation). Desk starts a new burst after 15 minutes idle or when an operator prompt arrives; to fit the screen, the map may also fold shorter waits into the box beside them, and the note under the map gives the threshold at this width. Each triangle between boxes is a wait, labeled with how long it lasted and what it waited on. The map is not to scale: the ladder under it carries the time. Select any box, triangle or ladder step to see the evidence behind it.</p>
       <div id="vsm"></div>
     </section>
@@ -162,6 +165,10 @@
       <div id="time-went"></div>
     </section>
     <div id="job-detail"><p class="chart-empty">Loading&hellip;</p></div>
+    <details id="other-tasks" class="other-tasks">
+      <summary>Other recorded tasks</summary>
+      <div id="task-picker"></div>
+    </details>
     <p class="next-step"><a href="#/compare">Next: <span class="step-n" aria-hidden="true">2</span>Compare tasks</a>, to put this task beside every other.</p>
   </div>
 </div>
@@ -275,6 +282,10 @@
   <div class="wrap">
     <p class="step-label">Step 4 of 4 &middot; Act</p>
     <h1 class="view-title">Improvements</h1>
+    <section class="block improvement-alarms" id="improvement-alarms" aria-labelledby="improvement-alarms-title" tabindex="-1">
+      <h2 class="block-title" id="improvement-alarms-title">Active improvement-system alarms</h2>
+      <div id="improvement-alarm-list"><p>Loading&hellip;</p></div>
+    </section>
     <p id="improvement-status" class="lede improvement-status" role="status">Loading the improvement status&hellip;</p>
     <details class="how-to-read" id="improvement-limits">
       <summary>How to read this list</summary>
@@ -324,7 +335,7 @@
     <h2 class="block-title">The eight wastes, in agent work</h2>
     <p>Lean names eight kinds of waste: Ohno's original seven, plus non-utilized talent, a later addition (<a href="https://www.lean.org/lexicon-terms/seven-wastes/" target="_blank" rel="noopener">LEI: 7 wastes</a>). The translations into agent work are our own mapping, borrowing the words of <a href="https://www.informit.com/store/implementing-lean-software-development-from-concept-9780321437389" target="_blank" rel="noopener">Poppendieck's wastes of software</a> where they fit and the definitions the factory's <a href="https://github.com/ourostack/desk/blob/main/plugins/desk/skills/factory-evaluator/SKILL.md" target="_blank" rel="noopener">waste evaluator</a> uses. Each waste keeps its color on every chart.</p>
     <dl class="waste-list">
-      <div><dt><span class="swatch" style="--sw: var(--c-waste-waiting)"></span>Waiting</dt><dd>Idle time: the lead time less the working time, when no agent of the task was working. It is split by what it waited on: the next prompt, the agent working on another task, an API retry, a failed tool call, a long tool call, the queue before the first session, no session running, or a cause not recorded.</dd></div>
+      <div><dt><span class="swatch" style="--sw: var(--c-waste-waiting)"></span>Waiting</dt><dd>Idle time: the lead time less the working time, when no agent of the task was working. It is split by what it waited on: the next prompt, recorded work on other tasks, an API retry, a failed tool call, a long tool call, the queue before the first session, no recorded task session, or a cause not recorded.</dd></div>
       <div><dt><span class="swatch" style="--sw: var(--c-waste-defects)"></span>Defects</dt><dd>Failures and their rework: a failed command, a broken build, a change undone, a delivery sent back.</dd></div>
       <div><dt><span class="swatch" style="--sw: var(--c-waste-extra-processing)"></span>Extra processing</dt><dd>More work than the outcome needs: repeating a check that already passed, polishing past the requirement.</dd></div>
       <div><dt><span class="swatch" style="--sw: var(--c-waste-overproduction)"></span>Overproduction</dt><dd>Work nobody asked for or used: an unrequested feature, a report no one reads.</dd></div>
@@ -338,15 +349,15 @@
     <dl class="glossary">
       <dt id="g-lead-time">Lead time</dt><dd>The time from a task's card being created to the task being done. Some cards were created after work began; there the lead time is counted from the first session and says so.</dd>
       <dt id="g-working-time">Working time</dt><dd>The time any agent on the task was busy: turns, tool calls and subagents. It includes rework and necessary steps, not only value-adding work. The evaluator's labels (value-adding, necessary, each waste other than waiting, agents working but not labeled, and not labeled yet) describe working time only.</dd>
-      <dt id="g-waiting">Waiting</dt><dd>Idle time: the lead time less the working time, when no agent was working on the task. It is split by what it waited on. Two causes are easy to confuse: <em>agent on another task</em> means a session of this task was running, but its agent was working on another task; <em>no session running</em> means no session of this task was open at all. <em>Cause not recorded</em> means no agent was working on this task and the store did not record why.</dd>
+      <dt id="g-waiting">Waiting</dt><dd>Idle time: the lead time less the working time, when no agent was working on the task. It is split by what it waited on. Two causes are easy to confuse: <em>recorded work on other tasks</em> means a session of this task was running, but its agent was working on another task; <em>no recorded task session</em> means no session of this task was open at all. <em>Cause not recorded</em> means no agent was working on this task and the store did not record why.</dd>
       <dt id="g-flow-efficiency">Flow efficiency</dt><dd>Working time divided by lead time, as the <a href="https://kanbanguides.org/english/" target="_blank" rel="noopener">Kanban Guide</a> uses it. A low figure is normal: most lead time in any process is waiting.</dd>
       <dt id="g-value-adding"><span class="swatch" style="--sw: var(--c-value)"></span>Value-adding</dt><dd>Work that directly changes the outcome the task exists for: writing the change, running the test that proves it, answering the question asked.</dd>
       <dt id="g-necessary"><span class="swatch" style="--sw: var(--c-necessary)"></span>Necessary</dt><dd>Work the outcome needs but that does not change it by itself: reading code to understand it, setting up a workspace, a required review.</dd>
       <dt id="g-waste">Waste</dt><dd>Time that adds no value and that the outcome does not need: one of the eight wastes above. Lean's word is <i>muda</i>. Waste is a property of the system, never a person's or an agent's fault.</dd>
       <dt id="g-agents-working"><span class="swatch swatch-hatch" style="--sw: var(--c-agents-working)"></span>Agents working, not labeled</dt><dd>Working time when an agent was busy but the evaluator's labels do not say what the work was.</dd>
       <dt id="g-not-labeled"><span class="swatch swatch-outline" style="--sw: var(--c-not-labeled)"></span>Not labeled yet</dt><dd>Working time the waste evaluator has not classified yet. It is shown as its own part, never as zero.</dd>
-      <dt id="g-no-session"><span class="swatch swatch-hatch" style="--sw: var(--c-no-session)"></span>No session running</dt><dd>Waiting in which no agent session of the task was open at all; the queue before the first session is shown apart.</dd>
-      <dt id="g-agent-on-another-task"><span class="swatch swatch-wait wait-other_task"></span>Agent on another task</dt><dd>Waiting in which a session of this task was running, but its agent was working on another task. The other task is never named.</dd>
+      <dt id="g-no-session"><span class="swatch swatch-hatch" style="--sw: var(--c-no-session)"></span>No recorded task session</dt><dd>Waiting in which no agent session of the task was open at all; the queue before the first session is shown apart.</dd>
+      <dt id="g-agent-on-another-task"><span class="swatch swatch-wait wait-other_task"></span>Recorded work on other tasks</dt><dd>Waiting in which a session of this task was running, but its agent was working on another task. The other task is never named.</dd>
       <dt id="g-labeled-pause"><span class="swatch lane-key lane-key-wait"></span>Evaluator-labeled pause (inside working time)</dt><dd>A stretch of a session the evaluator labeled as waiting, with what it waited on. It sits inside the working time the evaluator labels, and the session swimlane draws it cross-hatched. It is not the page's waiting, which always means idle time.</dd>
       <dt id="g-evaluator">The evaluator</dt><dd>An independent agent that labels each stretch of a task's sessions as value-adding, necessary or one of the wastes, once the task is done, citing the evidence and never grading its own work.</dd>
       <dt id="g-session">Session</dt><dd>One run of an agent harness, such as one Claude Code conversation, from its first record to its last. A session can work on several tasks; a task can have several sessions.</dd>

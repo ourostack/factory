@@ -62,6 +62,10 @@ test("only an explicitly marked, visibly labeled, bounded precision-timeline fra
   assert.deepEqual(codes({ ...clean, offscreen: [{ el: "a" }] }), ["offscreen_control"])
   assert.deepEqual(codes({ ...clean, overlaps: [{ chart: "pareto", a: "x", b: "y" }] }), ["overlapping_labels"])
   assert.deepEqual(codes({ ...clean, controlOverlaps: [{ a: "button", b: "a" }] }), ["overlapping_controls"])
+  // Chart text drawn past its chart's edge is cut off for the reader (the cold walk's Compare labels).
+  assert.deepEqual(codes({ ...clean, chartTextOut: [{ chart: "stackup", text: "Still open" }] }), ["chart_text_out_of_bounds"])
+  // A link with no accessible name is announced as "link" and nothing else.
+  assert.deepEqual(codes({ ...clean, unnamedLinks: [{ el: "a in #vsm" }] }), ["unnamed_link"])
 })
 
 test("each problem says whether it is on a planted element, so a negative control proves it caught its own defect", () => {
@@ -77,7 +81,7 @@ test("each problem says whether it is on a planted element, so a negative contro
 
 test("the gate must catch every planned negative control, and each control is actually run", () => {
   const names = ["injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls", "unmarked_scroll_frame",
-    "missing_chart_equivalent", "broken_focus_return", "false_copied_claim"]
+    "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -97,6 +101,9 @@ test("every required check is recorded by name, and a run that skips one fails",
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of G.REQUIRED_CHECKS) assert.ok(source.includes(`check("${name}"`), `${name} is a check in the source`)
   assert.match(source, /gate_ran_every_required_check/)
+  // The selection note uses the reader wording, never the old internal status line.
+  assert.match(source, /An item from this link is selected/)
+  assert.doesNotMatch(source, /\/Selection requested\//)
   // The Space check waits for the selection instead of reading the address at once.
   assert.match(source, /waitForFunction\(\(\) => location\.hash\.includes\("selection="\)/)
 })

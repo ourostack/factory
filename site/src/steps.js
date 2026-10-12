@@ -312,8 +312,8 @@
     tool_failure: "after failed tool calls",
     long_tool_call: "during long tool calls",
     queue_before_start: "queued before the first session",
-    no_session: "with no session of the task running",
-    other_task: "while the agent was working on another task",
+    no_session: "with no recorded task session",
+    other_task: "while the session recorded work on other tasks",
     unknown: "with its cause not recorded",
   };
 
@@ -1639,6 +1639,27 @@
     return String(key);
   }
 
+  // The active improvement-system alarms (the loop's own), from the same
+  // status line every page shows: what it is, its effect, who is on it (or
+  // that no one is) and the next action. `status` is format.js statusLine's
+  // result.
+  const LOOP_EFFECT = {
+    loop_alarms_open: "The improvement loop has open alarm cards about its own steps, so the improvement recommendations here may not be current.",
+    steps_stale: "A step of the improvement loop has stopped succeeding, so new findings may not reach this list.",
+    improvement_age: "An improvement has waited a week or more without being taken, so known problems are not being worked.",
+  };
+  function improvementAlarms(status) {
+    return arr(status && status.alarms).filter((a) => a && typeof a.key === "string" && a.key.startsWith("loop:")).map((a) => {
+      const code = a.key.slice(5);
+      const title = a.text.charAt(0).toUpperCase() + a.text.slice(1);
+      const owner = a.owner && a.owner.url ? { ref: a.owner.ref, url: a.owner.url } : null;
+      const ownerText = owner ? `Owned by public issue ${owner.ref}.` : /not checked/.test(a.ownerText || "") ? `Owner ${a.ownerText.replace(/^owner /, "")}.` : "Unassigned: no open public issue owns this alarm.";
+      const fix = "Read the loop's alarm cards on the desk and unblock that step first: the loop fixes everything else.";
+      const next = owner ? `Follow ${owner.ref}. ${fix}` : `Assign an owner: open an issue labeled factory-alarm in ourostack/factory whose title names ${a.key}. ${fix}`;
+      return { key: a.key, title, effect: LOOP_EFFECT[code] || "Improvement recommendations may not be current.", owner, ownerText, next };
+    });
+  }
+
   // The open issues labeled factory-alarm, each with the status-line alarms
   // it owns (only keys are read from an issue's title, never its words).
   function alarmRows(issues) {
@@ -1901,6 +1922,7 @@
     shortPct,
     alarmKeyWords,
     alarmRows,
+    improvementAlarms,
     taskCauses,
     overTime,
     overTimeCell: cellOf,

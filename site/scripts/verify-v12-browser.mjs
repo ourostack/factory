@@ -71,6 +71,7 @@ export const EXPECTED_CHARTS = Object.freeze({ compare: Object.freeze(["stackup"
 export const NEGATIVE_CONTROLS = Object.freeze([
   "injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls",
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
+  "chart_text_out_of_bounds", "unnamed_link",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -121,6 +122,8 @@ export function assessLayout(m) {
   for (const c of m.offscreen || []) add("offscreen_control", c.el, c)
   for (const o of m.overlaps || []) add("overlapping_labels", `${o.chart}: "${o.a}" / "${o.b}"`, o)
   for (const o of m.controlOverlaps || []) add("overlapping_controls", `${o.a} / ${o.b}`, o)
+  for (const t of m.chartTextOut || []) add("chart_text_out_of_bounds", `${t.chart}: "${t.text}"`, t)
+  for (const l of m.unnamedLinks || []) add("unnamed_link", l.el, l)
   return problems
 }
 
@@ -166,7 +169,7 @@ export function measureLayout(opts) {
   }
   const controls = [...document.body.querySelectorAll("button, a, select, input, textarea, summary, label, th, td, li, dt, dd, h1, h2, h3, p")]
   const charts = viewEl ? [...viewEl.querySelectorAll("svg")] : []
-  const frames = [], clipped = [], clippedY = [], offscreen = [], overlaps = [], controlOverlaps = []
+  const frames = [], clipped = [], clippedY = [], offscreen = [], overlaps = [], controlOverlaps = [], chartTextOut = [], unnamedLinks = []
   const frameOf = (e) => { for (let n = e.parentElement; n && n !== document.body; n = n.parentElement) if (cache.scrollers.includes(n)) return n; return null }
   for (const e of cache.scrollers) {
     if (!shown(e) || e.scrollWidth <= e.clientWidth + 1) continue
@@ -227,6 +230,11 @@ export function measureLayout(opts) {
     if (sr.width < 100 || sr.height < 50) continue
     const texts = [...svg.querySelectorAll("text")].filter((t) => (t.textContent || "").trim() && getComputedStyle(t).visibility !== "hidden" && getComputedStyle(t).display !== "none" && Number(getComputedStyle(t).opacity) > 0)
       .map((t) => ({ t: t.textContent.trim().slice(0, 30), r: t.getBoundingClientRect() })).filter((x) => x.r.width > 0 && x.r.height > 0)
+    // A label drawn past the chart's own box is cut off: an svg clips at its edge.
+    for (const x of texts) {
+      if (chartTextOut.length >= 20) break
+      if (x.r.left < sr.left - 1 || x.r.right > sr.right + 1 || x.r.top < sr.top - 1 || x.r.bottom > sr.bottom + 1) chartTextOut.push({ chart: (svg.closest("[id]") || svg).id || "chart", text: x.t, planted: planted(svg) })
+    }
     for (let i = 0; i < texts.length && overlaps.length < 20; i++) {
       for (let j = i + 1; j < texts.length; j++) {
         const a = texts[i].r, b = texts[j].r
@@ -237,9 +245,17 @@ export function measureLayout(opts) {
       }
     }
   }
+  // Every link the reader can reach has a name a screen reader can announce.
+  for (const a of document.body.querySelectorAll("a[href]")) {
+    if (unnamedLinks.length >= 20) break
+    if (a.checkVisibility ? !a.checkVisibility() : !shown(a)) continue
+    const ids = (a.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+    const named = (a.getAttribute("aria-label") || "").trim() || ids.map((id) => (document.getElementById(id) || {}).textContent || "").join("").trim() || (a.textContent || "").trim() || [...a.querySelectorAll("img[alt], svg title")].map((n) => n.getAttribute("alt") || n.textContent || "").join("").trim() || (a.getAttribute("title") || "").trim()
+    if (!named) unnamedLinks.push({ el: name(a), planted: planted(a) })
+  }
   const sw = document.documentElement.scrollWidth
   return { width: vw, doc: { scrollWidth: sw, clientWidth: vw, bodyScrollWidth: document.body.scrollWidth, planted: sw > vw + 1 && [...document.querySelectorAll("[data-gate-planted]")].some((p) => p.getBoundingClientRect().right > vw + 1) },
-    frames, clipped: clipped.slice(0, 20), clippedY: clippedY.slice(0, 20), offscreen: offscreen.slice(0, 20), overlaps, controlOverlaps }
+    frames, clipped: clipped.slice(0, 20), clippedY: clippedY.slice(0, 20), offscreen: offscreen.slice(0, 20), overlaps, controlOverlaps, chartTextOut, unnamedLinks }
 }
 
 // Runs in the page: each visible chart has a known equivalent with rows.
@@ -644,7 +660,7 @@ export async function main(argv = process.argv.slice(2)) {
           await page.waitForFunction(() => !location.hash.includes("selection="))
           await page.waitForTimeout(300)
           const r = await page.evaluate(() => ({
-            requested: /Selection requested/.test((document.getElementById("navigation-context") || {}).textContent || ""),
+            requested: /An item from this link is selected/.test((document.getElementById("navigation-context") || {}).textContent || ""),
             lit: document.querySelectorAll("#vsm .is-hl").length,
             body: document.activeElement === document.body || !document.activeElement,
           }))
@@ -818,8 +834,9 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page, errors } = await newPage({ width: 390, init: [init] })
       try {
         await open(page, ROUTES[0])
-        const status = await page.locator("#preferences-status").innerText()
-        if (!/not saved|unavailable/i.test(status)) throw new Error(`preferences status: ${status}`)
+        // Said where the reader sees it without opening the time zone control.
+        const status = await page.locator("#display-settings > summary").innerText()
+        if (!/not saved|unavailable/i.test(status)) throw new Error(`the visible time zone control does not say preferences are not saved: ${status}`)
         await page.selectOption("#display-zone", { index: 1 }).catch(() => {})
         await page.getByRole("link", { name: "Tasks", exact: true }).first().click()
         await settle(page, "tasks")
@@ -1028,6 +1045,21 @@ export async function main(argv = process.argv.slice(2)) {
           })
           await mustBeClean("overlapping_labels")
         }, /^planted overlapping_labels/)
+        await expectFailure("chart_text_out_of_bounds", async () => {
+          await openFresh()
+          await page.evaluate(() => {
+            const ns = "http://www.w3.org/2000/svg", s = document.createElementNS(ns, "svg")
+            s.setAttribute("width", "300"); s.setAttribute("height", "100"); s.setAttribute("aria-label", "injected"); s.setAttribute("data-gate-planted", "1")
+            const e = document.createElementNS(ns, "text"); e.setAttribute("x", "240"); e.setAttribute("y", "40"); e.textContent = "Still open, cut at the edge"; s.appendChild(e)
+            document.getElementById("view-compare").appendChild(s)
+          })
+          await mustBeClean("chart_text_out_of_bounds")
+        }, /^planted chart_text_out_of_bounds/)
+        await expectFailure("unnamed_link", async () => {
+          await openFresh()
+          await plant('<a href="#/compare" style="display:inline-block;width:24px;height:24px"></a>')
+          await mustBeClean("unnamed_link")
+        }, /^planted unnamed_link/)
         await expectFailure("overlapping_controls", async () => {
           await openFresh()
           await plant('<div style="position:relative;height:40px"><button style="position:absolute;left:0;top:0;width:120px">First control</button><button style="position:absolute;left:20px;top:4px;width:120px">Second control</button></div>')

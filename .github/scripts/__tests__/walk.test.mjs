@@ -539,7 +539,7 @@ test("Why Lean? gives the eight wastes as our mapping, the glossary, and its sou
   const why = html.slice(html.indexOf('id="view-why"'), html.indexOf('id="view-about"'))
   for (const w of ["Waiting", "Defects", "Extra processing", "Overproduction", "Motion", "Transportation", "Inventory", "Non-utilized talent"]) assert.match(why, new RegExp(`</span>${w}</dt>`), w)
   assert.match(why, /our own mapping/)
-  for (const term of ["Lead time", "Working time", "Waiting", "Flow efficiency", "Value-adding", "Necessary", "Waste", "Agent on another task", "Evaluator-labeled pause \\(inside working time\\)", "The evaluator", "Session", "Card", "The operator", "Sign-off", "Capture coverage", "Improvement loop", "Job-hours", "Value stream map", "Timeline ladder", "Inventory triangle", "Yamazumi", "Pareto chart", "A3", "Kaizen", "Andon"]) assert.match(why, new RegExp(`<dt id="g-[a-z0-9-]+">(<span[^>]*></span>)?${term}`), term)
+  for (const term of ["Lead time", "Working time", "Waiting", "Flow efficiency", "Value-adding", "Necessary", "Waste", "Recorded work on other tasks", "Evaluator-labeled pause \\(inside working time\\)", "The evaluator", "Session", "Card", "The operator", "Sign-off", "Capture coverage", "Improvement loop", "Job-hours", "Value stream map", "Timeline ladder", "Inventory triangle", "Yamazumi", "Pareto chart", "A3", "Kaizen", "Andon"]) assert.match(why, new RegExp(`<dt id="g-[a-z0-9-]+">(<span[^>]*></span>)?${term}`), term)
   // The ladder's "+5m" steps are explained, and "Labeled wait" is gone everywhere.
   assert.match(why, /A step labeled with a plus sign, such as "\+5m", is the short waits folded inside the box before it\./)
   assert.doesNotMatch(html + read("site/src/app.js") + read("site/src/walk.js"), /Labeled wait/)

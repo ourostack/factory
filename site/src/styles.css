@@ -1495,10 +1495,10 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 .display-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; padding-bottom: .35rem; }
 .display-preferences select { max-width: 100%; min-width: 0; padding: .4rem; font: inherit; }
 .display-preferences [role="status"] { font-size: .8rem; color: var(--text-muted); }
-.briefing-wrap { max-width: 1280px; }
 .briefing-wrap .lede, .visit-note { max-width: 70ch; }
 .briefing-columns { display: grid; grid-template-columns: 1fr; gap: 0 2rem; }
 .briefing-columns > * { min-width: 0; }
+.briefing-columns > .block { margin-top: 24px; }
 .briefing-list { list-style: none; margin: 0; padding: 0; }
 .briefing-item { padding: 1rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .briefing-item h3 { margin: .2rem 0 .6rem; font-size: 1.1rem; }
@@ -1553,3 +1553,22 @@ table.data-table.task-list-table td, table.data-table.task-list-table th { white
   .stacked > table.data-table > tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 0 24px; }
 }
 
+
+/* Reader-defect fixes (cold walk, 2026-10-12). */
+.display-settings { margin: 0 0 .4rem; font-size: .9rem; }
+.display-settings > summary { cursor: pointer; min-height: 32px; padding: 4px 0; box-sizing: border-box; color: var(--text-secondary); overflow-wrap: anywhere; }
+.display-settings[open] > summary { margin-bottom: .3rem; }
+.display-settings .chart-caption { margin: .2rem 0 .4rem; }
+.map-selection { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; margin: .2rem 0 .6rem; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.map-selection[hidden] { display: none; }
+.map-selection button { min-height: 44px; padding: .5rem .75rem; font: inherit; cursor: pointer; }
+.other-tasks { margin: 36px 0 0; border-top: 1px solid var(--border); padding-top: .75rem; }
+.other-tasks > summary { cursor: pointer; font-weight: 600; font-size: 1.1rem; min-height: 44px; display: flex; align-items: center; }
+.improvement-alarms:focus { outline: 2px solid var(--link); outline-offset: 4px; }
+.improvement-alarms:focus:not(:focus-visible) { outline: none; }
+.alarm-list { list-style: none; margin: 0; padding: 0; }
+.alarm-row { padding: .8rem 1rem; margin: 0 0 .75rem; border-left: 4px solid var(--c-alarm); background: var(--surface-2); overflow-wrap: anywhere; }
+.alarm-row .alarm-title { margin: 0 0 .5rem; font-size: 1.05rem; }
+.alarm-row .act-facts { margin: 0; }
+.vsm-legend-more { margin-top: .4rem; }
+.vsm-legend-more > summary { cursor: pointer; min-height: 32px; }

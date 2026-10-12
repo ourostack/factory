@@ -326,7 +326,7 @@ test("a running total reads 100% only at the last bar", () => {
 test("Rank causes' lede names the largest cause, the vital few, and the largest cause agents can fix", () => {
   const { causes } = snap()
   const t = S.causesLede(S.paretoModel(causes, "all"), S.paretoModel(causes, "working"))
-  assert.match(t, /^The ranking counts 8 of the 31 tasks; the note under the chart says why the rest are left out\. Across those 8, the largest cause, waiting · no session running, cost 117 hours: 69% of the 171 hours ranked\. Two causes of 9 carry 92% of the time: those are the vital few\./)
+  assert.match(t, /^The ranking counts 8 of the 31 tasks; the note under the chart says why the rest are left out\. Across those 8, the largest cause, no recorded task session, cost 117 hours: 69% of the 171 hours ranked\. Two causes of 9 carry 92% of the time: those are the vital few\./)
   assert.match(t, /Leave waiting out, and the largest cause agents can fix in their own work is extra processing, at 17 minutes\.$/)
   assert.match(S.causesLede({ state: "absent", bars: [] }, null), /not published yet/)
 })
