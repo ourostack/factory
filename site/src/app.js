@@ -745,7 +745,7 @@
       const head = el("p", "featured-head");
       const strong = el("strong");
       strong.appendChild(num(f.duration_ms, "hours"));
-      strong.appendChild(document.createTextNode(" hours in one session"));
+      strong.appendChild(document.createTextNode(" in one session"));
       head.appendChild(strong);
       head.appendChild(el("span", "muted", ` \u00b7 ${f.host} \u00b7 session ${f.session_id.slice(0, 8)}`));
       li.appendChild(head);

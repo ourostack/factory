@@ -229,9 +229,25 @@
     if (hr < 48) { const n = round(hr, 1); if (n < 48) return `${n}h`; }
     return `${round(hr / 24, 0.1)}d`;
   }
+  // A duration in hours, with its unit, on the same steps from an hour up:
+  // tenths of an hour below 10 ("5.5 hours"), whole hours to 48 ("33
+  // hours"), then tenths of a day ("7.2 days"); under an hour, tenths of an
+  // hour. Bounded or not, one quantity reads one way.
+  function hoursText(v, bound) {
+    const h = Math.max(0, v) / 3600000;
+    const round = (k, step) => {
+      const q = k / step;
+      const r = bound === "lower" ? Math.floor(q + 1e-9) : bound === "upper" ? Math.ceil(q - 1e-9) : Math.round(q);
+      return Math.round(r * step * 10) / 10;
+    };
+    const say = (n, unit) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+    if (h < 10) { const n = round(h, 0.1); if (n < 10) return say(n, "hour"); }
+    if (h < 48) { const n = round(h, 1); if (n < 48) return say(n, "hour"); }
+    return say(round(h / 24, 0.1), "day");
+  }
   const KINDS = {
     duration: (v) => durationText(v, null),
-    hours: (v) => (v / 3600000).toFixed(1),
+    hours: (v) => hoursText(v, null),
     count: (v) => v.toLocaleString("en-US"),
     compact(v) {
       if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
@@ -253,9 +269,7 @@
     const r = (k) => (bound === "lower" ? Math.floor(k + 1e-9) : Math.ceil(k - 1e-9));
     const tenth = (k) => (r(k * 10) / 10).toFixed(1);
     if (kind === "duration") return durationText(v, bound);
-    // Bounded hours take the duration rule's steps: tenths below 10 hours,
-    // whole hours from 10.
-    if (kind === "hours") { const h = v / 3600000; const t = r(h * 10) / 10; return t < 10 ? t.toFixed(1) : String(r(h)); }
+    if (kind === "hours") return hoursText(v, bound);
     if (kind === "pct") return `${r(v * 100)}%`;
     if (kind === "pct1") return `${tenth(v * 100)}%`;
     if (kind === "compact") {

@@ -68,7 +68,7 @@ test("a measured number shows plainly, and a measured zero is a zero", () => {
   assert.equal(F.toText(m(65000), "duration"), "1m 5s")
   assert.equal(F.toText(m(0.5), "pct"), "50%")
   assert.equal(F.toText(m(43531), "compact"), "43.5K")
-  assert.equal(F.toText(m(7200000), "hours"), "2.0")
+  assert.equal(F.toText(m(7200000), "hours"), "2 hours")
   const d = F.describe(m(0), "count")
   assert.equal(d.state, "measured")
   assert.equal(d.marker, null)

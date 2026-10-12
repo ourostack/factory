@@ -58,8 +58,8 @@ test("format.js describe uses the same rule and steps as walk.js, bounded or not
   // Bounded hours: tenths below 10 hours, whole hours to 48.
   assert.equal(F.describe(part(32.7 * HR, "lower"), "duration").text, "at least 32h")
   assert.equal(F.describe(part(10.02 * HR, "upper"), "duration").text, "at most 11h")
-  assert.equal(F.describe(part(5.51 * HR, "upper"), "hours").text, "at most 5.6")
-  assert.equal(F.describe(part(32.7 * HR, "lower"), "hours").text, "at least 32")
+  assert.equal(F.describe(part(5.51 * HR, "upper"), "hours").text, "at most 5.6 hours")
+  assert.equal(F.describe(part(32.7 * HR, "lower"), "hours").text, "at least 32 hours")
   assert.equal(S.hoursWords(32.7 * HR, "lower"), "32 hours")
 })
 
@@ -95,4 +95,27 @@ test("the gate scans the task pages for a bound before under, and budgets each p
   const app = read("site/src/app.js")
   assert.doesNotMatch(app, /"chart-empty", "Loading…"/)
   assert.match(app, /function loadingNote\(/)
+})
+
+// Ruling (2026-10-12): one quantity reads one way, so the hours kind takes the
+// same steps bounded or not: tenths from 1 to 10 hours, whole hours from 10
+// to 48, tenths of a day from 48, the same numbers walk.js gives.
+test("the hours kind follows the duration rule's steps, bounded or not, as walk.js does", () => {
+  const hoursOf = (p) => (p.unit === "h" ? `${p.n} hour${p.n === 1 ? "" : "s"}` : p.unit === "d" ? `${p.n} day${p.n === 1 ? "" : "s"}` : null)
+  let checked = 0
+  for (let ms = HR; ms < 30 * DAY; ms = Math.ceil(ms * 1.043) + 11) {
+    for (const bound of [null, "lower", "upper"]) {
+      const want = hoursOf(W.durationParts(ms, bound || false))
+      if (!want) continue
+      const n = bound ? part(ms, bound) : { state: "measured", value: ms, reasons: [] }
+      const q = bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""
+      assert.equal(F.describe(n, "hours").text, `${q}${want}`, `${ms} ms ${bound || "unbounded"}`)
+      checked += 1
+    }
+  }
+  assert.ok(checked > 100)
+  assert.equal(F.toText({ state: "measured", value: 32.7 * HR, reasons: [] }, "hours"), "33 hours")
+  assert.equal(F.toText({ state: "measured", value: 172.7 * HR, reasons: [] }, "hours"), "7.2 days")
+  // The featured session's caption says its own unit.
+  assert.doesNotMatch(read("site/src/app.js"), /" hours in one session"/)
 })

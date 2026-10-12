@@ -205,7 +205,7 @@ test("format.js describe rounds a lower bound down and an upper bound up", () =>
   assert.equal(d(400.2, "upper"), "at most 401 ms")
   assert.equal(d(0.1234, "upper", "pct"), "at most 13%")
   assert.equal(d(0.1294, "lower", "pct1"), "at least 12.9%")
-  assert.equal(d(5.5 * 3600000 + 1, "upper", "hours"), "at most 5.6")
+  assert.equal(d(5.5 * 3600000 + 1, "upper", "hours"), "at most 5.6 hours")
   // No direction keeps nearest rounding.
   assert.equal(F.describe({ state: "partial", value: 52600, bound: null, bound_reason: "bound_not_moved", reasons: ["x"] }, "duration").text, "53s")
 })
