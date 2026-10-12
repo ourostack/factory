@@ -106,9 +106,11 @@ export const HEIGHT_ROUTES = Object.freeze(["compare", "overview"])
 // (twice the line height, half the words per line), which bounds these
 // multiples from above. The multiples themselves are fitted tripwires, not
 // values derived from the spec: each sits just above the tallest page
-// measured when it was set (Compare: 3.02x at 390 px, 2.44x at 1280 px), so
-// an unrelated change can trip them, and a trip means "look", not "wrong".
-export const TEXT2X_HEIGHT_BUDGET = Object.freeze({ 1280: 2.5, 390: 3.25 })
+// measured when it was set (Compare: 3.02x at 390 px; 2.52x at 1280 px
+// once Compare read in days, which shortened the normal-text reference from
+// 5,522 to 5,321 px while the doubled page stayed near 13,450 px), so an
+// unrelated change can trip them, and a trip means "look", not "wrong".
+export const TEXT2X_HEIGHT_BUDGET = Object.freeze({ 1280: 2.6, 390: 3.25 })
 
 // Heights over their budget, as reader sentences. `heights` maps
 // "<route>_<width>" to { site, reference }; `budget` maps width to a multiple.

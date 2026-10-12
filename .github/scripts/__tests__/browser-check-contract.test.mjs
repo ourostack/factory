@@ -166,7 +166,7 @@ test("the task conclusion starts within the first screen at every width and text
 })
 
 test("doubled text has its own height budget against a fixed reference: the same page at normal text", () => {
-  assert.deepEqual(G.TEXT2X_HEIGHT_BUDGET, { 1280: 2.5, 390: 3.25 })
+  assert.deepEqual(G.TEXT2X_HEIGHT_BUDGET, { 1280: 2.6, 390: 3.25 })
   assert.deepEqual(G.assessHeights({ compare_390: { site: 900, reference: 1000 } }, { 390: 1 }), [])
   assert.deepEqual(G.assessHeights({ compare_390: { site: 1600, reference: 1000 } }, { 390: 1.5 }), ["compare at 390 px: 1600 px vs reference 1000 px (budget 1.5x)"])
   const source = readFileSync(SCRIPT, "utf8")
