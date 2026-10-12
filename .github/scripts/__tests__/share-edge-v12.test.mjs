@@ -184,3 +184,26 @@ test("the gate holds each share-mode bar label to its flow-efficiency words, wit
   assert.match(gate, /check\("share_mode_label_matches_flow_efficiency"/)
   assert.match(gate, /pairs: await page\.evaluate\(shareModePairs\)/)
 })
+
+test("a flow efficiency with no known direction carries ~ on its share-mode label, as its words say about", () => {
+  const H = 3600000
+  const bar = { job: "j", state: "ok", total_ms: 100 * H, groups: [{ key: "working", label: "Working", ms: 96 * H, segments: [] }, { key: "waiting", label: "Waiting", ms: 4 * H, segments: [] }], segments: [] }
+  const fe = (extra) => ({ job: "j", flow_efficiency: { state: "partial", value: 0.96, reasons: ["x"], ...extra } })
+  const label = (row) => S.shareBars([bar], [row])[0].label
+  assert.equal(label(fe({ bound: null })), "~96% working")
+  assert.equal(label(fe({ bound: null, bound_reason: "bound_reasons_conflict" })), "~96% working")
+  assert.equal(label(fe({ bound: "unknown" })), "~96% working")
+  assert.equal(label(fe({ bound: null, bound_reason: "bound_not_moved" })), "96% working", "exact for its window")
+  assert.equal(label(fe({ bound: "upper" })), "≤96% working")
+  const [, wait] = S.shareBars([bar], [fe({ bound: null })])[0].groups
+  assert.equal(S.shortPct(wait.share_of_lead, wait.share_bound), "~4%")
+  assert.match(W.feWords(fe({ bound: null })), /^96% \(partial, direction not known\)$/)
+})
+
+test("the gate's pair check holds the open direction on both the label and the words", async () => {
+  const { fileURLToPath } = await import("node:url")
+  const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
+  assert.equal(G.assessSharePairs([{ job: "a", bar: "96%", words: "96% (partial, direction not known)" }]).length, 1)
+  assert.equal(G.assessSharePairs([{ job: "a", bar: "~96%", words: "96%" }]).length, 1)
+  assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "~96%", words: "96% (partial, direction not known)", tip: "~96%" }, { job: "b", bar: "~0.4%", words: "about 0.4% (direction not known)" }, { job: "c", bar: "100%", words: "100% (could be lower)" }]), [])
+})

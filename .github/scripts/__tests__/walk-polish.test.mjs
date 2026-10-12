@@ -386,7 +386,8 @@ test("a partial figure Desk marks bound: null reads with no direction, never a g
   assert.equal(W.boundOf(pn(1)), null)
   // Round 8: an absent bound reads as format.js describe reads it, with no direction.
   assert.equal(W.boundOf(p(1, ["log_truncated"])), null, "an absent bound is no direction, as describe reads it")
-  assert.equal(S.feBound({ flow_efficiency: pn(0.1), working_ms: p(H, ["log_truncated"], { bound: "lower" }) }), null)
+  // Not the parts' guessed "lower": Desk's no direction stays unknown, so the label carries "~".
+  assert.equal(S.feBound({ flow_efficiency: pn(0.1), working_ms: p(H, ["log_truncated"], { bound: "lower" }) }), "unknown")
   const row = { job: "j", lead_time_ms: pn(10 * H), working_ms: pn(H), idle_ms: pn(9 * H), waiting_by_waited_on_ms: { other_task: pn(6 * H), unknown: pn(3 * H) }, flow_efficiency: pn(0.1), value_in_working_ms: pn(20 * M) }
   const text = W.ledeText(W.lede(row, F.reasonText, { idle: W.idleSplit(row, null) }))
   assert.match(text, /Agents were working for 1 hour of it;/)

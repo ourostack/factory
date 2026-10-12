@@ -558,7 +558,10 @@
     const n = row && row.flow_efficiency;
     if (!n || n.state !== "partial") return null;
     if (n.bound === "lower" || n.bound === "upper") return n.bound;
-    if (n.bound === null) return null;
+    // Desk's "no direction" is unknown, as its words say ("about …,
+    // direction not known", W.qualifierOf); bound_not_moved is exact for its
+    // window. Only an absent key (older data) derives a bound from the parts.
+    if (n.bound === null || n.bound === "unknown") return W.qualifierOf(n) === "about " ? "unknown" : null;
     const wb = W.boundOf(row.working_ms);
     const lb = totalBound(row.lead_time_ms);
     const low = wb === "lower" || lb === "upper";
