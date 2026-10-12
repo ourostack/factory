@@ -109,6 +109,8 @@ test("a goto that only changes the hash counts as an action, so its settle is ne
   assert.equal(G.hashOnly(`${o}#/`, `${o}#/compare`), true)
   assert.equal(G.hashOnly(`${o}#/compare`, `${o}#/compare?mode=share`), true)
   assert.equal(G.hashOnly(o, `${o}#/compare`), true, "from the bare page to a route")
+  assert.equal(G.hashOnly(`${o}#/tasks`, o), false, "a goto with no hash reloads the page")
+  assert.equal(G.hashOnly(o, o), false, "a goto to the same address with no hash reloads the page")
   assert.equal(G.hashOnly("about:blank", `${o}#/compare`), false, "a fresh page loads")
   assert.equal(G.hashOnly(`${o}#/`, `${o}?v=2#/`), false, "a new query string loads")
   assert.equal(G.hashOnly(`${o}#/`, "http://127.0.0.1:2/#/"), false, "another site loads")

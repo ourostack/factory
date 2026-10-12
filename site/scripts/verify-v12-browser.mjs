@@ -716,9 +716,10 @@ export function sameUrl(a, b) {
   try { return new URL(a).href === new URL(b).href } catch { return a === b }
 }
 // A goto that changes only the hash loads nothing: the page that is already
-// open redraws, as it does after a click.
+// open redraws, as it does after a click. A goto to a URL with no "#"
+// reloads the page even from the same address.
 export function hashOnly(from, to) {
-  try { const a = new URL(from), b = new URL(to); a.hash = ""; b.hash = ""; return a.href === b.href } catch { return false }
+  try { const a = new URL(from), b = new URL(to); if (!String(to).includes("#")) return false; a.hash = ""; b.hash = ""; return a.href === b.href } catch { return false }
 }
 // A navigation is a settle at the URL the last goto asked for or landed on,
 // with no settle since, when that goto loaded the page. Anything else
