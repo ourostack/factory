@@ -393,12 +393,12 @@
     const tiny = v > 0 && v < 1;
     const pct = tiny ? `${Math.max(0.1, Math.round(v * 10) / 10)}%` : v > 99 && v < 100 ? "99%" : `${Math.round(v)}%`;
     if (r.state === "measured") return tiny && v < 0.1 ? "under 0.1% of production time" : `${pct} of production time`;
-    if (r.bound === "lower") return v >= 100 ? "100% of production time" : tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
+    if (r.bound === "lower") return val(r) === 1 ? "100% of production time" : tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
     if (r.bound === "upper" && v <= 0) return "0% of production time";
     if (r.bound === "upper") return tiny && v < 0.1 ? "under 0.1% of production time" : `at most ${pct} of production time`;
     // At 0% or 100% a figure with no known direction can be off one way only.
     if (v <= 0) return "0% of production time (could be higher)";
-    if (v >= 100) return "100% of production time (could be lower)";
+    if (val(r) === 1) return "100% of production time (could be lower)";
     return `about ${pct} of production time (could be higher or lower)`;
   }
 

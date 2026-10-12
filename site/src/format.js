@@ -203,8 +203,9 @@
     return hasReasonText(code) ? REASON_TEXT[code] : String(code).replace(/_/g, " ");
   }
 
-  // One table for every duration, the same as walk.js durationParts: whole
-  // seconds under a minute, minutes and seconds to 10 minutes, whole minutes
+  // One table for every duration, the same as walk.js durationParts, so no
+  // figure moves by more than 10%: tenths of a second from 1 to 10 seconds,
+  // whole seconds to a minute, minutes and seconds to 10 minutes, whole minutes
   // to an hour, tenths of an hour to 10 hours, whole hours to 48, then
   // tenths of a day, so rounding stays within about 10% of the figure. A
   // lower bound rounds down, an upper bound up, true ("about") and none to
@@ -223,6 +224,7 @@
       const n = Math.max(bound === "lower" ? 0 : 1, round(x, 1));
       if (n < 1000) return { n, unit: "ms" };
     }
+    if (x < 10000) { const t = round(x / 1000, 0.1); if (t < 10) return { n: t, unit: "s" }; }
     if (x < 600000) {
       const t = round(x / 1000, 1);
       if (t < 60) return { n: t, unit: "s" };
@@ -429,7 +431,7 @@
       const share = kind === "pct" || kind === "pct1";
       const none = number.bound === "unknown" || (number.bound === null && number.bound_reason !== "bound_not_moved");
       if (v <= 0) { if (number.bound === "upper") direction = ""; else if (none) edge = " (could be higher)"; }
-      else if (share && v >= 1) { if (number.bound === "lower") direction = ""; else if (none) edge = " (could be lower)"; }
+      else if (share && v === 1) { if (number.bound === "lower") direction = ""; else if (none) edge = " (could be lower)"; }
     }
     const unknownDirection = number.bound === "unknown";
     // Desk's own "no direction" (bound: null) says why, when it says.

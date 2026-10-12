@@ -32,8 +32,10 @@
 
   // A duration as a number and a unit, shared by durationWords and
   // durationShort so both forms always agree (format.js describe follows the
-  // same rule). The step keeps any rounding within about 10% of the figure:
-  //   under 1 minute       whole seconds          37s
+  // same rule). The rule: no figure moves by more than 10%; the steps serve it:
+  //   under 1 second       milliseconds (bounded) 400ms
+  //   1 to 10 seconds      tenths of a second     1.1s
+  //   10 to 60 seconds     whole seconds          37s
   //   1 to 10 minutes      minutes and seconds    1m 5s
   //   10 to 60 minutes     whole minutes          13m
   //   1 to 10 hours        tenths of an hour      4.3h
@@ -59,6 +61,10 @@
       // A positive time never reads as zero unless it is a lower bound.
       const n = Math.max(bound === "lower" ? 0 : 1, round(x, 1));
       if (n < 1000) return { n, unit: "ms" };
+    }
+    if (x < 10 * SECOND) {
+      const t = round(x / SECOND, 0.1);
+      if (t < 10) return { n: t, unit: "s" };
     }
     if (x < 10 * MINUTE) {
       const t = round(x / SECOND, 1);
@@ -265,7 +271,7 @@
       if (q === "about ") return ["", " (could be higher)"];
       if (q === "at most ") return ["", ""];
     }
-    if (typeof hi === "number" && v >= hi) {
+    if (typeof hi === "number" && v === hi) {
       if (q === "about ") return ["", " (could be lower)"];
       if (q === "at least ") return ["", ""];
     }

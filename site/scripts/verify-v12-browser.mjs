@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "slow_data_file",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "slow_data_file", "loading_marker_never_clears",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -597,9 +597,19 @@ export function trackRequests(page) {
 // over budget, so a slow view cannot pass by being slow but finished.
 export const SETTLE_BUDGET_MS = 5000
 const SETTLE_TIMES = []
-const UNTIMED = new WeakSet()
+// A page whose settle times go to its own list instead (a control's page).
+const SINKS = new WeakMap()
 export function assessSettle(times, budget = SETTLE_BUDGET_MS) {
   return (times || []).filter((t) => t.ms > budget).map((t) => `${t.view}${t.where ? ` (${t.where})` : ""}: ${(t.ms / 1000).toFixed(1)} s`)
+}
+// The body of pages_settle_within_budget: throws when no route was timed or
+// any route is over budget; the slow-file control runs this same function.
+export function settleBudget(times, budget = SETTLE_BUDGET_MS) {
+  if (!times.length) throw new Error("no route was timed")
+  const over = assessSettle(times, budget)
+  if (over.length) throw new Error(`${over.length} of ${times.length} over ${budget / 1000} s: ${over.slice(0, 5).join("; ")}`)
+  const sorted = [...times].sort((a, b) => a.ms - b.ms)
+  return { settled: times.length, budget_ms: budget, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse() }
 }
 // A view is ready when it is shown, no request is in flight, nothing in it
 // is marked as loading (aria-busy, or the site's shared is-loading class,
@@ -614,6 +624,7 @@ async function settle(page, view, timeout = 20000, networkTimeout = 60000) {
   const start = Date.now()
   let idleSince = null
   let last = -1
+  let loading = false
   while (true) {
     const busy = open.size > 0
     const now = await page.evaluate((v) => {
@@ -621,18 +632,19 @@ async function settle(page, view, timeout = 20000, networkTimeout = 60000) {
       const loading = [...el.querySelectorAll('[aria-busy="true"], .is-loading')].some((n) => n.getClientRects().length > 0)
       return loading ? -2 : el.innerHTML.length
     }, view)
+    loading = now === -2
     if (busy) { idleSince = null; last = -1 }
     else {
       if (idleSince === null) idleSince = Date.now()
       if (now === last && now >= 0) {
         const ms = Date.now() - t0
-        if (!UNTIMED.has(page)) SETTLE_TIMES.push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, "") })
+        ;(SINKS.get(page) || SETTLE_TIMES).push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, "") })
         return ms
       }
       last = now
     }
     if (busy && Date.now() - start > networkTimeout) throw new Error(`route never settled: ${view} (${open.size} requests still in flight: ${[...open].slice(0, 3).map((r) => r.url().replace(/^https?:\/\/[^/]+/, "")).join(", ")})`)
-    if (!busy && Date.now() - idleSince > timeout) throw new Error(`route never settled: ${view} (the network was idle, but the view kept changing or stayed marked as loading)`)
+    if (!busy && Date.now() - idleSince > timeout) throw new Error(`route never settled: ${view} (the network was idle, but the view ${loading ? "stayed marked as loading" : "kept changing"})`)
     await page.waitForTimeout(300)
   }
 }
@@ -1577,17 +1589,31 @@ export async function main(argv = process.argv.slice(2)) {
           if (bad.length) throw new Error(`planted bound on a task page: ${bad[0]}`)
         }, /^planted bound on a task page: about under/)
         await expectFailure("slow_data_file", async () => {
-          // One data file answers 10 s late; the budget must catch the slow route.
+          // One data file answers 10 s late. The page is timed like any other,
+          // into its own list, and pages_settle_within_budget's own body must
+          // fail on the run's times with it added.
           const slow = await newPage({ width: 1280 })
-          UNTIMED.add(slow.page)
+          const sink = []
+          SINKS.set(slow.page, sink)
           try {
             await slow.page.route("**/rollups/causes.json", async (r) => { await new Promise((ok) => setTimeout(ok, 10000)); await r.continue() })
             await slow.page.goto(url + routeHash(ROUTES.find((x) => x.name === "cause"), targets))
-            const ms = await settle(slow.page, "cause")
-            const over = assessSettle([{ view: "cause", ms, where: "planted" }])
-            if (over.length) throw new Error(`planted slow route: ${over[0]}`)
+            await settle(slow.page, "cause")
           } finally { await slow.context.close() }
-        }, /^planted slow route: cause \(planted\): 1\d\.\d s/)
+          if (!sink.length) throw new Error("the slow page was not timed")
+          settleBudget([...SETTLE_TIMES, ...sink])
+        }, /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\): 1\d\.\d s/)
+        await expectFailure("loading_marker_never_clears", async () => {
+          // A loading marker left in a settled view must keep settle() from passing.
+          const stuck = await newPage({ width: 1280 })
+          SINKS.set(stuck.page, [])
+          try {
+            await stuck.page.goto(url + `#/task/${encodeURIComponent(targets.task)}`)
+            await settle(stuck.page, "task")
+            await stuck.page.evaluate(() => { const n = document.createElement("span"); n.className = "is-loading"; n.dataset.gatePlanted = "1"; n.textContent = "Fetching"; document.getElementById("task-lede").appendChild(n) })
+            await settle(stuck.page, "task", 3000)
+          } finally { await stuck.context.close() }
+        }, /^route never settled: task \(the network was idle, but the view stayed marked as loading\)/)
         await expectFailure("bound_before_under_on_compare", async () => {
           await openFresh()
           const before = boundsBeforeUnder((await page.evaluate(compareFigures)).texts)
@@ -1634,16 +1660,8 @@ export async function main(argv = process.argv.slice(2)) {
     await new Promise((resolve) => server.close(resolve))
     resources.server_closed = true
   }
-  // Every route settled within its budget (the slow-file control is untimed).
-  {
-    const over = assessSettle(SETTLE_TIMES)
-    const slowest = [...SETTLE_TIMES].sort((a, b) => b.ms - a.ms).slice(0, 5)
-    await check("pages_settle_within_budget", async () => {
-      if (!SETTLE_TIMES.length) throw new Error("no route was timed")
-      if (over.length) throw new Error(`${over.length} of ${SETTLE_TIMES.length} over ${SETTLE_BUDGET_MS / 1000} s: ${over.slice(0, 5).join("; ")}`)
-      return { settled: SETTLE_TIMES.length, budget_ms: SETTLE_BUDGET_MS, median_ms: [...SETTLE_TIMES].sort((a, b) => a.ms - b.ms)[Math.floor(SETTLE_TIMES.length / 2)].ms, slowest }
-    })
-  }
+  // Every route settled within its budget (a control's page is timed into its own list).
+  await check("pages_settle_within_budget", async () => settleBudget(SETTLE_TIMES))
   // A run proves every required check and every negative control ran.
   const ran = new Set(cases.map((c) => c.name))
   const missing = [...REQUIRED_CHECKS, ...NEGATIVE_CONTROLS.map((n) => `negative_control_${n}`)].filter((n) => !ran.has(n))

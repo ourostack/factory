@@ -1571,8 +1571,8 @@
   // What a part of a view shows while its data loads. The shared class (and
   // aria-busy) say it is loading, so a reader's tools and the browser gate
   // need not match the words.
-  function loadingNote(tag = "p") {
-    const n = el(tag, "chart-empty is-loading", "Loading…");
+  function loadingNote(tag = "p", text = "Loading…") {
+    const n = el(tag, "chart-empty is-loading", text);
     n.setAttribute("aria-busy", "true");
     return n;
   }
@@ -3377,7 +3377,7 @@
       emptyState(container, "No swimlane file is published for this session (only labeled sessions get one), so nothing is drawn rather than an empty lane.");
       return;
     }
-    container.appendChild(el("p", "chart-empty", "Loading the session…"));
+    container.appendChild(loadingNote("p", "Loading the session…"));
     const detail = await walkFile(path);
     if (seq !== walkSeq) return;
     container.innerHTML = "";

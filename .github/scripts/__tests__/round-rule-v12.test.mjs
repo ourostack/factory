@@ -155,3 +155,60 @@ test("describe follows the one table from 0 seconds up, in both forms, with walk
   assert.equal(F.describe({ ...zero, value: 400 }, "duration").text, "400ms")
   assert.equal(F.describe({ ...zero, value: 400 }, "hours").text, "400 milliseconds")
 })
+
+// Round 10: the governing rule is that no figure moves by more than 10%; the
+// table serves it, so seconds take tenths from 1 to 10 s, from 1 ms up.
+test("no figure moves by more than 10%, from 1 ms up, bounded or not, in walk.js and describe alike", () => {
+  const UNIT = { ms: 1, s: SEC, m: MIN, h: HR, d: DAY }
+  assert.equal(W.qualified("at most ", 1002), "at most 1.1 seconds")
+  assert.equal(W.durationShort(1002, "upper"), "1.1s")
+  assert.equal(W.durationShort(9960, "upper"), "10s")
+  assert.equal(W.durationShort(10020, "upper"), "11s")
+  assert.equal(W.durationShort(999, "upper"), "999ms")
+  assert.equal(F.describe(part(1002, "upper"), "duration").text, "at most 1.1s")
+  let checked = 0
+  for (let ms = 1; ms < 40 * DAY; ms = ms < 3000 ? ms + 1 : Math.ceil(ms * 1.013) + 1) {
+    for (const bound of ["lower", "upper", true, false]) {
+      const p = W.durationParts(ms, bound)
+      if (!p) { assert.ok(ms < SEC && !bound, `${ms} ms: only an unbounded figure under a second has no number`); continue }
+      const shown = p.n * UNIT[p.unit] + (p.s || 0) * SEC
+      assert.ok(Math.abs(shown - ms) <= 0.1 * ms + 1e-6, `${ms} ms (${bound}): ${JSON.stringify(p)} moves ${((Math.abs(shown - ms) / ms) * 100).toFixed(1)}%`)
+      if (bound === "lower") assert.ok(shown <= ms + 1e-6, `${ms} ms lower: ${JSON.stringify(p)}`)
+      if (bound === "upper") assert.ok(shown >= ms - 1e-6, `${ms} ms upper: ${JSON.stringify(p)}`)
+      if (typeof bound === "string") {
+        const q = bound === "lower" ? "at least " : "at most "
+        assert.equal(F.describe(part(ms, bound), "duration").text, `${q}${W.durationShort(ms, bound)}`, `${ms} ms ${bound}, short`)
+        assert.equal(F.describe(part(ms, bound), "hours").text, W.qualified(q, ms), `${ms} ms ${bound}, long`)
+      }
+      checked += 1
+    }
+  }
+  assert.ok(checked > 10000)
+})
+
+test("a share is at its edge only at exactly 100%: a lower bound above it keeps its at least", () => {
+  const share = (value, b) => F.describe({ state: "partial", value, bound: b, reasons: ["log_truncated"] }, "pct").text
+  assert.equal(share(1.2, "lower"), "at least 120%")
+  assert.equal(share(1, "lower"), "100%")
+  assert.equal(F.describe({ state: "partial", value: 1.2, bound: null, bound_reason: "bound_reasons_conflict", reasons: ["x"] }, "pct").text, "120%")
+  assert.deepEqual(W.atEdge("at least ", 1.2, undefined, 1), ["at least ", ""])
+  const r = (w, p, b) => S.clockShareWords({ state: "partial", value: w, bound: b, reasons: ["x"] }, { state: "measured", value: p, reasons: [] })
+  assert.equal(r(1200, 1000, "lower"), "at least 120% of production time")
+  assert.equal(r(1000, 1000, "lower"), "100% of production time")
+})
+
+test("the session loading note carries the shared marker, and the gate's controls prove the budget check and a lingering marker fail", async () => {
+  const app = read("site/src/app.js")
+  assert.doesNotMatch(app, /el\("p", "chart-empty", "Loading the session…"\)/)
+  assert.match(app, /loadingNote\("p", "Loading the session…"\)/)
+  const { fileURLToPath } = await import("node:url")
+  const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
+  assert.ok(G.NEGATIVE_CONTROLS.includes("loading_marker_never_clears"))
+  assert.throws(() => G.settleBudget([{ view: "task", ms: 700 }, { view: "cause", ms: 10300, where: "planted" }]), /1 of 2 over 5 s: cause \(planted\): 10\.3 s/)
+  assert.equal(G.settleBudget([{ view: "task", ms: 700 }]).settled, 1)
+  const gate = read("site/scripts/verify-v12-browser.mjs")
+  assert.match(gate, /check\("pages_settle_within_budget", async \(\) => settleBudget\(SETTLE_TIMES\)\)/)
+  const control = gate.slice(gate.indexOf('expectFailure("slow_data_file"'), gate.indexOf('expectFailure("bound_before_under_on_compare"'))
+  assert.doesNotMatch(control, /UNTIMED/)
+  assert.match(control, /settleBudget\(\[\.\.\.SETTLE_TIMES, \.\.\.sink\]\)/)
+})
