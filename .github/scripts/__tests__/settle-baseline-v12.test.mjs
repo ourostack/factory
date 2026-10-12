@@ -53,14 +53,15 @@ test("a settle that followed an action on the page is never excused", () => {
   assert.deepEqual(G.assessSettle([at(4000, "#/task/x", { after: "interaction" })], 5000, new Map()), [])
   assert.deepEqual(G.settleExcused([acted], 5000, re(acted, 600, 590)), [])
   // The gate marks each settle from its page: a navigation only at the URL the last goto asked for.
-  assert.match(gate, /page\.goto = async \(to, \.\.\.a\) => \{ const nav = \{ asked: to, landed: null \}; NAVIGATED\.set\(page, nav\); const r = await goto\(to, \.\.\.a\); nav\.landed = page\.url\(\); return r \}/)
-  assert.match(gate, /const after = asked !== undefined && \(sameUrl\(asked\.asked, page\.url\(\)\) \|\| \(asked\.landed !== null && sameUrl\(asked\.landed, page\.url\(\)\)\)\) \? "navigation" : "interaction"/)
+  assert.match(gate, /page\.goto = async \(to, \.\.\.a\) => \{ const nav = \{ from: page\.url\(\), asked: to, landed: null \}; NAVIGATED\.set\(page, nav\); const r = await goto\(to, \.\.\.a\); nav\.landed = page\.url\(\); return r \}/)
+  assert.match(gate, /const after = settleAfter\(asked, page\.url\(\)\)/)
   assert.match(gate, /width: size\.width, height: size\.height, scale: kind\.scale, theme: kind\.theme, after, altered: !!kind\.altered \}/)
   assert.equal(G.sameUrl("http://127.0.0.1:1/#/", "http://127.0.0.1:1/#/"), true)
   assert.equal(G.sameUrl("http://127.0.0.1:1/#/", "http://127.0.0.1:1/#/tasks"), false, "a goto and then a click is an action")
   assert.equal(G.sameUrl("http://127.0.0.1:1#/tasks", "http://127.0.0.1:1/#/tasks"), true)
   const control = gate.slice(gate.indexOf('expectFailure("slow_after_action"'), gate.indexOf('expectFailure("loading_marker_never_clears"'))
   assert.match(control, /a settle after a goto and a click was recorded as/)
+  assert.match(control, /a settle after a goto that only changed the hash was recorded as/)
   assert.match(gate, /t\.after !== "interaction" && !t\.altered && !RETIMES\.has\(settleKey\(t\)\)/)
   assert.ok(G.NEGATIVE_CONTROLS.includes("slow_after_action"))
 })
@@ -101,4 +102,31 @@ test("the gate re-times in the same kind of page, alternating with main, before 
   const control = gate.slice(gate.indexOf('expectFailure("slowdown_3x_over_budget"'), gate.indexOf('expectFailure("slow_after_action"'))
   assert.match(control, /retime\(t, 3 \* main, 2500\)/)
   assert.match(control, /if \(r\.ms < 3 \* r\.main_ms\) throw/)
+})
+
+test("a goto that only changes the hash counts as an action, so its settle is never excused", () => {
+  const o = "http://127.0.0.1:1/"
+  assert.equal(G.hashOnly(`${o}#/`, `${o}#/compare`), true)
+  assert.equal(G.hashOnly(`${o}#/compare`, `${o}#/compare?mode=share`), true)
+  assert.equal(G.hashOnly(o, `${o}#/compare`), true, "from the bare page to a route")
+  assert.equal(G.hashOnly(`${o}#/tasks`, o), false, "a goto with no hash reloads the page")
+  assert.equal(G.hashOnly(o, o), false, "a goto to the same address with no hash reloads the page")
+  assert.equal(G.hashOnly("about:blank", `${o}#/compare`), false, "a fresh page loads")
+  assert.equal(G.hashOnly(`${o}#/`, `${o}?v=2#/`), false, "a new query string loads")
+  assert.equal(G.hashOnly(`${o}#/`, "http://127.0.0.1:2/#/"), false, "another site loads")
+  assert.equal(G.hashOnly(`${o}#/`, "#/compare"), false, "a URL that does not parse is not called hash-only")
+
+  const fresh = { from: "about:blank", asked: `${o}#/compare`, landed: `${o}#/compare` }
+  assert.equal(G.settleAfter(fresh, `${o}#/compare`), "navigation")
+  assert.equal(G.settleAfter({ ...fresh, landed: `${o}#/tasks` }, `${o}#/tasks`), "navigation", "the site's own redirect")
+  assert.equal(G.settleAfter(fresh, `${o}#/tasks`), "interaction", "a click moved the page on")
+  assert.equal(G.settleAfter(undefined, `${o}#/compare`), "interaction", "no goto")
+  const hash = { from: `${o}#/`, asked: `${o}#/compare`, landed: `${o}#/compare` }
+  assert.equal(G.settleAfter(hash, `${o}#/compare`), "interaction")
+
+  const slow = at(6600, "#/compare", { after: G.settleAfter(hash, `${o}#/compare`) })
+  assert.deepEqual(G.assessSettle([slow], 5000, re(slow, 600, 590)), ["overview (#/compare) at 1280 px: 6.6 s, after an action on the page, so not re-timed"])
+  assert.deepEqual(G.settleExcused([slow], 5000, re(slow, 600, 590)), [])
+  const loaded = at(6600, "#/compare", { after: G.settleAfter(fresh, `${o}#/compare`) })
+  assert.deepEqual(G.assessSettle([loaded], 5000, re(loaded, 600, 590)), [], "a fresh load can still be excused")
 })
