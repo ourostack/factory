@@ -471,7 +471,9 @@
       const exact = (bound === "lower" && share === 1) || (bound === "upper" && share <= 0);
       return f.strict || exact ? f.text : `${bound === "lower" ? "≥" : "≤"}${f.text}`;
     }
-    if (bound === "unknown") return `~${F.shareFigure(share, 0, "none").text}`;
+    // At exactly 0 or 1 an open direction can be off one way only; the words
+    // say which ("100% (could be lower)", W.atEdge), and "~" would say both.
+    if (bound === "unknown") return share <= 0 || share === 1 ? W.pctWords(share) : `~${F.shareFigure(share, 0, "none").text}`;
     const p = share * 100;
     if (p > 0 && p < 1) return "<1%";
     return W.pctWords(share);

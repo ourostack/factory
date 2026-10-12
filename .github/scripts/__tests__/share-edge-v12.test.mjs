@@ -195,6 +195,10 @@ test("a flow efficiency with no known direction carries ~ on its share-mode labe
   assert.equal(label(fe({ bound: "unknown" })), "~96% working")
   assert.equal(label(fe({ bound: null, bound_reason: "bound_not_moved" })), "96% working", "exact for its window")
   assert.equal(label(fe({ bound: "upper" })), "≤96% working")
+  // At the edge the words say the one way it can be off, so the label has no "~".
+  assert.equal(S.shortPct(1, "unknown"), "100%")
+  assert.equal(S.shortPct(0, "unknown"), "0%")
+  assert.equal(S.shareQualify(1, "unknown"), "100% (could be lower)")
   const [, wait] = S.shareBars([bar], [fe({ bound: null })])[0].groups
   assert.equal(S.shortPct(wait.share_of_lead, wait.share_bound), "~4%")
   assert.match(W.feWords(fe({ bound: null })), /^96% \(partial, direction not known\)$/)
