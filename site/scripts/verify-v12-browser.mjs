@@ -206,12 +206,14 @@ export function compareFigures() {
   const after = (t) => { const i = t.lastIndexOf(": "); return i >= 0 ? t.slice(i + 2) : t }
   const jobOf = (href) => ((href || "").match(/#\/task\/([^?/&]+)/) || [])[1] || null
   const mode = new URLSearchParams(location.hash.split("?")[1] || "").get("mode") || "all"
-  const column = { all: /^Lead time$/, production: /^Production time$/, request: /^Request to delivery$/ }[mode]
+  const column = { all: /^Lead time$/, working: /^Working$/, production: /^Production time$/, request: /^Request to delivery$/ }[mode]
   const cells = new Map()
+  let columnShown = false
   if (column) for (const table of view.querySelectorAll("#stackup-table table, #stackup .clock-modes-table")) {
     const head = table.tHead ? table.tHead.rows[0] : table.rows[0]
     const idx = head ? [...head.cells].findIndex((c) => column.test(c.textContent.trim())) : -1
     if (idx < 0) continue
+    columnShown = true
     for (const tr of table.tBodies[0] ? table.tBodies[0].rows : []) {
       const a = tr.querySelector("a[href*='#/task/']"), td = tr.cells[idx], job = a && jobOf(a.getAttribute("href"))
       if (job && td && !cells.has(job)) cells.set(job, td.textContent.trim())
@@ -233,7 +235,7 @@ export function compareFigures() {
   const one = (sel) => { const e = view.querySelector(sel); return e ? e.textContent.trim() : null }
   const conclusion = one("#comparison-conclusion")
   return {
-    mode, rows, cells: cells.size,
+    mode, rows, cells: cells.size, column: columnShown,
     axis: one("#stackup .axis-title"), sum: one("#stackup .clock-exposure"), lead: conclusion ? after(conclusion) : null,
     texts: [view.innerText, ...[...view.querySelectorAll("[aria-label]")].map((e) => e.getAttribute("aria-label")), ...tips],
   }
@@ -1131,6 +1133,7 @@ export async function main(argv = process.argv.slice(2)) {
       for (const r of await readCompare()) {
         const off = assessTaskForms(r.rows)
         if (off.length) throw new Error(`${r.mode} at ${r.width} px: ${off.length} figures differ: ${off.slice(0, 3).join("; ")}`)
+        if (r.column && r.rows.length && !r.rows.some((x) => x.cell !== null)) throw new Error(`${r.mode} at ${r.width} px: a table column is shown but no bar matched a cell`)
         seen[`${r.mode}_${r.width}`] = { bars: r.rows.length, with_table_cell: r.rows.filter((x) => x.cell !== null).length, with_tooltip: r.rows.filter((x) => x.tip !== null).length }
       }
       // A mode may draw no bar (no task has that clock), but the check must read some.

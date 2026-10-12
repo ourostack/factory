@@ -103,14 +103,18 @@
     return x > 48 * HOUR ? "days" : x >= HOUR || x === 0 ? "hours" : "minutes";
   }
   // The number in the unit: whole from 10, one decimal from 1, two below;
-  // null when it rounds to zero.
-  function unitNumber(ms, unit) {
+  // null when it rounds to zero. A lower bound rounds down and an upper
+  // bound up (walk.js durationParts); anything else rounds to nearest.
+  function unitNumber(ms, unit, bound) {
     const v = ms / UNIT[unit][0];
-    if (v >= 10) return Math.round(v).toLocaleString("en-US");
-    if (v >= 1) return String(Math.round(v * 10) / 10);
-    const r = Math.round(v * 100) / 100;
-    return r > 0 ? String(r) : null;
+    const r = (k) => (bound === "lower" ? Math.floor(k + 1e-9) : bound === "upper" ? Math.ceil(k - 1e-9) : Math.round(k));
+    if (v >= 10) return r(v).toLocaleString("en-US");
+    if (v >= 1) return String(r(v * 10) / 10);
+    const t = r(v * 100) / 100;
+    return t > 0 ? String(t) : null;
   }
+  // The bound a figure's qualifier or sign carries, for rounding.
+  const BOUND_OF = { "at least ": "lower", "at most ": "upper", "about ": true, "≥": "lower", "≤": "upper", "~": true };
   // A view-unit figure, for the figures that compare magnitudes across a
   // view (its sum and lead sentence): "101 days", "0.15 days", "under 0.01
   // days"; without a unit, hoursWords. A bounded figure too small for the
@@ -119,8 +123,8 @@
     if (!UNIT[unit]) return hoursWords(ms);
     const x = Math.max(0, Number(ms) || 0);
     if (x === 0) return "none";
-    const t = unitNumber(x, unit), name = UNIT[unit][1];
-    if (t === null) return bounded ? W.durationWords(x, true) : `under 0.01 ${name}s`;
+    const t = unitNumber(x, unit, bounded), name = UNIT[unit][1];
+    if (t === null) return bounded ? W.durationWords(x, bounded) : `under 0.01 ${name}s`;
     return `${t} ${name}${t === "1" ? "" : "s"}`;
   }
 
@@ -141,7 +145,7 @@
     const fmt = (x, bounded) => (UNIT[unit] ? unitWords(x, unit, bounded) : W.durationWords(x, bounded));
     if (open) return `${fmt(v, false)} so far`;
     const b = totalBound(n);
-    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${fmt(v, b === "upper" || b === "lower")}`;
+    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${fmt(v, b === "upper" || b === "lower" ? b : false)}`;
   }
   // The same, in a bar's short value label: "≥47h", "12.9d".
   function totalShort(n, open) {
@@ -149,7 +153,7 @@
     if (v === null) return "no data";
     if (v === 0) return "none";
     const b = open ? null : totalBound(n);
-    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${W.durationShort(v, b === "upper" || b === "lower")}`;
+    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${W.durationShort(v, b === "upper" || b === "lower" ? b : false)}`;
   }
 
   // One bar per task for the stack-up, in walkOrder. `mode` is "all" (the
@@ -246,7 +250,7 @@
     // The same formatter as the task's other figures ("7 days", "3.6 hours").
     // The per-task form; with `unit`, a view's unit (a zero keeps its unit).
     // A partial value is bounded, so it never reads "under".
-    const bounded = n.state === "partial";
+    const bounded = n.state !== "partial" ? false : n.bound === "lower" || n.bound === "upper" ? n.bound : true;
     const v = UNIT[unit] ? (val(n) === 0 ? `0 ${UNIT[unit][1]}s` : unitWords(val(n), unit, bounded)) : val(n) === 0 ? "0 seconds" : W.durationWords(val(n), bounded);
     const soFar = n.so_far ? " so far" : "";
     if (n.state !== "partial") return { text: `${v}${soFar}`, why: "", state: "measured" };
@@ -327,7 +331,7 @@
       const words = clockWords(total, null).text;
       const viewWords = clockWords(total, null, o.unit).text;
       const shortB = total.state === "partial" ? (total.bound === "lower" ? "≥" : total.bound === "upper" ? "≤" : "~") : "";
-      const label = `${shortB}${W.durationShort(val(total), !!shortB)}`;
+      const label = `${shortB}${W.durationShort(val(total), BOUND_OF[shortB] || false)}`;
       const reasons = [...new Set(arr(total.reasons))];
       let segments = [{ key: "clock_total", label: key === "production_ms" ? "Production time" : "Request to delivery", ms: val(total) }];
       if (key === "production_ms") {
@@ -353,7 +357,7 @@
     const dirs = new Set(drawn.filter((b) => b.partial).map((b) => (b.bound === "lower" || b.bound === "upper" ? b.bound : null)));
     const lead = !dirs.size ? "" : dirs.size === 1 && dirs.has("lower") ? "at least " : dirs.size === 1 && dirs.has("upper") ? "at most " : "about ";
     const tail = lead === "about " ? " (could be higher or lower)" : "";
-    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${unitWords(total, u, !!lead)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
+    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${unitWords(total, u, BOUND_OF[lead] || false)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
   }
 
   // Recorded working as a share of production, keeping mixed bounds honest:
@@ -455,7 +459,7 @@
 
   // A bar group's time with its bound; a true zero is "none", never
   // "at least none".
-  const groupWords = (g) => (g && g.ms > 0 ? `${g.qualifier || ""}${W.durationWords(g.ms, !!g.qualifier)}` : "none");
+  const groupWords = (g) => (g && g.ms > 0 ? `${g.qualifier || ""}${W.durationWords(g.ms, BOUND_OF[g.qualifier] || false)}` : "none");
 
   // One row of Compare's phone table: the task, its lead time and its
   // waiting, the figures a reader on a small screen needs first, in the
@@ -463,7 +467,7 @@
   const SHORT_Q = { "at least ": "≥", "at most ": "≤", "about ": "~" };
   function compactRow(b) {
     const waiting = arr(b.groups).find((g) => g.key === "waiting");
-    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${W.durationShort(waiting.ms, !!SHORT_Q[waiting.qualifier])}` : "none";
+    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${W.durationShort(waiting.ms, BOUND_OF[waiting.qualifier] || false)}` : "none";
     return { job: b.job, name: b.name, href: b.href, lead: b.state === "no_data" ? "no data" : b.label, waiting: wait };
   }
   // The disclosure that holds every figure on a phone.

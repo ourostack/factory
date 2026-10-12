@@ -156,3 +156,42 @@ test("the preferences migration drops only the UTC the old bug stored, and keeps
   assert.equal(kept.dismissed, true)
   assert.equal(P.readPreferences(store("Not/AZone"), "America/Los_Angeles").zone, "America/Los_Angeles", "an invalid zone falls back")
 })
+
+// Round 7 (2026-10-12): rounding never overstates a bound, and the unit
+// comes from the rounded value.
+test("a lower bound rounds down and an upper bound up; other figures round to nearest", () => {
+  const M = 60000
+  assert.equal(W.durationWords(59.5 * M, "lower"), "59 minutes")
+  assert.equal(W.durationShort(59.5 * M, "lower"), "59m")
+  assert.equal(W.durationWords(59.5 * M), "1 hour")
+  assert.equal(W.durationWords(59.5 * M, "upper"), "1 hour")
+  assert.equal(W.durationWords(2.25 * D, "lower"), "2.2 days")
+  assert.equal(W.durationWords(2.25 * D, "upper"), "2.3 days")
+  assert.equal(W.durationShort(2.25 * D, "lower"), "2.2d")
+  assert.equal(W.durationShort(2.25 * D, "upper"), "2.3d")
+  assert.equal(S.unitWords(2.25 * D, "days", "lower"), "2.2 days")
+  assert.equal(S.unitWords(2.25 * D, "days", "upper"), "2.3 days")
+  // A Compare bar and its table cell round the same bound the same way.
+  const na = { state: "unavailable", reasons: ["not_recorded"] }
+  const clocks = { production_ms: p(2.25 * D, "lower"), active_in_production_ms: na, production_remainder_ms: na, request_to_delivery_ms: na, queue_ms: na }
+  const [bar] = S.clockBars([{ id: "a".repeat(16), status: "done", finish_date: na, clocks }], "production", { unit: "days" })
+  assert.equal(bar.label, "≥2.2d")
+  assert.equal(bar.words, "at least 2.2 days")
+  assert.equal(S.clockFigures(clocks, F.reasonText).find((f) => f.key === "production_ms").text, "at least 2.2 days")
+})
+
+test("60 seconds carries to a minute, as 60 minutes carries to an hour, and the unit comes from the rounded value", () => {
+  assert.equal(W.durationWords(59.6 * 1000), "1 minute")
+  assert.equal(W.durationShort(59.6 * 1000), "1m")
+  assert.equal(W.durationWords(59.4 * 1000), "59 seconds")
+  assert.equal(W.durationWords(47.96 * H), "2 days")
+  assert.equal(W.durationShort(47.96 * H), "2d")
+  assert.equal(W.durationWords(47.96 * H, "lower"), "47 hours")
+  assert.equal(W.durationWords(999.6, "upper"), "1 second")
+})
+
+test("the task-figure check compares working-mode table cells, and needs a cell wherever a table column is shown", () => {
+  const gate = read("site/scripts/verify-v12-browser.mjs")
+  assert.match(gate, /working: \/\^Working\$\//)
+  assert.match(gate, /a table column is shown but no bar matched a cell/)
+})

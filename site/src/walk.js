@@ -30,34 +30,57 @@
 
   // ------------------------------------------------------------ durations
 
+  // A duration as a number and a unit, shared by durationWords and
+  // durationShort so both forms always agree. `bound` says which way the
+  // figure may be wrong: "lower" (an "at least" figure) rounds down, "upper"
+  // (an "at most" figure) rounds up, so rounding never overstates what is
+  // known; true ("about") and none round to nearest. The unit comes from the
+  // rounded value, so 59.6 seconds carries to 1 minute, 59.6 minutes to
+  // 1 hour and 47.96 hours to 2 days. Returns { n, unit } with unit "ms",
+  // "s", "m", "h" or "d", or null for a positive time under a second with no
+  // bound (it reads "under a second"; a bound never meets "under").
+  function durationParts(ms, bound) {
+    const x = Math.max(0, Number(ms) || 0);
+    const round = (v, step) => {
+      const k = v / step;
+      const r = bound === "lower" ? Math.floor(k + 1e-9) : bound === "upper" ? Math.ceil(k - 1e-9) : Math.round(k);
+      return Math.round(r * step * 10) / 10;
+    };
+    if (x < SECOND) {
+      if (!bound) return null;
+      // A positive time never reads as zero unless it is a lower bound.
+      const n = Math.max(bound === "lower" ? 0 : 1, round(x, 1));
+      if (n < 1000) return { n, unit: "ms" };
+    }
+    if (x < MINUTE) {
+      const n = round(x / SECOND, 1);
+      if (n < 60) return { n, unit: "s" };
+    }
+    if (x < HOUR) {
+      const n = round(x / MINUTE, 1);
+      if (n < 60) return { n, unit: "m" };
+    }
+    if (x < 48 * HOUR) {
+      const h = x / HOUR;
+      const n = round(h, h >= 10 ? 1 : 0.1);
+      if (n < 48) return { n, unit: "h" };
+    }
+    return { n: round(x / DAY, 0.1), unit: "d" };
+  }
+  const UNIT_WORD = { ms: "millisecond", s: "second", m: "minute", h: "hour", d: "day" };
+
   // A duration in words, for sentences: "under a second", "40 seconds",
   // "12 minutes", "4.3 hours", "47 hours" (hours below two days), "4.5 days".
   // `bounded` is set when an "at least", "at most" or "about" goes in front:
-  // a bound never meets "under", so time under a second reads in milliseconds.
+  // "lower", "upper" or true (see durationParts). A bound never meets
+  // "under", so a bounded time under a second reads in milliseconds.
   function durationWords(ms, bounded) {
     const x = Math.max(0, Number(ms) || 0);
     // A true zero is "none"; only a positive time under a second is "under a second".
     if (x === 0) return "none";
-    if (x < SECOND && bounded) {
-      const n = Math.max(1, Math.round(x));
-      return `${n} millisecond${n === 1 ? "" : "s"}`;
-    }
-    if (x < SECOND) return "under a second";
-    if (x < MINUTE) {
-      const s = Math.round(x / SECOND);
-      return `${s} second${s === 1 ? "" : "s"}`;
-    }
-    if (x < HOUR) {
-      const m = Math.round(x / MINUTE);
-      return m === 60 ? "1 hour" : `${m} minute${m === 1 ? "" : "s"}`;
-    }
-    if (x < 48 * HOUR) {
-      const h = x / HOUR;
-      const t = h >= 10 ? String(Math.round(h)) : (Math.round(h * 10) / 10).toString();
-      return `${t} hour${t === "1" ? "" : "s"}`;
-    }
-    const d = Math.round((x / DAY) * 10) / 10;
-    return `${d} days`;
+    const p = durationParts(x, bounded);
+    if (!p) return "under a second";
+    return `${p.n} ${UNIT_WORD[p.unit]}${p.n === 1 ? "" : "s"}`;
   }
 
   // A duration in a few characters, for labels on marks: "<1s", "40s",
@@ -66,16 +89,9 @@
   function durationShort(ms, bounded) {
     const x = Math.max(0, Number(ms) || 0);
     if (x === 0) return "0s";
-    if (x < SECOND && bounded) return `${Math.max(1, Math.round(x))}ms`;
-    if (x < SECOND) return "<1s";
-    if (x < MINUTE) return `${Math.round(x / SECOND)}s`;
-    // As in durationWords: 59.6 minutes rounds to "1h", never "60m".
-    if (x < HOUR) return Math.round(x / MINUTE) === 60 ? "1h" : `${Math.round(x / MINUTE)}m`;
-    if (x < 48 * HOUR) {
-      const h = x / HOUR;
-      return `${h >= 10 ? Math.round(h) : (Math.round(h * 10) / 10).toString()}h`;
-    }
-    return `${(Math.round((x / DAY) * 10) / 10).toString()}d`;
+    const p = durationParts(x, bounded);
+    if (!p) return "<1s";
+    return `${p.n}${p.unit}`;
   }
 
   function pctWords(share) {
