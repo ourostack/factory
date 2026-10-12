@@ -3092,12 +3092,14 @@
       // The conclusion leads: right under the task title, before the
       // reference and status lines, so it starts on the first screen.
       const conclusion = el("p", "task-conclusion", summary.conclusion);
+      // The marker, not the wording, says which sentence is the conclusion.
+      conclusion.dataset.role = "conclusion";
       for (const old of document.querySelectorAll("#task-head .task-conclusion, #task-head .task-caveat")) old.remove();
       const title = document.querySelector("#task-head .task-title");
       if (title) title.after(conclusion);
       else summaryEl.appendChild(conclusion);
       // The caveat follows the conclusion; it never stands in for it.
-      if (summary.caveat) conclusion.after(el("p", "task-caveat", summary.caveat));
+      if (summary.caveat) { const caveat = el("p", "task-caveat", summary.caveat); caveat.dataset.role = "caveat"; conclusion.after(caveat); }
       const figures = el("dl", "task-summary-figures");
       for (const f of summary.figures) {
         const cell = el("div");
@@ -3799,6 +3801,7 @@
   // ------------------------------------------------- step 2: the stack-up
 
   const SB = { axisW: 46, top: 40, labelH: 118 };
+  const UNIT_TITLE = Object.freeze({ days: "Days", hours: "Hours", minutes: "Minutes" });
 
   function drawStackup(container, bars, mode, marked) {
     container.innerHTML = "";
@@ -3831,14 +3834,16 @@
     const plotW = colW * bars.length + 8;
     const drawn = bars.filter((b) => b.state !== "no_data" && typeof b.total_ms === "number");
     // Headroom above the tallest bar for its value label.
-    const scale = share ? { unit: "share", per: 1, max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total_ms)) * 1.15);
+    // A view with one unit (Compare) carries it on its bars; the axis uses it.
+    const unit = (bars.find((b) => b.unit) || {}).unit || null;
+    const scale = share ? { unit: "share", per: 1, max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total_ms)) * 1.15, undefined, unit || undefined);
     const y = (ms) => T + H - (ms / scale.max_ms) * H;
     const totalH = T + H + labelH;
 
     const row = el("div", "sb-row");
     // The axis stays put while the bars scroll inside their frame.
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
-    axis.appendChild(svg("text", { x: 12 * k, y: T + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone || k > 1 ? "% of lead time" : "% of each task's lead time") : ((long, short) => (long.length * 6.2 * k <= H ? long : short))(`${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : mode === "production" ? " of production" : mode === "request" ? " to delivery" : " elapsed"}`, scale.unit === "hours" ? "Hours" : "Minutes");
+    axis.appendChild(svg("text", { x: 12 * k, y: T + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone || k > 1 ? "% of lead time" : "% of each task's lead time") : ((long, short) => (long.length * 6.2 * k <= H ? long : short))(`${UNIT_TITLE[scale.unit]}${mode === "working" ? " of agent work" : mode === "production" ? " of production" : mode === "request" ? " to delivery" : " elapsed"}`, UNIT_TITLE[scale.unit]);
     for (const t of scale.ticks) {
       const ty = y(t);
       const tx = svg("text", { x: axisW - 6, y: ty + 4 * k, class: "axis-tick", "text-anchor": "end" });
@@ -3921,8 +3926,8 @@
       if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
       else {
         tipRows.push({ label: mode === "working" ? "Agent working time" : mode === "production" ? "Production time" : mode === "request" ? "Request to delivery" : "Lead time", value: b.words });
-        if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: S.hoursWords(sg.ms) });
-        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g) });
+        if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: S.unitWords(sg.ms, unit) });
+        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g, unit) });
         if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
       }
       if (b.finish && b.finish.kind !== "open") tipRows.push({ label: "Finished (UTC)", value: b.finish.words });
@@ -4427,6 +4432,7 @@
     const sum = S.exposureWords(bars);
     if (sum) wrap.appendChild(el("p", "chart-caption clock-exposure", sum));
     const byId = new Map(jobs.map((j) => [j.id, j]));
+    const unit = (bars.find((b) => b.unit) || {}).unit || null;
     const cols = mode === "request"
       ? [["request_to_delivery_ms", "Request to delivery"], ["queue_ms", "Queued before production"]]
       : [["production_ms", "Production time"], ["active_in_production_ms", "Recorded working inside production"], ["production_remainder_ms", "Not recorded as active"]];
@@ -4439,7 +4445,7 @@
     for (const b of bars) {
       const j = byId.get(b.job);
       const clocks = j && j.clocks && typeof j.clocks === "object" ? j.clocks : null;
-      const figures = new Map((S.clockFigures(clocks, F.reasonText) || []).map((f) => [f.key, f]));
+      const figures = new Map((S.clockFigures(clocks, F.reasonText, unit) || []).map((f) => [f.key, f]));
       const tr = document.createElement("tr");
       const name = el("td"); name.appendChild(jobLink(b.job, b.name)); tr.appendChild(name);
       for (const [key] of cols) {
@@ -4513,10 +4519,10 @@
       tr.appendChild(el("td", null, b.finish ? (b.finish.kind === "open" ? "open" : b.finish.words) : "—"));
       tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
       const g = (k) => b.groups.find((x) => x.key === k);
-      tr.appendChild(el("td", "num", g("working") ? groupWords(g("working")) : "not known"));
-      tr.appendChild(el("td", "num", g("waiting") ? groupWords(g("waiting")) : "not known"));
+      tr.appendChild(el("td", "num", g("working") ? groupWords(g("working"), b.unit) : "not known"));
+      tr.appendChild(el("td", "num", g("waiting") ? groupWords(g("waiting"), b.unit) : "not known"));
       const w = g("waiting") ? g("waiting").segments.slice().sort((p, q) => q.ms - p.ms)[0] : null;
-      tr.appendChild(el("td", null, w ? `${w.label}, ${S.hoursWords(w.ms)}` : "—"));
+      tr.appendChild(el("td", null, w ? `${w.label}, ${S.unitWords(w.ms, b.unit)}` : "—"));
       const notes = [];
       if (b.state === "unsplit" || b.state === "no_data") notes.push((b.reasons || []).map(F.reasonText).join("; ") || "not recorded");
       if (b.shared) notes.push("labels from a shared session");
@@ -4622,21 +4628,12 @@
     const filtered = ["task", "status", "from", "to", "evidence"].some((k) => context[k]);
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs.filter((r) => selectedIds.has(r.job)) : null;
     const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs.filter((r) => selectedIds.has(r.job)) : null;
-    const opts = (mode) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => jobLabel(j) });
+    const opts = (mode, unit) => ({ mode, segments: F.SEGMENTS, nameOf: (j) => jobLabel(j), unit });
     const all = !taskRows && !stackRows ? [] : S.stackBars(selectedJobs, stackRows, taskRows, opts("all"));
     renderComparisonControls(ledeEl, data, context, all);
     safely("compare-lede", () => {
       ledeEl.textContent = "Recorded task windows can overlap, so their sums are task exposure, not factory time. Their working share is not agent utilization or global idle time. Production time comes from Desk's production episodes; request to delivery is unavailable wherever the original request was not recorded. Acceptance is not part of production.";
-      let conclusion = document.getElementById("comparison-conclusion");
-      // The conclusion leads the page, right under its heading.
-      if (!conclusion) { conclusion = el("p", "comparison-conclusion"); conclusion.id = "comparison-conclusion"; document.querySelector("#view-compare h1").after(conclusion); }
-      conclusion.innerHTML = "";
-      const candidate = all.filter((b) => b.state !== "no_data" && Number.isFinite(b.total_ms)).sort((a, b) => b.total_ms - a.total_ms)[0];
-      if (!selectedJobs.length) conclusion.textContent = "No recorded task matches these filters. Clear filters or choose a different recorded population.";
-      else if (!candidate) conclusion.textContent = "The selected tasks have no comparable recorded window yet. Inspect their evidence before choosing an improvement.";
-      else {
-        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
-      }
+      ledeEl.dataset.role = "caveat";
       const scope = document.getElementById("compare-scope");
       scope.dataset.n = String(selectedJobs.length);
       scope.dataset.signature = JSON.stringify(all.map((b) => [b.job, b.total_ms, b.segments.map((s) => [s.key, s.ms])]));
@@ -4648,11 +4645,33 @@
         : " Date filters include exact UTC finish days only.";
       scope.textContent = `${selectedJobs.length} of ${data.jobs.length} recorded tasks selected. Percentages use each included task's own recorded elapsed window, not global utilization or capacity.${dateNote} Category emphasis changes no totals or denominators.`;
     });
+    // The conclusion names the largest recorded window, in the view's unit.
+    const writeConclusion = (bars) => {
+      let conclusion = document.getElementById("comparison-conclusion");
+      // The conclusion leads the page, right under its heading.
+      if (!conclusion) { conclusion = el("p", "comparison-conclusion"); conclusion.id = "comparison-conclusion"; document.querySelector("#view-compare h1").after(conclusion); }
+      conclusion.dataset.role = "conclusion";
+      conclusion.innerHTML = "";
+      const candidate = bars.filter((b) => b.state !== "no_data" && Number.isFinite(b.total_ms)).sort((a, b) => b.total_ms - a.total_ms)[0];
+      if (!selectedJobs.length) conclusion.textContent = "No recorded task matches these filters. Clear filters or choose a different recorded population.";
+      else if (!candidate) conclusion.textContent = "The selected tasks have no comparable recorded window yet. Inspect their evidence before choosing an improvement.";
+      else {
+        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
+      }
+    };
+    const drawTable = (bars) => safely("stackup-table", () => (bars.length ? drawStackTable(document.getElementById("stackup-table"), bars) : emptyState(document.getElementById("stackup-table"), "No selected task comparison is available.")));
     const draw = () => {
       const mode = modes.compare;
       const current = F.navigationContext(location.hash);
       const clockMode = mode === "production" || mode === "request";
-      const clockBars = clockMode ? S.clockBars(selectedJobs, mode, opts(mode)) : null;
+      // One duration unit for the whole view (lead sentence, bar labels,
+      // sums, tables and axis), chosen from the largest figure it shows.
+      const shown = [...all, ...(clockMode ? S.clockBars(selectedJobs, mode, opts(mode)) : []), ...(mode === "working" && all.length ? S.stackBars(selectedJobs, stackRows, taskRows, opts("working")) : [])];
+      const unit = S.viewUnit(Math.max(0, ...shown.map((b) => b.total_ms).filter(Number.isFinite)));
+      const allU = !taskRows && !stackRows ? [] : S.stackBars(selectedJobs, stackRows, taskRows, opts("all", unit));
+      safely("compare-lede", () => writeConclusion(allU));
+      drawTable(allU);
+      const clockBars = clockMode ? S.clockBars(selectedJobs, mode, opts(mode, unit)) : null;
       const clockDrawn = clockBars ? clockBars.filter((b) => b.state === "ok") : [];
       document.getElementById("stackup-caption").textContent =
         mode === "production"
@@ -4664,8 +4683,8 @@
           : mode === "share"
             ? "Each task's own lead time as 100%, on a 0 to 100% axis, with the same parts in the same order, so a 20-minute task's make-up compares with a 200-hour one's. Each bar is labeled with the share agents were working. A task whose split is not known is one hatched bar, never 100% of one part. Select a bar to follow its task."
             : "The whole lead time of each task, linear from zero. Left to right: every finished task (done or cancelled) by finish day (UTC), the latest on the right, with any finished task that has no finish day after the dated ones; then tasks still open, by when work began. Select a bar to follow its task.";
-      const view = !all.length || mode !== "working" || clockMode ? null : S.workingView(S.stackBars(selectedJobs, stackRows, taskRows, opts("working")));
-      const bars = clockMode ? clockBars : !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
+      const view = !allU.length || mode !== "working" || clockMode ? null : S.workingView(S.stackBars(selectedJobs, stackRows, taskRows, opts("working", unit)));
+      const bars = clockMode ? clockBars : !allU.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(allU, taskRows) : allU;
       const leftOut = document.getElementById("stackup-left-out");
       leftOut.textContent = view ? view.text : "";
       leftOut.hidden = !(view && view.text);
@@ -4781,12 +4800,9 @@
       };
     }
     drawRest();
-    const drawTable = () => safely("stackup-table", () => (all.length ? drawStackTable(document.getElementById("stackup-table"), all) : emptyState(document.getElementById("stackup-table"), "No selected task comparison is available.")));
-    drawTable();
     lastStepRender = () => {
       draw();
       drawRest();
-      drawTable();
     };
     lastStepWidth = document.getElementById("stackup").clientWidth;
   }

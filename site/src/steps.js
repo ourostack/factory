@@ -93,6 +93,41 @@
     return `${h >= 10 ? Math.round(h).toLocaleString("en-US") : String(Math.round(h * 10) / 10)}h`;
   }
 
+  // One duration unit for a whole view (Compare): days when its largest
+  // value is above 48 hours, hours from one hour, minutes below. Every
+  // figure in the view then reads in that unit, however small.
+  const DAY = 24 * HOUR;
+  const UNIT = Object.freeze({ days: [DAY, "day", "d"], hours: [HOUR, "hour", "h"], minutes: [MINUTE, "minute", "m"] });
+  function viewUnit(maxMs) {
+    const x = typeof maxMs === "number" && Number.isFinite(maxMs) && maxMs > 0 ? maxMs : 0;
+    return x > 48 * HOUR ? "days" : x >= HOUR || x === 0 ? "hours" : "minutes";
+  }
+  // The number in the unit: whole from 10, one decimal from 1, two below;
+  // null when it rounds to zero.
+  function unitNumber(ms, unit) {
+    const v = ms / UNIT[unit][0];
+    if (v >= 10) return Math.round(v).toLocaleString("en-US");
+    if (v >= 1) return String(Math.round(v * 10) / 10);
+    const r = Math.round(v * 100) / 100;
+    return r > 0 ? String(r) : null;
+  }
+  // "101 days", "0.15 days", "under 0.01 days"; without a unit, hoursWords.
+  function unitWords(ms, unit) {
+    if (!UNIT[unit]) return hoursWords(ms);
+    const x = Math.max(0, Number(ms) || 0);
+    if (x === 0) return "none";
+    const t = unitNumber(x, unit), name = UNIT[unit][1];
+    return t === null ? `under 0.01 ${name}s` : `${t} ${name}${t === "1" ? "" : "s"}`;
+  }
+  // The same for a bar's value label: "101d", "0.15d", "<0.01d".
+  function unitShort(ms, unit) {
+    if (!UNIT[unit]) return hoursShort(ms);
+    const x = Math.max(0, Number(ms) || 0), a = UNIT[unit][2];
+    if (x === 0) return `0${a}`;
+    const t = unitNumber(x, unit);
+    return t === null ? `<0.01${a}` : `${t}${a}`;
+  }
+
   // How a total reads: "at least " for a lower bound, "at most " for an
   // upper one, "so far" (after the figure) for a task still open. A lead
   // time counted from the first session (the card was created after work
@@ -102,20 +137,20 @@
     if (b === "window") return has(n, "card_dates_shorter_than_work") || has(n, "finish_time_not_known") ? "lower" : null;
     return b;
   }
-  function totalWords(n, open) {
+  function totalWords(n, open, unit) {
     const v = val(n);
     if (v === null) return null;
-    if (open) return `${hoursWords(v)} so far`;
+    if (open) return `${unitWords(v, unit)} so far`;
     const b = totalBound(n);
-    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${hoursWords(v)}`;
+    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${unitWords(v, unit)}`;
   }
   // The same, in a bar's short value label: "≥54h", "309h".
-  function totalShort(n, open) {
+  function totalShort(n, open, unit) {
     const v = val(n);
     if (v === null) return "no data";
     if (v === 0) return "none";
     const b = open ? null : totalBound(n);
-    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${hoursShort(v)}`;
+    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${unitShort(v, unit)}`;
   }
 
   // One bar per task for the stack-up, in walkOrder. `mode` is "all" (the
@@ -131,6 +166,7 @@
   function stackBars(jobs, stackRows, taskRows, opts) {
     const o = opts || {};
     const mode = o.mode === "working" ? "working" : "all";
+    const unit = UNIT[o.unit] ? o.unit : null;
     const nameOf = typeof o.nameOf === "function" ? o.nameOf : (j) => `Task ${String(j.id).slice(0, 8)}`;
     const stacks = byJob(stackRows);
     const tasks = byJob(taskRows);
@@ -155,6 +191,7 @@
         // Its finish day in words (format.js finishDay), for the bar's date
         // label, its tooltip and the table.
         finish: F.finishDay(j.finish_date),
+        unit,
       };
       const noData = (reasons) => ({ ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(reasons))] });
       if (!stack && !task) return noData(["not_published"]);
@@ -166,8 +203,8 @@
           ...base,
           state: "unsplit",
           total_ms: bar.total_ms,
-          words: totalWords(leadN, open),
-          label: totalShort(leadN, open),
+          words: totalWords(leadN, open, unit),
+          label: totalShort(leadN, open, unit),
           segments: [{ key: "unsplit", label: "Split not known", ms: bar.total_ms }],
           groups: [],
           reasons: bar.reasons || [],
@@ -178,9 +215,9 @@
       if (mode === "working") {
         const g = bar.groups[0];
         const workN = (task && task.working_ms) || (stack && stack.working_ms);
-        return { ...base, state: "ok", partial, total_ms: g.ms, words: totalWords(workN, open), label: totalShort(workN, open), segments: g.segments, groups: [g], reasons };
+        return { ...base, state: "ok", partial, total_ms: g.ms, words: totalWords(workN, open, unit), label: totalShort(workN, open, unit), segments: g.segments, groups: [g], reasons };
       }
-      return { ...base, state: "ok", partial, total_ms: bar.total_ms, words: totalWords(leadN, open), label: totalShort(leadN, open), segments: bar.segments, groups: bar.groups, reasons };
+      return { ...base, state: "ok", partial, total_ms: bar.total_ms, words: totalWords(leadN, open, unit), label: totalShort(leadN, open, unit), segments: bar.segments, groups: bar.groups, reasons };
     });
   }
 
@@ -201,13 +238,14 @@
 
   // One clock in words: { text, why }. `text` carries the bound; `why` is the
   // plain reason a reader can expand.
-  function clockWords(n, reasonText) {
+  function clockWords(n, reasonText, unit) {
     if (!n || n.state === "unavailable" || val(n) === null) {
       const why = reasonWords(reasonText, n && n.reasons);
       return { text: "Not available", why: `Not available because ${why || "Desk did not publish this figure"}.${n && n.so_far ? " The task is still open, so this may change." : ""}`, state: "unavailable" };
     }
     // The same formatter as the task's other figures ("7 days", "3.6 hours").
-    const v = val(n) === 0 ? "0 seconds" : W.durationWords(val(n));
+    // In a view's unit (Compare) every figure reads in it; a zero keeps its unit.
+    const v = UNIT[unit] ? (val(n) === 0 ? `0 ${UNIT[unit][1]}s` : unitWords(val(n), unit)) : val(n) === 0 ? "0 seconds" : W.durationWords(val(n));
     const soFar = n.so_far ? " so far" : "";
     if (n.state !== "partial") return { text: `${v}${soFar}`, why: "", state: "measured" };
     const why = reasonWords(reasonText, [...arr(n.reasons), ...(n.bound === null && n.bound_reason ? [n.bound_reason] : [])]);
@@ -218,9 +256,9 @@
 
   // The task's five clocks as figures, in reading order, or null for a task
   // without published clocks (legacy, not zero).
-  function clockFigures(clocks, reasonText) {
+  function clockFigures(clocks, reasonText, unit) {
     if (!clocks || typeof clocks !== "object") return null;
-    return CLOCK_FIGURES.map(([key, label, meaning]) => ({ key, label, meaning, ...clockWords(clocks[key], reasonText) }));
+    return CLOCK_FIGURES.map(([key, label, meaning]) => ({ key, label, meaning, ...clockWords(clocks[key], reasonText, unit) }));
   }
 
   // Production episodes on the task's journey, with the time between
@@ -281,12 +319,12 @@
       const clocks = j.clocks && typeof j.clocks === "object" ? j.clocks : null;
       const total = clocks ? clocks[key] : null;
       const open = !!(total && total.so_far) || (typeof j.status === "string" && !CLOSED.has(j.status));
-      const base = { job: j.id, name: nameOf(j), short: String(j.id).slice(0, 8), group, pos, unlabeled: false, status: typeof j.status === "string" ? j.status : null, open, shared: false, href: `#/task/${j.id}`, finish: F.finishDay(j.finish_date) };
+      const base = { job: j.id, name: nameOf(j), short: String(j.id).slice(0, 8), group, pos, unlabeled: false, status: typeof j.status === "string" ? j.status : null, open, shared: false, href: `#/task/${j.id}`, finish: F.finishDay(j.finish_date), unit: o.unit || null };
       if (!clocks) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: ["clocks_not_published"] };
       if (val(total) === null) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(total && total.reasons))] };
-      const words = clockWords(total, null).text;
+      const words = clockWords(total, null, o.unit).text;
       const shortB = total.state === "partial" ? (total.bound === "lower" ? "≥" : total.bound === "upper" ? "≤" : "~") : "";
-      const label = `${shortB}${hoursShort(val(total))}`;
+      const label = `${shortB}${unitShort(val(total), o.unit)}`;
       const reasons = [...new Set(arr(total.reasons))];
       let segments = [{ key: "clock_total", label: key === "production_ms" ? "Production time" : "Request to delivery", ms: val(total) }];
       if (key === "production_ms") {
@@ -303,15 +341,16 @@
   }
 
   // A sum of task clocks is task exposure: overlapping tasks count once each.
-  function exposureWords(bars) {
+  function exposureWords(bars, unit) {
     const drawn = arr(bars).filter((b) => b.state === "ok" && Number.isFinite(b.total_ms));
+    const u = unit || (drawn[0] && drawn[0].unit) || null;
     if (!drawn.length) return "";
     const total = drawn.reduce((a, b) => a + b.total_ms, 0);
     // A sum keeps a direction only when every partial member shares it.
     const dirs = new Set(drawn.filter((b) => b.partial).map((b) => (b.bound === "lower" || b.bound === "upper" ? b.bound : null)));
     const lead = !dirs.size ? "" : dirs.size === 1 && dirs.has("lower") ? "at least " : dirs.size === 1 && dirs.has("upper") ? "at most " : "about ";
     const tail = lead === "about " ? " (could be higher or lower)" : "";
-    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${hoursWords(total)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
+    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${unitWords(total, u)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
   }
 
   // Recorded working as a share of production, keeping mixed bounds honest:
@@ -342,6 +381,8 @@
   // "working" mode. Returns { bars, left_out, text }.
   function workingView(bars) {
     const list = arr(bars);
+    const u = (list.find((b) => b && b.unit) || {}).unit || null;
+    const uw = (ms) => unitWords(ms, u);
     const kept = list.filter((b) => b.state === "ok" && labeledMs(b) > 0);
     const out = list.filter((b) => !kept.includes(b));
     if (!out.length) return { bars: kept, left_out: 0, text: "" };
@@ -353,9 +394,9 @@
     const parts = [];
     if (open.length) {
       const top = open.slice().sort((a, b) => b.total_ms - a.total_ms)[0];
-      parts.push(`${open.length} still open ${open.length === 1 ? "holds" : "hold"} ${hoursWords(sum(open))} of working time not labeled yet${open.length > 1 ? `, the most in “${top.name}” (${hoursWords(top.total_ms)})` : ` (“${top.name}”)`}`);
+      parts.push(`${open.length} still open ${open.length === 1 ? "holds" : "hold"} ${uw(sum(open))} of working time not labeled yet${open.length > 1 ? `, the most in “${top.name}” (${uw(top.total_ms)})` : ` (“${top.name}”)`}`);
     }
-    if (done.length) parts.push(`${done.length} done but not labeled yet ${done.length === 1 ? "holds" : "hold"} ${hoursWords(sum(done))}`);
+    if (done.length) parts.push(`${done.length} done but not labeled yet ${done.length === 1 ? "holds" : "hold"} ${uw(sum(done))}`);
     if (none) parts.push(`${none} ${none === 1 ? "has" : "have"} no working time measured`);
     const head = `${plural(out.length, "task")} ${out.length === 1 ? "is" : "are"} left out because none of ${out.length === 1 ? "its" : "their"} working time is labeled yet`;
     return { bars: kept, left_out: out.length, text: `${head}: ${parts.join("; ")}. The table below lists every task.` };
@@ -412,7 +453,7 @@
 
   // A bar group's time with its bound; a true zero is "none", never
   // "at least none".
-  const groupWords = (g) => (g && g.ms > 0 ? `${g.qualifier || ""}${hoursWords(g.ms)}` : "none");
+  const groupWords = (g, unit) => (g && g.ms > 0 ? `${g.qualifier || ""}${unitWords(g.ms, unit)}` : "none");
 
   // One row of Compare's phone table: the task, its lead time and its
   // waiting, the figures a reader on a small screen needs first, in the
@@ -420,7 +461,7 @@
   const SHORT_Q = { "at least ": "≥", "at most ": "≤", "about ": "~" };
   function compactRow(b) {
     const waiting = arr(b.groups).find((g) => g.key === "waiting");
-    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${hoursShort(waiting.ms)}` : "none";
+    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${unitShort(waiting.ms, b.unit)}` : "none";
     return { job: b.job, name: b.name, href: b.href, lead: b.state === "no_data" ? "no data" : b.label, waiting: wait };
   }
   // The disclosure that holds every figure on a phone.
@@ -429,11 +470,12 @@
   // A linear scale from zero for a chart of durations: hours, or minutes
   // when every value is under an hour. Returns { unit, per, max_ms, ticks }
   // with round tick steps (1, 2, 2.5 or 5 times a power of ten).
-  function timeScale(maxMs, wanted) {
+  // A view with its own unit (Compare's viewUnit) passes it as `fixed`.
+  function timeScale(maxMs, wanted, fixed) {
     const want = wanted || 5;
     const m = typeof maxMs === "number" && Number.isFinite(maxMs) && maxMs > 0 ? maxMs : 0;
-    const unit = m >= HOUR || m === 0 ? "hours" : "minutes";
-    const per = unit === "hours" ? HOUR : MINUTE;
+    const unit = UNIT[fixed] ? fixed : m >= HOUR || m === 0 ? "hours" : "minutes";
+    const per = UNIT[unit][0];
     const top = m / per;
     if (!(top > 0)) return { unit, per, max_ms: per, ticks: [0, per] };
     const raw = top / want;
@@ -2017,6 +2059,9 @@
     paretoAxisTitle,
     isOpen,
     hoursWords,
+    viewUnit,
+    unitWords,
+    unitShort,
     hoursShort,
     totalWords,
     feBound,

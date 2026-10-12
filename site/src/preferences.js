@@ -7,7 +7,8 @@
   "use strict";
   // Version 2 (2026-10-12): version 1 saves could pin the zone to UTC behind
   // the reader's back, and a pinned UTC cannot be told from a chosen one, so a
-  // version 1 record keeps its other preferences and drops its zone.
+  // version 1 record drops a stored UTC (the old bug's value) and keeps any
+  // other zone, which only a deliberate choice could have stored.
   const KEY = "factory.preferences/2";
   const LEGACY = "factory.preferences/1";
   const keys = (x, list) => x && typeof x === "object" && !Array.isArray(x) && Object.keys(x).every((k) => list.includes(k));
@@ -36,7 +37,7 @@
         const old = storage.getItem(LEGACY);
         if (typeof old === "string" && old.length <= 32768) {
           const x = JSON.parse(old);
-          const carried = { schema: KEY, dismissed: x && x.dismissed === true, zone: fallback.zone, previous: x && validSummary(x.previous) ? x.previous : null };
+          const carried = { schema: KEY, dismissed: x && x.dismissed === true, zone: x && x.zone !== "UTC" && validZone(x.zone) ? x.zone : fallback.zone, previous: x && validSummary(x.previous) ? x.previous : null };
           if (valid(carried)) return { ...carried, persistent: true };
         }
         return { ...fallback, persistent: true };

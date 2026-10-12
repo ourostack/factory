@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place",
+  "caveat_in_the_conclusion_place", "mixed_units_on_compare",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -89,6 +89,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "private_decision_fixture_agrees_across_queue_overview_and_page",
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
+  "compare_uses_one_duration_unit",
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -128,21 +129,53 @@ export function assessHeights(heights, budget) {
 // most of a phone's screen, so the conclusion must start within two screens.
 export const FIRST_SCREEN = Object.freeze({ phone: 640, phoneMaxWidth: 480, wide: 900, text2xScreens: 2 })
 export function firstScreenHeight(width) { return width <= FIRST_SCREEN.phoneMaxWidth ? FIRST_SCREEN.phone : FIRST_SCREEN.wide }
-// A sentence that qualifies figures rather than concluding from them.
-export const CAVEAT_PATTERN = /\bincomplete\b|keep the bounds in view|not an all-clear|may still be/i
-// Each covered page and the element that holds its conclusion sentence.
-export const CONCLUSIONS = Object.freeze({ task: "#view-task .task-conclusion", compare: "#comparison-conclusion", overview: "#overview-conclusion" })
+// Each covered page's view. The page marks its conclusion sentence with
+// data-role="conclusion" and any caveat with data-role="caveat"; the first
+// marked sentence in the view must be the conclusion. The marker decides,
+// never the wording.
+export const CONCLUSIONS = Object.freeze({ task: "#view-task", compare: "#view-compare", overview: "#view-overview" })
 export function assessFirstScreen(m, width, scale = 1) {
   if (!m || !m.found) return "no conclusion is shown"
-  if (CAVEAT_PATTERN.test(m.text || "")) return `the conclusion's place holds a caveat, not a conclusion: "${String(m.text).slice(0, 80)}"`
+  if (m.role !== "conclusion") return `the conclusion's place holds a caveat, not a conclusion: "${String(m.text).slice(0, 80)}"`
   const limit = firstScreenHeight(width) * (scale === 2 ? FIRST_SCREEN.text2xScreens : 1)
   if (m.top >= limit) return `the conclusion starts at ${m.top} px, below the first screen (${limit} px at ${width} px wide${scale === 2 ? ", two screens with doubled text" : ""})`
   return null
 }
-// Runs in the page: where the conclusion starts and what it says.
-export function measureConclusion(selector) {
-  const c = [...document.querySelectorAll(selector)].find((e) => e.getBoundingClientRect().height > 0 && (e.textContent || "").trim() && !/^Loading/.test(e.textContent.trim()))
-  return c ? { found: true, top: Math.round(c.getBoundingClientRect().top + window.scrollY), text: c.textContent.trim() } : { found: false, top: 0, text: "" }
+// Runs in the page: the first marked sentence in the view, where it starts,
+// what it is marked as and what it says.
+export function measureConclusion(scope) {
+  const c = [...document.querySelectorAll(`${scope} [data-role="conclusion"], ${scope} [data-role="caveat"]`)].find((e) => e.getBoundingClientRect().height > 0 && (e.textContent || "").trim() && !/^Loading/.test(e.textContent.trim()))
+  return c ? { found: true, role: c.dataset.role, top: Math.round(c.getBoundingClientRect().top + window.scrollY), text: c.textContent.trim() } : { found: false, role: null, top: 0, text: "" }
+}
+
+// The duration units a set of texts uses: "7 days", "≥7d", "3.6 hours",
+// "48m", "under a second". Compare shows one unit per view.
+const UNIT_ORDER = ["days", "hours", "minutes", "seconds"]
+const UNIT_OF = { d: "days", day: "days", h: "hours", hour: "hours", m: "minutes", minute: "minutes", s: "seconds", second: "seconds" }
+export function durationUnitsIn(texts) {
+  const found = new Set()
+  for (const t of texts || []) {
+    const text = String(t || "")
+    for (const x of text.matchAll(/\d[\d,]*(?:\.\d+)?\s+(day|hour|minute|second)s?\b/gi)) found.add(UNIT_OF[x[1].toLowerCase()])
+    for (const x of text.matchAll(/(?:^|[\s(≥≤~<])\d[\d,]*(?:\.\d+)?([dhms])(?![\w])/g)) found.add(UNIT_OF[x[1]])
+    if (/\bunder a second\b/i.test(text)) found.add("seconds")
+  }
+  return UNIT_ORDER.filter((u) => found.has(u))
+}
+// A Compare view's problem with its units, or null: one unit in every
+// figure, and the axis titled with that unit.
+export function assessCompareUnits(r) {
+  const units = durationUnitsIn(r && r.texts)
+  if (units.length > 1) return `mixes units: ${units.join(", ")}`
+  const axis = r && r.axis ? String(r.axis).split(/\s+/)[0].toLowerCase() : null
+  if (units.length === 1 && axis && UNIT_ORDER.includes(axis) && axis !== units[0]) return `the axis is in ${axis}, the figures in ${units[0]}`
+  return null
+}
+// Runs in the page: Compare's duration texts and its axis title.
+export function compareDurationTexts() {
+  const texts = [...document.querySelectorAll('#comparison-conclusion, #stackup .sb-value, #stackup .clock-exposure, #stackup td.num, #stackup-left-out, #stackup-table td.num, #stackup-table .sb-table td:nth-child(7)')].map((e) => e.textContent.trim()).filter(Boolean)
+  const axis = document.querySelector("#stackup .axis-title")
+  return { texts, axis: axis ? axis.textContent.trim() : null }
 }
 // Runs in the page: tables shown as cards (a .stacked holder that is visible).
 export function findCardTables() {
@@ -871,7 +904,7 @@ export async function main(argv = process.argv.slice(2)) {
           const { context, page } = await newPage({ width: 1440, height: firstScreenHeight(1440), scale })
           try {
             await open(page, ROUTES.find((r) => r.name === name), scale)
-            await page.waitForFunction((sel) => { const e = document.querySelector(sel); return e && e.textContent.trim() && !/^Loading/.test(e.textContent.trim()) }, selector, { timeout: 15000 }).catch(() => {})
+            await page.waitForFunction((sel) => { const e = document.querySelector(`${sel} [data-role="conclusion"]`); return e && e.textContent.trim() && !/^Loading/.test(e.textContent.trim()) }, selector, { timeout: 15000 }).catch(() => {})
             for (let i = WIDTHS.length - 1; i >= 0; i--) {
               await page.setViewportSize({ width: WIDTHS[i], height: firstScreenHeight(WIDTHS[i]) })
               const m = await page.evaluate(measureConclusion, selector)
@@ -1000,6 +1033,23 @@ export async function main(argv = process.argv.slice(2)) {
           if (expected > 0 && !/task exposure/i.test(r.view)) throw new Error(`${mode}: the summed time is not labelled task exposure`)
         }
       } finally { await context.close() }
+    })
+    await check("compare_uses_one_duration_unit", async () => {
+      // The lead sentence, bar labels, sums and tables of each Compare view
+      // read in one unit, and the axis is titled with it.
+      const { context, page } = await newPage({ width: 1280 })
+      const seen = {}
+      try {
+        for (const mode of ["all", "working", "production", "request"]) {
+          await page.goto(url + `#/compare?mode=${mode}`)
+          await settle(page, "compare")
+          const r = await page.evaluate(compareDurationTexts)
+          const why = assessCompareUnits(r)
+          if (why) throw new Error(`${mode}: ${why}`)
+          seen[mode] = { units: durationUnitsIn(r.texts), axis: r.axis, texts: r.texts.length }
+        }
+      } finally { await context.close() }
+      return seen
     })
 
     // 8. JSON twins agree with each other and with what the page says.
@@ -1214,10 +1264,21 @@ export async function main(argv = process.argv.slice(2)) {
           await open(page, ROUTES.find((r) => r.name === "task"))
           const before = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (before) throw new Error(`before planting: ${before}`)
-          await page.evaluate(() => { const c = document.querySelector("#view-task .task-conclusion"); c.dataset.gatePlanted = "1"; c.textContent = "The recorded window or its work split is incomplete. Keep the bounds in view before comparing tasks." })
+          // A caveat-marked sentence takes the conclusion's place, ahead of it.
+          await page.evaluate(() => { const c = document.querySelector('#view-task [data-role="conclusion"]'); const p = document.createElement("p"); p.dataset.gatePlanted = "1"; p.dataset.role = "caveat"; p.textContent = "Keep the bounds in view before comparing tasks."; c.before(p) })
           const why = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (why) throw new Error(`planted caveat: ${why}`)
         }, /^planted caveat: .*caveat/)
+        await expectFailure("mixed_units_on_compare", async () => {
+          await openFresh()
+          const before = assessCompareUnits(await page.evaluate(compareDurationTexts))
+          if (before) throw new Error(`before planting: ${before}`)
+          const units = durationUnitsIn((await page.evaluate(compareDurationTexts)).texts)
+          const other = units[0] === "hours" ? "3 days" : "3.6 hours"
+          await page.evaluate((t) => { const s = document.createElement("span"); s.dataset.gatePlanted = "1"; s.textContent = ` (${t})`; document.getElementById("comparison-conclusion").appendChild(s) }, other)
+          const why = assessCompareUnits(await page.evaluate(compareDurationTexts))
+          if (why) throw new Error(`planted units: ${why}`)
+        }, /^planted units: mixes/)
         await expectFailure("overlapping_controls", async () => {
           await openFresh()
           await plant('<div style="position:relative;height:40px"><button style="position:absolute;left:0;top:0;width:120px">First control</button><button style="position:absolute;left:20px;top:4px;width:120px">Second control</button></div>')
