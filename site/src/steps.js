@@ -471,7 +471,9 @@
       const exact = (bound === "lower" && share === 1) || (bound === "upper" && share <= 0);
       return f.strict || exact ? f.text : `${bound === "lower" ? "≥" : "≤"}${f.text}`;
     }
-    if (bound === "unknown") return `~${F.shareFigure(share, 0, "none").text}`;
+    // At exactly 0 or 1 an open direction can be off one way only; the words
+    // say which ("100% (could be lower)", W.atEdge), and "~" would say both.
+    if (bound === "unknown") return share <= 0 || share === 1 ? W.pctWords(share) : `~${F.shareFigure(share, 0, "none").text}`;
     const p = share * 100;
     if (p > 0 && p < 1) return "<1%";
     return W.pctWords(share);
@@ -558,7 +560,10 @@
     const n = row && row.flow_efficiency;
     if (!n || n.state !== "partial") return null;
     if (n.bound === "lower" || n.bound === "upper") return n.bound;
-    if (n.bound === null) return null;
+    // Desk's "no direction" is unknown, as its words say ("about …,
+    // direction not known", W.qualifierOf); bound_not_moved is exact for its
+    // window. Only an absent key (older data) derives a bound from the parts.
+    if (n.bound === null || n.bound === "unknown") return W.qualifierOf(n) === "about " ? "unknown" : null;
     const wb = W.boundOf(row.working_ms);
     const lb = totalBound(row.lead_time_ms);
     const low = wb === "lower" || lb === "upper";

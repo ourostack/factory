@@ -272,6 +272,9 @@ export function assessSharePairs(pairs) {
     const bar = (r.bar === "<1%" ? "under 1%" : r.bar.replace(/^([≥≤~])/, (m) => sign[m])).replace(/^about /, "")
     const words = r.words.replace(/ \((?:partial, )?direction not known\)$| \(partial\)$| so far$| \(could be (?:higher|lower)\)$/, "").replace(/^about /, "")
     if (bar !== words) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", the words "${r.words}"`)
+    // An open direction is said on both, or on neither.
+    const open = (t) => /^about |direction not known\)$/.test(t)
+    if (/^~/.test(r.bar) !== open(r.words)) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", the words "${r.words}", one says the direction is open and the other does not`)
     if (typeof r.tip === "string" && r.tip !== r.bar) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", its tooltip "${r.tip}"`)
   }
   return out
