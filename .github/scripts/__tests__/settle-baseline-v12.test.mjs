@@ -1,6 +1,8 @@
-// A route over the settle budget fails only when it is also more than twice
-// main's time for the same route in the same run (2026-10-12 ruling): a busy
-// machine slows both builds, a real slowdown only one.
+// A route over the settle budget is re-timed twice, back to back with main's
+// same route. It passes only when the re-timed route is within budget (a
+// spike), or main is itself over budget in the same run (a busy machine) and
+// the route is at most twice main's time. On a quiet machine the budget stays
+// a hard limit (2026-10-12 ruling and its round-16 review).
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { readFileSync } from "node:fs"
@@ -9,40 +11,48 @@ import { fileURLToPath } from "node:url"
 const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
 const gate = readFileSync(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
 const at = (ms, where = "#/") => ({ view: "overview", ms, where })
+const re = (ms, main_ms, where = "#/") => new Map([[where, { ms, main_ms }]])
+const fails = (t, r) => G.assessSettle([t], 5000, r).length === 1
 
-test("over budget fails only when over twice main's time for the same route", () => {
+test("a route over budget passes only as a spike, or beside a main that is over budget too and within twice its time", () => {
   assert.equal(G.SETTLE_BUDGET_MS, 5000)
   assert.equal(G.SETTLE_RATIO, 2)
-  // The round-15 case: 16.8 s on a busy machine, main as slow, passes.
-  assert.deepEqual(G.assessSettle([at(16800)], 5000, new Map([["#/", 9000]])), [])
-  // A real slowdown: over budget and over twice main's.
-  assert.deepEqual(G.assessSettle([at(16800)], 5000, new Map([["#/", 600]])), ["overview (#/): 16.8 s (main 0.6 s)"])
-  // Exactly twice is not over; just past is.
-  assert.deepEqual(G.assessSettle([at(6000)], 5000, new Map([["#/", 3000]])), [])
-  assert.equal(G.assessSettle([at(6001)], 5000, new Map([["#/", 3000]])).length, 1)
-  // Under budget passes however slow against main; main not timed fails.
-  assert.deepEqual(G.assessSettle([at(4900)], 5000, new Map([["#/", 100]])), [])
-  assert.deepEqual(G.assessSettle([at(5100)], 5000, new Map()), ["overview (#/): 5.1 s (main not timed)"])
-  // Main is matched by route, not by view.
-  assert.equal(G.assessSettle([at(9000, "#/compare")], 5000, new Map([["#/", 9000]])).length, 1)
+  // The round-15 case: 16.8 s once, 0.6 s when re-timed.
+  assert.equal(fails(at(16800), re(600, 590)), false)
+  // A busy machine: slow on both builds, within twice main's.
+  assert.equal(fails(at(16800), re(16000, 12000)), false)
+  // A quiet machine keeps the hard limit: main is under budget.
+  assert.equal(fails(at(5100), re(5100, 2600)), true)
+  assert.equal(fails(at(9700), re(9700, 4900)), true)
+  assert.deepEqual(G.assessSettle([at(16800)], 5000, re(16800, 600)), ["overview (#/): 16.8 s, re-timed 16.8 s (main 0.6 s)"])
+  // Main over budget does not excuse more than twice its time.
+  assert.equal(fails(at(18000), re(18000, 6000)), true)
+  assert.equal(fails(at(12000), re(12000, 6000)), false)
+  assert.equal(fails(at(12001), re(12001, 6000)), true)
+  // Under budget passes untouched; over budget with no re-timing fails.
+  assert.deepEqual(G.assessSettle([at(4900)], 5000, new Map()), [])
+  assert.deepEqual(G.assessSettle([at(5100)], 5000, new Map()), ["overview (#/): 5.1 s, not re-timed"])
+  // The re-timing is matched by route.
+  assert.equal(fails(at(9000, "#/compare"), re(600, 590)), true)
 })
 
-test("settleBudget reports the routes that were slow on both builds and the load average", () => {
-  const r = G.settleBudget([at(700), at(16800)], 5000, new Map([["#/", 9000]]))
-  assert.equal(r.settled, 2)
-  assert.deepEqual(r.over_budget_but_main_slow_too, [{ view: "overview", ms: 16800, where: "#/", main_ms: 9000 }])
+test("settleBudget lists every excused route with why, and the load average", () => {
+  const r = G.settleBudget([at(700), at(16800), at(13000, "#/tasks")], 5000, new Map([["#/", { ms: 600, main_ms: 590 }], ["#/tasks", { ms: 12000, main_ms: 9000 }]]))
+  assert.equal(r.settled, 3)
+  assert.deepEqual(r.over_budget_excused.map((x) => [x.where, x.retimed_ms, x.main_ms, x.because]), [["#/", 600, 590, "within budget when re-timed"], ["#/tasks", 12000, 9000, "main was over budget too"]])
   assert.equal(r.load.length, 3)
-  assert.throws(() => G.settleBudget([at(700), at(16800)], 5000, new Map([["#/", 600]])), /^Error: 1 of 2 over 5 s and over 2x main: overview \(#\/\): 16\.8 s \(main 0\.6 s\)$/)
+  assert.throws(() => G.settleBudget([at(700), at(16800)], 5000, re(16800, 600)), /^Error: 1 of 2 over 5 s: overview \(#\/\): 16\.8 s, re-timed 16\.8 s \(main 0\.6 s\)$/)
 })
 
-test("the gate times main for each route over budget before its last check, records the load, and proves a 3x slowdown still fails", () => {
+test("the gate re-times each route over budget before its last check, alternating with main, records the load, and proves a 3x slowdown still fails", () => {
   assert.ok(G.NEGATIVE_CONTROLS.includes("slowdown_3x_over_budget"))
-  const end = gate.indexOf("await timeMainFor(SETTLE_TIMES)")
+  const end = gate.indexOf("await retimeOver(SETTLE_TIMES)\n    if (mainServer)")
   assert.ok(end > 0 && end < gate.indexOf('await check("pages_settle_within_budget"'))
+  assert.match(gate, /for \(let i = 0; i < 2; i\+\+\) \{ here\.push\(await timeRoute\(false, where, view, delay\)\); main\.push\(await timeRoute\(true, where, view, mainDelay\)\) \}/)
+  assert.match(gate, /return \{ ms: Math\.min\(\.\.\.here\), main_ms: Math\.min\(\.\.\.main\), load: loadavg\(\) \}/)
   assert.match(gate, /load_at_start: loadavg\(\)/)
   assert.match(gate, /resources\.load_at_end = loadavg\(\)/)
   const control = gate.slice(gate.indexOf('expectFailure("slowdown_3x_over_budget"'), gate.indexOf('expectFailure("loading_marker_never_clears"'))
-  assert.match(control, /timeOnMain\(where, "cause", 2500\)/)
-  assert.match(control, /setTimeout\(ok, 3 \* main\)/)
-  assert.match(control, /if \(t\.ms < 3 \* main\) throw/)
+  assert.match(control, /retime\(where, "cause", 3 \* main, 2500\)/)
+  assert.match(control, /if \(r\.ms < 3 \* r\.main_ms\) throw/)
 })
