@@ -203,47 +203,52 @@
     return hasReasonText(code) ? REASON_TEXT[code] : String(code).replace(/_/g, " ");
   }
 
-  // A duration's short form, one rule with walk.js durationParts: whole
+  // One table for every duration, the same as walk.js durationParts: whole
   // seconds under a minute, minutes and seconds to 10 minutes, whole minutes
   // to an hour, tenths of an hour to 10 hours, whole hours to 48, then
   // tenths of a day, so rounding stays within about 10% of the figure. A
-  // lower bound rounds down, an upper bound up, anything else to nearest;
-  // the step comes from the rounded value (59.6 seconds is "1m").
-  function durationText(v, bound) {
-    const x = Math.max(0, v);
-    if (x === 0) return "0s";
-    if (x < 1000) return "<1s";
+  // lower bound rounds down, an upper bound up, true ("about") and none to
+  // nearest; the step comes from the rounded value (59.6 seconds is 1
+  // minute). Under a second a bounded figure keeps its milliseconds and an
+  // unbounded one is null ("under a second").
+  function durationParts(ms, bound) {
+    const x = Math.max(0, Number(ms) || 0);
     const round = (k, step) => {
       const q = k / step;
       const r = bound === "lower" ? Math.floor(q + 1e-9) : bound === "upper" ? Math.ceil(q - 1e-9) : Math.round(q);
       return Math.round(r * step * 10) / 10;
     };
+    if (x < 1000) {
+      if (!bound) return null;
+      const n = Math.max(bound === "lower" ? 0 : 1, round(x, 1));
+      if (n < 1000) return { n, unit: "ms" };
+    }
     if (x < 600000) {
       const t = round(x / 1000, 1);
-      if (t < 60) return `${t}s`;
-      if (t < 600) return `${Math.floor(t / 60)}m${t % 60 ? ` ${t % 60}s` : ""}`;
+      if (t < 60) return { n: t, unit: "s" };
+      if (t < 600) return { n: Math.floor(t / 60), unit: "m", s: t % 60 };
     }
-    if (x < 3600000) { const n = round(x / 60000, 1); if (n < 60) return `${n}m`; }
-    const hr = x / 3600000;
-    if (hr < 10) { const n = round(hr, 0.1); if (n < 10) return `${n}h`; }
-    if (hr < 48) { const n = round(hr, 1); if (n < 48) return `${n}h`; }
-    return `${round(hr / 24, 0.1)}d`;
+    if (x < 3600000) { const n = round(x / 60000, 1); if (n < 60) return { n, unit: "m" }; }
+    if (x < 36000000) { const n = round(x / 3600000, 0.1); if (n < 10) return { n, unit: "h" }; }
+    if (x < 172800000) { const n = round(x / 3600000, 1); if (n < 48) return { n, unit: "h" }; }
+    return { n: round(x / 86400000, 0.1), unit: "d" };
   }
-  // A duration in hours, with its unit, on the same steps from an hour up:
-  // tenths of an hour below 10 ("5.5 hours"), whole hours to 48 ("33
-  // hours"), then tenths of a day ("7.2 days"); under an hour, tenths of an
-  // hour. Bounded or not, one quantity reads one way.
+  const UNIT_WORD = { ms: "millisecond", s: "second", m: "minute", h: "hour", d: "day" };
+  const unitWords = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  // The short form: "37s", "1m 5s", "13m", "4.3h", "33h", "2.3d".
+  function durationText(v, bound) {
+    if (Math.max(0, v) === 0) return "0s";
+    const p = durationParts(v, bound);
+    if (!p) return "<1s";
+    return `${p.n}${p.unit}${p.s ? ` ${p.s}s` : ""}`;
+  }
+  // The long form, the hours kind, in walk.js's words: "37 seconds",
+  // "1 minute 5 seconds", "4.3 hours", "7.2 days". One value reads one way.
   function hoursText(v, bound) {
-    const h = Math.max(0, v) / 3600000;
-    const round = (k, step) => {
-      const q = k / step;
-      const r = bound === "lower" ? Math.floor(q + 1e-9) : bound === "upper" ? Math.ceil(q - 1e-9) : Math.round(q);
-      return Math.round(r * step * 10) / 10;
-    };
-    const say = (n, unit) => `${n} ${unit}${n === 1 ? "" : "s"}`;
-    if (h < 10) { const n = round(h, 0.1); if (n < 10) return say(n, "hour"); }
-    if (h < 48) { const n = round(h, 1); if (n < 48) return say(n, "hour"); }
-    return say(round(h / 24, 0.1), "day");
+    if (Math.max(0, v) === 0) return "0 seconds";
+    const p = durationParts(v, bound);
+    if (!p) return "under a second";
+    return `${unitWords(p.n, UNIT_WORD[p.unit])}${p.s ? ` ${unitWords(p.s, "second")}` : ""}`;
   }
   const KINDS = {
     duration: (v) => durationText(v, null),
@@ -409,11 +414,22 @@
     // reader can use, so it reads "none recorded" beside its reason.
     const v = number.value;
     const dir = typeof v === "number" && (number.bound === "lower" || number.bound === "upper") ? number.bound : null;
-    let body = kind === "duration" && typeof v === "number" && v < 1000 ? `${(dir === "lower" ? Math.floor : dir === "upper" ? Math.ceil : Math.round)(Math.max(0, v))} ms` : dir ? directed(kind, v, dir) : KINDS[kind](v);
+    // A duration with no direction is still bounded for its form: under a
+    // second it keeps its milliseconds, as walk.js does.
+    let body = typeof v !== "number" ? KINDS[kind](v) : kind === "duration" ? durationText(v, dir || true) : kind === "hours" ? hoursText(v, dir || true) : dir ? directed(kind, v, dir) : KINDS[kind](v);
     let direction = number.bound === "lower" ? "at least " : number.bound === "upper" ? "at most " : "";
+    let edge = "";
     if (number.bound === "lower" && v === 0) {
       body = "none recorded";
       direction = "";
+    } else if (typeof v === "number" && kind !== "text" && kind !== "pass") {
+      // At its domain's edge a figure can be off one way only (walk.js
+      // atEdge): "at most 0" and "at least 100%" are exact, and a figure with
+      // no known direction says the one way it can be off.
+      const share = kind === "pct" || kind === "pct1";
+      const none = number.bound === "unknown" || (number.bound === null && number.bound_reason !== "bound_not_moved");
+      if (v <= 0) { if (number.bound === "upper") direction = ""; else if (none) edge = " (could be higher)"; }
+      else if (share && v >= 1) { if (number.bound === "lower") direction = ""; else if (none) edge = " (could be lower)"; }
     }
     const unknownDirection = number.bound === "unknown";
     // Desk's own "no direction" (bound: null) says why, when it says.
@@ -424,7 +440,7 @@
     // does not have to hover to learn the figure could be off either way.
     return {
       state: "partial",
-      text: direction + body,
+      text: direction + body + edge,
       // An unverified host is said as such, visibly, not only in the reason.
       marker: `${Array.isArray(number.reasons) && number.reasons.includes("unverified_host") ? "unverified" : "partial"}${unknownDirection ? `, ${UNKNOWN_DIRECTION}` : ""}`,
       reason: unknownDirection ? `${reason}; ${PULL_BOTH}` : noDirection ? `${reason}; ${noDirection}` : number.bound === null ? `${reason}; ${PULL_BOTH}` : reason,

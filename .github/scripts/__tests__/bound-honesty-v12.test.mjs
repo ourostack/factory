@@ -202,7 +202,7 @@ test("format.js describe rounds a lower bound down and an upper bound up", () =>
   assert.equal(d(59.6 * 60000, "lower"), "at least 59m")
   assert.equal(d(2.25 * 86400000, "upper"), "at most 2.3d")
   assert.equal(d(2.29 * 86400000, "lower"), "at least 2.2d")
-  assert.equal(d(400.2, "upper"), "at most 401 ms")
+  assert.equal(d(400.2, "upper"), "at most 401ms")
   assert.equal(d(0.1234, "upper", "pct"), "at most 13%")
   assert.equal(d(0.1294, "lower", "pct1"), "at least 12.9%")
   assert.equal(d(5.5 * 3600000 + 1, "upper", "hours"), "at most 5.6 hours")

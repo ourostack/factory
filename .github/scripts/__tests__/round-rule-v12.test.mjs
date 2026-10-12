@@ -119,3 +119,39 @@ test("the hours kind follows the duration rule's steps, bounded or not, as walk.
   // The featured session's caption says its own unit.
   assert.doesNotMatch(read("site/src/app.js"), /" hours in one session"/)
 })
+
+// Ruling (2026-10-12): one table for every value, with no carve-out for the
+// hours kind below an hour, swept down to 0 seconds and its domain edge.
+test("describe follows the one table from 0 seconds up, in both forms, with walk.js's words and its domain edge", () => {
+  const values = [0, 1, 400, 999.4, 1000, 1500, 37 * SEC, 59.6 * SEC, 65 * SEC, 119 * SEC, 599.6 * SEC, 12.4 * MIN, 59.6 * MIN]
+  for (let ms = 2; ms < 30 * DAY; ms = Math.ceil(ms * 1.09) + 3) values.push(ms)
+  for (const ms of values) {
+    for (const bound of [null, "lower", "upper"]) {
+      if (bound === "lower" && ms === 0) continue
+      const n = bound ? part(ms, bound) : { state: "measured", value: ms, reasons: [] }
+      const q = bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""
+      // Long form (the hours kind) reads as walk.js's words; a measured zero is "0 seconds".
+      const words = bound ? W.qualified(q, ms) : ms === 0 ? "0 seconds" : W.durationWords(ms)
+      assert.equal(F.describe(n, "hours").text, words, `${ms} ms ${bound || "measured"}, long form`)
+      // Short form (the duration kind) reads as walk.js's short form.
+      const short = bound && ms === 0 ? "0s" : `${q}${W.durationShort(ms, bound || false)}`
+      assert.equal(F.describe(n, "duration").text, short, `${ms} ms ${bound || "measured"}, short form`)
+    }
+  }
+  // The domain edge: a zero with no known direction can only be higher.
+  const zero = { state: "partial", value: 0, bound: null, bound_reason: "bound_reasons_conflict", reasons: ["log_truncated"] }
+  assert.equal(F.describe(zero, "hours").text, "0 seconds (could be higher)")
+  assert.equal(F.describe(zero, "hours").text, W.qualified("about ", 0))
+  assert.equal(F.describe(zero, "duration").text, W.statedText(zero, "duration"))
+  assert.equal(F.describe({ ...zero, bound: "unknown" }, "hours").text, "0 seconds (could be higher)")
+  assert.equal(F.describe(part(0, "lower"), "hours").text, "none recorded")
+  // A share at its edges, the same rule.
+  const share = (value, b) => F.describe({ state: "partial", value, bound: b, bound_reason: b === null ? "bound_reasons_conflict" : undefined, reasons: ["log_truncated"] }, "pct").text
+  assert.equal(share(1, null), "100% (could be lower)")
+  assert.equal(share(0, null), "0% (could be higher)")
+  assert.equal(share(1, "lower"), "100%")
+  assert.equal(share(0, "upper"), "0%")
+  // A partial figure with no direction under a second keeps its milliseconds, as walk.js does.
+  assert.equal(F.describe({ ...zero, value: 400 }, "duration").text, "400ms")
+  assert.equal(F.describe({ ...zero, value: 400 }, "hours").text, "400 milliseconds")
+})

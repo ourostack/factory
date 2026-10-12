@@ -258,7 +258,7 @@ test("safeAnchor allows only a plain in-page id", () => {
 })
 
 test("a bound reads in words, a partial duration under a second shows milliseconds, and a lower bound of zero says none recorded", () => {
-  assert.equal(F.describe(p(412, ["host_records_partly"], "lower"), "duration").text, "at least 412 ms")
+  assert.equal(F.describe(p(412, ["host_records_partly"], "lower"), "duration").text, "at least 412ms")
   assert.equal(F.describe(p(0, ["host_records_partly"], "lower"), "count").text, "none recorded")
   assert.equal(F.describe(p(0, ["host_records_partly"], "lower"), "count").reason, "the host records only part of this, so the figure is a lower bound")
   assert.equal(F.describe(p(9, ["log_truncated"], "upper"), "count").text, "at most 9")
