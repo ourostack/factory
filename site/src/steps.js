@@ -388,18 +388,20 @@
   function clockShareWords(work, production) {
     const r = shareOf(work, production);
     if (!r || r.state === "unavailable" || val(r) === null) return null;
-    const v = val(r) * 100;
-    // A share under 1% keeps one decimal, so it never reads as a bare 0%.
-    const tiny = v > 0 && v < 1;
-    const pct = tiny ? `${Math.max(0.1, Math.round(v * 10) / 10)}%` : v > 99 && v < 100 ? "99%" : `${Math.round(v)}%`;
-    if (r.state === "measured") return tiny && v < 0.1 ? "under 0.1% of production time" : `${pct} of production time`;
-    if (r.bound === "lower") return val(r) === 1 ? "100% of production time" : tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
-    if (r.bound === "upper" && v <= 0) return "0% of production time";
-    if (r.bound === "upper") return tiny && v < 0.1 ? "under 0.1% of production time" : `at most ${pct} of production time`;
+    const x = val(r);
+    const bound = r.state === "measured" ? null : r.bound === "lower" || r.bound === "upper" ? r.bound : "none";
+    // Only exactly 0 and 1 read as 0% and 100% (F.shareFigure): 99.6% keeps
+    // its decimal, and a strict form ("under 0.1%") carries its own side.
+    const fig = F.shareFigure(x, 0, bound);
+    const of = `${fig.text} of production time`;
+    if (r.state === "measured") return of;
+    if (r.bound === "lower") return x === 1 ? "100% of production time" : fig.strict ? of : `at least ${of}`;
+    if (r.bound === "upper" && x <= 0) return "0% of production time";
+    if (r.bound === "upper") return fig.strict ? of : `at most ${of}`;
     // At 0% or 100% a figure with no known direction can be off one way only.
-    if (v <= 0) return "0% of production time (could be higher)";
-    if (val(r) === 1) return "100% of production time (could be lower)";
-    return `about ${pct} of production time (could be higher or lower)`;
+    if (x <= 0) return "0% of production time (could be higher)";
+    if (x === 1) return "100% of production time (could be lower)";
+    return `about ${of} (could be higher or lower)`;
   }
 
   // The parts of a working bar that carry no evaluator label.
@@ -450,18 +452,29 @@
       if (b.state === "unsplit" || !(b.total_ms > 0)) return { ...b, share: true, state: b.state === "ok" ? "unsplit" : b.state, total_ms: 1, label: "split not known", segments: [{ key: "unsplit", label: "Split not known", ms: 1 }], groups: [] };
       const t = b.total_ms;
       const part = (x) => ({ ...x, ms: x.ms / t });
-      const groups = arr(b.groups).map((g) => ({ ...g, share_of_lead: g.ms / t, segments: arr(g.segments).map(part) }));
-      const work = groups.find((g) => g.key === "working");
       const bound = feBound(tasks.get(b.job));
-      const q = { lower: "≥", upper: "≤", unknown: "~" }[bound] || "";
-      return { ...b, share: true, total_ms: 1, lead_ms: t, segments: arr(b.segments).map(part), groups, label: work ? `${q}${shortPct(work.share_of_lead)} working` : "split not known" };
+      // Waiting is lead minus working, so its share's bound is the other way.
+      const flip = { lower: "upper", upper: "lower", unknown: "unknown" };
+      const groups = arr(b.groups).map((g) => ({ ...g, share_of_lead: g.ms / t, share_bound: g.key === "working" ? bound : g.key === "waiting" ? flip[bound] : undefined, segments: arr(g.segments).map(part) }));
+      const work = groups.find((g) => g.key === "working");
+      return { ...b, share: true, total_ms: 1, lead_ms: t, segments: arr(b.segments).map(part), groups, label: work ? `${shortPct(work.share_of_lead, bound)} working` : "split not known" };
     });
   }
-  // A share in a few characters, for labels and phone tables: "14%", "<1%".
-  function shortPct(share) {
+  // A share in a few characters, for labels and phone tables: "14%", "<1%",
+  // "99.6%". With a bound it carries its sign, rounded the way it reads
+  // (F.shareFigure), and never a sign before "<" ("≥<1%"): a strict form
+  // says its own side.
+  function shortPct(share, bound) {
+    if (bound === "lower" || bound === "upper") {
+      const f = F.shareFigure(share, 0, bound);
+      // "at least 100%" and "at most 0%" are exact (W.atEdge).
+      const exact = (bound === "lower" && share === 1) || (bound === "upper" && share <= 0);
+      return f.strict || exact ? f.text : `${bound === "lower" ? "≥" : "≤"}${f.text}`;
+    }
+    if (bound === "unknown") return `~${F.shareFigure(share, 0, "none").text}`;
     const p = share * 100;
     if (p > 0 && p < 1) return "<1%";
-    return `${Math.round(p)}%`;
+    return W.pctWords(share);
   }
 
   // The finished task to label on the chart. In "all" mode it is the one
@@ -627,7 +640,7 @@
     const waitDir = !workDir && !leadDir ? null : !workDir ? leadDir : !leadDir ? flip[workDir] || "unknown" : leadDir === "upper" && workDir === "lower" ? "upper" : leadDir === "lower" && workDir === "upper" ? "lower" : "unknown";
     const top = Object.entries(waitBy).sort((a, b) => b[1] - a[1])[0];
     const parts = [];
-    const shareWords = bound === "unknown" ? `about ${W.pctWords(share)} (direction not known)` : `${Q[bound] || ""}${W.pctWords(share)}`;
+    const shareWords = bound === "unknown" && share > 0 && share !== 1 ? `about ${W.shareFigure(share, 0, "none").text} (direction not known)` : W.shareWords(share, bound);
     parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${shareWords} of the elapsed time (${Q[workDir] || ""}${hoursWords(work, QB[workDir]).replace(/ hours?$/, "")} of ${Q[leadDir] || ""}${hoursWords(lead, QB[leadDir])}).`);
     if (waiting > 0 && top) {
       const most = top[1] >= 0.5 * waiting;
@@ -692,6 +705,9 @@
   const BOUND_WORD = { lower: "at least ", upper: "at most ", unknown: "about " };
   // One qualifier per figure (N4): "at least 5%", "about 5% (direction not
   // known)"; a figure already worded "under ..." takes no second one.
+  // A share behind its bound, rounded the way the bound reads (W.shareWords).
+  // At the domain's edge a share says the one way it can be off (W.atEdge).
+  const shareQualify = (v, bound) => (bound === "lower" || bound === "upper" || (bound === "unknown" && (v <= 0 || v === 1)) ? W.shareWords(v, bound) : qualify(W.pctWords(v), bound));
   function qualify(w, bound) {
     if (!bound) return w;
     if (!/^under /.test(w)) return `${BOUND_WORD[bound]}${w}${bound === "unknown" ? " (direction not known)" : ""}`;
@@ -928,7 +944,7 @@
         const kind = !b ? "exact" : b === "lower" ? "at_least" : b === "upper" ? "at_most" : "unknown";
         const lo = kind === "at_most" || kind === "unknown" ? 0 : v;
         const hi = kind === "at_least" || kind === "unknown" ? 1 : v;
-        marks.push({ ...base, value: Math.min(1, Math.max(0, v)), kind, lo, hi, words: qualify(W.pctWords(v), b) });
+        marks.push({ ...base, value: Math.min(1, Math.max(0, v)), kind, lo, hi, words: shareQualify(v, b) });
       }
       const f = w.raw.flow_efficiency || {};
       const m = f.median;
@@ -941,7 +957,7 @@
       else {
         const b = boundKey(m);
         const note = b === "unknown" ? ", measured tasks only" : "";
-        median = { value: mv, bound: b, short: `${b && !(b === "upper" && /^under /.test(W.pctWords(mv))) ? BOUND_SIGN[b] : ""}${pctShort(mv)}`, words: `median ${qualify(W.pctWords(mv), b)}, ${n} of ${plural(N, "task")}${note}` };
+        median = { value: mv, bound: b, short: b ? shortPct(mv, b) : pctShort(mv), words: `median ${shareQualify(mv, b)}, ${n} of ${plural(N, "task")}${note}` };
       }
       return { week: w.week, label: w.label, empty: w.empty, marks: marks.sort((a, b) => a.value - b.value), median };
     });
@@ -1149,7 +1165,7 @@
   const isCauseKey = (k) => typeof k === "string" && CAUSE_KEY.test(k);
   const causeRoute = (k) => (isCauseKey(k) ? `#/causes/${k}` : "#/causes");
   // A running total in words: it reads 100% only at the last bar.
-  const cumWords = (share) => (share < 1 && Math.round(share * 100) >= 100 ? "99%" : W.pctWords(share));
+  const cumWords = (share) => W.pctWords(share);
   const isWaiting = (k) => String(k).startsWith("waiting:");
 
   // The bars of the Pareto chart from Desk's rollups/causes.json. `mode` is
@@ -2116,6 +2132,7 @@
     paretoModel,
     paretoNote,
     cumWords,
+    shareQualify,
     causesLede,
     paretoCaption,
     unlabeledFinished,

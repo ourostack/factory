@@ -262,11 +262,39 @@
       if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
       return `${v}`;
     },
-    pct: (v) => `${(v * 100).toFixed(0)}%`,
-    pct1: (v) => `${(v * 100).toFixed(1)}%`,
+    pct: (v) => shareText(v, 0, null),
+    pct1: (v) => shareText(v, 1, null),
     text: (v) => String(v),
     pass: (v) => (v === 1 ? "passed first time" : v === 0 ? "sent back" : String(v)),
   };
+
+  // A share in whole or tenth percent, rounded the way it reads: a lower
+  // bound down, an upper bound up, anything else to nearest. Only exactly 0
+  // and exactly 1 read as 0% and 100%: a share within a point of either
+  // keeps a decimal ("99.6%", "at most 0.1%"). A bound that would still round
+  // onto the edge says which side it is on ("under 100%"), so the strict form
+  // carries its own direction. A figure with no known direction ("none")
+  // cannot claim a side, so it takes decimals instead ("99.96%"), as
+  // walk.js pctWords does; an exact (measured) figure may say its side.
+  function shareFigure(v, digits, bound) {
+    const at = (d) => {
+      const k = v * 100 * 10 ** d;
+      const n = bound === "lower" ? Math.floor(k + 1e-9) : bound === "upper" ? Math.ceil(k - 1e-9) : Number(k.toFixed(0));
+      return n / 10 ** d;
+    };
+    const edge = (k) => v !== 0 && v !== 1 && (k === 0 || k === 100);
+    let d = digits;
+    let k = at(d);
+    const p = v * 100;
+    if (d === 0 && v !== 0 && v !== 1 && ((p > 0 && p < 1) || (p > 99 && p < 101))) k = at((d = 1));
+    if (bound === "none") while (edge(k) && d < 3) k = at(++d);
+    // A gained decimal that rounds whole reads whole ("1%", not "1.0%").
+    if (!edge(k)) return { text: `${k.toFixed(d > digits && Number.isInteger(k) ? digits : d)}%`, strict: false };
+    if (bound === "none") return { text: `${(k === 0 ? 0.001 : v > 1 ? 100.001 : 99.999).toFixed(3)}%`, strict: false };
+    const text = k === 0 ? (bound === "lower" ? "more than 0%" : "under 0.1%") : v > 1 ? "over 100%" : bound === "upper" ? "under 100%" : "over 99.9%";
+    return { text, strict: true };
+  }
+  const shareText = (v, digits, bound) => shareFigure(v, digits, bound).text;
 
   // A bound's figure in a kind's own form, rounded the way it reads: a lower
   // bound ("at least") down, an upper bound ("at most") up, so rounding never
@@ -277,8 +305,8 @@
     const tenth = (k) => (r(k * 10) / 10).toFixed(1);
     if (kind === "duration") return durationText(v, bound);
     if (kind === "hours") return hoursText(v, bound);
-    if (kind === "pct") return `${r(v * 100)}%`;
-    if (kind === "pct1") return `${tenth(v * 100)}%`;
+    if (kind === "pct") return shareText(v, 0, bound);
+    if (kind === "pct1") return shareText(v, 1, bound);
     if (kind === "compact") {
       if (v >= 1e9) return `${tenth(v / 1e9)}B`;
       if (v >= 1e6) return `${tenth(v / 1e6)}M`;
@@ -418,9 +446,11 @@
     const dir = typeof v === "number" && (number.bound === "lower" || number.bound === "upper") ? number.bound : null;
     // A duration with no direction is still bounded for its form: under a
     // second it keeps its milliseconds, as walk.js does.
-    let body = typeof v !== "number" ? KINDS[kind](v) : kind === "duration" ? durationText(v, dir || true) : kind === "hours" ? hoursText(v, dir || true) : dir ? directed(kind, v, dir) : KINDS[kind](v);
+    let body = typeof v !== "number" ? KINDS[kind](v) : kind === "duration" ? durationText(v, dir || true) : kind === "hours" ? hoursText(v, dir || true) : dir ? directed(kind, v, dir) : kind === "pct" || kind === "pct1" ? shareText(v, kind === "pct" ? 0 : 1, "none") : KINDS[kind](v);
     let direction = number.bound === "lower" ? "at least " : number.bound === "upper" ? "at most " : "";
     let edge = "";
+    // A share past its decimal says its own side ("over 99.9%").
+    if ((kind === "pct" || kind === "pct1") && typeof v === "number" && shareFigure(v, kind === "pct" ? 0 : 1, dir).strict) direction = "";
     if (number.bound === "lower" && v === 0) {
       body = "none recorded";
       direction = "";
@@ -1467,6 +1497,6 @@
     return { cls, stroke: null };
   }
 
-  return { glossaryRoute, loadingView, parseRoute, parseSelect, routeWithContext, routeContext, navigationContext, contextualRoute, localDestination, formatInstant, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, yieldCaption, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
+  return { shareFigure, glossaryRoute, loadingView, parseRoute, parseSelect, routeWithContext, routeContext, navigationContext, contextualRoute, localDestination, formatInstant, alarmKeys, stepOf, safeRoute, defaultTask, landingChoice, segmentLook, withoutScope, yieldCaption, finishLabel, isFinished, LANDING_MIN_LEAD_MS, ordinal, taskName, taskNameText, statusLine, barScale,
     barRow, finishCell, finishWords, finishDay, compareHash, niceMax, SEGMENTS, CAUSE_ID, OLD_ANCHORS, parseLocalNames, servesLocalNames, jobLabel, WITHOUT_LOOP_WORDS, recordsWords, coverageWords, describe, toText, render, reasonText, reasonCore, signoffWords, hasReasonText, formatClock, clockIssues, lifecycleClockIssues, CLOCK_KEYS, reasonTable: () => ({ ...REASON_TEXT }), pageVerdict, safeGithubUrl, safeAnchor, caption, CAPTION_SECTIONS: Object.keys(CAPTIONS), STALE_AFTER_HOURS, REQUIRED_EVIDENCE, KINDS: Object.keys(KINDS) };
 });

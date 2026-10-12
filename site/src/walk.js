@@ -115,10 +115,63 @@
     return `${p.n}${p.unit}${p.s ? ` ${p.s}s` : ""}`;
   }
 
-  function pctWords(share) {
+  // A share rounded the way its bound reads: format.js shareFigure, mirrored
+  // here because walk.js loads on its own (the share-edge test holds the two
+  // equal). A lower bound rounds down, an upper bound up; within a point of
+  // 0% or 100% it keeps a decimal, and a bound still on the edge says its
+  // side ("under 100%", "more than 0%") as a strict form.
+  function shareFigure(v, digits, bound) {
+    const at = (d) => {
+      const k = v * 100 * 10 ** d;
+      const n = bound === "lower" ? Math.floor(k + 1e-9) : bound === "upper" ? Math.ceil(k - 1e-9) : Number(k.toFixed(0));
+      return n / 10 ** d;
+    };
+    const edge = (k) => v !== 0 && v !== 1 && (k === 0 || k === 100);
+    let d = digits;
+    let k = at(d);
+    const p = v * 100;
+    if (d === 0 && v !== 0 && v !== 1 && ((p > 0 && p < 1) || (p > 99 && p < 101))) k = at((d = 1));
+    if (bound === "none") while (edge(k) && d < 3) k = at(++d);
+    if (!edge(k)) return { text: `${k.toFixed(d > digits && Number.isInteger(k) ? digits : d)}%`, strict: false };
+    if (bound === "none") return { text: `${(k === 0 ? 0.001 : v > 1 ? 100.001 : 99.999).toFixed(3)}%`, strict: false };
+    const text = k === 0 ? (bound === "lower" ? "more than 0%" : "under 0.1%") : v > 1 ? "over 100%" : bound === "upper" ? "under 100%" : "over 99.9%";
+    return { text, strict: true };
+  }
+
+  // A share in words. Only exactly 0 and 1 read as 0% and 100%: a share
+  // that would round onto 100% takes decimals until it leaves it ("99.6%",
+  // "99.99%"), as shareFigure does for a figure with no direction. With a
+  // bound it is rounded the way the bound reads (shareFigure), so a caller's
+  // "at least" or "at most" stays true; shareWords adds that qualifier.
+  function pctWords(share, bound) {
+    if (bound === "lower" || bound === "upper") return shareFigure(share, 0, bound).text;
     const p = share * 100;
     if (p > 0 && p < 1) return "under 1%";
-    return `${Math.round(p)}%`;
+    if (Math.round(p) !== 100 || share === 1) return `${Math.round(p)}%`;
+    for (let d = 1; d <= 3; d++) {
+      const k = Number(p.toFixed(d));
+      if (k !== 100) return `${k.toFixed(d)}%`;
+    }
+    return share > 1 ? "100.001%" : "99.999%";
+  }
+
+  // A share behind its qualifier, one rule for every caller: "at least 57%"
+  // (rounded down), "at most 49%" (up), a strict form alone ("under 100%"),
+  // and at the domain's edge (atEdge) "100%" for at least 100%, "0%" for at
+  // most 0%, "100% (could be lower)" for a share of exactly 1 with no known
+  // direction. `bound` is lower, upper, unknown or none.
+  function shareWords(share, bound) {
+    // "at least 0%" says nothing; a zero lower bound reads as the edge it
+    // is, one way off, and fits every sentence a share sits in.
+    if (bound === "lower" && share <= 0) return "0% (could be higher)";
+    const q = { lower: "at least ", upper: "at most ", unknown: "about " }[bound] || "";
+    const [q2, tail] = atEdge(q, share, 0, 1);
+    if (tail || (q && !q2)) return `${share <= 0 ? "0%" : "100%"}${tail}`;
+    if (bound === "lower" || bound === "upper") {
+      const f = shareFigure(share, 0, bound);
+      return f.strict ? f.text : `${q}${f.text}`;
+    }
+    return `${q}${pctWords(share)}`;
   }
 
   // -------------------------------------------------------------- words
@@ -668,12 +721,11 @@
     if (fe === null) return null;
     const t = pctWords(fe);
     if (n.state !== "partial") return t;
-    if (n.bound === "upper") return `at most ${t}`;
-    if (n.bound === "lower") return `at least ${t}`;
+    if (n.bound === "upper" || n.bound === "lower") return shareWords(fe, n.bound);
     // Desk's bound: null is no direction, except bound_not_moved, which is
     // exact for its window; an absent key (older data) reads as describe
     // reads it, the plain figure (qualifierOf), never a derived bound.
-    if (qualifierOf(n) === "about ") return `${t} (partial, direction not known)`;
+    if (qualifierOf(n) === "about ") return fe <= 0 || fe === 1 ? shareWords(fe, "unknown") : `${t} (partial, direction not known)`;
     if (has(row.lead_time_ms, "censored")) return `${t} so far`;
     return `${t} (partial)`;
   }
@@ -3039,6 +3091,8 @@
     durationWords,
     durationShort,
     pctWords,
+    shareWords,
+    shareFigure,
     stated,
     qualifierOf,
     qualified,

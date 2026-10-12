@@ -459,8 +459,9 @@ test("the final review's fixes: one legend shape, a padded Pareto frame, the pic
   const pn = { state: "partial", value: 1, reasons: ["log_truncated"], bound: null, bound_reason: "bound_reasons_conflict" }
   const rows = W.pickerRows([{ id: "a1", finish_basis: "labels", finish_order: m(1), status: "done" }, { id: "b2", finish_basis: "labels", finish_order: m(2), status: "done" }], [{ job: "a1", lead_time_ms: m(H), flow_efficiency: pn }, { job: "b2", lead_time_ms: p(H, ["log_truncated"], { bound: "lower" }), flow_efficiency: p(0.5, ["log_truncated"], { bound: "upper" }) }], (j) => j.id)
   const a = rows.find((r) => r.id === "a1")
-  assert.equal(a.feText, "100% (partial, direction not known)")
-  assert.equal(a.badge, null)
+  // At 100% the words say which way it can be off, not "partial", so the badge says partial, once.
+  assert.equal(a.feText, "100% (could be lower)")
+  assert.equal(a.badge, "partial")
   assert.equal(rows.find((r) => r.id === "b2").badge, "partial", "a bounded partial keeps its badge")
 })
 
