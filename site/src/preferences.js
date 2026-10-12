@@ -5,7 +5,11 @@
   else root.FactoryPreferences = api;
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
-  const KEY = "factory.preferences/1";
+  // Version 2 (2026-10-12): version 1 saves could pin the zone to UTC behind
+  // the reader's back, and a pinned UTC cannot be told from a chosen one, so a
+  // version 1 record keeps its other preferences and drops its zone.
+  const KEY = "factory.preferences/2";
+  const LEGACY = "factory.preferences/1";
   const keys = (x, list) => x && typeof x === "object" && !Array.isArray(x) && Object.keys(x).every((k) => list.includes(k));
   function validZone(zone) {
     // Abbreviations such as PST are not user-selectable IANA zones.
@@ -28,7 +32,15 @@
     try {
       if (!storage || typeof storage.getItem !== "function") return fallback;
       const raw = storage.getItem(KEY);
-      if (raw === null) return { ...fallback, persistent: true };
+      if (raw === null) {
+        const old = storage.getItem(LEGACY);
+        if (typeof old === "string" && old.length <= 32768) {
+          const x = JSON.parse(old);
+          const carried = { schema: KEY, dismissed: x && x.dismissed === true, zone: fallback.zone, previous: x && validSummary(x.previous) ? x.previous : null };
+          if (valid(carried)) return { ...carried, persistent: true };
+        }
+        return { ...fallback, persistent: true };
+      }
       if (typeof raw !== "string" || raw.length > 32768) return fallback;
       const x = JSON.parse(raw);
       return valid(x) ? { ...x, persistent: true } : fallback;

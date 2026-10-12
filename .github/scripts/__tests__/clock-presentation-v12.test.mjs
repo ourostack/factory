@@ -16,7 +16,7 @@ const caseOf = (id) => structuredClone(fixture.cases.find((c) => c.id === id).ex
 
 const LABELS = {
   production_ms: "Production elapsed time",
-  active_in_production_ms: "Recorded working time",
+  active_in_production_ms: "Recorded working inside production",
   production_remainder_ms: "Production not recorded as active",
   request_to_delivery_ms: "Request to delivery",
   queue_ms: "Queued before production",

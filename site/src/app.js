@@ -137,6 +137,7 @@
     const doc = data.overview;
     if (!B.validateBriefing(doc).ok) throw new Error("The published briefing is unavailable or malformed; other views remain usable.");
     document.getElementById("overview-published").textContent = `Published data build: ${F.formatInstant(data.built_at, preferences.zone)}. This is not a task finish or acceptance timestamp.`;
+    document.getElementById("overview-conclusion").textContent = B.conclusionWords(doc);
     document.getElementById("overview-state").textContent = doc.state === "attention" ? "Start with the recorded problems below. Monitoring and ownership may still be incomplete." : "Monitoring or review evidence is incomplete. This is not an all-clear.";
     renderBriefRows(document.getElementById("overview-attention"), doc.attention, "No specific attention item is supported by this payload. Missing monitoring does not mean there are no problems.");
     renderBriefRows(document.getElementById("overview-agents"), doc.agents, "No current public claim is available for this briefing. This does not mean local work is unowned.");
@@ -183,7 +184,7 @@
         const back = el("a", null, "Return to the investigation"); setLocalHref(back, F.routeWithContext(context.return, Object.fromEntries(Object.entries(context).filter(([k]) => k !== "return")))); node.appendChild(back);
       }
       if (selection) {
-        node.appendChild(el("p", null, selection === "unsupported" ? "The item in this link is not available. Nothing else was selected." : "An item from this link is selected. If it is no longer recorded, nothing else is selected."));
+        node.appendChild(el("p", "selection-note", selection === "unsupported" ? "The item in this link is not available. Nothing else was selected." : "An item from this link is selected."));
         const clear = el("button", null, "Clear selection"); clear.type = "button";
         clear.addEventListener("click", clearEvidenceSelection);
         node.appendChild(clear);
@@ -1959,7 +1960,7 @@
         if (r.id === current) a.setAttribute("aria-current", "page");
         plainCell(tr, "Task", a);
         plainCell(tr, "Recorded lifecycle", outcomeNode(jobById.get(r.id)));
-        plainCell(tr, "Finish day (UTC)", el("span", null, r.finish ? r.finish.words : "Not recorded"));
+        plainCell(tr, "Finish day (UTC)", el("span", null, W.finishCellWords(r.finish, jobById.get(r.id))));
         const elapsed = el("span", null, fig(r.lead, "duration"));
         if (r.badge) elapsed.appendChild(el("span", "picker-badge", ` · ${r.badge}`));
         plainCell(tr, "Recorded elapsed", elapsed);
@@ -3091,10 +3092,12 @@
       // The conclusion leads: right under the task title, before the
       // reference and status lines, so it starts on the first screen.
       const conclusion = el("p", "task-conclusion", summary.conclusion);
-      for (const old of document.querySelectorAll("#task-head .task-conclusion")) old.remove();
+      for (const old of document.querySelectorAll("#task-head .task-conclusion, #task-head .task-caveat")) old.remove();
       const title = document.querySelector("#task-head .task-title");
       if (title) title.after(conclusion);
       else summaryEl.appendChild(conclusion);
+      // The caveat follows the conclusion; it never stands in for it.
+      if (summary.caveat) conclusion.after(el("p", "task-caveat", summary.caveat));
       const figures = el("dl", "task-summary-figures");
       for (const f of summary.figures) {
         const cell = el("div");
@@ -3122,7 +3125,7 @@
         summaryEl.appendChild(clear);
       }
       if (summary.classification) summaryEl.appendChild(el("p", "chart-caption", summary.classification));
-      renderTaskClocks(summaryEl, j);
+      renderTaskClocks(summaryEl, j, row);
       const definitions = el("details", "task-definitions");
       definitions.append(el("summary", null, "What do these measures mean?"), el("p", null, "Recorded elapsed is the existing task window, not original-request or production elapsed. Recorded working is activity captured for this task, not all agents' utilization. Work / elapsed is the working share of that window (flow efficiency). The evaluator classifies work as value-adding, necessary or waste; missing labels do not prove waste."));
       summaryEl.appendChild(definitions);
@@ -3157,7 +3160,14 @@
       if (!drawn || !drawn.select(select)) {
         const node = document.getElementById("navigation-context");
         node.hidden = false;
-        node.appendChild(el("p", "selection-unavailable", "The requested evidence selection is no longer available in this task. No substitute item was selected."));
+        // The item was not found, so nothing may say it is selected.
+        const note = node.querySelector(".selection-note");
+        if (note) note.remove();
+        const mapSel = document.getElementById("map-selection");
+        if (mapSel) mapSel.hidden = true;
+        const gone = el("p", "selection-unavailable", "The requested evidence selection is no longer available in this task. No substitute item was selected.");
+        const clearBtn = node.querySelector("button");
+        if (clearBtn) clearBtn.before(gone); else node.appendChild(gone);
       }
     });
   }
@@ -3962,7 +3972,7 @@
     if (mode === "production" || mode === "request") {
       const sw = (cls, color) => { const x = el("span", `swatch${cls}`); x.setAttribute("aria-hidden", "true"); if (color) x.style.setProperty("--sw", color); return x; };
       group(mode === "production" ? "Production time, from the base up" : "Request to delivery", mode === "production"
-        ? [...(present.has("prod_active") ? [[sw("", "var(--c-agents-working)"), "Recorded working time"]] : []), ...(present.has("prod_remainder") ? [[waitSwatch("unknown"), "Production not recorded as active (not proof of idle time or waste)"]] : [])]
+        ? [...(present.has("prod_active") ? [[sw("", "var(--c-agents-working)"), "Recorded working inside production"]] : []), ...(present.has("prod_remainder") ? [[waitSwatch("unknown"), "Production not recorded as active (not proof of idle time or waste)"]] : [])]
         : [[sw("", "var(--c-accent)"), "Request to delivery"]]);
     }
     else group("Working, by the evaluator's labels (from the base up)", [...F.SEGMENTS.filter((s) => present.has(s.key)).map((s) => [swatch(s.key), s.label]), ...(present.has("working_unsplit") ? [[swatch("not_labeled"), "Working, not split by label"]] : [])]);
@@ -3984,7 +3994,7 @@
 
   // The task's production clocks (spec 4.3): each figure with its bound and
   // a plain reason a reader can expand; unavailable is never shown as 0.
-  function renderTaskClocks(parent, j) {
+  function renderTaskClocks(parent, j, row) {
     const box = el("section", "task-clocks");
     box.setAttribute("aria-labelledby", "task-clocks-title");
     const h = el("h3", "task-clocks-title", "Production clocks");
@@ -4012,6 +4022,8 @@
       dl.appendChild(cell);
     }
     box.appendChild(dl);
+    const relation = S.productionRelation(clocks, row ? row.lead_time_ms : j.lead_time_ms);
+    if (relation) box.appendChild(el("p", "clock-relation", relation));
     const journey = S.productionJourney(clocks, F.reasonText);
     const jt = el("h4", "task-clocks-sub", "Production periods on this task's journey");
     box.appendChild(jt);
@@ -4417,11 +4429,11 @@
     const byId = new Map(jobs.map((j) => [j.id, j]));
     const cols = mode === "request"
       ? [["request_to_delivery_ms", "Request to delivery"], ["queue_ms", "Queued before production"]]
-      : [["production_ms", "Production time"], ["active_in_production_ms", "Recorded working"], ["production_remainder_ms", "Not recorded as active"]];
+      : [["production_ms", "Production time"], ["active_in_production_ms", "Recorded working inside production"], ["production_remainder_ms", "Not recorded as active"]];
     const table = el("table", "data-table clock-modes-table");
     table.appendChild(el("caption", null, mode === "request" ? "Request to delivery for each selected task" : "Production time for each selected task"));
     const head = document.createElement("tr");
-    for (const t of ["Task", ...cols.map((c) => c[1]), ...(mode === "request" ? [] : ["Recorded working share", "Acceptance wait"])]) { const th = el("th", null, t); th.scope = "col"; head.appendChild(th); }
+    for (const t of ["Task", ...cols.map((c) => c[1]), ...(mode === "request" ? [] : ["Working share of production", "Acceptance wait"])]) { const th = el("th", null, t); th.scope = "col"; head.appendChild(th); }
     const thead = document.createElement("thead"); thead.appendChild(head); table.appendChild(thead);
     const tbody = document.createElement("tbody");
     for (const b of bars) {
@@ -4447,7 +4459,7 @@
     wrap.appendChild(holder);
     wrap.appendChild(el("p", "chart-caption", mode === "request"
       ? "Request to delivery and queue are unavailable wherever Desk did not record the original request; adoption or card creation is never treated as the request."
-      : "Recorded working share is recorded working time over production time for that task; it is not agent or factory utilization, and a share whose bounds pull both ways says so instead of rounding to an exact figure. Acceptance wait is its coarse published class, outside production."));
+      : "Working share of production is recorded working inside production over production time for that task; it is not agent or factory utilization, and a share whose bounds pull both ways says so instead of rounding to an exact figure. Acceptance wait is its coarse published class, outside production."));
     return wrap;
   }
 
@@ -4616,8 +4628,8 @@
     safely("compare-lede", () => {
       ledeEl.textContent = "Recorded task windows can overlap, so their sums are task exposure, not factory time. Their working share is not agent utilization or global idle time. Production time comes from Desk's production episodes; request to delivery is unavailable wherever the original request was not recorded. Acceptance is not part of production.";
       let conclusion = document.getElementById("comparison-conclusion");
-      if (!conclusion) { conclusion = el("p", "comparison-conclusion"); conclusion.id = "comparison-conclusion"; }
-      document.getElementById("compare-population").before(conclusion);
+      // The conclusion leads the page, right under its heading.
+      if (!conclusion) { conclusion = el("p", "comparison-conclusion"); conclusion.id = "comparison-conclusion"; document.querySelector("#view-compare h1").after(conclusion); }
       conclusion.innerHTML = "";
       const candidate = all.filter((b) => b.state !== "no_data" && Number.isFinite(b.total_ms)).sort((a, b) => b.total_ms - a.total_ms)[0];
       if (!selectedJobs.length) conclusion.textContent = "No recorded task matches these filters. Clear filters or choose a different recorded population.";
@@ -4644,7 +4656,7 @@
       const clockDrawn = clockBars ? clockBars.filter((b) => b.state === "ok") : [];
       document.getElementById("stackup-caption").textContent =
         mode === "production"
-          ? "Each task's production time, from Desk's production episodes: recorded working time from the base up, then production not recorded as active (not proof of idle time or waste). Time between deliveries and acceptance waits are left out. ≥ means at least, ≤ at most, ~ direction not known. Select a bar to follow its task."
+          ? "Each task's production time, from Desk's production episodes: recorded working inside production from the base up, then production not recorded as active (not proof of idle time or waste). Time between deliveries and acceptance waits are left out. ≥ means at least, ≤ at most, ~ direction not known. Select a bar to follow its task."
           : mode === "request"
             ? "Each task's time from its original request to recorded delivery, where Desk recorded the original request. Select a bar to follow its task."
             : mode === "working"
@@ -5506,11 +5518,6 @@
     const box = document.getElementById("problems");
     const triageNode = document.getElementById("triage-brief");
     safely("improvement-alarm-list", () => renderImprovementAlarms(document.getElementById("improvement-alarm-list"), data));
-    if (focusAfterRender === "improvement-alarms") {
-      focusAfterRender = null;
-      const target = document.getElementById("improvement-alarms");
-      if (target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: "start" }); }
-    }
     safely("triage-brief", () => renderPublicImprovements(triageNode, data));
     const causes = await walkFile("rollups/causes.json");
     if (seq !== stepSeq) return;
@@ -5525,6 +5532,9 @@
     } else {
       if (!verified) box.appendChild(el("p", "chart-caption", "GitHub could not be reached for this build, so this list may be missing issues."));
       box.appendChild(el("p", "act-summary", S.actSummary(rows)));
+      // With a cause under investigation, say whether any improvement addresses it.
+      const addressed = S.causeAddressedWords(rows, F.navigationContext(location.hash).cause);
+      if (addressed) box.appendChild(el("p", "act-cause-addressed", addressed));
       const ul = el("ul", "act-list");
       for (const r of rows) {
         const li = el("li", "act-row");
@@ -5684,6 +5694,17 @@
         routedOnce = true;
         return;
       }
+    }
+    // The Overview's alarm link lands on the alarms themselves.
+    // A hash link fires both hashchange and popstate, so the same address
+    // routes twice; the second run keeps the alarms focused, and any other
+    // address ends the request.
+    if (focusAfterRender === `done:${location.hash}`) focusAfterRender = "improvement-alarms";
+    else if (typeof focusAfterRender === "string" && focusAfterRender.startsWith("done:")) focusAfterRender = null;
+    if (r.view === "act" && focusAfterRender === "improvement-alarms") {
+      focusAfterRender = `done:${location.hash}`;
+      const target = document.getElementById("improvement-alarms");
+      if (target) { target.scrollIntoView({ block: "start" }); target.focus({ preventScroll: true }); routedOnce = true; return; }
     }
     // After the first page load, move focus to the new view's heading, so a
     // keyboard or screen reader user lands where the content changed.
@@ -6096,7 +6117,7 @@
         for (const v of VIEWS) document.getElementById(`view-${v}`).hidden = v !== view;
         document.body.dataset.view = view;
         if (view === "help") renderGuide(document.getElementById("help-stops"), empty);
-        for (const id of ["overview-state", "overview-attention", "overview-agents", "overview-investigation", "task-list", "triage-brief"]) emptyState(document.getElementById(id), msg);
+        for (const id of ["overview-conclusion", "overview-state", "overview-attention", "overview-agents", "overview-investigation", "task-list", "triage-brief"]) emptyState(document.getElementById(id), msg);
         const status = document.getElementById("improvement-status");
         if (status) status.textContent = "The improvement status could not be loaded, so no reviewed improvement or published issue is shown.";
       };

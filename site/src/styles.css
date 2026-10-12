@@ -808,6 +808,8 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 
 /* Read the numbers; choose a separate, named action to inspect evidence. */
 .task-conclusion { font-size: 1.1rem; line-height: 1.6; font-weight: 600; max-width: 65ch; }
+.task-caveat { color: var(--text-secondary); max-width: 65ch; margin: -.3rem 0 .8rem; }
+.clock-relation { max-width: 70ch; color: var(--text-secondary); margin: .6rem 0 0; }
 .comparison-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; padding: 1rem 0; }
 .comparison-control { display: flex; flex-direction: column; gap: .4rem; min-width: 0; font-size: .9rem; }
 .comparison-control select, .comparison-control input { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; padding: .5rem; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 4px; }
@@ -1581,3 +1583,4 @@ table.data-table.task-list-table td, table.data-table.task-list-table th { white
 .production-journey { margin: 0; padding-left: 1.4rem; overflow-wrap: anywhere; }
 .production-journey li { margin: .3rem 0; }
 .production-journey .journey-between { color: var(--text-secondary); }
+.overview-conclusion { font-weight: 600; color: var(--text-primary); }

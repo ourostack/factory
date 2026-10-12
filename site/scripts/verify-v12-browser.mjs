@@ -73,6 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
+  "caveat_in_the_conclusion_place",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -101,8 +102,11 @@ export const HEIGHT_ROUTES = Object.freeze(["compare", "overview"])
 // Doubled text has its own budget against a fixed reference: the same page
 // of the same build at normal text, so neither the baseline nor the data
 // moves it. Text alone grows up to four times at doubled size on a phone
-// (twice the line height, half the words per line); charts and controls grow
-// less. A page past these multiples grows faster than its text.
+// (twice the line height, half the words per line), which bounds these
+// multiples from above. The multiples themselves are fitted tripwires, not
+// values derived from the spec: each sits just above the tallest page
+// measured when it was set (Compare: 3.02x at 390 px, 2.44x at 1280 px), so
+// an unrelated change can trip them, and a trip means "look", not "wrong".
 export const TEXT2X_HEIGHT_BUDGET = Object.freeze({ 1280: 2.5, 390: 3.25 })
 
 // Heights over their budget, as reader sentences. `heights` maps
@@ -116,19 +120,29 @@ export function assessHeights(heights, budget) {
   return over
 }
 
-// Spec 4.3: a task page leads with its conclusion. It must start within the
-// first screen (this height) at every width and text size, judged on its own,
-// not against a baseline.
-export const FIRST_SCREEN = Object.freeze({ height: 900 })
-export function assessFirstScreen(m) {
-  if (!m || !m.found) return "no task conclusion is shown"
-  if (m.top >= FIRST_SCREEN.height) return `the task conclusion starts at ${m.top} px, below the first screen (${FIRST_SCREEN.height} px)`
+// Spec 4.3: a page leads with its conclusion. The conclusion sentence (never
+// a caveat about partial figures) must start within the first screen, judged
+// on its own, not against a baseline. A phone's first screen is shorter
+// (640 px up to 480 px wide; an iPhone SE shows 667 px, an iPhone 14 844 px)
+// than a desktop's (900 px). With doubled text the page header alone fills
+// most of a phone's screen, so the conclusion must start within two screens.
+export const FIRST_SCREEN = Object.freeze({ phone: 640, phoneMaxWidth: 480, wide: 900, text2xScreens: 2 })
+export function firstScreenHeight(width) { return width <= FIRST_SCREEN.phoneMaxWidth ? FIRST_SCREEN.phone : FIRST_SCREEN.wide }
+// A sentence that qualifies figures rather than concluding from them.
+export const CAVEAT_PATTERN = /\bincomplete\b|keep the bounds in view|not an all-clear|may still be/i
+// Each covered page and the element that holds its conclusion sentence.
+export const CONCLUSIONS = Object.freeze({ task: "#view-task .task-conclusion", compare: "#comparison-conclusion", overview: "#overview-conclusion" })
+export function assessFirstScreen(m, width, scale = 1) {
+  if (!m || !m.found) return "no conclusion is shown"
+  if (CAVEAT_PATTERN.test(m.text || "")) return `the conclusion's place holds a caveat, not a conclusion: "${String(m.text).slice(0, 80)}"`
+  const limit = firstScreenHeight(width) * (scale === 2 ? FIRST_SCREEN.text2xScreens : 1)
+  if (m.top >= limit) return `the conclusion starts at ${m.top} px, below the first screen (${limit} px at ${width} px wide${scale === 2 ? ", two screens with doubled text" : ""})`
   return null
 }
-// Runs in the page.
-export function measureConclusion() {
-  const c = [...document.querySelectorAll("#view-task .task-conclusion")].find((e) => e.getBoundingClientRect().height > 0)
-  return c ? { found: true, top: Math.round(c.getBoundingClientRect().top + window.scrollY), planted: !!document.querySelector("[data-gate-planted]") } : { found: false, top: 0 }
+// Runs in the page: where the conclusion starts and what it says.
+export function measureConclusion(selector) {
+  const c = [...document.querySelectorAll(selector)].find((e) => e.getBoundingClientRect().height > 0 && (e.textContent || "").trim() && !/^Loading/.test(e.textContent.trim()))
+  return c ? { found: true, top: Math.round(c.getBoundingClientRect().top + window.scrollY), text: c.textContent.trim() } : { found: false, top: 0, text: "" }
 }
 // Runs in the page: tables shown as cards (a .stacked holder that is visible).
 export function findCardTables() {
@@ -847,23 +861,30 @@ export async function main(argv = process.argv.slice(2)) {
       } finally { await new Promise((resolve) => baseServer.close(resolve)) }
     }
 
-    // 5c. The task page leads with its conclusion: it starts within the first
-    // screen at every width and both text sizes, judged absolutely.
+    // 5c. The task page, Compare and Overview lead with their conclusion: it
+    // starts within the first screen at every width and both text sizes,
+    // judged absolutely.
     await check("conclusion_starts_within_the_first_screen", async () => {
-      const late = []
+      const late = [], worst = {}
       for (const scale of TEXT_SCALES) {
-        const { context, page } = await newPage({ width: 1440, height: FIRST_SCREEN.height, scale })
-        try {
-          await open(page, ROUTES.find((r) => r.name === "task"), scale)
-          for (let i = WIDTHS.length - 1; i >= 0; i--) {
-            await page.setViewportSize({ width: WIDTHS[i], height: FIRST_SCREEN.height })
-            const why = assessFirstScreen(await page.evaluate(measureConclusion))
-            if (why) late.push({ width: WIDTHS[i], scale, why })
-          }
-        } finally { await context.close() }
+        for (const [name, selector] of Object.entries(CONCLUSIONS)) {
+          const { context, page } = await newPage({ width: 1440, height: firstScreenHeight(1440), scale })
+          try {
+            await open(page, ROUTES.find((r) => r.name === name), scale)
+            await page.waitForFunction((sel) => { const e = document.querySelector(sel); return e && e.textContent.trim() && !/^Loading/.test(e.textContent.trim()) }, selector, { timeout: 15000 }).catch(() => {})
+            for (let i = WIDTHS.length - 1; i >= 0; i--) {
+              await page.setViewportSize({ width: WIDTHS[i], height: firstScreenHeight(WIDTHS[i]) })
+              const m = await page.evaluate(measureConclusion, selector)
+              const why = assessFirstScreen(m, WIDTHS[i], scale)
+              if (why) late.push({ name, width: WIDTHS[i], scale, why })
+              const k = `${name}_text${scale}x`
+              if (m.found && (!worst[k] || m.top > worst[k].top)) worst[k] = { top: m.top, width: WIDTHS[i] }
+            }
+          } finally { await context.close() }
+        }
       }
-      if (late.length) throw new Error(`${late.length} width and text-size pairs: ${late.slice(0, 3).map((l) => `${l.width} px at ${l.scale}x text: ${l.why}`).join("; ")}`)
-      return { widths: WIDTHS.length, text_scales: TEXT_SCALES }
+      if (late.length) throw new Error(`${late.length} page, width and text-size cases: ${late.slice(0, 4).map((l) => `${l.name} at ${l.width} px, ${l.scale}x text: ${l.why}`).join("; ")}`)
+      return { widths: WIDTHS.length, text_scales: TEXT_SCALES, pages: Object.keys(CONCLUSIONS), worst }
     })
 
     // 6. Long names, bounded values and a 26-week lookback stay readable.
@@ -1182,12 +1203,21 @@ export async function main(argv = process.argv.slice(2)) {
         await expectFailure("conclusion_below_first_screen", async () => {
           await page.goto("about:blank")
           await open(page, ROUTES.find((r) => r.name === "task"))
-          const before = assessFirstScreen(await page.evaluate(measureConclusion))
+          const before = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (before) throw new Error(`before planting: ${before}`)
           await page.evaluate(() => { const d = document.createElement("div"); d.dataset.gatePlanted = "1"; d.style.height = "1200px"; const head = document.getElementById("task-head"); head.parentNode.insertBefore(d, head) })
-          const why = assessFirstScreen(await page.evaluate(measureConclusion))
+          const why = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (why) throw new Error(`planted conclusion: ${why}`)
         }, /^planted conclusion/)
+        await expectFailure("caveat_in_the_conclusion_place", async () => {
+          await page.goto("about:blank")
+          await open(page, ROUTES.find((r) => r.name === "task"))
+          const before = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
+          if (before) throw new Error(`before planting: ${before}`)
+          await page.evaluate(() => { const c = document.querySelector("#view-task .task-conclusion"); c.dataset.gatePlanted = "1"; c.textContent = "The recorded window or its work split is incomplete. Keep the bounds in view before comparing tasks." })
+          const why = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
+          if (why) throw new Error(`planted caveat: ${why}`)
+        }, /^planted caveat: .*caveat/)
         await expectFailure("overlapping_controls", async () => {
           await openFresh()
           await plant('<div style="position:relative;height:40px"><button style="position:absolute;left:0;top:0;width:120px">First control</button><button style="position:absolute;left:20px;top:4px;width:120px">Second control</button></div>')
