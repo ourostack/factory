@@ -1626,6 +1626,15 @@
       if (sr.width < 2 || sr.height < 2) continue;
       for (const t of plot.querySelectorAll("text.sb-group, text.sb-callout")) {
         const r = t.getBoundingClientRect();
+        // A group name wider than the whole plot (one narrow task at larger
+        // text) cannot fit inside it: it moves above the chart as a caption
+        // rather than being cut at the plot's edge.
+        if (t.classList.contains("sb-group") && r.width > sr.width - 4) {
+          const row = plot.closest(".sb-row");
+          if (row && row.parentNode) row.parentNode.insertBefore(el("p", "chart-caption sb-group-note", t.dataset.long || t.textContent), row);
+          t.remove();
+          continue;
+        }
         const dx = r.right > sr.right - 1 ? sr.right - 2 - r.right : r.left < sr.left + 1 ? sr.left + 2 - r.left : 0;
         if (dx) t.setAttribute("x", Number(t.getAttribute("x")) + dx);
       }
@@ -2908,14 +2917,19 @@
       return;
     }
     const bar = W.timeBar(stackRow, row, idle, F.SEGMENTS);
+    // The lead time's own direction (walk.js leadQualifierOf), as the lede
+    // and Compare read it, rounded the way it reads (W.qualified); a partial
+    // bar whose lead time is not published as partial stays a lower bound.
+    const leadN = stackRow && stackRow.lead_time_ms;
+    const leadQ = leadN && leadN.state === "partial" ? W.leadQualifierOf(leadN) : bar.lead_state === "partial" ? "at least " : "";
+    const leadText = W.qualified(leadQ, bar.total_ms);
     if (bar.state === "lead_only") {
       // What is known (the lead time) is drawn; what is not (its split) is said.
       const why = (bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded";
-      const at = bar.lead_state === "partial" && stackRow.lead_time_ms && stackRow.lead_time_ms.bound !== null ? "at least " : "";
-      container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar: ${at}${W.durationWords(bar.total_ms)}. How it splits into working and waiting is not known, because ${why}.`));
+      container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar: ${leadText}. How it splits into working and waiting is not known, because ${why}.`));
       const track = el("div", "tw-bar");
       track.setAttribute("role", "img");
-      track.setAttribute("aria-label", `Lead time ${at}${W.durationWords(bar.total_ms)}; its split into working and waiting is not known.`);
+      track.setAttribute("aria-label", `Lead time ${leadText}; its split into working and waiting is not known.`);
       const d = el("div", "tw-seg tw-unsplit");
       d.style.width = "100%";
       track.appendChild(d);
@@ -2927,8 +2941,7 @@
       container.appendChild(el("p", "chart-empty", `Not measured for this task, because ${(bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded"}. No bar is drawn rather than an empty one.`));
       return;
     }
-    const atLeast = bar.lead_state === "partial" ? "at least " : "";
-    container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${atLeast}${W.durationWords(bar.total_ms)}. Working time comes first, split by the evaluator's labels; then waiting, idle time, split by what it waited on.`));
+    container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${leadText}. Working time comes first, split by the evaluator's labels; then waiting, idle time, split by what it waited on.`));
     // Each part of the bar, and each legend row, is a button that lights its
     // evidence on the map: a working part lights the boxes that hold it, a
     // waiting cause its triangles and ladder steps.
@@ -2938,11 +2951,11 @@
     // A class's figure says "at least" while some of the waiting is not classified.
     const segLabel = (s) => (s.why === "not_known" && s.reasons && s.reasons.length ? `${s.label} (${s.reasons.map(W.whyReasonWords).join("; ")})` : s.label);
     // A class of the next-prompt split states its floor and its ceiling.
-    const segMs = (s) => (s.why && typeof s.ceiling_ms === "number" ? W.boundedWords(s.ms, s.ceiling_ms, W.durationWords) : `${s.why ? W.qualOf(s) : ""}${W.durationWords(s.ms)}`);
+    const segMs = (s) => (s.why && typeof s.ceiling_ms === "number" ? W.boundedWords(s.ms, s.ceiling_ms, W.durationWords) : W.qualified(s.why ? W.qualOf(s) : "", s.ms));
     const partWords = (s) => `${segLabel(s)}: ${segMs(s)}, ${W.pctWords(s.share)} of the lead time`;
     const track = el("div", "tw-bar");
     track.setAttribute("role", "group");
-    track.setAttribute("aria-label", `Lead time ${atLeast}${W.durationWords(bar.total_ms)}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.durationWords(g.ms)}`).join("; ")}. Each part lights its evidence on the map.`);
+    track.setAttribute("aria-label", `Lead time ${leadText}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.qualified(g.qualifier || "", g.ms)}`).join("; ")}. Each part lights its evidence on the map.`);
     for (const g of bar.groups) {
       const gd = el("div", `tw-group tw-group-${g.key}`);
       gd.style.width = `${Math.max(0, (g.ms / bar.total_ms) * 100)}%`;
@@ -2969,7 +2982,7 @@
     for (const g of bar.groups) {
       const head = el("p", "tw-group-head");
       head.appendChild(el("strong", null, g.label));
-      head.appendChild(document.createTextNode(` ${g.qualifier || ""}${W.durationWords(g.ms)} · ${W.pctWords(g.ms / bar.total_ms)} of the lead time${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
+      head.appendChild(document.createTextNode(` ${W.qualified(g.qualifier || "", g.ms)} · ${W.pctWords(g.ms / bar.total_ms)} of the lead time${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
       container.appendChild(head);
       const ul = el("ul", "tw-legend tw-legend-buttons");
       for (const s of g.segments) {
@@ -3860,7 +3873,7 @@
     // A group's name sits in its first column's row; the long form only where it fits that row.
     const rowRoom = (i) => { const r = rowsOf[rowOf(i)] || []; return (r[r.length - 1] - i + 1) * colW; };
     const groupLabel = (i, x, long, short) => {
-      const t = svg("text", { x, y: 14 * k, class: "sb-group", "data-col": i });
+      const t = svg("text", { x, y: 14 * k, class: "sb-group", "data-col": i, "data-long": long.replace(/ →$/, "") });
       t.textContent = !phone && long.length * 7 * k < rowRoom(i) ? long : short;
       plot.appendChild(t);
     };
@@ -4881,7 +4894,9 @@
       tx.textContent = `${Math.round(t * 100)}%`;
       right.appendChild(tx);
     }
-    const rx = rightW - 8 * k;
+    // The rotated title's glyphs extend right of its baseline by about the
+    // font's ascent (12 px at 1x), so the baseline sits 13 px in, not 8.
+    const rx = rightW - 13 * k;
     const rt = svg("text", { x: rx, y: top + H / 2, class: "axis-title", transform: `rotate(90 ${rx} ${top + H / 2})`, "text-anchor": "middle" });
     rt.textContent = fits("Running total, % of time") ? "Running total, % of time" : "Running total";
     right.appendChild(rt);

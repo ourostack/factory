@@ -138,7 +138,7 @@ test("sums_are_task_exposure_and_ratios_keep_uncertainty", () => {
   assert.equal(S.clockShareWords(m(1), m(100000)), "under 0.1% of production time")
   assert.equal(S.clockShareWords(p(3, null), m(1000)), "about 0.3% of production time (could be higher or lower)")
   assert.equal(S.clockShareWords(p(1, "lower"), m(100000)), "more than 0% of production time")
-  assert.equal(S.clockWords({ state: "partial", value: 0, reasons: ["log_truncated"], bound: null }, null).text, "about 0 seconds (could be higher or lower)")
+  assert.equal(S.clockWords({ state: "partial", value: 0, reasons: ["log_truncated"], bound: null }, null).text, "0 seconds (could be higher)")
 })
 
 test("compare offers production and request modes backed by the producer, labelled honestly", () => {

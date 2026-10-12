@@ -181,8 +181,9 @@ test("I2: a task page states the operator's own time: the Store's attention esti
   assert.doesNotMatch(o.text, /wait/i)
   // A partial estimate keeps its bound and reason; one with no direction names no bound.
   const p = W.operatorTime({ attention_ms: partial(769527, ["host_records_partly"], "lower"), human_turns: partial(3, ["host_records_partly"], "lower") }, [], { state: "partial", reasons: ["host_records_partly"] }, F.reasonText)
-  assert.equal(p.attention, "at least 13 minutes")
-  assert.match(p.text, /^The operator sent at least 3 prompts\. Desk's estimate of the operator's attention on this task, their reading and answering time, is at least 13 minutes \(partial: the host records only part of this, so the figure is a lower bound\);/)
+  // 12.8 minutes as a lower bound rounds down.
+  assert.equal(p.attention, "at least 12 minutes")
+  assert.match(p.text, /^The operator sent at least 3 prompts\. Desk's estimate of the operator's attention on this task, their reading and answering time, is at least 12 minutes \(partial: the host records only part of this, so the figure is a lower bound\);/)
   // No estimate: says so, with the reason, and never a zero.
   const u = W.operatorTime({ attention_ms: unavailable(["not_recorded"]), human_turns: unavailable(["not_recorded"]) }, [], null, F.reasonText)
   assert.equal(u.state, "none")
