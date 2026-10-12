@@ -247,9 +247,20 @@ export function assessShareEdges(figs) {
 export function shareModePairs() {
   const job = (h) => ((h || "").match(/#\/task\/([^?/&]+)/) || [])[1] || null
   const bars = {}, dots = {}
-  for (const a of document.querySelectorAll("#view-compare a.sb-col")) { const m = /: ([^:]*?) working of a lead time/.exec(a.getAttribute("aria-label") || ""); if (m) bars[job(a.getAttribute("href"))] = m[1] }
+  const tip = document.getElementById("tooltip"), tips = {}
+  for (const a of document.querySelectorAll("#view-compare a.sb-col")) {
+    const m = /: ([^:]*?) working of a lead time/.exec(a.getAttribute("aria-label") || "")
+    if (!m) continue
+    bars[job(a.getAttribute("href"))] = m[1]
+    // The tooltip's working row is the same quantity.
+    a.dispatchEvent(new FocusEvent("focus"))
+    const row = tip ? [...tip.querySelectorAll(".tt-row")].map((r) => r.innerText.replace(/\s+/g, " ").trim()).find((t) => /^Working\b/.test(t)) : null
+    const t = row ? /^Working:? (.*?) of the lead time/.exec(row) : null
+    if (t) tips[job(a.getAttribute("href"))] = t[1]
+    a.dispatchEvent(new FocusEvent("blur"))
+  }
   for (const a of document.querySelectorAll("#view-compare a.chart-link")) { const m = /flow efficiency (.*?)\. Follow this task/.exec(a.getAttribute("aria-label") || ""); if (m) dots[job(a.getAttribute("href"))] = m[1] }
-  return Object.keys(bars).filter((j) => j in dots).map((j) => ({ job: j, bar: bars[j], words: dots[j] }))
+  return Object.keys(bars).filter((j) => j in dots).map((j) => ({ job: j, bar: bars[j], words: dots[j], tip: j in tips ? tips[j] : null }))
 }
 // One quantity reads one way: a bar's "≤49%" is the words' "at most 49%".
 export function assessSharePairs(pairs) {
@@ -261,6 +272,7 @@ export function assessSharePairs(pairs) {
     const bar = (r.bar === "<1%" ? "under 1%" : r.bar.replace(/^([≥≤~])/, (m) => sign[m])).replace(/^about /, "")
     const words = r.words.replace(/ \((?:partial, )?direction not known\)$| \(partial\)$| so far$| \(could be (?:higher|lower)\)$/, "").replace(/^about /, "")
     if (bar !== words) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", the words "${r.words}"`)
+    if (typeof r.tip === "string" && r.tip !== r.bar) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", its tooltip "${r.tip}"`)
   }
   return out
 }
@@ -1372,9 +1384,10 @@ export async function main(argv = process.argv.slice(2)) {
       for (const r of await readCompareShare()) {
         const pairs = r.pairs || []
         if (!pairs.length) throw new Error(`no task in share mode at ${r.width} px has both a bar and flow-efficiency words`)
+        if (!pairs.some((p) => typeof p.tip === "string")) throw new Error(`no share-mode tooltip was read at ${r.width} px`)
         const off = assessSharePairs(pairs)
         if (off.length) throw new Error(`${off.length} of ${pairs.length} at ${r.width} px differ: ${off.slice(0, 4).join("; ")}`)
-        seen[`share_${r.width}`] = { tasks: pairs.length }
+        seen[`share_${r.width}`] = { tasks: pairs.length, tooltips: pairs.filter((p) => typeof p.tip === "string").length }
       }
       return seen
     })

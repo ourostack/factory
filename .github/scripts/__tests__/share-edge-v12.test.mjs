@@ -140,7 +140,7 @@ test("a bounded share is rounded the way its bound reads wherever a qualifier go
       const fe = W.feWords({ flow_efficiency: { state: "partial", value: v, bound: b, reasons: ["x"] } })
       assert.equal(fe, W.shareWords(v, b))
       assert.equal(S.shareQualify(v, b), fe)
-      const edge = (b === "lower" && v === 1) || (b === "upper" && v === 0)
+      const edge = (b === "lower" && (v === 1 || v === 0)) || (b === "upper" && v === 0)
       if (!edge) honest(v, b, fe.replace(/^(at least|at most) /, ""), "feWords")
       checked++
     }
@@ -154,6 +154,23 @@ test("a bounded share is rounded the way its bound reads wherever a qualifier go
   assert.equal(fe(0, "unknown"), "0% (could be higher)")
   assert.equal(S.shareQualify(1, "unknown"), "100% (could be lower)")
   assert.equal(S.cumWords(0.996), "99.6%")
+  assert.equal(W.shareWords(0, "lower"), "0% (could be higher)")
+})
+
+test("a share-mode tooltip carries its group's bound: working the task's, waiting the other way; the lede never reads about under", () => {
+  const H = 3600000
+  const bar = { job: "j", state: "ok", total_ms: 100 * H, groups: [{ key: "working", label: "Working", ms: 1.049 * H, segments: [] }, { key: "waiting", label: "Waiting", ms: 98.951 * H, segments: [] }], segments: [] }
+  const row = { job: "j", flow_efficiency: { state: "partial", value: 0.01049, bound: "upper", reasons: ["x"] } }
+  const [b] = S.shareBars([bar], [row])
+  assert.equal(b.label, "≤2% working")
+  const [work, wait] = b.groups
+  assert.deepEqual([work.share_bound, wait.share_bound], ["upper", "lower"])
+  assert.equal(S.shortPct(work.share_of_lead, work.share_bound), "≤2%")
+  assert.equal(S.shortPct(wait.share_of_lead, wait.share_bound), "≥98%")
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  assert.match(app, /S\.shortPct\(g\.share_of_lead, g\.share_bound\)/)
+  const steps = readFileSync(new URL("../../../site/src/steps.js", import.meta.url), "utf8")
+  assert.doesNotMatch(steps, /`about \$\{W\.pctWords\(share\)\} \(direction not known\)`/)
 })
 
 test("the gate holds each share-mode bar label to its flow-efficiency words, with a control", async () => {
@@ -161,6 +178,7 @@ test("the gate holds each share-mode bar label to its flow-efficiency words, wit
   const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
   assert.deepEqual(G.assessSharePairs([{ job: "690331dd", bar: "≤49%", words: "at most 48%" }]), ['690331dd: the bar reads "≤49%", the words "at most 48%"'])
   assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "≤49%", words: "at most 49%" }, { job: "b", bar: "100%", words: "100% (could be lower)" }, { job: "c", bar: "<1%", words: "under 1%" }, { job: "d", bar: "~42%", words: "42% (partial, direction not known)" }]), [])
+  assert.deepEqual(G.assessSharePairs([{ job: "c87c243f", bar: "≤2%", words: "at most 2%", tip: "1%" }]), ['c87c243f: the bar reads "≤2%", its tooltip "1%"'])
   assert.ok(G.NEGATIVE_CONTROLS.includes("share_label_differs_from_words"))
   const gate = readFileSync(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
   assert.match(gate, /check\("share_mode_label_matches_flow_efficiency"/)

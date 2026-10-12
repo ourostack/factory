@@ -161,6 +161,9 @@
   // most 0%, "100% (could be lower)" for a share of exactly 1 with no known
   // direction. `bound` is lower, upper, unknown or none.
   function shareWords(share, bound) {
+    // "at least 0%" says nothing; a zero lower bound reads as the edge it
+    // is, one way off, and fits every sentence a share sits in.
+    if (bound === "lower" && share <= 0) return "0% (could be higher)";
     const q = { lower: "at least ", upper: "at most ", unknown: "about " }[bound] || "";
     const [q2, tail] = atEdge(q, share, 0, 1);
     if (tail || (q && !q2)) return `${share <= 0 ? "0%" : "100%"}${tail}`;

@@ -452,9 +452,11 @@
       if (b.state === "unsplit" || !(b.total_ms > 0)) return { ...b, share: true, state: b.state === "ok" ? "unsplit" : b.state, total_ms: 1, label: "split not known", segments: [{ key: "unsplit", label: "Split not known", ms: 1 }], groups: [] };
       const t = b.total_ms;
       const part = (x) => ({ ...x, ms: x.ms / t });
-      const groups = arr(b.groups).map((g) => ({ ...g, share_of_lead: g.ms / t, segments: arr(g.segments).map(part) }));
-      const work = groups.find((g) => g.key === "working");
       const bound = feBound(tasks.get(b.job));
+      // Waiting is lead minus working, so its share's bound is the other way.
+      const flip = { lower: "upper", upper: "lower", unknown: "unknown" };
+      const groups = arr(b.groups).map((g) => ({ ...g, share_of_lead: g.ms / t, share_bound: g.key === "working" ? bound : g.key === "waiting" ? flip[bound] : undefined, segments: arr(g.segments).map(part) }));
+      const work = groups.find((g) => g.key === "working");
       return { ...b, share: true, total_ms: 1, lead_ms: t, segments: arr(b.segments).map(part), groups, label: work ? `${shortPct(work.share_of_lead, bound)} working` : "split not known" };
     });
   }
@@ -638,7 +640,7 @@
     const waitDir = !workDir && !leadDir ? null : !workDir ? leadDir : !leadDir ? flip[workDir] || "unknown" : leadDir === "upper" && workDir === "lower" ? "upper" : leadDir === "lower" && workDir === "upper" ? "lower" : "unknown";
     const top = Object.entries(waitBy).sort((a, b) => b[1] - a[1])[0];
     const parts = [];
-    const shareWords = bound === "unknown" && share > 0 && share !== 1 ? `about ${W.pctWords(share)} (direction not known)` : W.shareWords(share, bound);
+    const shareWords = bound === "unknown" && share > 0 && share !== 1 ? `about ${W.shareFigure(share, 0, "none").text} (direction not known)` : W.shareWords(share, bound);
     parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${shareWords} of the elapsed time (${Q[workDir] || ""}${hoursWords(work, QB[workDir]).replace(/ hours?$/, "")} of ${Q[leadDir] || ""}${hoursWords(lead, QB[leadDir])}).`);
     if (waiting > 0 && top) {
       const most = top[1] >= 0.5 * waiting;

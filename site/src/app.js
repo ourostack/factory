@@ -3950,7 +3950,7 @@
       else {
         tipRows.push({ label: mode === "working" ? "Agent working time" : mode === "production" ? "Production time" : mode === "request" ? "Request to delivery" : "Lead time", value: b.words });
         if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: sg.words || W.durationWords(sg.ms) });
-        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g) });
+        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead, g.share_bound)} of the lead time` : groupWords(g) });
         if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
       }
       if (b.finish && b.finish.kind !== "open") tipRows.push({ label: "Finished (UTC)", value: b.finish.words });
