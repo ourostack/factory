@@ -52,12 +52,29 @@ test("a settle that followed an action on the page is never excused", () => {
   assert.deepEqual(G.assessSettle([acted], 5000, re(acted, 9000, 8000)), ["overview (#/task/x) at 1280 px: 6.6 s, after an action on the page, so not re-timed"])
   assert.deepEqual(G.assessSettle([at(4000, "#/task/x", { after: "interaction" })], 5000, new Map()), [])
   assert.deepEqual(G.settleExcused([acted], 5000, re(acted, 600, 590)), [])
-  // The gate marks each settle from its page: a goto since the last settle, or not.
-  assert.match(gate, /page\.goto = \(\.\.\.a\) => \{ NAVIGATED\.add\(page\); return goto\(\.\.\.a\) \}/)
-  assert.match(gate, /const after = NAVIGATED\.delete\(page\) \? "navigation" : "interaction"/)
-  assert.match(gate, /width: size\.width, height: size\.height, scale: kind\.scale, theme: kind\.theme, after \}/)
-  assert.match(gate, /t\.after !== "interaction" && !RETIMES\.has\(settleKey\(t\)\)/)
+  // The gate marks each settle from its page: a navigation only at the URL the last goto asked for.
+  assert.match(gate, /page\.goto = async \(to, \.\.\.a\) => \{ const nav = \{ asked: to, landed: null \}; NAVIGATED\.set\(page, nav\); const r = await goto\(to, \.\.\.a\); nav\.landed = page\.url\(\); return r \}/)
+  assert.match(gate, /const after = asked !== undefined && \(sameUrl\(asked\.asked, page\.url\(\)\) \|\| \(asked\.landed !== null && sameUrl\(asked\.landed, page\.url\(\)\)\)\) \? "navigation" : "interaction"/)
+  assert.match(gate, /width: size\.width, height: size\.height, scale: kind\.scale, theme: kind\.theme, after, altered: !!kind\.altered \}/)
+  assert.equal(G.sameUrl("http://127.0.0.1:1/#/", "http://127.0.0.1:1/#/"), true)
+  assert.equal(G.sameUrl("http://127.0.0.1:1/#/", "http://127.0.0.1:1/#/tasks"), false, "a goto and then a click is an action")
+  assert.equal(G.sameUrl("http://127.0.0.1:1#/tasks", "http://127.0.0.1:1/#/tasks"), true)
+  const control = gate.slice(gate.indexOf('expectFailure("slow_after_action"'), gate.indexOf('expectFailure("loading_marker_never_clears"'))
+  assert.match(control, /a settle after a goto and a click was recorded as/)
+  assert.match(gate, /t\.after !== "interaction" && !t\.altered && !RETIMES\.has\(settleKey\(t\)\)/)
   assert.ok(G.NEGATIVE_CONTROLS.includes("slow_after_action"))
+})
+
+test("a settle on a page the check altered is never excused", () => {
+  // Storage denied, a refused clipboard or planted data is not replayed by a re-timing.
+  const altered = at(9000, "#/tasks", { altered: true })
+  assert.deepEqual(G.assessSettle([altered], 5000, re(altered, 600, 590)), ["overview (#/tasks) at 1280 px: 9.0 s, on a page the check altered, so not re-timed"])
+  assert.equal(G.assessSettle([altered], 5000, re(altered, 9000, 8000)).length, 1)
+  assert.deepEqual(G.settleExcused([altered], 5000, re(altered, 600, 590)), [])
+  assert.deepEqual(G.assessSettle([at(4000, "#/tasks", { altered: true })], 5000, new Map()), [])
+  assert.match(gate, /const kind = \{ scale, theme, altered: init\.length > 0 \}/)
+  assert.match(gate, /page\.route = \(\.\.\.a\) => \{ kind\.altered = true; return route\(\.\.\.a\) \}/)
+  assert.match(gate, /t\.after !== "interaction" && !t\.altered && !RETIMES/)
 })
 
 test("settleBudget lists every excused route with why and the load average, and each is warned about on stderr", () => {

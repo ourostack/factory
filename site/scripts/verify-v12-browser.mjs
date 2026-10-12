@@ -673,15 +673,19 @@ export const settleKey = (t) => [t.where, t.width, t.height, t.scale, t.theme].j
 const RETIMES = new Map()
 // A page whose settle times go to its own list instead (a control's page).
 const SINKS = new WeakMap()
-// Each page's text scale and theme, and whether a navigation is waiting for
-// its settle (set by goto, cleared by the settle that follows it).
+// Each page's text scale and theme, and whether the check altered it (an
+// init script, or a route override that plants or holds back data).
 const PAGE_KIND = new WeakMap()
-const NAVIGATED = new WeakSet()
+// The URL each page's last goto asked for and where it landed, until a
+// settle reads it. A settle is a navigation only when the page is still there.
+const NAVIGATED = new WeakMap()
 const secs = (ms) => `${(ms / 1000).toFixed(1)} s`
 const kindWords = (t) => (t.width ? ` at ${t.width} px${t.scale && t.scale !== 1 ? `, text ${t.scale}x` : ""}${t.theme && t.theme !== "light" ? `, ${t.theme}` : ""}` : "")
 const settleName = (t) => `${t.view}${t.where ? ` (${t.where})` : ""}${kindWords(t)}`
+// Why a settle cannot be re-timed from its URL in a fresh page, or null.
+const unrepeatable = (t) => (t.after === "interaction" ? "after an action on the page" : t.altered ? "on a page the check altered" : null)
 const excusedBy = (t, budget, retimes) => {
-  if (t.after === "interaction") return null
+  if (unrepeatable(t)) return null
   const r = retimes.get(settleKey(t))
   if (!r) return null
   if (r.ms <= budget) return "within budget when re-timed"
@@ -690,7 +694,7 @@ const excusedBy = (t, budget, retimes) => {
 export function assessSettle(times, budget = SETTLE_BUDGET_MS, retimes = new Map()) {
   return (times || [])
     .filter((t) => t.ms > budget && !excusedBy(t, budget, retimes))
-    .map((t) => { const r = retimes.get(settleKey(t)); return `${settleName(t)}: ${secs(t.ms)}, ${t.after === "interaction" ? "after an action on the page, so not re-timed" : r ? `re-timed ${secs(r.ms)} (main ${secs(r.main_ms)})` : "not re-timed"}` })
+    .map((t) => { const r = retimes.get(settleKey(t)); return `${settleName(t)}: ${secs(t.ms)}, ${unrepeatable(t) ? `${unrepeatable(t)}, so not re-timed` : r ? `re-timed ${secs(r.ms)} (main ${secs(r.main_ms)})` : "not re-timed"}` })
 }
 // Every route that went over budget and was excused, with why.
 export function settleExcused(times, budget = SETTLE_BUDGET_MS, retimes = RETIMES) {
@@ -705,7 +709,11 @@ export function settleBudget(times, budget = SETTLE_BUDGET_MS, retimes = RETIMES
   const over = assessSettle(times, budget, retimes)
   if (over.length) throw new Error(`${over.length} of ${times.length} over ${budget / 1000} s: ${over.slice(0, 5).join("; ")}`)
   const sorted = [...times].sort((a, b) => a.ms - b.ms)
-  return { settled: times.length, after_an_action: times.filter((t) => t.after === "interaction").length, budget_ms: budget, ratio: SETTLE_RATIO, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse(), over_budget_excused: settleExcused(times, budget, retimes), load: loadavg() }
+  return { settled: times.length, after_an_action: times.filter((t) => t.after === "interaction").length, on_an_altered_page: times.filter((t) => t.altered).length, budget_ms: budget, ratio: SETTLE_RATIO, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse(), over_budget_excused: settleExcused(times, budget, retimes), load: loadavg() }
+}
+// Two URLs for the same page: the same once parsed.
+export function sameUrl(a, b) {
+  try { return new URL(a).href === new URL(b).href } catch { return a === b }
 }
 // A view is ready when it is shown, no request is in flight, nothing in it
 // is marked as loading (aria-busy, or the site's shared is-loading class,
@@ -736,9 +744,13 @@ async function settle(page, view, timeout = 20000, networkTimeout = 60000) {
         const ms = Date.now() - t0
         const size = page.viewportSize() || {}
         const kind = PAGE_KIND.get(page) || {}
-        // A settle with no goto since the last one followed an action on the page.
-        const after = NAVIGATED.delete(page) ? "navigation" : "interaction"
-        ;(SINKS.get(page) || SETTLE_TIMES).push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, ""), width: size.width, height: size.height, scale: kind.scale, theme: kind.theme, after })
+        // A navigation is a settle at the URL the last goto asked for, with no
+        // settle since. Anything else followed an action on the page: no
+        // goto, or a goto and then a click that moved the page on.
+        const asked = NAVIGATED.get(page)
+        NAVIGATED.delete(page)
+        const after = asked !== undefined && (sameUrl(asked.asked, page.url()) || (asked.landed !== null && sameUrl(asked.landed, page.url()))) ? "navigation" : "interaction"
+        ;(SINKS.get(page) || SETTLE_TIMES).push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, ""), width: size.width, height: size.height, scale: kind.scale, theme: kind.theme, after, altered: !!kind.altered })
         return ms
       }
       last = now
@@ -788,10 +800,17 @@ export async function main(argv = process.argv.slice(2)) {
       for (const s of init) await context.addInitScript(s.fn, s.arg)
       const page = await context.newPage()
       trackRequests(page)
-      PAGE_KIND.set(page, { scale, theme })
-      // The settle after a goto is a navigation; any other follows an action.
+      const kind = { scale, theme, altered: init.length > 0 }
+      PAGE_KIND.set(page, kind)
+      // The settle after a goto, at the URL it asked for, is a navigation.
       const goto = page.goto.bind(page)
-      page.goto = (...a) => { NAVIGATED.add(page); return goto(...a) }
+      // `landed` is where the page stood when the goto resolved: the site's
+      // own redirect of a legacy route is part of the navigation.
+      page.goto = async (to, ...a) => { const nav = { asked: to, landed: null }; NAVIGATED.set(page, nav); const r = await goto(to, ...a); nav.landed = page.url(); return r }
+      // A route override changes what the page loads, so its settles cannot
+      // be re-timed in a fresh page.
+      const route = page.route.bind(page)
+      page.route = (...a) => { kind.altered = true; return route(...a) }
       page.setDefaultTimeout(15000)
       const errors = []
       page.on("pageerror", (e) => errors.push(String(e)))
@@ -1590,7 +1609,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     // The re-timing of each navigation over budget that has none yet.
     const retimeOver = async (times) => {
-      for (const t of times) if (t.ms > SETTLE_BUDGET_MS && t.after !== "interaction" && !RETIMES.has(settleKey(t))) RETIMES.set(settleKey(t), await retime(t))
+      for (const t of times) if (t.ms > SETTLE_BUDGET_MS && t.after !== "interaction" && !t.altered && !RETIMES.has(settleKey(t))) RETIMES.set(settleKey(t), await retime(t))
     }
     const expectFailure = async (name, fn, mustMatch) => {
       let failed = false, why = ""
@@ -1793,7 +1812,10 @@ export async function main(argv = process.argv.slice(2)) {
           if (!sink.length) throw new Error("the slow page was not timed")
           // Re-timed like any route over budget, with the file still late.
           await retimeOver(SETTLE_TIMES)
-          settleBudget([...SETTLE_TIMES, ...sink], SETTLE_BUDGET_MS, new Map([...RETIMES, [settleKey(sink[0]), await retime(sink[0], 10000)]]))
+          // The re-timing holds the same file back, so the page's one
+          // alteration is replayed and the route is judged on its times.
+          const slowed = { ...sink[0], altered: false }
+          settleBudget([...SETTLE_TIMES, slowed], SETTLE_BUDGET_MS, new Map([...RETIMES, [settleKey(slowed), await retime(slowed, 10000)]]))
         }, /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\) at 1280 px: 1\d\.\d s, re-timed 1\d\.\d s \(main \d+\.\d s\)/)
         await expectFailure("slowdown_3x_over_budget", async () => {
           // Main is held back 2.5 s; this build three times main's time.
@@ -1822,6 +1844,18 @@ export async function main(argv = process.argv.slice(2)) {
           if (!t || t.after !== "interaction") throw new Error(`the settle after the action was recorded as ${t ? t.after : "nothing"}`)
           if (sink[0].after !== "navigation") throw new Error(`the settle after the goto was recorded as ${sink[0].after}`)
           if (t.ms <= SETTLE_BUDGET_MS) throw new Error(`the action was not slow: ${secs(t.ms)}`)
+          // A goto, then a click that moves the page on, then one settle: the
+          // page is no longer where the goto asked, so that is an action too.
+          const clicked = await newPage({ width: 1280 })
+          const sink2 = []
+          SINKS.set(clicked.page, sink2)
+          try {
+            await clicked.page.goto(url + "#/")
+            await clicked.page.waitForSelector('a[href="#/tasks"]')
+            await clicked.page.evaluate(() => { location.hash = "#/tasks" })
+            await settle(clicked.page, "tasks")
+          } finally { await clicked.context.close() }
+          if (!sink2.length || sink2[0].after !== "interaction") throw new Error(`a settle after a goto and a click was recorded as ${sink2.length ? sink2[0].after : "nothing"}`)
           settleBudget([t], SETTLE_BUDGET_MS, new Map([[settleKey(t), { ms: 600, main_ms: 590 }]]))
         }, /^1 of 1 over 5 s: task \(#\/task\/[^)]*\) at 1280 px: \d+\.\d s, after an action on the page, so not re-timed/)
         await expectFailure("loading_marker_never_clears", async () => {

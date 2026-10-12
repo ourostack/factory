@@ -210,5 +210,5 @@ test("the session loading note carries the shared marker, and the gate's control
   assert.match(gate, /check\("pages_settle_within_budget", async \(\) => settleBudget\(SETTLE_TIMES\)\)/)
   const control = gate.slice(gate.indexOf('expectFailure("slow_data_file"'), gate.indexOf('expectFailure("bound_before_under_on_compare"'))
   assert.doesNotMatch(control, /UNTIMED/)
-  assert.match(control, /settleBudget\(\[\.\.\.SETTLE_TIMES, \.\.\.sink\], SETTLE_BUDGET_MS, new Map\(\[\.\.\.RETIMES, \[settleKey\(sink\[0\]\), await retime\(sink\[0\], 10000\)\]\]\)\)/)
+  assert.match(control, /settleBudget\(\[\.\.\.SETTLE_TIMES, slowed\], SETTLE_BUDGET_MS, new Map\(\[\.\.\.RETIMES, \[settleKey\(slowed\), await retime\(slowed, 10000\)\]\]\)\)/)
 })
