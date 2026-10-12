@@ -5,10 +5,12 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { createRequire } from "node:module"
+import { readFileSync } from "node:fs"
 
 const require = createRequire(import.meta.url)
 const F = require("../../../site/src/format.js")
 const S = require("../../../site/src/steps.js")
+const W = require("../../../site/src/walk.js")
 
 const BOUNDS = ["measured", "lower", "upper", null, "unknown"]
 const stated = (value, b) => (b === "measured" ? { state: "measured", value, reasons: [] } : { state: "partial", value, bound: b, reasons: ["log_truncated"] })
@@ -54,6 +56,8 @@ test("only exactly 0 and 1 read as 0% and 100%, in describe and clockShareWords,
       if (!(b === "lower" && v === 0)) honest(v, b, d, "describe")
       const c = shareWords(w, b)
       honest(v, b, c, "clockShareWords")
+      // A figure with no known direction never claims a side.
+      if (b === null || b === "unknown") for (const t of [d, c]) assert.doesNotMatch(t, /^(?:about )?(?:more than|under|over) /, `${b} ${v}: ${t}`)
       checked += 2
     }
   }
@@ -66,11 +70,60 @@ test("the ruling's examples", () => {
   assert.equal(F.describe(stated(0.004, "unknown"), "pct").text, "0.4%")
   assert.equal(F.describe(stated(0.996, "lower"), "pct").text, "at least 99.6%")
   assert.equal(F.describe(stated(0.9996, "upper"), "pct").text, "under 100%")
-  assert.equal(F.describe(stated(0.9996, null), "pct1").text, "over 99.9%")
+  assert.equal(F.describe(stated(0.9996, null), "pct1").text, "99.96%")
+  assert.equal(F.describe(stated(0.9996, "measured"), "pct").text, "over 99.9%")
+  assert.equal(shareWords(999600, null), "about 99.96% of production time (could be higher or lower)")
   assert.equal(F.describe(stated(1, null), "pct").text, "100% (could be lower)")
   assert.equal(F.describe(stated(0, null), "pct").text, "0% (could be higher)")
   assert.equal(shareWords(996000, "measured"), "99.6% of production time")
   assert.equal(shareWords(996000, null), "about 99.6% of production time (could be higher or lower)")
   assert.equal(shareWords(4000, "upper"), "at most 0.4% of production time")
   assert.equal(shareWords(PROD, "lower"), "100% of production time")
+})
+
+test("pctWords and shortPct follow the rule, swept near both edges; a short bound never sits before <", () => {
+  const SIGN = { lower: "≥", upper: "≤", unknown: "~" }
+  let checked = 0
+  for (const w of nearEdges()) {
+    const v = w / PROD
+    const p = v * 100
+    const words = W.pctWords(v)
+    if (v > 0 && p < 1) assert.equal(words, "under 1%")
+    else {
+      const n = Number(words.replace(/%$/, ""))
+      assert.ok(Number.isFinite(n), words)
+      if (v !== 0 && v !== 1) assert.ok(n !== 0 && n !== 100, `pctWords ${v}: ${words}`)
+      assert.ok(Math.abs(n - p) <= 0.5 + 1e-9, `pctWords ${v}: ${words}`)
+    }
+    for (const b of [undefined, "lower", "upper", "unknown"]) {
+      const t = S.shortPct(v, b)
+      assert.doesNotMatch(t, /[≥≤~]\s*</, `${b} ${v}: ${t}`)
+      const sign = SIGN[b] || ""
+      const body = t.startsWith(sign) ? t.slice(sign.length) : t
+      if (body === "<1%") { assert.ok(!b && v > 0 && p < 1, `${b} ${v}: ${t}`); continue }
+      const strict = /^(more than|under|over) /.exec(body)
+      honest(v, b === "unknown" ? null : b || null, strict ? body : body, `shortPct ${b}`)
+      if (strict) assert.ok(b === "lower" || b === "upper", `only a bound may claim a side: ${b} ${v}: ${t}`)
+      checked++
+    }
+  }
+  assert.ok(checked > 10000)
+  assert.equal(W.pctWords(0.99992), "99.99%")
+  assert.equal(W.pctWords(0.996), "99.6%")
+  assert.equal(W.pctWords(1), "100%")
+  assert.equal(S.shortPct(0.004, "lower"), "≥0.4%")
+  assert.equal(S.shortPct(0.0004, "lower"), "more than 0%")
+  assert.equal(S.shortPct(1, "lower"), "100%")
+})
+
+test("the gate scans task pages for a 0% or 100% that is not exact, with a control, and reads Compare's share mode for bounds before under", async () => {
+  const { fileURLToPath } = await import("node:url")
+  const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
+  assert.deepEqual(G.assessShareEdges({ groups: [{ dur: "4.2 days", pct: "100" }, { dur: "29 seconds", pct: "0" }], parts: [] }), ["a group of 4.2 days reads 100% beside one of 29 seconds", "a group of 29 seconds reads 0%"])
+  assert.deepEqual(G.assessShareEdges({ groups: [{ dur: "4.2 days", pct: "99.99" }, { dur: "29 seconds", pct: "0.01" }], parts: [{ dur: "none", pct: "0" }, { dur: "4 days", pct: "100" }] }), [])
+  assert.ok(G.NEGATIVE_CONTROLS.includes("share_edge_on_task_page"))
+  const gate = readFileSync(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
+  assert.match(gate, /check\("task_pages_share_edges_exact"/)
+  assert.match(gate, /#\/compare\?mode=share/)
+  assert.match(gate, /\[\.\.\.\(await readCompare\(\)\), \.\.\.\(await readCompareShare\(\)\)\]/)
 })

@@ -115,10 +115,18 @@
     return `${p.n}${p.unit}${p.s ? ` ${p.s}s` : ""}`;
   }
 
+  // A share in words. Only exactly 0 and 1 read as 0% and 100%: a share
+  // that would round onto 100% takes decimals until it leaves it ("99.6%",
+  // "99.99%"), as format.js shareFigure does for a figure with no direction.
   function pctWords(share) {
     const p = share * 100;
     if (p > 0 && p < 1) return "under 1%";
-    return `${Math.round(p)}%`;
+    if (Math.round(p) !== 100 || share === 1) return `${Math.round(p)}%`;
+    for (let d = 1; d <= 3; d++) {
+      const k = Number(p.toFixed(d));
+      if (k !== 100) return `${k.toFixed(d)}%`;
+    }
+    return share > 1 ? "100.001%" : "99.999%";
   }
 
   // -------------------------------------------------------------- words

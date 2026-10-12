@@ -271,9 +271,11 @@
   // A share in whole or tenth percent, rounded the way it reads: a lower
   // bound down, an upper bound up, anything else to nearest. Only exactly 0
   // and exactly 1 read as 0% and 100%: a share within a point of either
-  // keeps a decimal ("99.6%", "at most 0.1%"), and one that would still
-  // round onto the edge says which side it is on ("over 99.9%"), so the
-  // strict form carries its own direction.
+  // keeps a decimal ("99.6%", "at most 0.1%"). A bound that would still round
+  // onto the edge says which side it is on ("under 100%"), so the strict form
+  // carries its own direction. A figure with no known direction ("none")
+  // cannot claim a side, so it takes decimals instead ("99.96%"), as
+  // walk.js pctWords does; an exact (measured) figure may say its side.
   function shareFigure(v, digits, bound) {
     const at = (d) => {
       const k = v * 100 * 10 ** d;
@@ -285,8 +287,10 @@
     let k = at(d);
     const p = v * 100;
     if (d === 0 && v !== 0 && v !== 1 && ((p > 0 && p < 1) || (p > 99 && p < 101))) k = at((d = 1));
+    if (bound === "none") while (edge(k) && d < 3) k = at(++d);
     // A gained decimal that rounds whole reads whole ("1%", not "1.0%").
     if (!edge(k)) return { text: `${k.toFixed(d > digits && Number.isInteger(k) ? digits : d)}%`, strict: false };
+    if (bound === "none") return { text: `${(k === 0 ? 0.001 : v > 1 ? 100.001 : 99.999).toFixed(3)}%`, strict: false };
     const text = k === 0 ? (bound === "lower" ? "more than 0%" : "under 0.1%") : v > 1 ? "over 100%" : bound === "upper" ? "under 100%" : "over 99.9%";
     return { text, strict: true };
   }
@@ -442,7 +446,7 @@
     const dir = typeof v === "number" && (number.bound === "lower" || number.bound === "upper") ? number.bound : null;
     // A duration with no direction is still bounded for its form: under a
     // second it keeps its milliseconds, as walk.js does.
-    let body = typeof v !== "number" ? KINDS[kind](v) : kind === "duration" ? durationText(v, dir || true) : kind === "hours" ? hoursText(v, dir || true) : dir ? directed(kind, v, dir) : KINDS[kind](v);
+    let body = typeof v !== "number" ? KINDS[kind](v) : kind === "duration" ? durationText(v, dir || true) : kind === "hours" ? hoursText(v, dir || true) : dir ? directed(kind, v, dir) : kind === "pct" || kind === "pct1" ? shareText(v, kind === "pct" ? 0 : 1, "none") : KINDS[kind](v);
     let direction = number.bound === "lower" ? "at least " : number.bound === "upper" ? "at most " : "";
     let edge = "";
     // A share past its decimal says its own side ("over 99.9%").

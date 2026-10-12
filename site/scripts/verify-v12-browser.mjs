@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "slow_data_file", "loading_marker_never_clears",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "slow_data_file", "loading_marker_never_clears",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -219,6 +219,27 @@ export function taskLeadFigures() {
 export function taskPageTexts() {
   const view = document.getElementById("view-task")
   return [view.innerText, ...[...view.querySelectorAll("[aria-label], [title]")].flatMap((e) => [e.getAttribute("aria-label"), e.getAttribute("title")]).filter(Boolean)]
+}
+// Runs in the page: each part of the task page's time bar as its duration and
+// its share of the lead time, by group and by part.
+export function taskShareFigures() {
+  const split = (t) => { const m = /^\s*(.*?) · (\d+(?:\.\d+)?)% of the lead time/.exec(t || ""); return m ? { dur: m[1].trim(), pct: m[2] } : null }
+  const groups = [...document.querySelectorAll("#view-task .tw-group-head")].map((h) => { const l = h.querySelector("strong"); return split(h.textContent.slice(l ? l.textContent.length : 0)) }).filter(Boolean)
+  const parts = [...document.querySelectorAll("#view-task .tw-row .tw-ms")].map((e) => split(e.textContent)).filter(Boolean)
+  return { groups, parts }
+}
+// Only exactly 0 and 1 read as 0% and 100%: a part reading 0% has no time,
+// and a part reading 100% is the only one with time.
+export function assessShareEdges(figs) {
+  const out = []
+  const zero = (d) => /^(?:none|(?:at least |at most |about )?0 seconds)$/.test(d)
+  for (const [name, list] of [["group", figs.groups || []], ["part", figs.parts || []]]) {
+    list.forEach((f, i) => {
+      if (Number(f.pct) === 0 && !zero(f.dur)) out.push(`a ${name} of ${f.dur} reads 0%`)
+      if (Number(f.pct) === 100) { const other = list.find((g, j) => j !== i && !zero(g.dur)); if (other) out.push(`a ${name} of ${f.dur} reads 100% beside one of ${other.dur}`) }
+    })
+  }
+  return out
 }
 // A bound sign or word followed by "<" or "under" says two things at once.
 export function boundsBeforeUnder(texts) {
@@ -1255,7 +1276,7 @@ export async function main(argv = process.argv.slice(2)) {
             await page.goto("about:blank")
             await page.goto(url + `#/task/${encodeURIComponent(job)}`)
             await settle(page, "task")
-            out.push({ width, job, ...(await page.evaluate(taskLeadFigures)), texts: await page.evaluate(taskPageTexts) })
+            out.push({ width, job, ...(await page.evaluate(taskLeadFigures)), texts: await page.evaluate(taskPageTexts), shares: await page.evaluate(taskShareFigures) })
           }
         } finally { await context.close() }
       }
@@ -1271,6 +1292,13 @@ export async function main(argv = process.argv.slice(2)) {
       const off = assessLeadAgreement(rows)
       if (off.length) throw new Error(`${off.length} of ${rows.length * 2} lead times differ: ${off.slice(0, 4).join("; ")}`)
       return { tasks: rows.length, sample: rows.slice(0, 5) }
+    })
+    await check("task_pages_share_edges_exact", async () => {
+      const pages = await readTaskPages()
+      if (!pages.length) throw new Error("no task page was read")
+      const bad = pages.flatMap((r) => assessShareEdges(r.shares).map((x) => `${r.job.slice(0, 8)} at ${r.width} px: ${x}`))
+      if (bad.length) throw new Error(`${bad.length} found: ${[...new Set(bad)].slice(0, 4).join("; ")}`)
+      return { pages: pages.length, figures: pages.reduce((a, r) => a + r.shares.groups.length + r.shares.parts.length, 0) }
     })
     await check("task_pages_no_bound_before_under", async () => {
       const pages = await readTaskPages()
@@ -1300,9 +1328,25 @@ export async function main(argv = process.argv.slice(2)) {
       if (!Object.values(seen).some((x) => x.bars > 0)) throw new Error("no bar with a value was read in any mode")
       return seen
     })
+    // Share mode is read only for its texts: its figures are shares, not the
+    // durations the other Compare checks compare.
+    let shareRead = null
+    const readCompareShare = async () => {
+      if (shareRead) return shareRead
+      const out = []
+      for (const width of [1280, 390]) {
+        const { context, page } = await newPage({ width })
+        try {
+          await page.goto(url + "#/compare?mode=share")
+          await settle(page, "compare")
+          out.push({ width, mode: "share", ...(await page.evaluate(compareFigures)) })
+        } finally { await context.close() }
+      }
+      return (shareRead = out)
+    }
     await check("compare_no_bound_before_under", async () => {
       const seen = {}
-      for (const r of await readCompare()) {
+      for (const r of [...(await readCompare()), ...(await readCompareShare())]) {
         const bad = boundsBeforeUnder(r.texts)
         if (bad.length) throw new Error(`${r.mode} at ${r.width} px: ${[...new Set(bad)].slice(0, 4).join(", ")}`)
         seen[`${r.mode}_${r.width}`] = { texts: r.texts.length }
@@ -1588,6 +1632,19 @@ export async function main(argv = process.argv.slice(2)) {
           const bad = boundsBeforeUnder(await page.evaluate(taskPageTexts))
           if (bad.length) throw new Error(`planted bound on a task page: ${bad[0]}`)
         }, /^planted bound on a task page: about under/)
+        await expectFailure("share_edge_on_task_page", async () => {
+          // A task whose bar has two parts with time: one planted to read 100%.
+          const two = (await readTaskPages()).find((r) => r.width === 1280 && r.shares.groups.filter((g) => !/^(?:none|(?:at least |at most |about )?0 seconds)$/.test(g.dur)).length >= 2)
+          if (!two) throw new Error("no task page has two groups with time")
+          await page.goto("about:blank")
+          await page.goto(url + `#/task/${encodeURIComponent(two.job)}`)
+          await settle(page, "task")
+          const before = assessShareEdges(await page.evaluate(taskShareFigures))
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          await page.evaluate(() => { const h = [...document.querySelectorAll("#view-task .tw-group-head")].find((x) => / · \d+(?:\.\d+)?% of the lead time/.test(x.textContent)); h.dataset.gatePlanted = "1"; for (const n of h.childNodes) if (n.nodeType === 3) n.textContent = n.textContent.replace(/\d+(?:\.\d+)?% of the lead time/, "100% of the lead time") })
+          const bad = assessShareEdges(await page.evaluate(taskShareFigures))
+          if (bad.length) throw new Error(`planted share edge: ${bad[0]}`)
+        }, /^planted share edge: a group of .* reads 100% beside/)
         await expectFailure("slow_data_file", async () => {
           // One data file answers 10 s late. The page is timed like any other,
           // into its own list, and pages_settle_within_budget's own body must

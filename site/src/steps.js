@@ -389,7 +389,7 @@
     const r = shareOf(work, production);
     if (!r || r.state === "unavailable" || val(r) === null) return null;
     const x = val(r);
-    const bound = r.state === "measured" ? null : r.bound === "lower" || r.bound === "upper" ? r.bound : null;
+    const bound = r.state === "measured" ? null : r.bound === "lower" || r.bound === "upper" ? r.bound : "none";
     // Only exactly 0 and 1 read as 0% and 100% (F.shareFigure): 99.6% keeps
     // its decimal, and a strict form ("under 0.1%") carries its own side.
     const fig = F.shareFigure(x, 0, bound);
@@ -401,7 +401,7 @@
     // At 0% or 100% a figure with no known direction can be off one way only.
     if (x <= 0) return "0% of production time (could be higher)";
     if (x === 1) return "100% of production time (could be lower)";
-    return `${fig.strict ? "" : "about "}${of} (could be higher or lower)`;
+    return `about ${of} (could be higher or lower)`;
   }
 
   // The parts of a working bar that carry no evaluator label.
@@ -455,15 +455,24 @@
       const groups = arr(b.groups).map((g) => ({ ...g, share_of_lead: g.ms / t, segments: arr(g.segments).map(part) }));
       const work = groups.find((g) => g.key === "working");
       const bound = feBound(tasks.get(b.job));
-      const q = { lower: "≥", upper: "≤", unknown: "~" }[bound] || "";
-      return { ...b, share: true, total_ms: 1, lead_ms: t, segments: arr(b.segments).map(part), groups, label: work ? `${q}${shortPct(work.share_of_lead)} working` : "split not known" };
+      return { ...b, share: true, total_ms: 1, lead_ms: t, segments: arr(b.segments).map(part), groups, label: work ? `${shortPct(work.share_of_lead, bound)} working` : "split not known" };
     });
   }
-  // A share in a few characters, for labels and phone tables: "14%", "<1%".
-  function shortPct(share) {
+  // A share in a few characters, for labels and phone tables: "14%", "<1%",
+  // "99.6%". With a bound it carries its sign, rounded the way it reads
+  // (F.shareFigure), and never a sign before "<" ("≥<1%"): a strict form
+  // says its own side.
+  function shortPct(share, bound) {
+    if (bound === "lower" || bound === "upper") {
+      const f = F.shareFigure(share, 0, bound);
+      // "at least 100%" and "at most 0%" are exact (W.atEdge).
+      const exact = (bound === "lower" && share === 1) || (bound === "upper" && share <= 0);
+      return f.strict || exact ? f.text : `${bound === "lower" ? "≥" : "≤"}${f.text}`;
+    }
+    if (bound === "unknown") return `~${F.shareFigure(share, 0, "none").text}`;
     const p = share * 100;
     if (p > 0 && p < 1) return "<1%";
-    return `${Math.round(p)}%`;
+    return W.pctWords(share);
   }
 
   // The finished task to label on the chart. In "all" mode it is the one
