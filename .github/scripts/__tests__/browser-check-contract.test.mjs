@@ -83,7 +83,7 @@ test("the gate must catch every planned negative control, and each control is ac
   const names = ["injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls", "unmarked_scroll_frame",
     "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link",
     "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-    "caveat_in_the_conclusion_place", "mixed_units_on_compare"]
+    "caveat_in_the_conclusion_place", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -165,8 +165,7 @@ test("the task conclusion starts within the first screen at every width and text
   assert.match(source, /for \(const scale of TEXT_SCALES\)[\s\S]{0,900}WIDTHS\.length/)
 })
 
-test("doubled text has its own height budget against a fixed reference: the same page at normal text", () => {
-  assert.deepEqual(G.TEXT2X_HEIGHT_BUDGET, { 1280: 2.6, 390: 3.25 })
+test("doubled text has a height budget against the baseline's doubled text", () => {
   assert.deepEqual(G.assessHeights({ compare_390: { site: 900, reference: 1000 } }, { 390: 1 }), [])
   assert.deepEqual(G.assessHeights({ compare_390: { site: 1600, reference: 1000 } }, { 390: 1.5 }), ["compare at 390 px: 1600 px vs reference 1000 px (budget 1.5x)"])
   const source = readFileSync(SCRIPT, "utf8")

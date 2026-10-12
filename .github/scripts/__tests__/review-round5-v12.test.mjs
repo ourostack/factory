@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url"
 const require = createRequire(import.meta.url)
 const F = require("../../../site/src/format.js")
 const S = require("../../../site/src/steps.js")
+const W = require("../../../site/src/walk.js")
 const P = require("../../../site/src/preferences.js")
 const read = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8")
 const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
@@ -28,19 +29,21 @@ test("a view's unit comes from its largest value: days above 48 hours, hours fro
   assert.equal(S.viewUnit(0), "hours")
 })
 
-test("every figure in a unit reads in that unit, however small", () => {
-  assert.equal(S.unitWords(2419 * H, "days"), "101 days")
-  assert.equal(S.unitWords(7 * D, "days"), "7 days")
-  assert.equal(S.unitWords(D, "days"), "1 day")
-  assert.equal(S.unitWords(3.6 * H, "days"), "0.15 days")
+test("a per-task figure has one form: days from 48 hours, then hours, minutes and seconds; a bound never meets 'under'", () => {
+  assert.equal(W.durationWords(48 * H), "2 days")
+  assert.equal(W.durationWords(47 * H), "47 hours")
+  assert.equal(W.durationShort(53.7 * H), "2.2d")
+  assert.equal(W.durationWords(400), "under a second")
+  assert.equal(W.durationShort(400), "<1s")
+  // A bounded value too small for seconds drops to milliseconds.
+  assert.equal(W.durationWords(400, true), "400 milliseconds")
+  assert.equal(W.durationShort(400, true), "400ms")
+  assert.equal(W.durationWords(0.2, true), "1 millisecond")
+  // The view unit drops to the per-task form rather than "under" behind a bound.
   assert.equal(S.unitWords(60000, "days"), "under 0.01 days")
-  assert.equal(S.unitWords(0, "days"), "none")
-  assert.equal(S.unitWords(30 * 60000, "hours"), "0.5 hours")
-  assert.equal(S.unitShort(2419 * H, "days"), "101d")
-  assert.equal(S.unitShort(3.6 * H, "days"), "0.15d")
-  assert.equal(S.unitShort(60000, "days"), "<0.01d")
-  // No unit keeps the old behavior for the views this change does not cover.
-  assert.equal(S.unitWords(5.5 * H), S.hoursWords(5.5 * H))
+  assert.equal(S.unitWords(60000, "days", true), "1 minute")
+  assert.equal(S.unitWords(2419 * H, "days"), "101 days")
+  assert.equal(S.unitShort, undefined, "bar labels never use the view unit")
 })
 
 test("the axis takes the view's unit and is labelled with it", () => {
@@ -48,39 +51,78 @@ test("the axis takes the view's unit and is labelled with it", () => {
   assert.equal(s.unit, "days")
   assert.equal(s.per, D)
   assert.ok(s.max_ms >= 230 * H && s.ticks.every((t) => (t / D) * 4 === Math.round((t / D) * 4)), "ticks fall on round days")
-  // Without a unit the other charts keep hours and minutes.
   assert.equal(S.timeScale(200 * H).unit, "hours")
-  const app = read("site/src/app.js")
-  assert.match(app, /UNIT_TITLE\[scale\.unit\]/)
-  assert.match(read("site/src/steps.js"), /days: \[DAY, "day", "d"\]/)
+  assert.match(read("site/src/app.js"), /UNIT_TITLE\[scale\.unit\]/)
 })
 
-test("Compare's bar labels, lead sentence, sums and tables use one unit", () => {
+test("Compare: the axis, sum and lead sentence share the view unit; each task's figure has one form in its label, table, tooltip and accessible label", () => {
   const job = (id, clocks) => ({ id, status: "done", finish_date: { state: "unavailable", reasons: ["not_recorded"] }, clocks })
-  const clocks = (prod, active, rest) => ({ production_ms: m(prod), active_in_production_ms: p(active, "lower"), production_remainder_ms: p(rest, "upper"), request_to_delivery_ms: { state: "unavailable", reasons: ["original_request_not_recorded"] }, queue_ms: { state: "unavailable", reasons: ["original_request_not_recorded"] } })
-  const jobs = [job("a".repeat(16), clocks(7 * D, 3.6 * H, 7 * D - 3.6 * H)), job("b".repeat(16), clocks(5 * H, 2 * H, 3 * H))]
+  const na = { state: "unavailable", reasons: ["original_request_not_recorded"] }
+  const clocks = (prod, active, rest) => ({ production_ms: prod, active_in_production_ms: active, production_remainder_ms: rest, request_to_delivery_ms: na, queue_ms: na })
+  const jobs = [
+    job("a".repeat(16), clocks(m(7 * D), p(3.6 * H, "lower"), p(7 * D - 3.6 * H, "upper"))),
+    job("b".repeat(16), clocks(m(5 * H), m(2 * H), m(3 * H))),
+    job("c".repeat(16), clocks(p(3 * 60000, "lower"), p(400, "lower"), p(3 * 60000 - 400, null))),
+  ]
   const bars = S.clockBars(jobs, "production", { unit: "days" })
-  assert.deepEqual(bars.map((b) => b.unit), ["days", "days"])
-  assert.deepEqual(bars.map((b) => b.words), ["7 days", "0.21 days"])
-  assert.deepEqual(bars.map((b) => b.label), ["7d", "0.21d"])
-  assert.match(S.exposureWords(bars), /: 7.2 days of task exposure/)
-  const figures = S.clockFigures(jobs[0].clocks, F.reasonText, "days")
-  assert.equal(figures.find((f) => f.key === "active_in_production_ms").text, "at least 0.15 days")
-  assert.equal(S.groupWords({ ms: 3.6 * H, qualifier: "at least " }, "days"), "at least 0.15 days")
-  assert.equal(S.compactRow({ job: "x", name: "x", state: "ok", label: "7d", unit: "days", groups: [{ key: "waiting", ms: 5 * H, qualifier: "" }] }).waiting, "0.21d")
+  assert.deepEqual(bars.map((b) => b.words), ["7 days", "5 hours", "at least 3 minutes"])
+  assert.deepEqual(bars.map((b) => b.label), ["7d", "5h", "≥3m"])
+  assert.deepEqual(bars.map((b) => b.view_words), ["7 days", "0.21 days", "at least 3 minutes"])
+  // The table cell is the same clock in the same form.
+  for (const [i, b] of bars.entries()) assert.equal(S.clockFigures(jobs[i].clocks, F.reasonText).find((f) => f.key === "production_ms").text, b.words)
+  // Tooltip rows for the parts carry their bound in the same form as the table.
+  const seg = bars[2].segments.find((x) => x.key === "prod_active")
+  assert.equal(seg.words, "at least 400 milliseconds")
+  assert.equal(seg.words, S.clockFigures(jobs[2].clocks, F.reasonText).find((f) => f.key === "active_in_production_ms").text)
+  // The sum is in the view unit.
+  assert.match(S.exposureWords(bars), /: at least 7.2 days of task exposure/)
+  assert.equal(S.groupWords({ ms: 3.6 * H, qualifier: "at least " }), "at least 3.6 hours")
+  assert.equal(S.groupWords({ ms: 300, qualifier: "at least " }), "at least 300 milliseconds")
+  assert.equal(S.compactRow({ job: "x", name: "x", state: "ok", label: "2.2d", groups: [{ key: "waiting", ms: 300, qualifier: "at least " }] }).waiting, "≥300ms")
   const app = read("site/src/app.js")
-  // One unit for the whole view, from the largest figure it shows.
   assert.match(app, /const unit = S\.viewUnit\(/)
-  assert.match(app, /S\.clockFigures\(clocks, F\.reasonText, unit\)/)
-  assert.match(app, /writeConclusion\(allU\)/)
+  assert.match(app, /candidate\.view_words/)
+  assert.match(app, /value: sg\.words \|\| W\.durationWords\(sg\.ms\)/)
+  for (const t of [...bars.map((b) => b.words), ...bars.map((b) => b.label), seg.words]) assert.deepEqual(G.boundsBeforeUnder([t]), [], t)
 })
 
-test("the gate finds every unit a text uses, so a mixed view fails", () => {
-  assert.deepEqual(G.durationUnitsIn(["Start by inspecting x: 101 days so far.", "≥7d", "0.15d", "about 0.15 days (could be higher or lower)"]), ["days"])
-  assert.deepEqual(G.durationUnitsIn(["7 days", "3.6 hours", "48m", "under a second"]), ["days", "hours", "minutes", "seconds"])
-  assert.deepEqual(G.durationUnitsIn(["at least 4% of production time", "Not available", "none", "2026-10-03"]), [])
-  assert.ok(G.REQUIRED_CHECKS.includes("compare_uses_one_duration_unit"))
-  assert.ok(G.NEGATIVE_CONTROLS.includes("mixed_units_on_compare"))
+test("the gate reads a duration's form from a label or a sentence, and compares each task's figures", () => {
+  assert.deepEqual(G.durationForm("≥2.2d"), { bound: "lower", value: "2.2", unit: "days" })
+  assert.deepEqual(G.durationForm("at least 2.2 days so far"), { bound: "lower", value: "2.2", unit: "days" })
+  assert.deepEqual(G.durationForm("~3.6h"), G.durationForm("about 3.6 hours (could be higher or lower)"))
+  assert.deepEqual(G.durationForm("<1s"), { bound: "under", value: "1", unit: "seconds" })
+  assert.deepEqual(G.durationForm("under a second"), { bound: "under", value: "1", unit: "seconds" })
+  assert.deepEqual(G.durationForm("≤400ms"), { bound: "upper", value: "400", unit: "milliseconds" })
+  assert.deepEqual(G.durationForm("1,234 hours"), { bound: null, value: "1234", unit: "hours" })
+  assert.equal(G.durationForm("none"), null)
+  const row = { job: "a", label: "≥2.2d", aria: "Fix 3 bugs: at least 2.2 days", tip: "at least 2.2 days", cell: "at least 2.2 days" }
+  assert.deepEqual(G.assessTaskForms([row]), [])
+  assert.match(G.assessTaskForms([{ ...row, cell: "at least 53 hours" }])[0], /a: the table cell reads "at least 53 hours"/)
+  assert.match(G.assessTaskForms([{ ...row, tip: "2.2 days" }])[0], /tooltip/)
+  assert.match(G.assessTaskForms([{ ...row, aria: "Fix: 2.3 days" }])[0], /accessible label/)
+})
+
+test("the gate holds the axis, sum and lead to one unit, and rejects any bound followed by '<' or 'under'", () => {
+  const ok = { axis: "Days of production", sum: "Summed over the 3 drawn tasks: at least 7.2 days of task exposure.", lead: "Start by inspecting x: 101 days so far, the largest" }
+  assert.equal(G.assessViewUnits(ok), null)
+  assert.match(G.assessViewUnits({ ...ok, axis: "Hours of production" }), /axis in hours.*days/)
+  assert.match(G.assessViewUnits({ ...ok, sum: "Summed: 170 hours of task exposure." }), /sum in hours/)
+  assert.equal(G.assessViewUnits({ ...ok, sum: null, axis: null }), null)
+  assert.deepEqual(G.boundsBeforeUnder(["at least under 0.01 days", "≥<0.01d", "≤ <1s", "about under a second", "under a second", "at least 3 minutes", "<1s"]), ["at least under", "≥<", "≤ <", "about under"])
+  for (const name of ["compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  for (const name of ["view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare"]) assert.ok(G.NEGATIVE_CONTROLS.includes(name), name)
+  assert.ok(!G.REQUIRED_CHECKS.includes("compare_uses_one_duration_unit"))
+  // The page function reads tooltips and accessible labels too.
+  const gate = read("site/scripts/verify-v12-browser.mjs")
+  assert.match(gate, /getAttribute\("aria-label"\)/)
+  assert.match(gate, /getElementById\("tooltip"\)/)
+})
+
+test("doubled text is budgeted against the baseline's doubled text; its ratio to normal text is reported, not judged", () => {
+  assert.equal(G.TEXT2X_HEIGHT_BUDGET, undefined)
+  const gate = read("site/scripts/verify-v12-browser.mjs")
+  assert.match(gate, /check\("page_height_within_budget_at_doubled_text"[\s\S]{0,1600}assessHeights\(heights, HEIGHT_BUDGET\)/)
+  assert.match(gate, /text2x_over_text1x/)
 })
 
 test("each conclusion is marked as one, and the gate reads that marker instead of a caveat phrase list", () => {

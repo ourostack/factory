@@ -31,11 +31,17 @@
   // ------------------------------------------------------------ durations
 
   // A duration in words, for sentences: "under a second", "40 seconds",
-  // "12 minutes", "4.3 hours", "54 hours" (hours up to three days), "4.5 days".
-  function durationWords(ms) {
+  // "12 minutes", "4.3 hours", "47 hours" (hours below two days), "4.5 days".
+  // `bounded` is set when an "at least", "at most" or "about" goes in front:
+  // a bound never meets "under", so time under a second reads in milliseconds.
+  function durationWords(ms, bounded) {
     const x = Math.max(0, Number(ms) || 0);
     // A true zero is "none"; only a positive time under a second is "under a second".
     if (x === 0) return "none";
+    if (x < SECOND && bounded) {
+      const n = Math.max(1, Math.round(x));
+      return `${n} millisecond${n === 1 ? "" : "s"}`;
+    }
     if (x < SECOND) return "under a second";
     if (x < MINUTE) {
       const s = Math.round(x / SECOND);
@@ -45,7 +51,7 @@
       const m = Math.round(x / MINUTE);
       return m === 60 ? "1 hour" : `${m} minute${m === 1 ? "" : "s"}`;
     }
-    if (x < 72 * HOUR) {
+    if (x < 48 * HOUR) {
       const h = x / HOUR;
       const t = h >= 10 ? String(Math.round(h)) : (Math.round(h * 10) / 10).toString();
       return `${t} hour${t === "1" ? "" : "s"}`;
@@ -55,14 +61,16 @@
   }
 
   // A duration in a few characters, for labels on marks: "<1s", "40s",
-  // "12m", "4.3h", "54h" (hours up to three days, as in durationWords), "4.5d".
-  function durationShort(ms) {
+  // "12m", "4.3h", "47h" (hours below two days, as in durationWords), "4.5d".
+  // `bounded` as in durationWords: "≥400ms", never "≥<1s".
+  function durationShort(ms, bounded) {
     const x = Math.max(0, Number(ms) || 0);
     if (x === 0) return "0s";
+    if (x < SECOND && bounded) return `${Math.max(1, Math.round(x))}ms`;
     if (x < SECOND) return "<1s";
     if (x < MINUTE) return `${Math.round(x / SECOND)}s`;
     if (x < HOUR) return `${Math.round(x / MINUTE)}m`;
-    if (x < 72 * HOUR) {
+    if (x < 48 * HOUR) {
       const h = x / HOUR;
       return `${h >= 10 ? Math.round(h) : (Math.round(h * 10) / 10).toString()}h`;
     }

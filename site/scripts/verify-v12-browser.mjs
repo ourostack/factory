@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "mixed_units_on_compare",
+  "caveat_in_the_conclusion_place", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -89,7 +89,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "private_decision_fixture_agrees_across_queue_overview_and_page",
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
-  "compare_uses_one_duration_unit",
+  "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under",
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -100,17 +100,9 @@ export const REQUIRED_CHECKS = Object.freeze([
 export const HEIGHT_BUDGET = Object.freeze({ 1280: 1.15, 390: 1.5 })
 export const HEIGHT_ROUTES = Object.freeze(["compare", "overview"])
 
-// Doubled text has its own budget against a fixed reference: the same page
-// of the same build at normal text, so neither the baseline nor the data
-// moves it. Text alone grows up to four times at doubled size on a phone
-// (twice the line height, half the words per line), which bounds these
-// multiples from above. The multiples themselves are fitted tripwires, not
-// values derived from the spec: each sits just above the tallest page
-// measured when it was set (Compare: 3.02x at 390 px; 2.52x at 1280 px
-// once Compare read in days, which shortened the normal-text reference from
-// 5,522 to 5,321 px while the doubled page stayed near 13,450 px), so an
-// unrelated change can trip them, and a trip means "look", not "wrong".
-export const TEXT2X_HEIGHT_BUDGET = Object.freeze({ 1280: 2.6, 390: 3.25 })
+// Doubled text has the same budget, against the baseline build's page at
+// doubled text, so shortening the normal-text page can never trip it. The
+// ratio to the same page at normal text is reported, not judged.
 
 // Heights over their budget, as reader sentences. `heights` maps
 // "<route>_<width>" to { site, reference }; `budget` maps width to a multiple.
@@ -150,34 +142,101 @@ export function measureConclusion(scope) {
   return c ? { found: true, role: c.dataset.role, top: Math.round(c.getBoundingClientRect().top + window.scrollY), text: c.textContent.trim() } : { found: false, role: null, top: 0, text: "" }
 }
 
-// The duration units a set of texts uses: "7 days", "≥7d", "3.6 hours",
-// "48m", "under a second". Compare shows one unit per view.
-const UNIT_ORDER = ["days", "hours", "minutes", "seconds"]
-const UNIT_OF = { d: "days", day: "days", h: "hours", hour: "hours", m: "minutes", minute: "minutes", s: "seconds", second: "seconds" }
-export function durationUnitsIn(texts) {
-  const found = new Set()
-  for (const t of texts || []) {
-    const text = String(t || "")
-    for (const x of text.matchAll(/\d[\d,]*(?:\.\d+)?\s+(day|hour|minute|second)s?\b/gi)) found.add(UNIT_OF[x[1].toLowerCase()])
-    for (const x of text.matchAll(/(?:^|[\s(≥≤~<])\d[\d,]*(?:\.\d+)?([dhms])(?![\w])/g)) found.add(UNIT_OF[x[1]])
-    if (/\bunder a second\b/i.test(text)) found.add("seconds")
+// A duration's form, from a bar label ("≥2.2d", "<1s", "400ms") or a
+// sentence ("at least 2.2 days so far", "under a second"): its bound, its
+// number as written and its unit; null when the text holds none. The first
+// duration in the text wins.
+const UNIT_NAME = { d: "days", day: "days", h: "hours", hour: "hours", m: "minutes", minute: "minutes", s: "seconds", second: "seconds", ms: "milliseconds", millisecond: "milliseconds" }
+const BOUND_OF = { "≥": "lower", "at least": "lower", "≤": "upper", "at most": "upper", "~": "about", about: "about", "<": "under", under: "under" }
+export function durationForm(text) {
+  const t = String(text || "")
+  const hits = []
+  const w = t.match(/(at least |at most |about |under )?(\d[\d,]*(?:\.\d+)?) (day|hour|minute|second|millisecond)s?\b/i)
+  if (w) hits.push({ at: w.index, bound: w[1] ? BOUND_OF[w[1].trim().toLowerCase()] : null, value: w[2].replace(/,/g, ""), unit: UNIT_NAME[w[3].toLowerCase()] })
+  const sh = t.match(/(?:^|[^\w.])([≥≤~<])?(\d[\d,]*(?:\.\d+)?)(ms|d|h|m|s)(?![\w])/)
+  if (sh) hits.push({ at: sh.index, bound: sh[1] ? BOUND_OF[sh[1]] : null, value: sh[2].replace(/,/g, ""), unit: UNIT_NAME[sh[3]] })
+  const sec = t.match(/\bunder a second\b/i)
+  if (sec) hits.push({ at: sec.index, bound: "under", value: "1", unit: "seconds" })
+  if (!hits.length) return null
+  const { bound, value, unit } = hits.sort((a, b) => a.at - b.at)[0]
+  return { bound, value, unit }
+}
+// Each task's figure has one form: its bar label, table cell, tooltip and
+// accessible label agree in bound, number and unit. Rows are
+// { job, label, cell, tip, aria }; a missing field is not compared.
+export function assessTaskForms(rows) {
+  const out = []
+  for (const r of rows || []) {
+    const base = durationForm(r.label)
+    if (!base) continue
+    for (const [key, name] of [["cell", "table cell"], ["tip", "tooltip"], ["aria", "accessible label"]]) {
+      if (r[key] === null || r[key] === undefined) continue
+      const f = durationForm(r[key])
+      if (!f || f.bound !== base.bound || f.value !== base.value || f.unit !== base.unit) out.push(`${r.job}: the ${name} reads "${String(r[key]).slice(0, 60)}", the bar label "${r.label}"`)
+    }
   }
-  return UNIT_ORDER.filter((u) => found.has(u))
+  return out
 }
-// A Compare view's problem with its units, or null: one unit in every
-// figure, and the axis titled with that unit.
-export function assessCompareUnits(r) {
-  const units = durationUnitsIn(r && r.texts)
-  if (units.length > 1) return `mixes units: ${units.join(", ")}`
-  const axis = r && r.axis ? String(r.axis).split(/\s+/)[0].toLowerCase() : null
-  if (units.length === 1 && axis && UNIT_ORDER.includes(axis) && axis !== units[0]) return `the axis is in ${axis}, the figures in ${units[0]}`
-  return null
+// The axis, the summed task exposure and the lead sentence compare
+// magnitudes, so they share one unit (the view's, from its largest value).
+export function assessViewUnits(r) {
+  const axisWord = r && r.axis ? String(r.axis).split(/\s+/)[0].toLowerCase() : null
+  const parts = [
+    ["lead sentence", r && r.lead ? (durationForm(r.lead) || {}).unit : null],
+    ["axis", ["days", "hours", "minutes"].includes(axisWord) ? axisWord : null],
+    ["sum", r && r.sum ? (durationForm(r.sum) || {}).unit : null],
+  ].filter(([, u]) => u)
+  if (parts.length < 2) return null
+  const [baseName, baseUnit] = parts[0]
+  const off = parts.slice(1).filter(([, u]) => u !== baseUnit).map(([n, u]) => `the ${n} in ${u}, the ${baseName} in ${baseUnit}`)
+  return off.length ? off.join("; ") : null
 }
-// Runs in the page: Compare's duration texts and its axis title.
-export function compareDurationTexts() {
-  const texts = [...document.querySelectorAll('#comparison-conclusion, #stackup .sb-value, #stackup .clock-exposure, #stackup td.num, #stackup-left-out, #stackup-table td.num, #stackup-table .sb-table td:nth-child(7)')].map((e) => e.textContent.trim()).filter(Boolean)
-  const axis = document.querySelector("#stackup .axis-title")
-  return { texts, axis: axis ? axis.textContent.trim() : null }
+// A bound sign or word followed by "<" or "under" says two things at once.
+export function boundsBeforeUnder(texts) {
+  const out = []
+  for (const t of texts || []) for (const x of String(t || "").matchAll(/(≥|≤|~|\bat least|\bat most|\babout)\s*(<|under\b)/gi)) out.push(x[0])
+  return out
+}
+// Runs in the page: Compare's view-unit figures, each drawn task's figures
+// (bar label, table cell in this mode's column, tooltip, accessible label)
+// and every text a reader can meet (page text, accessible labels, tooltips).
+export function compareFigures() {
+  const view = document.getElementById("view-compare")
+  const tip = document.getElementById("tooltip")
+  const after = (t) => { const i = t.lastIndexOf(": "); return i >= 0 ? t.slice(i + 2) : t }
+  const jobOf = (href) => ((href || "").match(/#\/task\/([^?/&]+)/) || [])[1] || null
+  const mode = new URLSearchParams(location.hash.split("?")[1] || "").get("mode") || "all"
+  const column = { all: /^Lead time$/, production: /^Production time$/, request: /^Request to delivery$/ }[mode]
+  const cells = new Map()
+  if (column) for (const table of view.querySelectorAll("#stackup-table table, #stackup .clock-modes-table")) {
+    const head = table.tHead ? table.tHead.rows[0] : table.rows[0]
+    const idx = head ? [...head.cells].findIndex((c) => column.test(c.textContent.trim())) : -1
+    if (idx < 0) continue
+    for (const tr of table.tBodies[0] ? table.tBodies[0].rows : []) {
+      const a = tr.querySelector("a[href*='#/task/']"), td = tr.cells[idx], job = a && jobOf(a.getAttribute("href"))
+      if (job && td && !cells.has(job)) cells.set(job, td.textContent.trim())
+    }
+  }
+  const rows = [], tips = []
+  for (const a of view.querySelectorAll("#stackup a.sb-col")) {
+    const v = a.querySelector(".sb-value")
+    const label = v ? v.textContent.trim().replace(/\*$/, "") : ""
+    a.dispatchEvent(new FocusEvent("focus"))
+    const strong = tip ? tip.querySelector(".tt-row strong") : null
+    if (tip) tips.push(tip.innerText)
+    a.dispatchEvent(new FocusEvent("blur"))
+    if (!label) continue
+    const job = jobOf(a.getAttribute("href"))
+    const aria = (a.getAttribute("aria-label") || "").replace(/\. Follow this task\.$/, "")
+    rows.push({ job, label, aria: after(aria), tip: strong ? strong.textContent.trim() : null, cell: cells.has(job) ? cells.get(job) : null })
+  }
+  const one = (sel) => { const e = view.querySelector(sel); return e ? e.textContent.trim() : null }
+  const conclusion = one("#comparison-conclusion")
+  return {
+    mode, rows, cells: cells.size,
+    axis: one("#stackup .axis-title"), sum: one("#stackup .clock-exposure"), lead: conclusion ? after(conclusion) : null,
+    texts: [view.innerText, ...[...view.querySelectorAll("[aria-label]")].map((e) => e.getAttribute("aria-label")), ...tips],
+  }
 }
 // Runs in the page: tables shown as cards (a .stacked holder that is visible).
 export function findCardTables() {
@@ -864,20 +923,24 @@ export async function main(argv = process.argv.slice(2)) {
           return heights
         })
         await check("page_height_within_budget_at_doubled_text", async () => {
+          // Against the baseline build at doubled text, with the normal-text
+          // budget; the ratio to this page at normal text is reported only.
           const heights = {}
-          for (const width of Object.keys(TEXT2X_HEIGHT_BUDGET).map(Number)) {
-            for (const scale of [1, 2]) {
+          for (const width of Object.keys(HEIGHT_BUDGET).map(Number)) {
+            for (const scale of [2, 1]) {
               const { context, page } = await newPage({ width, height: 900, scale })
               try {
                 for (const name of HEIGHT_ROUTES) {
-                  const h = await height(page, url, ROUTES.find((r) => r.name === name))
-                  const k = `${name}_${width}`
-                  heights[k] = { ...heights[k], [scale === 1 ? "reference" : "site"]: h }
+                  const route = ROUTES.find((r) => r.name === name), k = `${name}_${width}`
+                  if (scale === 2) {
+                    const site = await height(page, url, route), base = await height(page, baseUrl, route)
+                    heights[k] = { site, reference: base, ratio: Math.round((site / base) * 100) / 100 }
+                  } else heights[k].text2x_over_text1x = Math.round((heights[k].site / (await height(page, url, route))) * 100) / 100
                 }
               } finally { await context.close() }
             }
           }
-          const over = assessHeights(heights, TEXT2X_HEIGHT_BUDGET)
+          const over = assessHeights(heights, HEIGHT_BUDGET).map((o) => o.replace("vs reference", "vs the baseline's doubled text"))
           if (over.length) throw new Error(over.join("; "))
           return heights
         })
@@ -1036,21 +1099,50 @@ export async function main(argv = process.argv.slice(2)) {
         }
       } finally { await context.close() }
     })
-    await check("compare_uses_one_duration_unit", async () => {
-      // The lead sentence, bar labels, sums and tables of each Compare view
-      // read in one unit, and the axis is titled with it.
-      const { context, page } = await newPage({ width: 1280 })
+    // Compare's figures, read once per mode and width for the three checks
+    // below: page text, accessible labels and tooltips.
+    let compareRead = null
+    const readCompare = async () => {
+      if (compareRead) return compareRead
+      const out = []
+      for (const width of [1280, 390]) {
+        const { context, page } = await newPage({ width })
+        try {
+          for (const mode of ["all", "working", "production", "request"]) {
+            await page.goto(url + `#/compare?mode=${mode}`)
+            await settle(page, "compare")
+            out.push({ width, ...(await page.evaluate(compareFigures)) })
+          }
+        } finally { await context.close() }
+      }
+      return (compareRead = out)
+    }
+    await check("compare_axis_sum_and_lead_share_one_unit", async () => {
       const seen = {}
-      try {
-        for (const mode of ["all", "working", "production", "request"]) {
-          await page.goto(url + `#/compare?mode=${mode}`)
-          await settle(page, "compare")
-          const r = await page.evaluate(compareDurationTexts)
-          const why = assessCompareUnits(r)
-          if (why) throw new Error(`${mode}: ${why}`)
-          seen[mode] = { units: durationUnitsIn(r.texts), axis: r.axis, texts: r.texts.length }
-        }
-      } finally { await context.close() }
+      for (const r of await readCompare()) {
+        const why = assessViewUnits(r)
+        if (why) throw new Error(`${r.mode} at ${r.width} px: ${why}`)
+        seen[`${r.mode}_${r.width}`] = { axis: r.axis, sum: r.sum ? (durationForm(r.sum) || {}).unit : null, lead: r.lead ? (durationForm(r.lead) || {}).unit : null }
+      }
+      return seen
+    })
+    await check("compare_task_figures_match_everywhere", async () => {
+      const seen = {}
+      for (const r of await readCompare()) {
+        const off = assessTaskForms(r.rows)
+        if (off.length) throw new Error(`${r.mode} at ${r.width} px: ${off.length} figures differ: ${off.slice(0, 3).join("; ")}`)
+        if (!r.rows.length) throw new Error(`${r.mode} at ${r.width} px: no bar with a value was read`)
+        seen[`${r.mode}_${r.width}`] = { bars: r.rows.length, with_table_cell: r.rows.filter((x) => x.cell !== null).length, with_tooltip: r.rows.filter((x) => x.tip !== null).length }
+      }
+      return seen
+    })
+    await check("compare_no_bound_before_under", async () => {
+      const seen = {}
+      for (const r of await readCompare()) {
+        const bad = boundsBeforeUnder(r.texts)
+        if (bad.length) throw new Error(`${r.mode} at ${r.width} px: ${[...new Set(bad)].slice(0, 4).join(", ")}`)
+        seen[`${r.mode}_${r.width}`] = { texts: r.texts.length }
+      }
       return seen
     })
 
@@ -1271,16 +1363,32 @@ export async function main(argv = process.argv.slice(2)) {
           const why = assessFirstScreen(await page.evaluate(measureConclusion, CONCLUSIONS.task), 390)
           if (why) throw new Error(`planted caveat: ${why}`)
         }, /^planted caveat: .*caveat/)
-        await expectFailure("mixed_units_on_compare", async () => {
+        await expectFailure("view_unit_mismatch_on_compare", async () => {
           await openFresh()
-          const before = assessCompareUnits(await page.evaluate(compareDurationTexts))
-          if (before) throw new Error(`before planting: ${before}`)
-          const units = durationUnitsIn((await page.evaluate(compareDurationTexts)).texts)
-          const other = units[0] === "hours" ? "3 days" : "3.6 hours"
-          await page.evaluate((t) => { const s = document.createElement("span"); s.dataset.gatePlanted = "1"; s.textContent = ` (${t})`; document.getElementById("comparison-conclusion").appendChild(s) }, other)
-          const why = assessCompareUnits(await page.evaluate(compareDurationTexts))
-          if (why) throw new Error(`planted units: ${why}`)
-        }, /^planted units: mixes/)
+          const before = await page.evaluate(compareFigures)
+          if (assessViewUnits(before)) throw new Error(`before planting: ${assessViewUnits(before)}`)
+          const other = (before.axis || "").toLowerCase().startsWith("hours") ? "Days elapsed" : "Hours elapsed"
+          await page.evaluate((t) => { const a = document.querySelector("#stackup .axis-title"); a.dataset.gatePlanted = "1"; a.textContent = t }, other)
+          const why = assessViewUnits(await page.evaluate(compareFigures))
+          if (why) throw new Error(`planted view unit: ${why}`)
+        }, /^planted view unit: the axis in/)
+        await expectFailure("task_figure_differs_on_compare", async () => {
+          await openFresh()
+          const before = assessTaskForms((await page.evaluate(compareFigures)).rows)
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          // One bar's label changes form; its table cell, tooltip and accessible label do not.
+          await page.evaluate(() => { const v = [...document.querySelectorAll("#stackup .sb-value")].find((e) => e.textContent.trim()); v.dataset.gatePlanted = "1"; v.textContent = "≥999h" })
+          const off = assessTaskForms((await page.evaluate(compareFigures)).rows)
+          if (off.length) throw new Error(`planted task figure: ${off[0]}`)
+        }, /^planted task figure: .*the (table cell|tooltip|accessible label) reads/)
+        await expectFailure("bound_before_under_on_compare", async () => {
+          await openFresh()
+          const before = boundsBeforeUnder((await page.evaluate(compareFigures)).texts)
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          await page.evaluate(() => { const a = document.querySelector("#stackup a.sb-col"); a.dataset.gatePlanted = "1"; a.setAttribute("aria-label", `${a.getAttribute("aria-label")} (at least under 0.01 days)`) })
+          const bad = boundsBeforeUnder((await page.evaluate(compareFigures)).texts)
+          if (bad.length) throw new Error(`planted bound: ${bad[0]}`)
+        }, /^planted bound: at least under/)
         await expectFailure("overlapping_controls", async () => {
           await openFresh()
           await plant('<div style="position:relative;height:40px"><button style="position:absolute;left:0;top:0;width:120px">First control</button><button style="position:absolute;left:20px;top:4px;width:120px">Second control</button></div>')

@@ -111,21 +111,17 @@
     const r = Math.round(v * 100) / 100;
     return r > 0 ? String(r) : null;
   }
-  // "101 days", "0.15 days", "under 0.01 days"; without a unit, hoursWords.
-  function unitWords(ms, unit) {
+  // A view-unit figure, for the figures that compare magnitudes across a
+  // view (its sum and lead sentence): "101 days", "0.15 days", "under 0.01
+  // days"; without a unit, hoursWords. A bounded figure too small for the
+  // unit drops to the per-task form, so a bound never meets "under".
+  function unitWords(ms, unit, bounded) {
     if (!UNIT[unit]) return hoursWords(ms);
     const x = Math.max(0, Number(ms) || 0);
     if (x === 0) return "none";
     const t = unitNumber(x, unit), name = UNIT[unit][1];
-    return t === null ? `under 0.01 ${name}s` : `${t} ${name}${t === "1" ? "" : "s"}`;
-  }
-  // The same for a bar's value label: "101d", "0.15d", "<0.01d".
-  function unitShort(ms, unit) {
-    if (!UNIT[unit]) return hoursShort(ms);
-    const x = Math.max(0, Number(ms) || 0), a = UNIT[unit][2];
-    if (x === 0) return `0${a}`;
-    const t = unitNumber(x, unit);
-    return t === null ? `<0.01${a}` : `${t}${a}`;
+    if (t === null) return bounded ? W.durationWords(x, true) : `under 0.01 ${name}s`;
+    return `${t} ${name}${t === "1" ? "" : "s"}`;
   }
 
   // How a total reads: "at least " for a lower bound, "at most " for an
@@ -137,20 +133,23 @@
     if (b === "window") return has(n, "card_dates_shorter_than_work") || has(n, "finish_time_not_known") ? "lower" : null;
     return b;
   }
+  // A task's figure in the per-task form (walk.js durationWords), or with
+  // `unit`, in a view's unit for its lead sentence.
   function totalWords(n, open, unit) {
     const v = val(n);
     if (v === null) return null;
-    if (open) return `${unitWords(v, unit)} so far`;
+    const fmt = (x, bounded) => (UNIT[unit] ? unitWords(x, unit, bounded) : W.durationWords(x, bounded));
+    if (open) return `${fmt(v, false)} so far`;
     const b = totalBound(n);
-    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${unitWords(v, unit)}`;
+    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${fmt(v, b === "upper" || b === "lower")}`;
   }
-  // The same, in a bar's short value label: "≥54h", "309h".
-  function totalShort(n, open, unit) {
+  // The same, in a bar's short value label: "≥47h", "12.9d".
+  function totalShort(n, open) {
     const v = val(n);
     if (v === null) return "no data";
     if (v === 0) return "none";
     const b = open ? null : totalBound(n);
-    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${unitShort(v, unit)}`;
+    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${W.durationShort(v, b === "upper" || b === "lower")}`;
   }
 
   // One bar per task for the stack-up, in walkOrder. `mode` is "all" (the
@@ -203,8 +202,9 @@
           ...base,
           state: "unsplit",
           total_ms: bar.total_ms,
-          words: totalWords(leadN, open, unit),
-          label: totalShort(leadN, open, unit),
+          words: totalWords(leadN, open),
+          view_words: totalWords(leadN, open, unit),
+          label: totalShort(leadN, open),
           segments: [{ key: "unsplit", label: "Split not known", ms: bar.total_ms }],
           groups: [],
           reasons: bar.reasons || [],
@@ -215,9 +215,9 @@
       if (mode === "working") {
         const g = bar.groups[0];
         const workN = (task && task.working_ms) || (stack && stack.working_ms);
-        return { ...base, state: "ok", partial, total_ms: g.ms, words: totalWords(workN, open, unit), label: totalShort(workN, open, unit), segments: g.segments, groups: [g], reasons };
+        return { ...base, state: "ok", partial, total_ms: g.ms, words: totalWords(workN, open), view_words: totalWords(workN, open, unit), label: totalShort(workN, open), segments: g.segments, groups: [g], reasons };
       }
-      return { ...base, state: "ok", partial, total_ms: bar.total_ms, words: totalWords(leadN, open, unit), label: totalShort(leadN, open, unit), segments: bar.segments, groups: bar.groups, reasons };
+      return { ...base, state: "ok", partial, total_ms: bar.total_ms, words: totalWords(leadN, open), view_words: totalWords(leadN, open, unit), label: totalShort(leadN, open), segments: bar.segments, groups: bar.groups, reasons };
     });
   }
 
@@ -244,8 +244,10 @@
       return { text: "Not available", why: `Not available because ${why || "Desk did not publish this figure"}.${n && n.so_far ? " The task is still open, so this may change." : ""}`, state: "unavailable" };
     }
     // The same formatter as the task's other figures ("7 days", "3.6 hours").
-    // In a view's unit (Compare) every figure reads in it; a zero keeps its unit.
-    const v = UNIT[unit] ? (val(n) === 0 ? `0 ${UNIT[unit][1]}s` : unitWords(val(n), unit)) : val(n) === 0 ? "0 seconds" : W.durationWords(val(n));
+    // The per-task form; with `unit`, a view's unit (a zero keeps its unit).
+    // A partial value is bounded, so it never reads "under".
+    const bounded = n.state === "partial";
+    const v = UNIT[unit] ? (val(n) === 0 ? `0 ${UNIT[unit][1]}s` : unitWords(val(n), unit, bounded)) : val(n) === 0 ? "0 seconds" : W.durationWords(val(n), bounded);
     const soFar = n.so_far ? " so far" : "";
     if (n.state !== "partial") return { text: `${v}${soFar}`, why: "", state: "measured" };
     const why = reasonWords(reasonText, [...arr(n.reasons), ...(n.bound === null && n.bound_reason ? [n.bound_reason] : [])]);
@@ -322,9 +324,10 @@
       const base = { job: j.id, name: nameOf(j), short: String(j.id).slice(0, 8), group, pos, unlabeled: false, status: typeof j.status === "string" ? j.status : null, open, shared: false, href: `#/task/${j.id}`, finish: F.finishDay(j.finish_date), unit: o.unit || null };
       if (!clocks) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: ["clocks_not_published"] };
       if (val(total) === null) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(total && total.reasons))] };
-      const words = clockWords(total, null, o.unit).text;
+      const words = clockWords(total, null).text;
+      const viewWords = clockWords(total, null, o.unit).text;
       const shortB = total.state === "partial" ? (total.bound === "lower" ? "≥" : total.bound === "upper" ? "≤" : "~") : "";
-      const label = `${shortB}${unitShort(val(total), o.unit)}`;
+      const label = `${shortB}${W.durationShort(val(total), !!shortB)}`;
       const reasons = [...new Set(arr(total.reasons))];
       let segments = [{ key: "clock_total", label: key === "production_ms" ? "Production time" : "Request to delivery", ms: val(total) }];
       if (key === "production_ms") {
@@ -333,10 +336,10 @@
         const activeN = clocks.active_in_production_ms, restN = clocks.production_remainder_ms;
         const active = val(activeN), rest = val(restN);
         const boundOf = (n) => (n && n.state === "partial" ? (n.bound === "lower" || n.bound === "upper" ? n.bound : null) : undefined);
-        if (active !== null && rest !== null) segments = [{ key: "prod_active", label: "Recorded working inside production", ms: active, bound: boundOf(activeN) }, { key: "prod_remainder", label: "Production not recorded as active", ms: rest, bound: boundOf(restN) }];
+        if (active !== null && rest !== null) segments = [{ key: "prod_active", label: "Recorded working inside production", ms: active, bound: boundOf(activeN), words: clockWords(activeN, null).text }, { key: "prod_remainder", label: "Production not recorded as active", ms: rest, bound: boundOf(restN), words: clockWords(restN, null).text }];
         else segments = [{ key: "unsplit", label: "Split not known", ms: val(total) }];
       }
-      return { ...base, state: "ok", partial: total.state === "partial", bound: total.state === "partial" ? (total.bound === "lower" || total.bound === "upper" ? total.bound : null) : undefined, total_ms: val(total), words, label, segments, groups: [], reasons };
+      return { ...base, state: "ok", partial: total.state === "partial", bound: total.state === "partial" ? (total.bound === "lower" || total.bound === "upper" ? total.bound : null) : undefined, total_ms: val(total), words, view_words: viewWords, label, segments, groups: [], reasons };
     });
   }
 
@@ -350,7 +353,7 @@
     const dirs = new Set(drawn.filter((b) => b.partial).map((b) => (b.bound === "lower" || b.bound === "upper" ? b.bound : null)));
     const lead = !dirs.size ? "" : dirs.size === 1 && dirs.has("lower") ? "at least " : dirs.size === 1 && dirs.has("upper") ? "at most " : "about ";
     const tail = lead === "about " ? " (could be higher or lower)" : "";
-    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${unitWords(total, u)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
+    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${unitWords(total, u, !!lead)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
   }
 
   // Recorded working as a share of production, keeping mixed bounds honest:
@@ -381,8 +384,7 @@
   // "working" mode. Returns { bars, left_out, text }.
   function workingView(bars) {
     const list = arr(bars);
-    const u = (list.find((b) => b && b.unit) || {}).unit || null;
-    const uw = (ms) => unitWords(ms, u);
+    const uw = (ms) => W.durationWords(ms);
     const kept = list.filter((b) => b.state === "ok" && labeledMs(b) > 0);
     const out = list.filter((b) => !kept.includes(b));
     if (!out.length) return { bars: kept, left_out: 0, text: "" };
@@ -453,7 +455,7 @@
 
   // A bar group's time with its bound; a true zero is "none", never
   // "at least none".
-  const groupWords = (g, unit) => (g && g.ms > 0 ? `${g.qualifier || ""}${unitWords(g.ms, unit)}` : "none");
+  const groupWords = (g) => (g && g.ms > 0 ? `${g.qualifier || ""}${W.durationWords(g.ms, !!g.qualifier)}` : "none");
 
   // One row of Compare's phone table: the task, its lead time and its
   // waiting, the figures a reader on a small screen needs first, in the
@@ -461,7 +463,7 @@
   const SHORT_Q = { "at least ": "≥", "at most ": "≤", "about ": "~" };
   function compactRow(b) {
     const waiting = arr(b.groups).find((g) => g.key === "waiting");
-    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${unitShort(waiting.ms, b.unit)}` : "none";
+    const wait = !waiting ? "not known" : waiting.ms > 0 ? `${SHORT_Q[waiting.qualifier] || ""}${W.durationShort(waiting.ms, !!SHORT_Q[waiting.qualifier])}` : "none";
     return { job: b.job, name: b.name, href: b.href, lead: b.state === "no_data" ? "no data" : b.label, waiting: wait };
   }
   // The disclosure that holds every figure on a phone.
@@ -2061,7 +2063,6 @@
     hoursWords,
     viewUnit,
     unitWords,
-    unitShort,
     hoursShort,
     totalWords,
     feBound,

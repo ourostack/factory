@@ -3926,8 +3926,8 @@
       if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
       else {
         tipRows.push({ label: mode === "working" ? "Agent working time" : mode === "production" ? "Production time" : mode === "request" ? "Request to delivery" : "Lead time", value: b.words });
-        if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: S.unitWords(sg.ms, unit) });
-        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g, unit) });
+        if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: sg.words || W.durationWords(sg.ms) });
+        for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g) });
         if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
       }
       if (b.finish && b.finish.kind !== "open") tipRows.push({ label: "Finished (UTC)", value: b.finish.words });
@@ -4432,7 +4432,6 @@
     const sum = S.exposureWords(bars);
     if (sum) wrap.appendChild(el("p", "chart-caption clock-exposure", sum));
     const byId = new Map(jobs.map((j) => [j.id, j]));
-    const unit = (bars.find((b) => b.unit) || {}).unit || null;
     const cols = mode === "request"
       ? [["request_to_delivery_ms", "Request to delivery"], ["queue_ms", "Queued before production"]]
       : [["production_ms", "Production time"], ["active_in_production_ms", "Recorded working inside production"], ["production_remainder_ms", "Not recorded as active"]];
@@ -4445,7 +4444,7 @@
     for (const b of bars) {
       const j = byId.get(b.job);
       const clocks = j && j.clocks && typeof j.clocks === "object" ? j.clocks : null;
-      const figures = new Map((S.clockFigures(clocks, F.reasonText, unit) || []).map((f) => [f.key, f]));
+      const figures = new Map((S.clockFigures(clocks, F.reasonText) || []).map((f) => [f.key, f]));
       const tr = document.createElement("tr");
       const name = el("td"); name.appendChild(jobLink(b.job, b.name)); tr.appendChild(name);
       for (const [key] of cols) {
@@ -4519,10 +4518,10 @@
       tr.appendChild(el("td", null, b.finish ? (b.finish.kind === "open" ? "open" : b.finish.words) : "—"));
       tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
       const g = (k) => b.groups.find((x) => x.key === k);
-      tr.appendChild(el("td", "num", g("working") ? groupWords(g("working"), b.unit) : "not known"));
-      tr.appendChild(el("td", "num", g("waiting") ? groupWords(g("waiting"), b.unit) : "not known"));
+      tr.appendChild(el("td", "num", g("working") ? groupWords(g("working")) : "not known"));
+      tr.appendChild(el("td", "num", g("waiting") ? groupWords(g("waiting")) : "not known"));
       const w = g("waiting") ? g("waiting").segments.slice().sort((p, q) => q.ms - p.ms)[0] : null;
-      tr.appendChild(el("td", null, w ? `${w.label}, ${S.unitWords(w.ms, b.unit)}` : "—"));
+      tr.appendChild(el("td", null, w ? `${w.label}, ${W.durationWords(w.ms)}` : "—"));
       const notes = [];
       if (b.state === "unsplit" || b.state === "no_data") notes.push((b.reasons || []).map(F.reasonText).join("; ") || "not recorded");
       if (b.shared) notes.push("labels from a shared session");
@@ -4656,7 +4655,7 @@
       if (!selectedJobs.length) conclusion.textContent = "No recorded task matches these filters. Clear filters or choose a different recorded population.";
       else if (!candidate) conclusion.textContent = "The selected tasks have no comparable recorded window yet. Inspect their evidence before choosing an improvement.";
       else {
-        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
+        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.view_words || candidate.words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
       }
     };
     const drawTable = (bars) => safely("stackup-table", () => (bars.length ? drawStackTable(document.getElementById("stackup-table"), bars) : emptyState(document.getElementById("stackup-table"), "No selected task comparison is available.")));
@@ -4664,8 +4663,9 @@
       const mode = modes.compare;
       const current = F.navigationContext(location.hash);
       const clockMode = mode === "production" || mode === "request";
-      // One duration unit for the whole view (lead sentence, bar labels,
-      // sums, tables and axis), chosen from the largest figure it shows.
+      // One unit for the figures that compare magnitudes across the view
+      // (axis, sum and lead sentence), chosen from the largest figure it
+      // shows. Each task's own figure keeps the per-task form everywhere.
       const shown = [...all, ...(clockMode ? S.clockBars(selectedJobs, mode, opts(mode)) : []), ...(mode === "working" && all.length ? S.stackBars(selectedJobs, stackRows, taskRows, opts("working")) : [])];
       const unit = S.viewUnit(Math.max(0, ...shown.map((b) => b.total_ms).filter(Number.isFinite)));
       const allU = !taskRows && !stackRows ? [] : S.stackBars(selectedJobs, stackRows, taskRows, opts("all", unit));

@@ -137,7 +137,8 @@ test("the first-screen check is per width, wants the conclusion sentence, and co
   assert.match(G.assessFirstScreen({ found: true, role: "caveat", top: 10, text: "The recorded window or its work split is incomplete." }, 800), /caveat/)
   assert.match(G.assessFirstScreen({ found: false }, 800), /no conclusion/)
   const source = readFileSync(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)), "utf8")
-  assert.match(source, /fitted tripwires/)
+  // Doubled text is budgeted against the baseline, so no fitted tripwire remains.
+  assert.doesNotMatch(source, /TEXT2X_HEIGHT_BUDGET/)
 })
 
 test("Overview and Compare lead with their conclusion, right under the heading", () => {
