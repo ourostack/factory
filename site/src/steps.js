@@ -133,6 +133,9 @@
   // time counted from the first session (the card was created after work
   // began) is a lower bound.
   function totalBound(n) {
+    // An explicit null (or unknown) bound has no direction: "about", or the
+    // plain figure for bound_not_moved (walk.js qualifierOf), never a minimum.
+    if (n && n.state === "partial" && (n.bound === null || n.bound === "unknown")) return W.qualifierOf(n) ? "about" : null;
     const b = W.boundOf(n);
     if (b === "window") return has(n, "card_dates_shorter_than_work") || has(n, "finish_time_not_known") ? "lower" : null;
     return b;
@@ -143,17 +146,19 @@
     const v = val(n);
     if (v === null) return null;
     const fmt = (x, bounded) => (UNIT[unit] ? unitWords(x, unit, bounded) : W.durationWords(x, bounded));
-    if (open) return `${fmt(v, false)} so far`;
     const b = totalBound(n);
-    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : ""}${fmt(v, b === "upper" || b === "lower" ? b : false)}`;
+    // An open task's figure reads "so far"; one with no known direction
+    // still says "about".
+    if (open) return b === "about" ? `about ${fmt(v, true)} so far` : `${fmt(v, false)} so far`;
+    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : b === "about" ? "about " : ""}${fmt(v, b === "upper" || b === "lower" ? b : b === "about")}`;
   }
   // The same, in a bar's short value label: "≥47h", "12.9d".
   function totalShort(n, open) {
     const v = val(n);
     if (v === null) return "no data";
     if (v === 0) return "none";
-    const b = open ? null : totalBound(n);
-    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : ""}${W.durationShort(v, b === "upper" || b === "lower" ? b : false)}`;
+    const b = open ? (totalBound(n) === "about" ? "about" : null) : totalBound(n);
+    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : b === "about" ? "~" : ""}${W.durationShort(v, b === "upper" || b === "lower" ? b : b === "about")}`;
   }
 
   // One bar per task for the stack-up, in walkOrder. `mode` is "all" (the

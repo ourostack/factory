@@ -96,3 +96,19 @@ test("the gate measures every visible chart's text, with a one-task check and a 
   const m = { doc: { scrollWidth: 390, clientWidth: 390, bodyScrollWidth: 390 }, chartTextOut: [{ chart: "stackup", text: "Cut at the edge", planted: true }] }
   assert.deepEqual(G.assessLayout(m).map((p) => p.code), ["chart_text_out_of_bounds"])
 })
+
+test("a Compare bar's working figure with no known direction says so in its label, open or not", () => {
+  const job = { id: "f".repeat(32), status: "processing", finish_date: { state: "unavailable", reasons: ["open_job"] } }
+  const work = { state: "partial", value: 40131607, bound: null, bound_reason: "bound_reasons_conflict", reasons: ["censored", "session_open"] }
+  const lead = { state: "partial", value: 149659105, bound: "lower", reasons: ["censored"] }
+  const row = { job: job.id, status: { state: "measured", value: "processing", reasons: [] }, lead_time_ms: lead, working_ms: work }
+  const [bar] = S.stackBars([job], [row], [row], { mode: "working", segments: F.SEGMENTS })
+  assert.equal(bar.state, "ok")
+  {
+    assert.equal(bar.label, "~11h")
+    assert.equal(bar.words, "about 11 hours so far")
+  }
+  const app = read("site/src/app.js")
+  assert.match(app, /const rx = rightW - 13 \* k;/)
+  assert.match(app, /"chart-caption sb-group-note"/)
+})

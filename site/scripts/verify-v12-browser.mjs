@@ -453,7 +453,7 @@ export function checkChartEquivalents(map) {
 // Runs in the page before any script: an increased-text mode that doubles
 // every pixel font size in the site's style sheets and the root size, so
 // px-specified text grows as it does with a reader's larger text setting.
-function textScaleInit(scale) {
+export function textScaleInit(scale) {
   if (scale === 1) return
   const apply = () => {
     if (window.__gateTextScale === scale) return

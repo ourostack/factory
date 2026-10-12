@@ -1626,6 +1626,15 @@
       if (sr.width < 2 || sr.height < 2) continue;
       for (const t of plot.querySelectorAll("text.sb-group, text.sb-callout")) {
         const r = t.getBoundingClientRect();
+        // A group name wider than the whole plot (one narrow task at larger
+        // text) cannot fit inside it: it moves above the chart as a caption
+        // rather than being cut at the plot's edge.
+        if (t.classList.contains("sb-group") && r.width > sr.width - 4) {
+          const row = plot.closest(".sb-row");
+          if (row && row.parentNode) row.parentNode.insertBefore(el("p", "chart-caption sb-group-note", t.dataset.long || t.textContent), row);
+          t.remove();
+          continue;
+        }
         const dx = r.right > sr.right - 1 ? sr.right - 2 - r.right : r.left < sr.left + 1 ? sr.left + 2 - r.left : 0;
         if (dx) t.setAttribute("x", Number(t.getAttribute("x")) + dx);
       }
@@ -3864,7 +3873,7 @@
     // A group's name sits in its first column's row; the long form only where it fits that row.
     const rowRoom = (i) => { const r = rowsOf[rowOf(i)] || []; return (r[r.length - 1] - i + 1) * colW; };
     const groupLabel = (i, x, long, short) => {
-      const t = svg("text", { x, y: 14 * k, class: "sb-group", "data-col": i });
+      const t = svg("text", { x, y: 14 * k, class: "sb-group", "data-col": i, "data-long": long.replace(/ →$/, "") });
       t.textContent = !phone && long.length * 7 * k < rowRoom(i) ? long : short;
       plot.appendChild(t);
     };
@@ -4885,7 +4894,9 @@
       tx.textContent = `${Math.round(t * 100)}%`;
       right.appendChild(tx);
     }
-    const rx = rightW - 8 * k;
+    // The rotated title's glyphs extend right of its baseline by about the
+    // font's ascent (12 px at 1x), so the baseline sits 13 px in, not 8.
+    const rx = rightW - 13 * k;
     const rt = svg("text", { x: rx, y: top + H / 2, class: "axis-title", transform: `rotate(90 ${rx} ${top + H / 2})`, "text-anchor": "middle" });
     rt.textContent = fits("Running total, % of time") ? "Running total, % of time" : "Running total";
     right.appendChild(rt);
