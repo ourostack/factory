@@ -230,6 +230,33 @@
     pass: (v) => (v === 1 ? "passed first time" : v === 0 ? "sent back" : String(v)),
   };
 
+  // A bound's figure in a kind's own form, rounded the way it reads: a lower
+  // bound ("at least") down, an upper bound ("at most") up, so rounding never
+  // overstates what is known (walk.js durationParts). The unit comes from the
+  // rounded value: 59.2 seconds as an upper bound is "1m".
+  function directed(kind, v, bound) {
+    const r = (k) => (bound === "lower" ? Math.floor(k + 1e-9) : Math.ceil(k - 1e-9));
+    const tenth = (k) => (r(k * 10) / 10).toFixed(1);
+    if (kind === "duration") {
+      const x = Math.max(0, v);
+      if (x === 0) return "0s";
+      if (x < 60000) { const n = r(x / 1000); if (n < 60) return `${n}s`; }
+      if (x < 3600000) { const n = r(x / 60000); if (n < 60) return `${n}m`; }
+      const hr = x / 3600000;
+      if (hr < 48) { const n = r(hr * 10) / 10; if (n < 48) return `${n.toFixed(1)}h`; }
+      return `${tenth(hr / 24)}d`;
+    }
+    if (kind === "hours") return tenth(v / 3600000);
+    if (kind === "pct") return `${r(v * 100)}%`;
+    if (kind === "pct1") return `${tenth(v * 100)}%`;
+    if (kind === "compact") {
+      if (v >= 1e9) return `${tenth(v / 1e9)}B`;
+      if (v >= 1e6) return `${tenth(v / 1e6)}M`;
+      if (v >= 1e3) return `${tenth(v / 1e3)}K`;
+    }
+    return KINDS[kind](v);
+  }
+
   function isStated(n) {
     return (
       n !== null &&
@@ -358,7 +385,8 @@
     // would itself read as a bound). A lower bound of zero says nothing a
     // reader can use, so it reads "none recorded" beside its reason.
     const v = number.value;
-    let body = kind === "duration" && typeof v === "number" && v < 1000 ? `${Math.round(Math.max(0, v))} ms` : KINDS[kind](v);
+    const dir = typeof v === "number" && (number.bound === "lower" || number.bound === "upper") ? number.bound : null;
+    let body = kind === "duration" && typeof v === "number" && v < 1000 ? `${(dir === "lower" ? Math.floor : dir === "upper" ? Math.ceil : Math.round)(Math.max(0, v))} ms` : dir ? directed(kind, v, dir) : KINDS[kind](v);
     let direction = number.bound === "lower" ? "at least " : number.bound === "upper" ? "at most " : "";
     if (number.bound === "lower" && v === 0) {
       body = "none recorded";

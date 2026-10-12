@@ -37,9 +37,8 @@ test("one qualifier rule: an explicit null bound is never a minimum", () => {
   assert.equal(W.boundOf(lower), "lower")
   assert.equal(W.boundOf(upper), "upper")
   // Round 8: every stated shape reads as describe's text does.
-  // Round 8: every stated shape carries describe's qualifier (or none).
-  const qual = (t) => (t.match(/^(at least |at most |about )/) || [""])[0]
-  for (const n of [notMoved, lower, upper, unstated]) assert.equal(qual(W.statedText(n, "duration")), qual(F.describe(n, "duration").text), JSON.stringify(n))
+  // Round 8: every stated shape reads exactly as describe reads it.
+  for (const n of [notMoved, lower, upper, unstated]) assert.equal(W.statedText(n, "duration"), F.describe(n, "duration").text, JSON.stringify(n))
   assert.equal(W.qualifierOf({ state: "measured", value: 1, reasons: [] }), "")
   // The same rule as the canonical formatter.
   assert.equal(F.describe(notMoved, "duration").text.startsWith("at least"), false)
@@ -191,4 +190,30 @@ test("at a domain edge a figure with no known direction says the one way it can 
   assert.deepEqual(W.atEdge("about ", 1, undefined, 1), ["", " (could be lower)"])
   assert.deepEqual(W.atEdge("at least ", 1, undefined, 1), ["", ""])
   assert.deepEqual(W.atEdge("about ", 0.5, 0, 1), ["about ", ""])
+})
+
+// Round 8 follow-up: describe rounds a bound the way it reads, as the site does.
+test("format.js describe rounds a lower bound down and an upper bound up", () => {
+  const d = (value, bound, kind = "duration") => F.describe({ state: "partial", value, bound, reasons: ["log_truncated"] }, kind).text
+  assert.equal(d(52400, "upper"), "at most 53s")
+  assert.equal(d(52600, "lower"), "at least 52s")
+  assert.equal(d(59200, "upper"), "at most 1m")
+  assert.equal(d(59.6 * 60000, "lower"), "at least 59m")
+  assert.equal(d(2.25 * 86400000, "upper"), "at most 2.3d")
+  assert.equal(d(2.29 * 86400000, "lower"), "at least 2.2d")
+  assert.equal(d(400.2, "upper"), "at most 401 ms")
+  assert.equal(d(0.1234, "upper", "pct"), "at most 13%")
+  assert.equal(d(0.1294, "lower", "pct1"), "at least 12.9%")
+  assert.equal(d(5.5 * 3600000 + 1, "upper", "hours"), "at most 5.6")
+  // No direction keeps nearest rounding.
+  assert.equal(F.describe({ state: "partial", value: 52600, bound: null, bound_reason: "bound_not_moved", reasons: ["x"] }, "duration").text, "53s")
+})
+
+// Round 8 follow-up: a route is read once its data has arrived, not after a guessed time.
+test("the gate settles a route on network idle and a stable layout", () => {
+  const gate = read("site/scripts/verify-v12-browser.mjs")
+  assert.match(gate, /const page = await context\.newPage\(\)\n\s*trackRequests\(page\)/)
+  const settle = gate.slice(gate.indexOf("async function settle("), gate.indexOf("export async function main("))
+  assert.match(settle, /const busy = open\.size > 0/)
+  assert.match(settle, /if \(busy\) \{ idleSince = null; last = -1 \}/)
 })

@@ -575,20 +575,45 @@ export function routeHash(route, t) {
     .replace("{return}", encodeURIComponent(`#/causes/${t.cause}`))
 }
 
-async function settle(page, view, timeout = 20000) {
+// The requests a page has in flight (the site fetches its rollups only when
+// a view first needs them), so settle() can wait for the data itself rather
+// than for a guessed time.
+const IN_FLIGHT = new WeakMap()
+export function trackRequests(page) {
+  const open = new Set()
+  IN_FLIGHT.set(page, open)
+  page.on("request", (r) => open.add(r))
+  page.on("requestfinished", (r) => open.delete(r))
+  page.on("requestfailed", (r) => open.delete(r))
+  return open
+}
+// A view is ready when it is shown, no request is in flight, it no longer
+// says "Loading…", and its markup is the same on two reads 300 ms apart with
+// the network idle in between. A slow fetch extends the wait up to
+// `networkTimeout`; a view that keeps changing with the network idle fails
+// after `timeout`.
+async function settle(page, view, timeout = 20000, networkTimeout = 60000) {
   await page.waitForFunction((v) => document.body.dataset.view === v && !document.getElementById(`view-${v}`).hidden, view, { timeout })
+  const open = IN_FLIGHT.get(page) || new Set()
   const start = Date.now()
+  let idleSince = null
   let last = -1
-  while (Date.now() - start < timeout) {
+  while (true) {
+    const busy = open.size > 0
     const now = await page.evaluate((v) => {
       const el = document.getElementById(`view-${v}`)
       return el.textContent.includes("Loading…") ? -2 : el.innerHTML.length
     }, view)
-    if (now === last && now >= 0) return true
-    last = now
+    if (busy) { idleSince = null; last = -1 }
+    else {
+      if (idleSince === null) idleSince = Date.now()
+      if (now === last && now >= 0) return true
+      last = now
+    }
+    if (busy && Date.now() - start > networkTimeout) throw new Error(`route never settled: ${view} (${open.size} requests still in flight: ${[...open].slice(0, 3).map((r) => r.url().replace(/^https?:\/\/[^/]+/, "")).join(", ")})`)
+    if (!busy && Date.now() - idleSince > timeout) throw new Error(`route never settled: ${view} (the network was idle, but the view kept changing or said Loading…)`)
     await page.waitForTimeout(300)
   }
-  throw new Error(`route never settled: ${view}`)
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -629,6 +654,7 @@ export async function main(argv = process.argv.slice(2)) {
       await context.addInitScript(textScaleInit, scale)
       for (const s of init) await context.addInitScript(s.fn, s.arg)
       const page = await context.newPage()
+      trackRequests(page)
       page.setDefaultTimeout(15000)
       const errors = []
       page.on("pageerror", (e) => errors.push(String(e)))

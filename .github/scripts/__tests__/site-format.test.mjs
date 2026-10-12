@@ -37,7 +37,8 @@ test("formatClock states provenance and producer direction visibly, refusing uns
   assert.match(F.formatClock(c), /at least 1m/)
   assert.match(F.formatClock(c), /declared/)
   assert.match(F.formatClock(c), /so far/)
-  assert.match(F.formatClock({ ...c, bound: "upper" }), /at most 1m/)
+  // 65 seconds as an upper bound rounds up.
+  assert.match(F.formatClock({ ...c, bound: "upper" }), /at most 2m/)
   const opposing = { ...c, bound: null, bound_reason: "bound_reasons_conflict" }
   assert.match(F.formatClock(opposing), /Direction not known/)
   for (const bad of [null, {}, { ...c, basis: ["unknown"] }, { ...c, bound: "unknown" }, { ...c, class: "unavailable" }]) assert.throws(() => F.formatClock(bad), TypeError)
