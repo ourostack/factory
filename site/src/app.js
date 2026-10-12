@@ -3088,7 +3088,13 @@
     safely("task-lede", () => {
       renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
       const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled });
-      summaryEl.appendChild(el("p", "task-conclusion", summary.conclusion));
+      // The conclusion leads: right under the task title, before the
+      // reference and status lines, so it starts on the first screen.
+      const conclusion = el("p", "task-conclusion", summary.conclusion);
+      for (const old of document.querySelectorAll("#task-head .task-conclusion")) old.remove();
+      const title = document.querySelector("#task-head .task-title");
+      if (title) title.after(conclusion);
+      else summaryEl.appendChild(conclusion);
       const figures = el("dl", "task-summary-figures");
       for (const f of summary.figures) {
         const cell = el("div");
@@ -3116,6 +3122,7 @@
         summaryEl.appendChild(clear);
       }
       if (summary.classification) summaryEl.appendChild(el("p", "chart-caption", summary.classification));
+      renderTaskClocks(summaryEl, j);
       const definitions = el("details", "task-definitions");
       definitions.append(el("summary", null, "What do these measures mean?"), el("p", null, "Recorded elapsed is the existing task window, not original-request or production elapsed. Recorded working is activity captured for this task, not all agents' utilization. Work / elapsed is the working share of that window (flow efficiency). The evaluator classifies work as value-adding, necessary or waste; missing labels do not prove waste."));
       summaryEl.appendChild(definitions);
@@ -3133,7 +3140,7 @@
       // The operator's own time on this task (A1 I2).
       ledeEl.appendChild(el("span", "lede-operator", ` ${W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore).text}`));
       const caption = document.querySelector(".vsm-block > .chart-caption");
-      if (caption) caption.textContent = "Detailed recorded timeline (legacy map): boxes show recorded activity; pauses, operator prompts and pull requests have distinct shapes and text labels. This map is not to scale and its folding can change with available width. Open an item for evidence; use its separate session link for a time-scaled timeline. New production grouping is not available.";
+      if (caption) caption.textContent = "Detailed recorded timeline (legacy map): boxes show recorded activity; pauses, operator prompts and pull requests have distinct shapes and text labels. This map is not to scale and its folding can change with available width. Open an item for evidence; use its separate session link for a time-scaled timeline. Production periods and the time between deliveries are listed under Production clocks above.";
     });
     safely("time-went", () => {
       renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle, light });
@@ -3714,7 +3721,7 @@
     for (const b of document.querySelectorAll(`#${viewId} .mode-btn[data-mode]`)) {
       b.setAttribute("aria-pressed", String(b.dataset.mode === modes[which]));
       b.onclick = () => {
-        modes[which] = b.dataset.mode === "working" || (b.dataset.mode === "share" && which === "compare") ? b.dataset.mode : "all";
+        modes[which] = b.dataset.mode === "working" || (["share", "production", "request"].includes(b.dataset.mode) && which === "compare") ? b.dataset.mode : "all";
         for (const x of document.querySelectorAll(`#${viewId} .mode-btn[data-mode]`)) x.setAttribute("aria-pressed", String(x.dataset.mode === modes[which]));
         // The mode goes in the URL, so a link or a reload opens this view.
         try {
@@ -3821,7 +3828,7 @@
     const row = el("div", "sb-row");
     // The axis stays put while the bars scroll inside their frame.
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
-    axis.appendChild(svg("text", { x: 12 * k, y: T + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone || k > 1 ? "% of lead time" : "% of each task's lead time") : ((long, short) => (long.length * 6.2 * k <= H ? long : short))(`${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`, scale.unit === "hours" ? "Hours" : "Minutes");
+    axis.appendChild(svg("text", { x: 12 * k, y: T + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone || k > 1 ? "% of lead time" : "% of each task's lead time") : ((long, short) => (long.length * 6.2 * k <= H ? long : short))(`${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : mode === "production" ? " of production" : mode === "request" ? " to delivery" : " elapsed"}`, scale.unit === "hours" ? "Hours" : "Minutes");
     for (const t of scale.ticks) {
       const ty = y(t);
       const tx = svg("text", { x: axisW - 6, y: ty + 4 * k, class: "axis-tick", "text-anchor": "end" });
@@ -3831,7 +3838,7 @@
     row.appendChild(axis);
 
     const frame = el("div", "sb-frame chart-frame");
-    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": share ? `Stack-up of ${bars.length} tasks, each as shares of its own lead time on a 0 to 100% axis. Each bar is a link to its task.` : `Stack-up of ${bars.length} tasks, ${mode === "working" ? "agent working time" : "all elapsed time"}, in ${scale.unit}, linear from zero. Each bar is a link to its task.` });
+    const plot = svg("svg", { class: "sb-plot", width: plotW, height: totalH, role: "group", "aria-label": share ? `Stack-up of ${bars.length} tasks, each as shares of its own lead time on a 0 to 100% axis. Each bar is a link to its task.` : `Stack-up of ${bars.length} tasks, ${mode === "working" ? "agent working time" : mode === "production" ? "production time split into recorded working time and production not recorded as active" : mode === "request" ? "request to delivery" : "all elapsed time"}, in ${scale.unit}, linear from zero. Each bar is a link to its task.` });
     for (const t of scale.ticks) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
     // The two groups, named above the bars.
     const firstOpen = bars.findIndex((b) => b.group === "open");
@@ -3864,7 +3871,7 @@
         for (const s of b.segments) {
           const h = (s.ms / scale.max_ms) * H;
           const top = y(base + s.ms);
-          const fill = s.key === "unsplit" ? "url(#hatch-unsplit)" : s.cause ? (s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${s.cause})`) : s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, false);
+          const fill = s.key === "prod_active" ? "var(--c-agents-working)" : s.key === "prod_remainder" ? "url(#hatch-waiting)" : s.key === "clock_total" ? "var(--c-accent)" : s.key === "unsplit" ? "url(#hatch-unsplit)" : s.cause ? (s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${s.cause})`) : s.key === "working_unsplit" ? "transparent" : segmentFill(s.key, false);
           const look = F.segmentLook(s);
           const r = svg("rect", { x: x0, y: top, width: barW, height: Math.max(0, h), class: look.cls });
           if (s.emphasized === false) r.classList.add("category-muted");
@@ -3903,7 +3910,8 @@
       const tipRows = [];
       if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
       else {
-        tipRows.push({ label: mode === "working" ? "Agent working time" : "Lead time", value: b.words });
+        tipRows.push({ label: mode === "working" ? "Agent working time" : mode === "production" ? "Production time" : mode === "request" ? "Request to delivery" : "Lead time", value: b.words });
+        if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: S.hoursWords(sg.ms) });
         for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead)} of the lead time` : groupWords(g) });
         if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
       }
@@ -3951,8 +3959,14 @@
       g.appendChild(ul);
       legend.appendChild(g);
     };
-    group("Working, by the evaluator's labels (from the base up)", [...F.SEGMENTS.filter((s) => present.has(s.key)).map((s) => [swatch(s.key), s.label]), ...(present.has("working_unsplit") ? [[swatch("not_labeled"), "Working, not split by label"]] : [])]);
-    if (mode !== "working") group("Then waiting, by what it waited on", W.WAIT_KEYS.filter((k) => present.has(`wait_${k}`)).map((k) => [waitSwatch(k), W.waitCauseLabel(k)]));
+    if (mode === "production" || mode === "request") {
+      const sw = (cls, color) => { const x = el("span", `swatch${cls}`); x.setAttribute("aria-hidden", "true"); if (color) x.style.setProperty("--sw", color); return x; };
+      group(mode === "production" ? "Production time, from the base up" : "Request to delivery", mode === "production"
+        ? [...(present.has("prod_active") ? [[sw("", "var(--c-agents-working)"), "Recorded working time"]] : []), ...(present.has("prod_remainder") ? [[waitSwatch("unknown"), "Production not recorded as active (not proof of idle time or waste)"]] : [])]
+        : [[sw("", "var(--c-accent)"), "Request to delivery"]]);
+    }
+    else group("Working, by the evaluator's labels (from the base up)", [...F.SEGMENTS.filter((s) => present.has(s.key)).map((s) => [swatch(s.key), s.label]), ...(present.has("working_unsplit") ? [[swatch("not_labeled"), "Working, not split by label"]] : [])]);
+    if (mode === "all" || mode === "share") group("Then waiting, by what it waited on", W.WAIT_KEYS.filter((k) => present.has(`wait_${k}`)).map((k) => [waitSwatch(k), W.waitCauseLabel(k)]));
     const marks = [];
     const keyFor = (cls) => {
       const k = el("span", `sb-key ${cls}`);
@@ -3963,9 +3977,56 @@
     if (bars.some((b) => b.open)) marks.push([keyFor("sb-key-open"), "Dashed outline: still open, so its figures are so far"]);
     if (bars.some((b) => b.shared)) marks.push([keyFor("sb-key-star"), "Partial: its labels come from a session it shared with other tasks"]);
     if (bars.some((b) => b.finish && b.finish.kind !== "open")) marks.push([Object.assign(keyFor("sb-key-day"), { textContent: "7 Oct" }), "Under each finished bar, its finish day (UTC): plain when measured, ≤ on or before, ≥ on or after, ~ direction not known, \"no date\" with the reason in its tooltip"]);
-    if (bars.some((b) => b.state === "no_data")) marks.push([Object.assign(keyFor("sb-key-nodata"), { textContent: "?" }), mode === "working" ? "Not measured: no working time is known for it, so no bar is drawn rather than a zero" : "Not measured: no lead time is known for it, so no bar is drawn rather than a zero"]);
+    if (bars.some((b) => b.state === "no_data")) marks.push([Object.assign(keyFor("sb-key-nodata"), { textContent: "?" }), mode === "working" ? "Not measured: no working time is known for it, so no bar is drawn rather than a zero" : mode === "production" ? "Not available: Desk published no production time for it (its tooltip says why), so no bar is drawn rather than a zero" : mode === "request" ? "Not available: the original request was not recorded, so no bar is drawn rather than a zero" : "Not measured: no lead time is known for it, so no bar is drawn rather than a zero"]);
     group("Marks", marks);
     container.appendChild(legend);
+  }
+
+  // The task's production clocks (spec 4.3): each figure with its bound and
+  // a plain reason a reader can expand; unavailable is never shown as 0.
+  function renderTaskClocks(parent, j) {
+    const box = el("section", "task-clocks");
+    box.setAttribute("aria-labelledby", "task-clocks-title");
+    const h = el("h3", "task-clocks-title", "Production clocks");
+    h.id = "task-clocks-title";
+    box.appendChild(h);
+    let clocks = null;
+    try { clocks = S.readLifecycleClocks(j); } catch { clocks = undefined; }
+    const figures = clocks ? S.clockFigures(clocks, F.reasonText) : null;
+    if (!figures) {
+      box.appendChild(el("p", null, clocks === undefined ? "This task's production clocks are malformed in this build, so none is shown; that is not a zero." : "This build publishes no production clocks for this task; that is not a zero."));
+      parent.appendChild(box);
+      return;
+    }
+    const acceptance = S.acceptanceFigure(j, F.reasonText);
+    const dl = el("dl", "task-summary-figures clock-figures");
+    for (const f of [...figures, { label: acceptance.label, text: acceptance.text, why: acceptance.why, meaning: "", state: acceptance.text === "Not available" ? "unavailable" : "measured" }]) {
+      const cell = el("div", `clock-figure is-${f.state || "measured"}`);
+      cell.append(el("dt", null, f.label), el("dd", null, f.text));
+      if (f.meaning) cell.appendChild(el("p", "chart-caption", f.meaning));
+      if (f.why) {
+        const why = el("details", "figure-limits");
+        why.append(el("summary", null, f.state === "unavailable" ? "Why it is not available" : f.state === "partial" ? "Why it is a bound" : "What this means"), el("p", null, f.why));
+        cell.appendChild(why);
+      }
+      dl.appendChild(cell);
+    }
+    box.appendChild(dl);
+    const journey = S.productionJourney(clocks, F.reasonText);
+    const jt = el("h4", "task-clocks-sub", "Production periods on this task's journey");
+    box.appendChild(jt);
+    if (!journey || !journey.items.length) box.appendChild(el("p", null, journey ? journey.words : "Production periods are not published for this task."));
+    else {
+      const ol = el("ol", "production-journey");
+      for (const it of journey.items) {
+        const li = el("li", `journey-${it.kind}`);
+        li.append(el("strong", null, `${it.label}: `), document.createTextNode(it.words));
+        ol.appendChild(li);
+      }
+      box.appendChild(ol);
+      if (journey.words) box.appendChild(el("p", "chart-caption", journey.words));
+    }
+    parent.appendChild(box);
   }
 
   // ------------------------------------------------- step 2: over time
@@ -4347,6 +4408,49 @@
   // The stack-up as a table: every figure in words.
   // On a phone: three columns (task, lead time, waiting), with every
   // figure behind a disclosure, so the walk's next step stays near.
+  // Compare's clock modes: the chart's equivalent table, with each task's
+  // clocks as words (bounds kept) and the exposure sum stated as such.
+  function clockTable(bars, mode, jobs) {
+    const wrap = el("div", "clock-table");
+    const sum = S.exposureWords(bars);
+    if (sum) wrap.appendChild(el("p", "chart-caption clock-exposure", sum));
+    const byId = new Map(jobs.map((j) => [j.id, j]));
+    const cols = mode === "request"
+      ? [["request_to_delivery_ms", "Request to delivery"], ["queue_ms", "Queued before production"]]
+      : [["production_ms", "Production time"], ["active_in_production_ms", "Recorded working"], ["production_remainder_ms", "Not recorded as active"]];
+    const table = el("table", "data-table clock-modes-table");
+    table.appendChild(el("caption", null, mode === "request" ? "Request to delivery for each selected task" : "Production time for each selected task"));
+    const head = document.createElement("tr");
+    for (const t of ["Task", ...cols.map((c) => c[1]), ...(mode === "request" ? [] : ["Recorded working share", "Acceptance wait"])]) { const th = el("th", null, t); th.scope = "col"; head.appendChild(th); }
+    const thead = document.createElement("thead"); thead.appendChild(head); table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const b of bars) {
+      const j = byId.get(b.job);
+      const clocks = j && j.clocks && typeof j.clocks === "object" ? j.clocks : null;
+      const figures = new Map((S.clockFigures(clocks, F.reasonText) || []).map((f) => [f.key, f]));
+      const tr = document.createElement("tr");
+      const name = el("td"); name.appendChild(jobLink(b.job, b.name)); tr.appendChild(name);
+      for (const [key] of cols) {
+        const f = figures.get(key);
+        const td = el("td", "num", f ? f.text : "Not available");
+        td.title = f ? f.why || f.meaning : F.reasonText("clocks_not_published");
+        tr.appendChild(td);
+      }
+      if (mode !== "request") {
+        tr.appendChild(el("td", "num", (clocks && S.clockShareWords(clocks.active_in_production_ms, clocks.production_ms)) || "Not available"));
+        tr.appendChild(el("td", null, j ? S.acceptanceFigure(j, F.reasonText).text : "Not available"));
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    const holder = el("div", "table-wrap"); holder.appendChild(table);
+    wrap.appendChild(holder);
+    wrap.appendChild(el("p", "chart-caption", mode === "request"
+      ? "Request to delivery and queue are unavailable wherever Desk did not record the original request; adoption or card creation is never treated as the request."
+      : "Recorded working share is recorded working time over production time for that task; it is not agent or factory utilization, and a share whose bounds pull both ways says so instead of rounding to an exact figure. Acceptance wait is its coarse published class, outside production."));
+    return wrap;
+  }
+
   function drawStackTable(container, bars) {
     container.innerHTML = "";
     if (container.clientWidth < 600) {
@@ -4510,7 +4614,7 @@
     const all = !taskRows && !stackRows ? [] : S.stackBars(selectedJobs, stackRows, taskRows, opts("all"));
     renderComparisonControls(ledeEl, data, context, all);
     safely("compare-lede", () => {
-      ledeEl.textContent = "Recorded task windows can overlap. Their working share is not agent utilization or global idle time. Original-request and corrected production clocks are unavailable; acceptance is not presented as a production bucket.";
+      ledeEl.textContent = "Recorded task windows can overlap, so their sums are task exposure, not factory time. Their working share is not agent utilization or global idle time. Production time comes from Desk's production episodes; request to delivery is unavailable wherever the original request was not recorded. Acceptance is not part of production.";
       let conclusion = document.getElementById("comparison-conclusion");
       if (!conclusion) { conclusion = el("p", "comparison-conclusion"); conclusion.id = "comparison-conclusion"; }
       document.getElementById("compare-population").before(conclusion);
@@ -4535,33 +4639,46 @@
     const draw = () => {
       const mode = modes.compare;
       const current = F.navigationContext(location.hash);
-      const unavailable = ["production", "request"].includes(current.mode);
+      const clockMode = mode === "production" || mode === "request";
+      const clockBars = clockMode ? S.clockBars(selectedJobs, mode, opts(mode)) : null;
+      const clockDrawn = clockBars ? clockBars.filter((b) => b.state === "ok") : [];
       document.getElementById("stackup-caption").textContent =
-        mode === "working"
+        mode === "production"
+          ? "Each task's production time, from Desk's production episodes: recorded working time from the base up, then production not recorded as active (not proof of idle time or waste). Time between deliveries and acceptance waits are left out. ≥ means at least, ≤ at most, ~ direction not known. Select a bar to follow its task."
+          : mode === "request"
+            ? "Each task's time from its original request to recorded delivery, where Desk recorded the original request. Select a bar to follow its task."
+            : mode === "working"
           ? "Agent working time only, for the tasks whose working time the evaluator has labeled, in finish order, linear from zero at their own scale. Waiting is left out, so defects, rework and necessary steps, where agent-side fixes live, show. Select a bar to follow its task."
           : mode === "share"
             ? "Each task's own lead time as 100%, on a 0 to 100% axis, with the same parts in the same order, so a 20-minute task's make-up compares with a 200-hour one's. Each bar is labeled with the share agents were working. A task whose split is not known is one hatched bar, never 100% of one part. Select a bar to follow its task."
             : "The whole lead time of each task, linear from zero. Left to right: every finished task (done or cancelled) by finish day (UTC), the latest on the right, with any finished task that has no finish day after the dated ones; then tasks still open, by when work began. Select a bar to follow its task.";
-      const view = !all.length || mode !== "working" ? null : S.workingView(S.stackBars(selectedJobs, stackRows, taskRows, opts("working")));
-      const bars = !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
+      const view = !all.length || mode !== "working" || clockMode ? null : S.workingView(S.stackBars(selectedJobs, stackRows, taskRows, opts("working")));
+      const bars = clockMode ? clockBars : !all.length ? [] : view ? view.bars : mode === "share" ? S.shareBars(all, taskRows) : all;
       const leftOut = document.getElementById("stackup-left-out");
       leftOut.textContent = view ? view.text : "";
       leftOut.hidden = !(view && view.text);
       safely("stackup", () => {
-        if (unavailable) emptyState(document.getElementById("stackup"), "This requested clock mode is unavailable: no approved producer supplies its boundaries. Choose a recorded task measure instead; no legacy chart is relabeled as production or original-request accounting.");
-        else if (!all.length) emptyState(document.getElementById("stackup"), selectedJobs.length ? "Recorded task comparison data is not published yet." : "No selected task has a bar. Clear filters to inspect recorded tasks.");
+        if (clockMode && !clockDrawn.length) {
+          const counts = new Map();
+          for (const b of clockBars) for (const r of b.reasons.length ? b.reasons : ["not_recorded"]) counts.set(r, counts.has(r) ? counts.get(r) + 1 : 1);
+          const why = [...counts].map(([r, n]) => `${n} because ${F.reasonText(r)}`).join("; ");
+          emptyState(document.getElementById("stackup"), clockBars.length ? `${mode === "request" ? "Request to delivery" : "Production time"} is not available for any of the ${clockBars.length} selected tasks: ${why}. No bar is drawn rather than a zero, and no other measure is relabeled in its place.` : "No selected task has a bar. Clear filters to inspect recorded tasks.");
+        }
+        else if (!clockMode && !all.length) emptyState(document.getElementById("stackup"), selectedJobs.length ? "Recorded task comparison data is not published yet." : "No selected task has a bar. Clear filters to inspect recorded tasks.");
         else if (view && !bars.length) emptyState(document.getElementById("stackup"), "No task's working time is labeled yet, so there is nothing to compare in agent working time.");
         else {
           const node = document.getElementById("stackup");
-          drawStackup(node, S.emphasizeCategories(bars, current.category), mode, null);
-          if (current.category && !S.supportedEmphasis(bars, current.category)) {
+          if (clockMode) drawStackup(node, bars, mode, null);
+          else drawStackup(node, S.emphasizeCategories(bars, current.category), mode, null);
+          if (clockMode) node.appendChild(clockTable(bars, mode, selectedJobs));
+          if (!clockMode && current.category && !S.supportedEmphasis(bars, current.category)) {
             const note = el("p", "chart-caption compare-emphasis-note");
             note.id = "compare-emphasis-note"; note.setAttribute("role", "status");
             note.textContent = `The requested emphasis "${current.category}" is not a category drawn in this chart, so nothing is emphasized. Choose a category from Category emphasis, or use Clear emphasis.`;
             node.prepend(note);
           }
           const legend = node.querySelector(".sb-legend");
-          if (legend) {
+          if (legend && !clockMode) {
             const key = el("p", "compact-legend", "Recorded working: value-adding, necessary, classified waste or not labeled. Recorded task interruptions: no recorded task session, work on other tasks or another reported cause. Emphasis is a visual aid, not a new clock.");
             legend.before(key);
             const detail = el("details", "comparison-taxonomy"); detail.appendChild(el("summary", null, "Full taxonomy and evidence marks"));
@@ -5544,7 +5661,7 @@
     }
     const failed = (id) => (err) => emptyState(document.getElementById(id), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`);
     // The chart mode comes from the URL (#/compare?mode=working).
-    if (r.view === "compare" || r.view === "causes") modes[r.view] = r.mode === "working" || (r.mode === "share" && r.view === "compare") ? r.mode : "all";
+    if (r.view === "compare" || r.view === "causes") modes[r.view] = r.mode === "working" || (["share", "production", "request"].includes(r.mode) && r.view === "compare") ? r.mode : "all";
     if (r.view === "compare") {
       overTimeView.over = r.over === "task" ? "task" : "week";
       overTimeView.otmode = r.otmode === "all" || r.otmode === "working" ? r.otmode : "share";
