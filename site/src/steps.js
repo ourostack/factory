@@ -638,7 +638,7 @@
     const waitDir = !workDir && !leadDir ? null : !workDir ? leadDir : !leadDir ? flip[workDir] || "unknown" : leadDir === "upper" && workDir === "lower" ? "upper" : leadDir === "lower" && workDir === "upper" ? "lower" : "unknown";
     const top = Object.entries(waitBy).sort((a, b) => b[1] - a[1])[0];
     const parts = [];
-    const shareWords = bound === "unknown" ? `about ${W.pctWords(share)} (direction not known)` : `${Q[bound] || ""}${W.pctWords(share)}`;
+    const shareWords = bound === "unknown" && share > 0 && share !== 1 ? `about ${W.pctWords(share)} (direction not known)` : W.shareWords(share, bound);
     parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${shareWords} of the elapsed time (${Q[workDir] || ""}${hoursWords(work, QB[workDir]).replace(/ hours?$/, "")} of ${Q[leadDir] || ""}${hoursWords(lead, QB[leadDir])}).`);
     if (waiting > 0 && top) {
       const most = top[1] >= 0.5 * waiting;
@@ -703,6 +703,9 @@
   const BOUND_WORD = { lower: "at least ", upper: "at most ", unknown: "about " };
   // One qualifier per figure (N4): "at least 5%", "about 5% (direction not
   // known)"; a figure already worded "under ..." takes no second one.
+  // A share behind its bound, rounded the way the bound reads (W.shareWords).
+  // At the domain's edge a share says the one way it can be off (W.atEdge).
+  const shareQualify = (v, bound) => (bound === "lower" || bound === "upper" || (bound === "unknown" && (v <= 0 || v === 1)) ? W.shareWords(v, bound) : qualify(W.pctWords(v), bound));
   function qualify(w, bound) {
     if (!bound) return w;
     if (!/^under /.test(w)) return `${BOUND_WORD[bound]}${w}${bound === "unknown" ? " (direction not known)" : ""}`;
@@ -939,7 +942,7 @@
         const kind = !b ? "exact" : b === "lower" ? "at_least" : b === "upper" ? "at_most" : "unknown";
         const lo = kind === "at_most" || kind === "unknown" ? 0 : v;
         const hi = kind === "at_least" || kind === "unknown" ? 1 : v;
-        marks.push({ ...base, value: Math.min(1, Math.max(0, v)), kind, lo, hi, words: qualify(W.pctWords(v), b) });
+        marks.push({ ...base, value: Math.min(1, Math.max(0, v)), kind, lo, hi, words: shareQualify(v, b) });
       }
       const f = w.raw.flow_efficiency || {};
       const m = f.median;
@@ -952,7 +955,7 @@
       else {
         const b = boundKey(m);
         const note = b === "unknown" ? ", measured tasks only" : "";
-        median = { value: mv, bound: b, short: `${b && !(b === "upper" && /^under /.test(W.pctWords(mv))) ? BOUND_SIGN[b] : ""}${pctShort(mv)}`, words: `median ${qualify(W.pctWords(mv), b)}, ${n} of ${plural(N, "task")}${note}` };
+        median = { value: mv, bound: b, short: b ? shortPct(mv, b) : pctShort(mv), words: `median ${shareQualify(mv, b)}, ${n} of ${plural(N, "task")}${note}` };
       }
       return { week: w.week, label: w.label, empty: w.empty, marks: marks.sort((a, b) => a.value - b.value), median };
     });
@@ -1160,7 +1163,7 @@
   const isCauseKey = (k) => typeof k === "string" && CAUSE_KEY.test(k);
   const causeRoute = (k) => (isCauseKey(k) ? `#/causes/${k}` : "#/causes");
   // A running total in words: it reads 100% only at the last bar.
-  const cumWords = (share) => (share < 1 && Math.round(share * 100) >= 100 ? "99%" : W.pctWords(share));
+  const cumWords = (share) => W.pctWords(share);
   const isWaiting = (k) => String(k).startsWith("waiting:");
 
   // The bars of the Pareto chart from Desk's rollups/causes.json. `mode` is
@@ -2127,6 +2130,7 @@
     paretoModel,
     paretoNote,
     cumWords,
+    shareQualify,
     causesLede,
     paretoCaption,
     unlabeledFinished,

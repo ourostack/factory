@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "slow_data_file", "loading_marker_never_clears",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "loading_marker_never_clears",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -239,6 +239,28 @@ export function assessShareEdges(figs) {
       if (Number(f.pct) === 0 && !zero(f.dur)) out.push(`a ${name} of ${f.dur} reads 0%`)
       if (Number(f.pct) === 100) { const other = list.find((g, j) => j !== i && !zero(g.dur)); if (other) out.push(`a ${name} of ${f.dur} reads 100% beside one of ${other.dur}`) }
     })
+  }
+  return out
+}
+// Runs in the page (Compare, share mode): each task's bar label share and its
+// flow-efficiency words on the dot chart, by task.
+export function shareModePairs() {
+  const job = (h) => ((h || "").match(/#\/task\/([^?/&]+)/) || [])[1] || null
+  const bars = {}, dots = {}
+  for (const a of document.querySelectorAll("#view-compare a.sb-col")) { const m = /: ([^:]*?) working of a lead time/.exec(a.getAttribute("aria-label") || ""); if (m) bars[job(a.getAttribute("href"))] = m[1] }
+  for (const a of document.querySelectorAll("#view-compare a.chart-link")) { const m = /flow efficiency (.*?)\. Follow this task/.exec(a.getAttribute("aria-label") || ""); if (m) dots[job(a.getAttribute("href"))] = m[1] }
+  return Object.keys(bars).filter((j) => j in dots).map((j) => ({ job: j, bar: bars[j], words: dots[j] }))
+}
+// One quantity reads one way: a bar's "≤49%" is the words' "at most 49%".
+export function assessSharePairs(pairs) {
+  const out = []
+  const sign = { "≥": "at least ", "≤": "at most ", "~": "about " }
+  for (const r of pairs || []) {
+    // "~" and "(direction not known)" both say the direction is open, so the
+    // figure and any at least or at most are what must agree.
+    const bar = (r.bar === "<1%" ? "under 1%" : r.bar.replace(/^([≥≤~])/, (m) => sign[m])).replace(/^about /, "")
+    const words = r.words.replace(/ \((?:partial, )?direction not known\)$| \(partial\)$| so far$| \(could be (?:higher|lower)\)$/, "").replace(/^about /, "")
+    if (bar !== words) out.push(`${String(r.job).slice(0, 8)}: the bar reads "${r.bar}", the words "${r.words}"`)
   }
   return out
 }
@@ -1340,11 +1362,22 @@ export async function main(argv = process.argv.slice(2)) {
         try {
           await page.goto(url + "#/compare?mode=share")
           await settle(page, "compare")
-          out.push({ width, mode: "share", ...(await page.evaluate(compareFigures)) })
+          out.push({ width, mode: "share", ...(await page.evaluate(compareFigures)), pairs: await page.evaluate(shareModePairs) })
         } finally { await context.close() }
       }
       return (shareRead = out)
     }
+    await check("share_mode_label_matches_flow_efficiency", async () => {
+      const seen = {}
+      for (const r of await readCompareShare()) {
+        const pairs = r.pairs || []
+        if (!pairs.length) throw new Error(`no task in share mode at ${r.width} px has both a bar and flow-efficiency words`)
+        const off = assessSharePairs(pairs)
+        if (off.length) throw new Error(`${off.length} of ${pairs.length} at ${r.width} px differ: ${off.slice(0, 4).join("; ")}`)
+        seen[`share_${r.width}`] = { tasks: pairs.length }
+      }
+      return seen
+    })
     await check("compare_no_bound_before_under", async () => {
       const seen = {}
       for (const r of [...(await readCompare()), ...(await readCompareShare())]) {
@@ -1646,6 +1679,17 @@ export async function main(argv = process.argv.slice(2)) {
           const bad = assessShareEdges(await page.evaluate(taskShareFigures))
           if (bad.length) throw new Error(`planted share edge: ${bad[0]}`)
         }, /^planted share edge: a group of .* reads 100% beside/)
+        await expectFailure("share_label_differs_from_words", async () => {
+          await page.goto("about:blank")
+          await page.goto(url + "#/compare?mode=share")
+          await settle(page, "compare")
+          const before = assessSharePairs(await page.evaluate(shareModePairs))
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          // One bar's share moves by a point; its flow-efficiency words do not.
+          await page.evaluate(() => { const pairs = new Set([...document.querySelectorAll("#view-compare a.chart-link")].map((a) => a.getAttribute("href"))); const a = [...document.querySelectorAll("#view-compare a.sb-col")].find((x) => pairs.has(x.getAttribute("href")) && /: [≥≤~]?\d+% working of a lead time/.test(x.getAttribute("aria-label") || "")); a.dataset.gatePlanted = "1"; a.setAttribute("aria-label", a.getAttribute("aria-label").replace(/: ([≥≤~]?)(\d+)% working/, (m, s, n) => `: ${s}${Number(n) + 1}% working`)) })
+          const off = assessSharePairs(await page.evaluate(shareModePairs))
+          if (off.length) throw new Error(`planted share label: ${off[0]}`)
+        }, /^planted share label: .*: the bar reads/)
         await expectFailure("slow_data_file", async () => {
           // One data file answers 10 s late. The page is timed like any other,
           // into its own list, and pages_settle_within_budget's own body must

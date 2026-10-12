@@ -81,7 +81,7 @@ test("the lede: partial, counted from the first session, with working and value-
   assert.doesNotMatch(text, /in all/)
   assert.match(text, /The longest single wait was 19 hours, also for the next prompt\./)
   // Flow efficiency is defined in place; a lead time that is a lower bound makes it an upper bound.
-  assert.match(text, /working time divided by lead time is called flow efficiency; here it is at most 32%\. A low number is normal/)
+  assert.match(text, /working time divided by lead time is called flow efficiency; here it is at most 33%\. A low number is normal/)
   assert.doesNotMatch(text, /\byou(r)?\b/i, "public copy says the operator")
   // Every number is a token the page turns into a button.
   const keys = model.parts.filter((x) => typeof x === "object" && !x.term).map((x) => x.key)
@@ -799,7 +799,7 @@ test("Desk's own bound on flow efficiency wins: bound upper reads at most, bound
   const r = ["truncated"]
   const base = row825({ lead_time_ms: m(193344986), working_ms: p(62609950, r) })
   const upper = W.ledeText(W.lede({ ...base, flow_efficiency: { ...p(0.3238, r), bound: "upper" } }, F.reasonText, {}))
-  assert.match(upper, /here it is at most 32%\./)
+  assert.match(upper, /here it is at most 33%\./)
   const lower = W.ledeText(W.lede({ ...base, flow_efficiency: { ...p(0.3238, r), bound: "lower" } }, F.reasonText, {}))
   assert.match(lower, /here it is at least 32%\./)
   // An inferred bound (no bound field: a lower-bound working time over a measured lead time) reads the same in the picker as in the lede (R2).

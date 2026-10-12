@@ -130,3 +130,39 @@ test("the gate scans task pages for a 0% or 100% that is not exact, with a contr
   assert.match(gate, /#\/compare\?mode=share/)
   assert.match(gate, /\[\.\.\.\(await readCompare\(\)\), \.\.\.\(await readCompareShare\(\)\)\]/)
 })
+
+test("a bounded share is rounded the way its bound reads wherever a qualifier goes before it: feWords, shareWords and the over-time marks", () => {
+  let checked = 0
+  for (const w of [...nearEdges(), ...Array.from({ length: 1001 }, (_, i) => i * 1000)]) {
+    const v = w / PROD
+    for (const d of [0, 1]) for (const b of ["lower", "upper", "none", null]) assert.deepEqual(W.shareFigure(v, d, b), F.shareFigure(v, d, b), `walk and format differ: ${v} ${d} ${b}`)
+    for (const b of ["lower", "upper"]) {
+      const fe = W.feWords({ flow_efficiency: { state: "partial", value: v, bound: b, reasons: ["x"] } })
+      assert.equal(fe, W.shareWords(v, b))
+      assert.equal(S.shareQualify(v, b), fe)
+      const edge = (b === "lower" && v === 1) || (b === "upper" && v === 0)
+      if (!edge) honest(v, b, fe.replace(/^(at least|at most) /, ""), "feWords")
+      checked++
+    }
+  }
+  assert.ok(checked > 10000)
+  const fe = (v, b) => W.feWords({ flow_efficiency: { state: "partial", value: v, bound: b, reasons: ["x"] } })
+  assert.equal(fe(0.48246, "upper"), "at most 49%")
+  assert.equal(fe(0.01049, "upper"), "at most 2%")
+  assert.equal(fe(0.11739, "lower"), "at least 11%")
+  assert.equal(fe(1, "unknown"), "100% (could be lower)")
+  assert.equal(fe(0, "unknown"), "0% (could be higher)")
+  assert.equal(S.shareQualify(1, "unknown"), "100% (could be lower)")
+  assert.equal(S.cumWords(0.996), "99.6%")
+})
+
+test("the gate holds each share-mode bar label to its flow-efficiency words, with a control", async () => {
+  const { fileURLToPath } = await import("node:url")
+  const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
+  assert.deepEqual(G.assessSharePairs([{ job: "690331dd", bar: "≤49%", words: "at most 48%" }]), ['690331dd: the bar reads "≤49%", the words "at most 48%"'])
+  assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "≤49%", words: "at most 49%" }, { job: "b", bar: "100%", words: "100% (could be lower)" }, { job: "c", bar: "<1%", words: "under 1%" }, { job: "d", bar: "~42%", words: "42% (partial, direction not known)" }]), [])
+  assert.ok(G.NEGATIVE_CONTROLS.includes("share_label_differs_from_words"))
+  const gate = readFileSync(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
+  assert.match(gate, /check\("share_mode_label_matches_flow_efficiency"/)
+  assert.match(gate, /pairs: await page\.evaluate\(shareModePairs\)/)
+})

@@ -221,8 +221,8 @@ test("I2 and I6: the cause × week table has causes in Pareto order, one cell pe
   const fd2 = doc()
   fd2.weeks[2].flow_efficiency = { n: 1, N: 1, of: "x", median: { state: "partial", value: 0.004, reasons: ["x"], bound: "upper" } }
   const med = S.overTime(fd2, opts).fe.weeks[2].median
-  assert.equal(med.words, "median under 1%, 1 of 1 task")
-  assert.equal(med.short, "<1%")
+  assert.equal(med.words, "median at most 0.4%, 1 of 1 task")
+  assert.equal(med.short, "≤0.4%")
   // A share under 1% reads "<1%", never "~under 1%".
   assert.equal(S.overTimeCell({ state: "partial", value: 0.004, reasons: ["x"], bound: "unknown" }, false, "share").short, "~<1%")
   // The direction of a ratio from its parts.

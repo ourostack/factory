@@ -222,7 +222,7 @@ test("the lede's share carries a bound: at most when lead times start at the fir
   const c = rows("b", { workN: p(1.75 * H, ["log_truncated"]), fe: p(0.1, ["log_truncated"]) })
   const bars2 = S.stackBars(jobs, [a.stack, c.stack], [a.task, c.task], { mode: "all", segments: F.SEGMENTS, nameOf })
   // Working at least over an exact lead time: the parts prove "at least", whatever the tasks' own bounds say (S8 review M-4).
-  assert.match(S.compareLede(bars2, [a.task, c.task]).text, /agents were working at least 22%/)
+  assert.match(S.compareLede(bars2, [a.task, c.task]).text, /agents were working at least 21%/)
 })
 
 test("the lede says what it leaves out, and degrades when nothing is published or nothing has finished", () => {
@@ -319,7 +319,7 @@ test("on the real store the Pareto keeps Desk's order and running total, and sta
 })
 
 test("a running total reads 100% only at the last bar", () => {
-  assert.equal(S.cumWords(0.996), "99%")
+  assert.equal(S.cumWords(0.996), "99.6%")
   assert.equal(S.cumWords(1), "100%")
   assert.equal(S.cumWords(0.685), "69%")
 })
