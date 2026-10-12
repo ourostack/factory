@@ -223,7 +223,8 @@ export function taskPageTexts() {
 // Runs in the page: each part of the task page's time bar as its duration and
 // its share of the lead time, by group and by part.
 export function taskShareFigures() {
-  const split = (t) => { const m = /^\s*(.*?) · (\d+(?:\.\d+)?)% of the lead time/.exec(t || ""); return m ? { dur: m[1].trim(), pct: m[2] } : null }
+  // "under 1%" is kept: its part still has time beside a 100%.
+  const split = (t) => { const m = /^\s*(.*?) · (under )?(\d+(?:\.\d+)?)% of the lead time/.exec(t || ""); return m ? { dur: m[1].trim(), pct: `${m[2] ? "<" : ""}${m[3]}` } : null }
   const groups = [...document.querySelectorAll("#view-task .tw-group-head")].map((h) => { const l = h.querySelector("strong"); return split(h.textContent.slice(l ? l.textContent.length : 0)) }).filter(Boolean)
   const parts = [...document.querySelectorAll("#view-task .tw-row .tw-ms")].map((e) => split(e.textContent)).filter(Boolean)
   return { groups, parts }
