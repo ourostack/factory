@@ -1100,7 +1100,7 @@
   function taskSummary(row, reasonText, opts) {
     const o = opts || {};
     const model = lede(row, reasonText, o);
-    if (model.state !== "ok") return { conclusion: ledeText(model), figures: [], classification: "" };
+    if (model.state !== "ok") return { conclusion: ledeText(model), caveat: "", figures: [], classification: "" };
     const names = { lead: "Recorded elapsed", working: "Recorded working", waiting: "Recorded waiting" };
     const idle = o.idle || idleSplit(row, null);
     const sources = { lead: row.lead_time_ms, working: row.working_ms, waiting: idle, value: row.value_in_working_ms };
@@ -1109,7 +1109,8 @@
       const q = n && n.state === "partial" && n.bound === null ? ""
         : n && n.state === "partial" && n.bound === "upper" ? "at most "
         : n && n.state === "partial" && n.bound === "lower" ? "at least " : p.q || "";
-      let text = `${q}${p.text}`;
+      // A lower bound of zero says nothing a reader can use (statedText says the same).
+      let text = n && n.state === "partial" && n.bound !== "upper" && n.value === 0 ? "none recorded" : `${q}${p.text}`;
       let details = "";
       if (n && n.state === "partial") {
         const baseWords = typeof reasonText === "function" ? reasonText : (r) => String(r).replace(/_/g, " ");
@@ -1124,14 +1125,33 @@
       .map((p) => ({ label: names[p.key], ...textOf(p), token: p }));
     const lead = stated(row.lead_time_ms), work = stated(row.working_ms);
     const exact = lead.state === "measured" && work.state === "measured" && idle.state === "measured";
-    const conclusion = exact
-      ? idle.value > work.value ? "Waiting is the largest recorded part of this task's elapsed time. Inspect its evidence before deciding what to change."
-        : "Recorded working time is at least as large as recorded waiting. This does not show whether the work was necessary or waste."
-      : "The recorded window or its work split is incomplete. Keep the bounds in view before comparing tasks.";
+    // The conclusion leads; a caveat about partial figures follows it. Waiting
+    // and working are ranked only where their bounds settle the order.
+    const low = (n) => (n.state === "measured" || (n.state === "partial" && n.bound === "lower") ? n.value : n.state === "partial" && n.bound === "upper" ? 0 : null);
+    const high = (n) => (n.state === "measured" || (n.state === "partial" && n.bound === "upper") ? n.value : null);
+    const waitN = stated(idle.state ? idle : null), workN = work;
+    const waitLow = low(waitN), waitHigh = high(waitN), workLow = low(workN), workHigh = high(workN);
+    const waitingFirst = waitLow !== null && workHigh !== null && waitLow > workHigh;
+    const workingFirst = workLow !== null && waitHigh !== null && workLow >= waitHigh;
+    const conclusion = waitingFirst ? "Waiting is the largest recorded part of this task's elapsed time. Inspect its evidence before deciding what to change."
+      : workingFirst ? "Recorded working time is at least as large as recorded waiting. This does not show whether the work was necessary or waste."
+        : "The recorded figures cannot yet say whether waiting or working is the larger part of this task's elapsed time. Inspect its evidence before comparing it with other tasks.";
+    const caveat = exact ? "" : "The recorded window or its work split is incomplete, so keep the bounds in view before comparing tasks.";
     const value = model.parts.find((p) => p && typeof p === "object" && p.key === "value");
     const classification = value ? `Evaluator-labeled value-adding work: ${textOf(value).text}.${row.labels_from_shared_session ? " Labels come from a shared session; this classification is partial." : ""} Classification describes work, not capture completeness.`
       : "Work is not labeled or its value-adding share is not recorded. Unclassified work is not automatically waste.";
-    return { conclusion, figures, classification };
+    return { conclusion, caveat, figures, classification };
+  }
+
+  // A task's finish day for a table cell, in the lifecycle's own words when
+  // there is none yet, so a delivered task awaiting acceptance never reads
+  // "still open".
+  function finishCellWords(finish, job) {
+    if (!finish) return "Not recorded";
+    if (finish.kind !== "open") return finish.words;
+    const status = job && typeof job.status === "string" ? job.status : null;
+    if (job && (job.outcome === "awaiting_signoff" || job.outcome === "delivered")) return `No finish day yet: delivered for acceptance, but its card is still in ${status || "progress"}`;
+    return `No finish day yet: in progress${status ? ` (${status})` : ""}`;
   }
 
   // Reader-facing facts first; all original reference/technical rows remain
@@ -2974,6 +2994,7 @@
     drawer,
     promptText,
     taskSummary,
+    finishCellWords,
     readableDrawer,
     clockListStates,
     clockAt,

@@ -23,7 +23,7 @@ test("concise_summary_preserves_existing_bounds_without_new_clocks", () => {
   assert.match(summary.classification, /not labeled|not recorded/i)
   const partial = W.taskSummary({ ...row, working_ms: { state: "partial", value: 120000, bound: "lower", reasons: ["log_truncated"] } }, F.reasonText)
   assert.match(partial.figures.find((x) => x.label === "Recorded working").text, /at least 2 minutes/)
-  assert.match(partial.conclusion, /incomplete|partial/i)
+  assert.match(partial.caveat, /incomplete|partial/i)
   assert.doesNotMatch(partial.conclusion, /largest|most/)
 })
 

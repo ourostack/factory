@@ -118,5 +118,15 @@
     if (!validateBriefing(doc, validateQueue).ok) throw new TypeError("overview_projection_invalid");
     return doc;
   }
-  return { buildBriefing, validateBriefing, visitChanges, snapshot, generationOf };
+  // The Overview's answer to "What needs a closer look?", in one sentence:
+  // it leads the page, and the monitoring caveat follows it.
+  function conclusionWords(doc) {
+    const att = Array.isArray(doc && doc.attention) ? doc.attention : [];
+    const inv = Array.isArray(doc && doc.investigation) ? doc.investigation : [];
+    if (att.length === 1) return `One item needs your attention first: ${att[0].title}.`;
+    if (att.length > 1) return `${att.length} items need your attention first, led by: ${att[0].title}.`;
+    if (inv.length) return `Nothing is flagged for your attention first; ${inv.length === 1 ? "1 recorded pattern is" : `${inv.length} recorded patterns are`} worth investigating${inv.length === 1 ? ":" : ", led by:"} ${inv[0].title}.`;
+    return "Nothing in this briefing is flagged for attention or investigation.";
+  }
+  return { buildBriefing, validateBriefing, visitChanges, snapshot, generationOf, conclusionWords };
 });

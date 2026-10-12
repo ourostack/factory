@@ -81,7 +81,9 @@ test("each problem says whether it is on a planted element, so a negative contro
 
 test("the gate must catch every planned negative control, and each control is actually run", () => {
   const names = ["injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls", "unmarked_scroll_frame",
-    "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link"]
+    "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link",
+    "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
+    "caveat_in_the_conclusion_place"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -149,4 +151,25 @@ test("the gate is run by a person or agent with a provisioned browser, never by 
   assert.match(source, /resources/)
   assert.match(source, /finally/)
   assert.match(readFileSync(join(ROOT, "README.md"), "utf8"), /node site\/scripts\/verify-v12-browser\.mjs --site/)
+})
+
+test("the task conclusion starts within the first screen at every width and text size, judged absolutely", () => {
+  assert.ok(G.REQUIRED_CHECKS.includes("conclusion_starts_within_the_first_screen"))
+  assert.deepEqual(G.FIRST_SCREEN, { phone: 640, phoneMaxWidth: 480, wide: 900, text2xScreens: 2 })
+  assert.equal(G.assessFirstScreen({ top: 120, found: true, text: "Waiting is the largest recorded part." }, 1280), null)
+  assert.match(G.assessFirstScreen({ top: 901, found: true, text: "Waiting is the largest recorded part." }, 1280), /starts at 901 px/)
+  assert.equal(G.assessFirstScreen({ top: 1200, found: true, text: "Waiting is the largest recorded part." }, 390, 2), null)
+  assert.match(G.assessFirstScreen({ top: 1300, found: true, text: "Waiting is the largest recorded part." }, 390, 2), /two screens with doubled text/)
+  assert.match(G.assessFirstScreen({ top: 0, found: false }, 1280), /no conclusion/)
+  const source = readFileSync(SCRIPT, "utf8")
+  assert.match(source, /for \(const scale of TEXT_SCALES\)[\s\S]{0,900}WIDTHS\.length/)
+})
+
+test("doubled text has its own height budget against a fixed reference: the same page at normal text", () => {
+  assert.deepEqual(G.TEXT2X_HEIGHT_BUDGET, { 1280: 2.5, 390: 3.25 })
+  assert.deepEqual(G.assessHeights({ compare_390: { site: 900, reference: 1000 } }, { 390: 1 }), [])
+  assert.deepEqual(G.assessHeights({ compare_390: { site: 1600, reference: 1000 } }, { 390: 1.5 }), ["compare at 390 px: 1600 px vs reference 1000 px (budget 1.5x)"])
+  const source = readFileSync(SCRIPT, "utf8")
+  assert.match(source, /check\("page_height_within_budget_at_doubled_text"/)
+  assert.ok(G.REQUIRED_CHECKS.includes("page_height_within_budget_at_doubled_text"))
 })

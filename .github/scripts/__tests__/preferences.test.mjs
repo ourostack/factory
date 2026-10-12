@@ -13,7 +13,7 @@ test("return_visit_requires_comparable_generation", () => {
   assert.equal(typeof P.readPreferences, "function")
   const s = storage()
   const fresh = P.readPreferences(s, "America/Los_Angeles")
-  assert.equal(fresh.schema, "factory.preferences/1")
+  assert.equal(fresh.schema, "factory.preferences/2")
   assert.equal(fresh.zone, "America/Los_Angeles")
   assert.equal(fresh.previous, null)
   assert.equal(P.savePreferences(s, { dismissed: true, zone: "UTC" }).saved, true)

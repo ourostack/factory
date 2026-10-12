@@ -187,6 +187,7 @@
     late_work_without_reopen: "work was recorded after delivery without a recorded reopen",
     episode_boundary_not_recorded: "a production episode boundary was not recorded",
     episode_history_incomplete: "the recorded production episode history is incomplete",
+    clocks_not_published: "Desk published no lifecycle clocks for this task",
     pr_time_not_placed: "some of the task's pull requests have no time on the task clock, so they cannot be counted in a box",
     clock_skew_conflict: "GitHub's merge time, placed through the task's clock anchor, falls before the opening the session recorded, and the anchor says it could be even earlier. The two disagree, so which way the true merge time lies is not known. It is drawn at the opening.",
   };
@@ -865,8 +866,8 @@
     if (base.view !== "missing" && Object.keys(context).length) {
       // A legacy mode-only URL keeps its old return shape. New context is
       // additive when an investigation/filter/selection selector is present.
-      if (Object.keys(context).some((k) => k !== "mode") || ["production", "request"].includes(context.mode) || ["overview", "tasks", "help"].includes(base.view) || hash.startsWith("#/improvements")) base.context = context;
-      if (base.context && ["compare", "causes"].includes(base.view) && context.mode && ["all", "working", "share"].includes(context.mode)) base.mode = context.mode;
+      if (Object.keys(context).some((k) => k !== "mode") || (["production", "request"].includes(context.mode) && base.view !== "compare") || ["overview", "tasks", "help"].includes(base.view) || hash.startsWith("#/improvements")) base.context = context;
+      if (base.context && ["compare", "causes"].includes(base.view) && context.mode && ["all", "working", "share", ...(base.view === "compare" ? ["production", "request"] : [])].includes(context.mode)) base.mode = context.mode;
       if (context.selection) {
         const [kind, numbers] = context.selection.split(":");
         const select = parseSelect(`${kind}=${numbers}`);
@@ -925,7 +926,7 @@
         const out = { view: "compare" };
         for (const kv of q.split("&")) {
           const [k, v] = kv.split("=");
-          if (k === "mode" && (v === "working" || v === "share")) out.mode = v;
+          if (k === "mode" && ["working", "share", "production", "request"].includes(v)) out.mode = v;
           else if (k === "over" && v === "task") out.over = v;
           else if (k === "otmode" && (v === "all" || v === "working")) out.otmode = v;
         }
@@ -1110,7 +1111,7 @@
   function compareHash(c) {
     const o = c || {};
     const q = [];
-    if (o.mode === "working" || o.mode === "share") q.push(`mode=${o.mode}`);
+    if (["working", "share", "production", "request"].includes(o.mode)) q.push(`mode=${o.mode}`);
     if (o.over === "task") q.push("over=task");
     if (o.otmode === "all" || o.otmode === "working") q.push(`otmode=${o.otmode}`);
     // Additive investigation/filter context; legacy mode-only shape and

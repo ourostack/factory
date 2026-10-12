@@ -184,6 +184,151 @@
     });
   }
 
+  // ------------------------------------------------ lifecycle clocks (v1.2)
+  // Desk computes the clocks; the site only words them. A partial value keeps
+  // its bound beside it, an unavailable one is never shown as zero, and an
+  // open value is marked "so far".
+
+  const CLOCK_FIGURES = Object.freeze([
+    ["production_ms", "Production elapsed time", "From the first recorded work of each production episode to its recorded delivery, summed over episodes; time between deliveries is left out."],
+    ["active_in_production_ms", "Recorded working inside production", "The union of this task's recorded agent activity inside its production episodes; overlapping workers count once."],
+    ["production_remainder_ms", "Production not recorded as active", "Production time outside recorded activity. It is not proof of idle time or waste: some work is not captured."],
+    ["request_to_delivery_ms", "Request to delivery", "From the original request to recorded delivery."],
+    ["queue_ms", "Queued before production", "From the original request to the first recorded work."],
+  ]);
+
+  const reasonWords = (reasonText, codes) => arr(codes).map((r) => (typeof reasonText === "function" ? reasonText(r) : String(r).replace(/_/g, " "))).join("; ");
+
+  // One clock in words: { text, why }. `text` carries the bound; `why` is the
+  // plain reason a reader can expand.
+  function clockWords(n, reasonText) {
+    if (!n || n.state === "unavailable" || val(n) === null) {
+      const why = reasonWords(reasonText, n && n.reasons);
+      return { text: "Not available", why: `Not available because ${why || "Desk did not publish this figure"}.${n && n.so_far ? " The task is still open, so this may change." : ""}`, state: "unavailable" };
+    }
+    // The same formatter as the task's other figures ("7 days", "3.6 hours").
+    const v = val(n) === 0 ? "0 seconds" : W.durationWords(val(n));
+    const soFar = n.so_far ? " so far" : "";
+    if (n.state !== "partial") return { text: `${v}${soFar}`, why: "", state: "measured" };
+    const why = reasonWords(reasonText, [...arr(n.reasons), ...(n.bound === null && n.bound_reason ? [n.bound_reason] : [])]);
+    if (n.bound === "lower") return { text: `at least ${v}${soFar}`, why: `This is a lower bound: the true time could be longer, because ${why}.`, state: "partial", bound: "lower" };
+    if (n.bound === "upper") return { text: `at most ${v}${soFar}`, why: `This is an upper bound: the true time could be shorter, because ${why}.`, state: "partial", bound: "upper" };
+    return { text: `about ${v}${soFar} (could be higher or lower)`, why: `Partly measured, and the direction is not known, because ${why}.`, state: "partial", bound: null };
+  }
+
+  // The task's five clocks as figures, in reading order, or null for a task
+  // without published clocks (legacy, not zero).
+  function clockFigures(clocks, reasonText) {
+    if (!clocks || typeof clocks !== "object") return null;
+    return CLOCK_FIGURES.map(([key, label, meaning]) => ({ key, label, meaning, ...clockWords(clocks[key], reasonText) }));
+  }
+
+  // Production episodes on the task's journey, with the time between
+  // deliveries shown as its own item. Offsets are on the task's own clock.
+  function productionJourney(clocks, reasonText) {
+    if (!clocks || typeof clocks !== "object" || !clocks.production_periods) return null;
+    const p = clocks.production_periods;
+    const why = reasonWords(reasonText, p.reasons);
+    if (p.state === "unavailable" || !arr(p.items).length) return { state: "unavailable", items: [], words: `Production periods are not available because ${why || "Desk did not publish them"}.` };
+    const at = (ms) => (ms === 0 ? "the task's start" : `${W.durationWords(ms)} after the task's start`);
+    const items = [];
+    arr(p.items).forEach((it, i) => {
+      const prev = arr(p.items)[i - 1];
+      if (prev && it.start_ms > prev.end_ms) items.push({ kind: "between", label: "Between deliveries", start_ms: prev.end_ms, end_ms: it.start_ms, duration_ms: it.start_ms - prev.end_ms, words: `${W.durationWords(it.start_ms - prev.end_ms)} from a recorded delivery to the next recorded work; not production time, and not an exact acceptance duration.` });
+      items.push({ kind: "production", label: `Production period ${i + 1}`, start_ms: it.start_ms, end_ms: it.end_ms, duration_ms: it.end_ms - it.start_ms, so_far: !!it.so_far, words: `${W.durationWords(it.end_ms - it.start_ms)}${it.so_far ? " so far" : ""}, from ${at(it.start_ms)} to ${at(it.end_ms)}${it.so_far ? " (the latest recorded evidence; still open)" : ""}.` });
+    });
+    return { state: p.state, items, words: p.state === "partial" ? `Some boundaries are not exact because ${why}.` : "" };
+  }
+
+  // One line relating production elapsed to the task's overall recorded
+  // elapsed, so a reader sees why the two spans differ.
+  function productionRelation(clocks, lead) {
+    if (!clocks || typeof clocks !== "object") return null;
+    const prod = clockWords(clocks.production_ms, null);
+    const leadN = lead && typeof lead === "object" ? lead : null;
+    const leadText = val(leadN) === null ? "not available" : clockWords(leadN, null).text;
+    if (prod.state === "unavailable") return `Production elapsed time is not available for this task; its recorded elapsed (${leadText}) is the whole recorded window, from the task's first record to its end.`;
+    return `Production elapsed time (${prod.text}) runs from the first recorded work of each production period to its delivery and leaves out time between deliveries; recorded elapsed (${leadText}) is the task's whole recorded window, so the two can differ.`;
+  }
+
+  // Whether any published improvement issue addresses the cause a reader is
+  // investigating; null when no cause is in context.
+  function causeAddressedWords(rows, cause) {
+    if (!cause || !isCauseKey(cause)) return null;
+    const hits = arr(rows).filter((r) => r && r.cause && r.cause.key === cause);
+    const name = W.causeWords(cause);
+    if (!hits.length) return `No published improvement issue addresses ${name} yet.`;
+    return `${plural(hits.length, "published improvement issue")} address${hits.length === 1 ? "es" : ""} ${name}: ${hits.map((r) => r.ref).join(", ")}.`;
+  }
+
+  // The acceptance wait stays its published coarse class, outside production.
+  function acceptanceFigure(job, reasonText) {
+    const n = job && job.signoff_wait;
+    const meaning = "Acceptance is an outcome record, kept as a coarse class (under one hour, under one day, under seven days, seven days or more); it is not part of production time.";
+    if (!n || n.state === "unavailable" || typeof n.value !== "string") return { label: "Acceptance wait", text: "Not available", why: `Not available because ${reasonWords(reasonText, n && n.reasons) || "no acceptance record is published"}. ${meaning}` };
+    return { label: "Acceptance wait", text: n.value, why: meaning };
+  }
+
+  // One bar per task for Compare's clock modes, in walkOrder. "production"
+  // splits production time into recorded working and production not recorded
+  // as active; "request" draws request to delivery. Missing clocks never draw
+  // a zero.
+  function clockBars(jobs, mode, opts) {
+    const o = opts || {};
+    const nameOf = typeof o.nameOf === "function" ? o.nameOf : (j) => `Task ${String(j.id).slice(0, 8)}`;
+    const key = mode === "request" ? "request_to_delivery_ms" : "production_ms";
+    return walkOrder(jobs).map(({ j, group, pos }) => {
+      const clocks = j.clocks && typeof j.clocks === "object" ? j.clocks : null;
+      const total = clocks ? clocks[key] : null;
+      const open = !!(total && total.so_far) || (typeof j.status === "string" && !CLOSED.has(j.status));
+      const base = { job: j.id, name: nameOf(j), short: String(j.id).slice(0, 8), group, pos, unlabeled: false, status: typeof j.status === "string" ? j.status : null, open, shared: false, href: `#/task/${j.id}`, finish: F.finishDay(j.finish_date) };
+      if (!clocks) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: ["clocks_not_published"] };
+      if (val(total) === null) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(total && total.reasons))] };
+      const words = clockWords(total, null).text;
+      const shortB = total.state === "partial" ? (total.bound === "lower" ? "≥" : total.bound === "upper" ? "≤" : "~") : "";
+      const label = `${shortB}${hoursShort(val(total))}`;
+      const reasons = [...new Set(arr(total.reasons))];
+      let segments = [{ key: "clock_total", label: key === "production_ms" ? "Production time" : "Request to delivery", ms: val(total) }];
+      if (key === "production_ms") {
+        // Both parts are read as Desk published them, each with its own
+        // bound; the site never subtracts one clock from another.
+        const activeN = clocks.active_in_production_ms, restN = clocks.production_remainder_ms;
+        const active = val(activeN), rest = val(restN);
+        const boundOf = (n) => (n && n.state === "partial" ? (n.bound === "lower" || n.bound === "upper" ? n.bound : null) : undefined);
+        if (active !== null && rest !== null) segments = [{ key: "prod_active", label: "Recorded working inside production", ms: active, bound: boundOf(activeN) }, { key: "prod_remainder", label: "Production not recorded as active", ms: rest, bound: boundOf(restN) }];
+        else segments = [{ key: "unsplit", label: "Split not known", ms: val(total) }];
+      }
+      return { ...base, state: "ok", partial: total.state === "partial", bound: total.state === "partial" ? (total.bound === "lower" || total.bound === "upper" ? total.bound : null) : undefined, total_ms: val(total), words, label, segments, groups: [], reasons };
+    });
+  }
+
+  // A sum of task clocks is task exposure: overlapping tasks count once each.
+  function exposureWords(bars) {
+    const drawn = arr(bars).filter((b) => b.state === "ok" && Number.isFinite(b.total_ms));
+    if (!drawn.length) return "";
+    const total = drawn.reduce((a, b) => a + b.total_ms, 0);
+    // A sum keeps a direction only when every partial member shares it.
+    const dirs = new Set(drawn.filter((b) => b.partial).map((b) => (b.bound === "lower" || b.bound === "upper" ? b.bound : null)));
+    const lead = !dirs.size ? "" : dirs.size === 1 && dirs.has("lower") ? "at least " : dirs.size === 1 && dirs.has("upper") ? "at most " : "about ";
+    const tail = lead === "about " ? " (could be higher or lower)" : "";
+    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${hoursWords(total)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
+  }
+
+  // Recorded working as a share of production, keeping mixed bounds honest:
+  // a ratio whose bounds pull both ways is "about", never an exact percentage.
+  function clockShareWords(work, production) {
+    const r = shareOf(work, production);
+    if (!r || r.state === "unavailable" || val(r) === null) return null;
+    const v = val(r) * 100;
+    // A share under 1% keeps one decimal, so it never reads as a bare 0%.
+    const tiny = v > 0 && v < 1;
+    const pct = tiny ? `${Math.max(0.1, Math.round(v * 10) / 10)}%` : v > 99 && v < 100 ? "99%" : `${Math.round(v)}%`;
+    if (r.state === "measured") return tiny && v < 0.1 ? "under 0.1% of production time" : `${pct} of production time`;
+    if (r.bound === "lower") return tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
+    if (r.bound === "upper") return tiny && v < 0.1 ? "under 0.1% of production time" : `at most ${pct} of production time`;
+    return `about ${pct} of production time (could be higher or lower)`;
+  }
+
   // The parts of a working bar that carry no evaluator label.
   const UNLABELED = new Set(["agents_working_unlabeled", "not_labeled", "working_unsplit", "no_session", "unsplit"]);
   const labeledMs = (b) => arr(b && b.segments).filter((s) => !s.cause && !UNLABELED.has(s.key)).reduce((a, s) => a + (s.ms > 0 ? s.ms : 0), 0);
@@ -1935,5 +2080,14 @@
     shareOf,
     sortPicker,
     readLifecycleClocks,
+    clockFigures,
+    clockWords,
+    productionJourney,
+    acceptanceFigure,
+    clockBars,
+    exposureWords,
+    clockShareWords,
+    productionRelation,
+    causeAddressedWords,
   };
 });
