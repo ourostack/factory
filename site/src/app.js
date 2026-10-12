@@ -215,6 +215,67 @@
     return a;
   }
 
+  // ------------------------------------------------- tables that reflow
+  // No table scrolls sideways (spec 4.5). A table wider than its holder
+  // first lets its text cells wrap; only a table that still cannot fit is
+  // shown as stacked cards, each value named by its column heading. Both are
+  // measured undone, so a holder that grows wide enough (or text that
+  // shrinks) brings the plain table back. Cards keep the table's structure
+  // as roles, since a browser may drop table semantics when display changes.
+  const TABLE_HOLDERS = ".table-wrap, #jobs-table, #trend, .block:has(> table.data-table)";
+  function labelTable(table) {
+    table.setAttribute("role", "table");
+    const head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
+    const labels = head ? S.columnLabels([...head.cells].map((c) => ({ text: c.textContent, span: c.colSpan }))) : [];
+    for (const group of [table.tHead, ...table.tBodies, table.tFoot]) {
+      if (!group) continue;
+      group.setAttribute("role", "rowgroup");
+      const rows = [...group.rows];
+      const cols = S.bodyCellColumns(rows.map((tr) => [...tr.cells].map((c) => ({ colSpan: c.colSpan, rowSpan: c.rowSpan }))));
+      rows.forEach((tr, r) => {
+        tr.setAttribute("role", "row");
+        [...tr.cells].forEach((cell, k) => {
+          cell.setAttribute("role", group === table.tHead ? "columnheader" : cell.tagName === "TH" ? "rowheader" : "cell");
+          if (group !== table.tHead && !cell.dataset.label && labels[cols[r][k]]) cell.dataset.label = labels[cols[r][k]];
+        });
+      });
+    }
+  }
+  function fitTables() {
+    const holders = [...document.querySelectorAll(TABLE_HOLDERS)].filter((h) => h.querySelector(":scope > table.data-table"));
+    for (const h of holders) {
+      labelTable(h.querySelector(":scope > table.data-table"));
+      h.classList.remove("stacked", "fit-wrap");
+    }
+    const overflows = (h) => h.clientWidth > 0 && h.scrollWidth > h.clientWidth + 1;
+    const wide = holders.filter(overflows);
+    for (const h of wide) h.classList.add("fit-wrap");
+    for (const h of wide.filter(overflows)) h.classList.add("stacked");
+    // A table that fits only by wrapping, or by squeezing its first (text)
+    // column below a few words' width, can still be a tall ribbon of broken
+    // lines. It becomes cards only when they are clearly shorter (by a fifth);
+    // otherwise a table that fits stays a table.
+    const narrowFirst = (h) => {
+      const td = h.querySelector(":scope > table.data-table > tbody > tr > td:first-child");
+      return !!td && td.getBoundingClientRect().width < 6 * (parseFloat(getComputedStyle(td).fontSize) || 16);
+    };
+    for (const h of holders) {
+      if (h.classList.contains("stacked") || !(h.classList.contains("fit-wrap") || narrowFirst(h))) continue;
+      const asTable = h.getBoundingClientRect().height;
+      h.classList.add("stacked");
+      if (h.getBoundingClientRect().height > asTable * 0.8) h.classList.remove("stacked");
+    }
+  }
+  let fitPending = false;
+  function scheduleFit() {
+    if (fitPending) return;
+    fitPending = true;
+    requestAnimationFrame(() => { fitPending = false; fitTables(); });
+  }
+  if (typeof MutationObserver === "function") new MutationObserver(scheduleFit).observe(document.getElementById("main") || document.body, { subtree: true, childList: true });
+  window.addEventListener("resize", scheduleFit);
+  document.addEventListener("toggle", scheduleFit, true);
+
   function el(tag, className, text) {
     const e = document.createElement(tag);
     if (className) e.className = className;
@@ -1506,6 +1567,70 @@
     return e;
   }
 
+  // How much larger than designed the chart text is drawn (a reader's larger
+  // text): the computed size of an axis tick over its designed 11px. Every
+  // text-sized spacing in a chart is multiplied by it, so labels keep their
+  // room instead of drawing on top of one another.
+  function chartTextScale(container) {
+    const probe = svg("svg", { width: 0, height: 0, "aria-hidden": "true" });
+    probe.style.position = "absolute";
+    const t = svg("text", { class: "axis-tick" });
+    probe.appendChild(t);
+    container.appendChild(probe);
+    const px = parseFloat(getComputedStyle(t).fontSize) || 11;
+    probe.remove();
+    return Math.max(1, px / 11);
+  }
+
+  // A column chart wider than its frame is drawn as rows of whole columns
+  // that each fit (spec 4.5: no chart pans). Each row shows the same plot
+  // through its own window (viewBox) and keeps only its own columns (the
+  // elements marked data-col), so every bar, link and label appears once;
+  // gridlines, lines and axes are repeated per row.
+  function wrapColumnRows(row, plot, n, colW, avail, colX) {
+    const rows = S.chartRows(n, colW, avail);
+    if (rows.length <= 1) return;
+    const plotW = Number(plot.getAttribute("width"));
+    const H = plot.getAttribute("height");
+    const children = [...plot.childNodes];
+    const label = plot.getAttribute("aria-label") || "";
+    const built = rows.map((cols, r) => {
+      const start = r === 0 ? 0 : colX(cols[0]);
+      const end = r === rows.length - 1 ? plotW : colX(cols[cols.length - 1] + 1);
+      const keep = new Set(cols.map(String));
+      const part = plot.cloneNode(false);
+      part.setAttribute("width", end - start);
+      part.setAttribute("viewBox", `${start} 0 ${end - start} ${H}`);
+      if (r > 0) part.setAttribute("aria-label", `${label} Continued, row ${r + 1} of ${rows.length}.`);
+      else if (label) part.setAttribute("aria-label", `${label} Drawn in ${rows.length} rows.`);
+      for (const c of children) {
+        const col = c.getAttribute && c.getAttribute("data-col");
+        if (col === null || col === undefined) {
+          // A repeated decoration carries no id, so no id appears twice.
+          const copy = c.cloneNode(true);
+          if (copy.nodeType === 1) for (const n of [copy, ...copy.querySelectorAll("[id]")]) n.removeAttribute("id");
+          part.appendChild(copy);
+        }
+        else if (keep.has(col)) part.appendChild(c);
+      }
+      const line = row.cloneNode(false);
+      for (const c of row.children) {
+        if (c.contains(plot)) {
+          const frame = c.cloneNode(false);
+          frame.appendChild(part);
+          line.appendChild(frame);
+        } else {
+          const copy = c.cloneNode(true);
+          for (const n of [copy, ...copy.querySelectorAll("[id]")]) n.removeAttribute("id");
+          line.appendChild(copy);
+        }
+      }
+      line.classList.add("chart-row-wrapped");
+      return line;
+    });
+    row.replaceWith(...built);
+  }
+
   // A segment's fill: its color, or its hatch where the meaning is "not
   // measured work" (format.js SEGMENTS).
   function segmentFill(key, css) {
@@ -2390,7 +2515,9 @@
       });
       sizes[i] = Object.keys(geo).length ? geo : phone ? st.clientHeight : st.clientWidth;
     }
-    const L = W.ladderLanes(clock, sizes, { origin });
+    // A count badge's width grows with the reader's text size.
+    const k = chartTextScale(root);
+    const L = W.ladderLanes(clock, sizes, { origin, badge: (n) => (16 + 7 * String(n).length) * k });
     for (const [lane, groups] of [["prompt", L.prompts], ["pr", L.prs]]) {
       const buttons = [];
       for (const g of groups) {
@@ -2429,6 +2556,18 @@
         const range = geo && typeof geo === "object" && geo[g.step] ? geo[g.step] : [0, typeof geo === "number" ? geo : 0];
         if (g.count > 1) b.style.setProperty(phone ? "top" : "left", `${range[1] - range[0] > 2 * half ? Math.min(Math.max(g.pos, range[0] + half), range[1] - half) : (range[0] + range[1]) / 2}px`);
         buttons.push(b);
+      }
+      // Marks in neighbouring steps can still meet at the step boundary: move
+      // each one clear of the one before it in its strip, so no two marks
+      // (each a button) draw on top of one another.
+      const side = phone ? ["top", "bottom", "offsetHeight"] : ["left", "right", "offsetWidth"];
+      for (const st of strips) {
+        const own = buttons.filter((b) => st.contains(b)).sort((a, b) => a.getBoundingClientRect()[side[0]] - b.getBoundingClientRect()[side[0]]);
+        for (let i = 1; i < own.length; i++) {
+          const prev = own[i - 1].getBoundingClientRect()[side[1]];
+          const start = own[i].getBoundingClientRect()[side[0]];
+          if (start < prev + 1) own[i].style.setProperty(side[0], `${parseFloat(own[i].style.getPropertyValue(side[0])) + (prev + 1 - start)}px`);
+        }
       }
       roving(buttons);
     }
@@ -2954,12 +3093,19 @@
 
   // ------------------------------------------------------- the swimlane
 
-  const LANE_H = 26;
-  const LABEL_ROW_H = 30;
-  const AXIS_H = 24;
+  // Lane sizes grow with the reader's text size (set per drawing), so a
+  // lane's name always fits its lane.
+  let LANE_H = 26;
+  let LABEL_ROW_H = 30;
+  let AXIS_H = 24;
   // The Operator and Pull requests lanes, at the top.
-  const OP_H = 22;
-  const TOP_H = AXIS_H + 2 * OP_H;
+  let OP_H = 22;
+  let TOP_H = AXIS_H + 2 * OP_H;
+  let LABELS_W = 112;
+  function scaleLanes(k) {
+    LANE_H = Math.round(26 * k); LABEL_ROW_H = Math.round(30 * k); AXIS_H = Math.round(24 * k);
+    OP_H = Math.round(22 * k); TOP_H = AXIS_H + 2 * OP_H; LABELS_W = Math.round(112 * k);
+  }
 
   // The swimlane's Operator lane (a tick per prompt of this session, with a
   // band from the agent's stop to the prompt) and Pull requests lane (each
@@ -3090,6 +3236,7 @@
   }
 
   async function renderSwimlane(container, data, jobId, sessionId, select) {
+    scaleLanes(chartTextScale(container));
     const seq = ++walkSeq;
     container.innerHTML = "";
     const j = jobId ? data.jobs.find((x) => x.id === jobId) : null;
@@ -3155,9 +3302,16 @@
     const expandB = subs.length ? mk(`Show ${subs.length} subagent lane${subs.length === 1 ? "" : "s"}`, "Show one lane per subagent") : null;
     container.appendChild(controls);
 
+    // The one frame allowed to pan (spec 4.5): a precision timeline, named by
+    // a visible label and kept inside the page.
+    const frameLabel = el("p", "chart-caption lane-frame-label", "Session timeline. When zoomed in, scroll sideways inside this frame to move along the session.");
+    frameLabel.id = "lane-frame-label";
+    container.appendChild(frameLabel);
     const frame = el("div", "lane-frame");
     frame.setAttribute("tabindex", "0");
-    frame.setAttribute("aria-label", "The session swimlane; scroll sideways to move along the session");
+    frame.setAttribute("role", "region");
+    frame.setAttribute("aria-labelledby", "lane-frame-label");
+    frame.setAttribute("data-precision-frame", "");
     const inner = el("div", "lane-inner");
     const labels = el("div", "lane-labels");
     const plot = el("div", "lane-plot");
@@ -3173,7 +3327,7 @@
     const order = stretches.map((st, k) => k).sort((a, b) => stretches[a].start_ms - stretches[b].start_ms || a - b);
 
     const draw = () => {
-      const frameW = Math.max(200, frame.clientWidth - 112);
+      const frameW = Math.max(200, frame.clientWidth - LABELS_W);
       const steps = W.zoomSteps(span, frameW, 32768);
       zoom = Math.min(Math.max(1, zoom), steps[steps.length - 1]);
       inB.disabled = zoom >= steps[steps.length - 1];
@@ -3190,6 +3344,7 @@
       // Pinned labels.
       labels.innerHTML = "";
       labels.style.height = `${height}px`;
+      labels.style.width = `${LABELS_W}px`;
       const lab = (text, y, h, depth, cls) => {
         const d = el("div", `lane-label ${cls || ""}`, text);
         d.style.top = `${y}px`;
@@ -3330,7 +3485,7 @@
     };
     fitB.addEventListener("click", () => zoomTo(1));
     const fitTask = () => {
-      const frameW = Math.max(200, frame.clientWidth - 112);
+      const frameW = Math.max(200, frame.clientWidth - LABELS_W);
       const steps = W.zoomSteps(span, frameW, 32768);
       const want = span / (taskPart[1] - taskPart[0]);
       zoom = steps.filter((z) => z <= want).pop() || 1;
@@ -3557,28 +3712,41 @@
       return;
     }
     const phone = container.clientWidth < 600;
-    const H = phone ? 220 : 280;
+    let H = phone ? 220 : 280;
+    // Text-sized room grows with the reader's text size.
+    const k = chartTextScale(container);
+    const axisW = Math.round(SB.axisW * k);
+    let labelH = Math.round(SB.labelH * k);
+    let nameLen = 18;
     // "Share of each task": every bar is its own lead time as 0 to 100%, so
     // the bars are full height and their labels need room above them.
     const share = mode === "share";
-    const T = share ? 104 : SB.top;
-    const avail = Math.max(200, container.clientWidth - SB.axisW - 4);
-    // A few bars (agent working time mode) get wider columns.
-    const colW = Math.max(phone ? 28 : 26, Math.min(bars.length <= 12 ? 64 : 40, Math.floor(avail / bars.length)));
+    const T = Math.round((share ? 104 : SB.top) * k);
+    const avail = Math.max(120, container.clientWidth - axisW - 4);
+    // A few bars (agent working time mode) get wider columns; a column always
+    // holds its two rotated lines (name and finish day) at the text's size.
+    const minCol = Math.ceil(Math.max(24, 24 * k));
+    const colW = Math.max(minCol, Math.min(Math.max(minCol, bars.length <= 12 ? 64 : 40), Math.floor(avail / bars.length)));
+    // Bars that do not fit one row wrap into rows (never a sideways scroll).
+    const rowsOf = S.chartRows(bars.length, colW, avail - 12);
+    // Several rows on a phone are each shorter, so the chart stays near one screen's worth per two rows.
+    // Their rotated names are shorter too (the full name is on each bar's link).
+    if (rowsOf.length > 1 && phone) { H = 140; nameLen = 12; labelH = Math.round(84 * k); }
+    const rowOf = (i) => rowsOf.findIndex((r) => r.includes(i));
     const plotW = colW * bars.length + 8;
     const drawn = bars.filter((b) => b.state !== "no_data" && typeof b.total_ms === "number");
     // Headroom above the tallest bar for its value label.
     const scale = share ? { unit: "share", per: 1, max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total_ms)) * 1.15);
     const y = (ms) => T + H - (ms / scale.max_ms) * H;
-    const totalH = T + H + SB.labelH;
+    const totalH = T + H + labelH;
 
     const row = el("div", "sb-row");
     // The axis stays put while the bars scroll inside their frame.
-    const axis = svg("svg", { class: "sb-axis", width: SB.axisW, height: totalH, "aria-hidden": "true" });
-    axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone ? "% of lead time" : "% of each task's lead time") : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
+    const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
+    axis.appendChild(svg("text", { x: 12 * k, y: T + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? (phone || k > 1 ? "% of lead time" : "% of each task's lead time") : ((long, short) => (long.length * 6.2 * k <= H ? long : short))(`${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`, scale.unit === "hours" ? "Hours" : "Minutes");
     for (const t of scale.ticks) {
       const ty = y(t);
-      const tx = svg("text", { x: SB.axisW - 6, y: ty + 4, class: "axis-tick", "text-anchor": "end" });
+      const tx = svg("text", { x: axisW - 6, y: ty + 4 * k, class: "axis-tick", "text-anchor": "end" });
       tx.textContent = share ? `${Math.round(t * 100)}%` : S.tickWords(t, scale);
       axis.appendChild(tx);
     }
@@ -3589,14 +3757,16 @@
     for (const t of scale.ticks) plot.appendChild(svg("line", { x1: 0, x2: plotW, y1: y(t), y2: y(t), class: t === 0 ? "sb-base" : "sb-grid" }));
     // The two groups, named above the bars.
     const firstOpen = bars.findIndex((b) => b.group === "open");
-    const groupLabel = (x, text) => {
-      const t = svg("text", { x, y: 14, class: "sb-group" });
-      t.textContent = text;
+    // A group's name sits in its first column's row; the long form only where it fits that row.
+    const rowRoom = (i) => { const r = rowsOf[rowOf(i)] || []; return (r[r.length - 1] - i + 1) * colW; };
+    const groupLabel = (i, x, long, short) => {
+      const t = svg("text", { x, y: 14 * k, class: "sb-group", "data-col": i });
+      t.textContent = !phone && long.length * 7 * k < rowRoom(i) ? long : short;
       plot.appendChild(t);
     };
-    if (firstOpen !== 0) groupLabel(4, phone ? "Finished →" : "Finished, by finish day (UTC) →");
-    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: T + H, class: "sb-divider" }));
-    if (firstOpen >= 0) groupLabel(firstOpen * colW + 8, phone ? "Still open →" : "Still open, by when work began →");
+    if (firstOpen !== 0) groupLabel(0, 4, "Finished, by finish day (UTC) →", "Finished →");
+    if (firstOpen > 0) plot.appendChild(svg("line", { x1: firstOpen * colW + 2, x2: firstOpen * colW + 2, y1: 4, y2: T + H, class: "sb-divider", "data-col": firstOpen }));
+    if (firstOpen >= 0) groupLabel(firstOpen, firstOpen * colW + 8, "Still open, by when work began →", "Still open →");
 
     const barW = colW - 8;
     bars.forEach((b, i) => {
@@ -3604,7 +3774,8 @@
       const label = `${b.name}${b.finish && b.finish.kind !== "open" ? (b.finish.day ? `, finished ${F.finishLabel(b.finish)}` : `, finished, ${b.finish.words}`) : ""}: ${b.state === "no_data" ? "no data" : share ? (b.state === "unsplit" ? `lead time ${b.words}, split not known` : `${b.label} of a lead time of ${b.words}`) : b.words}${b.open ? ", still open" : ""}${b.unlabeled ? ", not labeled yet" : ""}${b.shared ? ", partial (labels from a shared session)" : ""}`;
       const a = svgLink(b.href, `${label}. Follow this task.`);
       a.setAttribute("class", `chart-link sb-col${b.open ? " is-open" : ""}`);
-      a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + SB.labelH - 6, class: "hit" }));
+      a.setAttribute("data-col", i);
+      a.appendChild(svg("rect", { x: i * colW + 4, y: T - 18, width: colW, height: H + 18 + labelH - 6, class: "hit" }));
       if (b.state === "no_data") {
         a.appendChild(svg("rect", { x: x0, y: T + H - 18, width: barW, height: 18, class: "sb-nodata" }));
         const q = svg("text", { x: x0 + barW / 2, y: T + H - 5, class: "sb-nodata-q", "text-anchor": "middle" });
@@ -3640,13 +3811,13 @@
       a.appendChild(v);
       // Under each bar: its finish day (UTC) and its name, two lines read upward.
       const dated = b.finish && b.finish.kind !== "open";
-      const lx = x0 + barW / 2 + (dated ? 9 : 4);
-      const ly = T + H + 8;
+      const lx = x0 + barW / 2 + (dated ? 9 : 4) * k;
+      const ly = T + H + 8 * k;
       const name = svg("text", { x: lx, y: ly, class: "sb-name", "text-anchor": "end", transform: `rotate(-90 ${lx} ${ly})` });
-      name.textContent = clip(b.name, 18);
+      name.textContent = clip(b.name, nameLen);
       a.appendChild(name);
       if (dated) {
-        const dx = lx - 11;
+        const dx = lx - 11 * k;
         const day = svg("text", { x: dx, y: ly, class: "sb-day", "text-anchor": "end", transform: `rotate(-90 ${dx} ${ly})` });
         day.textContent = b.finish.short;
         a.appendChild(day);
@@ -3669,17 +3840,20 @@
     if (marked && bars[marked.index] && bars[marked.index].job === marked.job) {
       const b = bars[marked.index];
       const cx = marked.index * colW + 8 + barW / 2;
-      const valueTop = Math.min(y(b.total_ms), T + H) - 4 - (b.label.length + (b.shared ? 1 : 0)) * 6.4 - 4;
-      const ty = 30;
-      const right = cx + 150 > plotW;
-      const t = svg("text", { x: right ? cx + 4 : cx - 4, y: ty, class: "sb-callout", "text-anchor": right ? "end" : "start" });
+      const valueTop = Math.min(y(b.total_ms), T + H) - 4 - (b.label.length + (b.shared ? 1 : 0)) * 6.4 * k - 4;
+      const ty = 30 * k;
+      // Anchored toward the side of its row with room for the words.
+      const own = rowsOf[rowOf(marked.index)] || [marked.index];
+      const right = rowRoom(marked.index) < (marked.index - own[0] + 1) * colW;
+      const t = svg("text", { x: right ? cx + 4 : cx - 4, y: ty, class: "sb-callout", "text-anchor": right ? "end" : "start", "data-col": marked.index });
       t.textContent = marked.label;
       plot.appendChild(t);
-      if (valueTop > ty + 6) plot.appendChild(svg("line", { x1: cx, x2: cx, y1: ty + 4, y2: valueTop, class: "sb-callout-line" }));
+      if (valueTop > ty + 6) plot.appendChild(svg("line", { x1: cx, x2: cx, y1: ty + 4, y2: valueTop, class: "sb-callout-line", "data-col": marked.index }));
     }
     frame.appendChild(plot);
     row.appendChild(frame);
     container.appendChild(row);
+    wrapColumnRows(row, plot, bars.length, colW, avail - 12, (i) => i * colW + 4);
 
     // The legend: the parts that appear, in stacking order, then the marks.
     const present = new Set(bars.flatMap((b) => b.segments.map((s) => (s.cause ? `wait_${s.cause}` : s.key))));
@@ -3729,18 +3903,6 @@
     const seg = SEGMENT_BY_KEY.get(row.segment);
     return seg && seg.fill === "solid" ? `var(${seg.token})` : "var(--c-waste-unknown)";
   }
-  // A frame that scrolls inside itself opens at its newest (right) end, and
-  // says so when it scrolls.
-  function newestInView(frame, cueParent) {
-    const fix = () => {
-      if (frame.scrollWidth > frame.clientWidth + 1) {
-        frame.scrollLeft = frame.scrollWidth;
-        if (cueParent && !cueParent.querySelector(":scope > .ot-cue")) cueParent.appendChild(el("p", "ot-cue", "← Older weeks: scroll this chart sideways. The newest week is on the right."));
-      }
-    };
-    fix();
-    requestAnimationFrame(fix);
-  }
   // A small arrow under a week whose days are bounds (B1): left when its
   // tasks may have finished earlier, right when later, both ways for both.
   function dayBracket(parent, x0, w, y, bracket) {
@@ -3757,22 +3919,28 @@
     container.innerHTML = "";
     const bars = S.weekBars(ot, mode);
     const share = mode === "share";
-    const axisW = SB.axisW;
-    const avail = Math.max(200, container.clientWidth - axisW - 4);
-    const ax = S.weekAxis(bars.length, avail, { min: 10, max: 96, labelPx: 52, valuePx: 34 });
+    // Text-sized room grows with the reader's text size; the weeks always
+    // fit the frame (labels are thinned instead), so the chart never pans.
+    const k = chartTextScale(container);
+    const axisW = Math.round(SB.axisW * k);
+    const avail = Math.max(100, container.clientWidth - axisW - 4);
+    const ax = S.weekAxis(bars.length, avail, { min: 1, max: 96, labelPx: 52 * k, valuePx: 34 * k });
     const H = container.clientWidth < 600 ? 200 : 240;
-    const T = 22;
+    const T = Math.round(22 * k);
+    // "n/m not split" under a bar only where every such line fits its column.
+    const unsplitWords = (b) => `${b.unsplit.n}/${b.unsplit.of} not split`;
+    const showUnsplit = ax.showValues && bars.every((b) => !(b.unsplit && b.unsplit.n) || unsplitWords(b).length * 6.2 * k + 4 <= ax.colW);
     const drawn = bars.filter((b) => !b.empty && typeof b.total === "number");
     const scale = share ? { unit: "share", max_ms: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : S.timeScale(Math.max(0, ...drawn.map((b) => b.total)) * 1.1);
     const y = (v) => T + H - (v / scale.max_ms) * H;
     // A line under the week labels when any week has tasks with no split.
     const anyUnsplit = bars.some((b) => b.unsplit && b.unsplit.n > 0);
-    const totalH = T + H + 46 + (anyUnsplit ? 16 : 0);
+    const totalH = T + H + Math.round((46 + (anyUnsplit && showUnsplit ? 16 : 0)) * k);
     const row = el("div", "sb-row");
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
-    axis.appendChild(svg("text", { x: 12, y: T + H / 2, class: "axis-title", transform: `rotate(-90 12 ${T + H / 2})`, "text-anchor": "middle" })).textContent = share ? "% of the week's lead time" : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`;
+    axis.appendChild(svg("text", { x: 12 * k, y: T + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${T + H / 2})`, "text-anchor": "middle" })).textContent = ((long, short) => (long.length * 6.2 * k <= H ? long : short))(share ? "% of the week's lead time" : `${scale.unit === "hours" ? "Hours" : "Minutes"}${mode === "working" ? " of agent work" : " elapsed"}`, share ? "% of lead time" : scale.unit === "hours" ? "Hours" : "Minutes");
     for (const t of scale.ticks) {
-      const tx = svg("text", { x: axisW - 6, y: y(t) + 4, class: "axis-tick", "text-anchor": "end" });
+      const tx = svg("text", { x: axisW - 6, y: y(t) + 4 * k, class: "axis-tick", "text-anchor": "end" });
       tx.textContent = share ? `${Math.round(t * 100)}%` : S.tickWords(t, scale);
       axis.appendChild(tx);
     }
@@ -3822,14 +3990,14 @@
       if (ax.brackets) dayBracket(g, x0, ax.colW, T + H + 8, b.days && b.days.bracket);
       const lab = ax.labels.find((l) => l.i === i);
       if (lab) {
-        const t = svg("text", { x: lab.x + (x0 - i * ax.colW), y: T + H + 26, class: "axis-tick", "text-anchor": lab.anchor });
+        const t = svg("text", { x: lab.x + (x0 - i * ax.colW), y: T + H + 26 * k, class: "axis-tick", "text-anchor": lab.anchor });
         t.textContent = b.label;
         g.appendChild(t);
       }
       // Under the bar: how many of its tasks have no working/waiting split yet (A1 I7).
-      if (b.unsplit && b.unsplit.n && ax.showValues) {
-        const t = svg("text", { x: x0 + ax.colW / 2, y: T + H + 42, class: "axis-tick ot-unsplit", "text-anchor": "middle" });
-        t.textContent = `${b.unsplit.n}/${b.unsplit.of} not split`;
+      if (b.unsplit && b.unsplit.n && showUnsplit) {
+        const t = svg("text", { x: x0 + ax.colW / 2, y: T + H + 42 * k, class: "axis-tick ot-unsplit", "text-anchor": "middle" });
+        t.textContent = unsplitWords(b);
         g.appendChild(t);
       }
       markTip(g, `Week of ${b.label} (UTC)`, b.empty ? [{ label: "Tasks", value: "none finished" }] : [{ label: "Tasks", value: b.count }, { label: "Finish days", value: b.days.words }, ...(b.unsplit && b.unsplit.n ? [{ label: b.unsplit.final ? "No split" : "No split yet", value: b.unsplit.words }] : []), { label: share ? "Lead time (as 100%)" : mode === "working" ? "Agent working time" : "Lead time", value: b.totalWords }]);
@@ -3838,7 +4006,6 @@
     frame.appendChild(plot);
     row.appendChild(frame);
     container.appendChild(row);
-    newestInView(frame, container);
     const present = new Map();
     for (const b of bars) for (const s of b.segments) if (!present.has(s.key)) present.set(s.key, s);
     const ul = el("ul", "tw-legend");
@@ -3855,6 +4022,7 @@
       const p = el("p", "chart-caption ot-unsplit-note", S.unsplitNote(unsplitWeeks));
       container.appendChild(p);
     }
+    if (!showUnsplit && unsplitWeeks.length) container.appendChild(el("p", "chart-caption", "The columns are too narrow to say under each bar how many of its tasks have no split; the table below gives each week's count."));
     container.appendChild(el("p", "chart-caption", `The number above a bar is how many tasks finished that week; * marks a thin week (fewer than 3). A dashed slot is a week with no finished task, never a zero bar. Hatched parts are partial. Weeks are labeled by the Monday they start on${ax.every > 1 ? `, every ${ax.every} weeks` : ""}.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here; the table below gives each week's days."}`));
   }
 
@@ -3921,7 +4089,6 @@
     const wrap = el("div", "table-wrap ot-scroll");
     wrap.appendChild(table);
     container.appendChild(wrap);
-    newestInView(wrap, container);
   }
 
   // Flow efficiency by finish week (I4, I5): each task's value as the range
@@ -3933,17 +4100,19 @@
       return;
     }
     const weeks = ot.fe.weeks;
-    const axisW = SB.axisW;
-    const avail = Math.max(200, container.clientWidth - axisW - 4);
-    const ax = S.weekAxis(weeks.length, avail, { min: 12, max: 160, labelPx: 52, valuePx: 40 });
+    // The weeks always fit the frame (labels are thinned instead): no pan.
+    const k = chartTextScale(container);
+    const axisW = Math.round(SB.axisW * k);
+    const avail = Math.max(100, container.clientWidth - axisW - 4);
+    const ax = S.weekAxis(weeks.length, avail, { min: 1, max: 160, labelPx: 52 * k, valuePx: 40 * k });
     const H = container.clientWidth < 600 ? 180 : 210;
-    const top = 16;
-    const totalH = top + H + 46;
+    const top = Math.round(16 * k);
+    const totalH = top + H + Math.round(46 * k);
     const y = (v) => top + H - Math.min(1, Math.max(0, v)) * H;
     const row = el("div", "sb-row");
     const axis = svg("svg", { class: "sb-axis", width: axisW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.25, 0.5, 0.75, 1]) {
-      const tx = svg("text", { x: axisW - 6, y: y(t) + 4, class: "axis-tick", "text-anchor": "end" });
+      const tx = svg("text", { x: axisW - 6, y: y(t) + 4 * k, class: "axis-tick", "text-anchor": "end" });
       tx.textContent = `${Math.round(t * 100)}%`;
       axis.appendChild(tx);
     }
@@ -3955,7 +4124,7 @@
       const x0 = i * ax.colW;
       const wk = ot.weeks[i];
       const hasMedian = w.median && w.median.value !== null && w.median.value !== undefined;
-      const L = S.feLayout(ax.colW, w.marks.length, { labelPx: hasMedian && ax.showValues ? Math.max(30, 7 * String(w.median.short || "").length + 6) : ax.colW });
+      const L = S.feLayout(ax.colW, w.marks.length, { labelPx: hasMedian && ax.showValues ? Math.max(30, 7 * k * String(w.median.short || "").length + 6) : ax.colW });
       w.marks.forEach((p, k) => {
         const cx = x0 + L.xs[k];
         const a = svgLink(p.href, `${p.name}: finished ${F.finishLabel(p.finish)}; flow efficiency ${p.words}. Follow this task.`);
@@ -3990,7 +4159,7 @@
       if (ax.brackets) dayBracket(plot, x0, ax.colW, top + H + 8, wk.days && wk.days.bracket);
       const lab = ax.labels.find((l) => l.i === i);
       if (lab) {
-        const t = svg("text", { x: lab.x + (x0 - i * ax.colW), y: top + H + 26, class: "axis-tick", "text-anchor": lab.anchor });
+        const t = svg("text", { x: lab.x + (x0 - i * ax.colW), y: top + H + 26 * k, class: "axis-tick", "text-anchor": lab.anchor });
         t.textContent = w.label;
         plot.appendChild(t);
       }
@@ -3998,7 +4167,6 @@
     frame.appendChild(plot);
     row.appendChild(frame);
     container.appendChild(row);
-    newestInView(frame, container);
     const omitted = ot.fe.omitted.length;
     container.appendChild(el("p", "chart-caption", `${ot.fe.n} finished task${ot.fe.n === 1 ? "" : "s"} drawn${omitted ? `; ${omitted} more ${omitted === 1 ? "has" : "have"} a finish day but no flow efficiency figure (named in the table below the charts)` : ""}. Each week's median, in words, is in the table below.${ax.brackets ? "" : " The columns are too narrow for the arrows that mark bounded days, so they are left out here."}`));
   }
@@ -4122,7 +4290,10 @@
         cb.appendChild(tr);
       }
       compact.appendChild(cb);
-      container.appendChild(compact);
+      // In a holder, so it too becomes cards when larger text needs the room.
+      const holder = el("div", "table-wrap");
+      holder.appendChild(compact);
+      container.appendChild(holder);
       const det = el("details", "full-table");
       const summary = document.createElement("summary");
       summary.textContent = S.fullTableSummary(bars.length);
@@ -4328,6 +4499,9 @@
       const detail = el("details", "comparison-history"); detail.appendChild(el("summary", null, "Recorded changes over time (additional evidence)"));
       overtime.before(detail); detail.appendChild(overtime);
     }
+    // Closed below the conclusion; its summary states the one-line takeaway (every week stays in the table).
+    const otSummary = overtime.parentElement.querySelector(":scope > summary");
+    if (otSummary) otSummary.textContent = ot && ot.state !== "absent" && ot.trend && ot.trend.words ? `Over time: ${ot.trend.words}` : "Recorded changes over time (additional evidence)";
     const OT_CAPTION = {
       share: "Each week's lead time as 100%, in the stack-up's colors and order, so a week of 5 tasks and a week of 1 compare: working time by label from the base up, then waiting by what it waited on.",
       all: "Hours of all elapsed time per finish week, linear from zero: a week with more or longer tasks is taller, so compare shapes with care or switch to the share of lead time.",
@@ -4442,17 +4616,22 @@
       return;
     }
     const n = model.bars.length;
-    const leftW = 50;
-    const rightW = 46;
+    // Text-sized room grows with the reader's text size.
+    const k = chartTextScale(container);
+    const leftW = Math.round(50 * k);
+    const rightW = Math.round(46 * k);
     const phone = container.clientWidth < 600;
-    const width = Math.max(300, container.clientWidth);
-    const colW = Math.min(120, Math.max(phone ? 70 : 78, Math.floor((width - leftW - rightW) / Math.max(n, 3))));
-    // The frame's end is padded by the pinned axis's width, so the last
-    // bar's label shows whole, clear of the fade, when scrolled fully right.
-    const plotW = colW * n + (phone ? rightW : 8);
+    const width = Math.max(200, container.clientWidth);
+    const avail = Math.max(60, width - leftW - rightW - 4);
+    // On a phone a column holds the bar's number; otherwise its name, in lines.
+    const minCol = Math.ceil((phone ? 30 : 78) * k);
+    const colW = Math.min(Math.max(minCol, 120), Math.max(minCol, Math.floor(avail / Math.max(n, 3))));
+    // Bars that do not fit one row wrap into rows (never a sideways scroll).
+    const plotW = colW * n + 8;
     const H = phone ? 220 : 260;
-    const top = 26;
-    const labelH = 62;
+    const top = Math.round(26 * k);
+    const lineH = 13 * k;
+    const labelH = Math.round(15 * k + (phone ? 1 : 4) * lineH);
     const totalH = top + H + labelH;
     const scale = S.timeScale(model.bars[0].ms);
     const y = (ms) => top + H - (ms / scale.max_ms) * H;
@@ -4462,22 +4641,25 @@
     const row = el("div", "sb-row pareto-row");
     const left = svg("svg", { class: "sb-axis", width: leftW, height: totalH, "aria-hidden": "true" });
     for (const t of scale.ticks) {
-      const tx = svg("text", { x: leftW - 6, y: y(t) + 4, class: "axis-tick", "text-anchor": "end" });
+      const tx = svg("text", { x: leftW - 6, y: y(t) + 4 * k, class: "axis-tick", "text-anchor": "end" });
       tx.textContent = S.tickWords(t, scale);
       left.appendChild(tx);
     }
-    const lt = svg("text", { x: 12, y: top + H / 2, class: "axis-title", transform: `rotate(-90 12 ${top + H / 2})`, "text-anchor": "middle" });
-    lt.textContent = S.paretoAxisTitle(scale.unit);
+    const lt = svg("text", { x: 12 * k, y: top + H / 2, class: "axis-title", transform: `rotate(-90 ${12 * k} ${top + H / 2})`, "text-anchor": "middle" });
+    // An axis title longer than the axis takes its short form (larger text); the caption keeps the long one.
+    const fits = (text) => text.length * 6.2 * k <= H;
+    const longTitle = S.paretoAxisTitle(scale.unit);
+    lt.textContent = fits(longTitle) ? longTitle : longTitle.split(",")[0];
     left.appendChild(lt);
     const right = svg("svg", { class: "sb-axis", width: rightW, height: totalH, "aria-hidden": "true" });
     for (const t of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
-      const tx = svg("text", { x: 4, y: yc(t) + 4, class: "axis-tick" });
+      const tx = svg("text", { x: 4, y: yc(t) + 4 * k, class: "axis-tick" });
       tx.textContent = `${Math.round(t * 100)}%`;
       right.appendChild(tx);
     }
-    const rx = rightW - 8;
+    const rx = rightW - 8 * k;
     const rt = svg("text", { x: rx, y: top + H / 2, class: "axis-title", transform: `rotate(90 ${rx} ${top + H / 2})`, "text-anchor": "middle" });
-    rt.textContent = "Running total, % of time";
+    rt.textContent = fits("Running total, % of time") ? "Running total, % of time" : "Running total";
     right.appendChild(rt);
     const frame = el("div", "chart-frame pareto-frame");
     const root = svg("svg", { class: "pareto", width: plotW, height: totalH, role: "group", "aria-label": `Pareto chart of ${n} causes, ${model.mode === "working" ? "agent working time" : "all elapsed time"}: bars in ${scale.unit} from zero, largest first, with the running total as a line on a 0 to 100% axis. Each bar is a link to its cause.` });
@@ -4488,6 +4670,7 @@
       const cx = i * colW + colW / 2;
       const words = `${b.label}: ${S.hoursWords(b.ms)}, ${W.pctWords(b.share)} of the time; running total ${S.cumWords(b.cum)}`;
       const a = b.href ? svgLink(b.href, `${words}. Open this cause.`) : svg("g", { class: "chart-other", tabindex: "0", role: "img", "aria-label": `${words}. Folded in: ${b.members.map((k) => W.causeWords(k)).join("; ")}.` });
+      a.setAttribute("data-col", i);
       a.appendChild(svg("rect", { x: i * colW, y: 0, width: colW, height: totalH, class: "hit" }));
       const r = svg("rect", { x: cx - barW / 2, y: y(b.ms), width: barW, height: Math.max(0, top + H - y(b.ms)), class: "pareto-bar" });
       r.style.fill = causeFill(b);
@@ -4519,8 +4702,8 @@
       v.textContent = S.hoursShort(b.ms);
       a.appendChild(v);
       // A phone's narrow columns take the bar's number; the names follow as a list.
-      (phone ? [String(i + 1)] : wrapWords(b.label, Math.max(9, Math.floor(colW / 6.6)), 4)).forEach((line, k) => {
-        const t = svg("text", { x: cx, y: top + H + 15 + k * 13, class: phone ? "pareto-name pareto-num" : "pareto-name", "text-anchor": "middle" });
+      (phone ? [String(i + 1)] : wrapWords(b.label, Math.max(4, Math.floor(colW / (6.6 * k))), 4)).forEach((line, li) => {
+        const t = svg("text", { x: cx, y: top + H + 15 * k + li * lineH, class: phone ? "pareto-name pareto-num" : "pareto-name", "text-anchor": "middle" });
         t.textContent = line;
         a.appendChild(t);
       });
@@ -4540,6 +4723,7 @@
     frame.appendChild(root);
     row.append(left, frame, right);
     container.appendChild(row);
+    wrapColumnRows(row, root, n, colW, avail - 8, (i) => i * colW);
     if (phone) {
       // The bars' names, numbered as under the bars.
       const ol = el("ol", "pareto-names");
@@ -5171,7 +5355,8 @@
       const view = document.body.dataset.view;
       if (!lastStepRender || (view !== "compare" && view !== "causes")) return;
       const node = document.getElementById(view === "compare" ? "stackup" : "pareto");
-      if (!node || Math.abs(node.clientWidth - lastStepWidth) < 40) return;
+      // Any change of width redraws: a chart always fits its frame and never pans.
+      if (!node || node.clientWidth === lastStepWidth) return;
       lastStepWidth = node.clientWidth;
       lastStepRender();
     }, 150);

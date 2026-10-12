@@ -446,7 +446,7 @@ test("an unavailable flow efficiency carrying the lead-time floor reason passes 
 
 test("at phone width a task card's values wrap inside the card, so the page never scrolls sideways", () => {
   const css = read("site/src/styles.css")
-  const phone = css.slice(css.indexOf("@media (max-width: 720px) {\n  .task-table thead"))
+  const phone = css.slice(css.indexOf("@container (width <= 42.5em) {\n  .task-table thead"))
   const block = phone.slice(0, phone.indexOf("\n}\n"))
   assert.match(block, /table\.data-table\.task-table td \{ white-space: normal; \}/)
   assert.match(block, /\.task-table td > \* \{ min-width: 0; overflow-wrap: anywhere; \}/)
@@ -462,4 +462,14 @@ test("no view scrolls the page sideways: grids never ask for more than their col
   // Task names wrap between words only, so a key never splits mid-word and a long name never pushes the other columns away.
   assert.match(css, /table\.data-table\.task-table td\.task-cell \{ min-width: 18ch; max-width: 30ch; \}/)
   assert.match(css, /table\.data-table\.task-table td\.task-cell a \{ overflow-wrap: normal; word-break: normal; \}/)
+})
+
+test("a task table turns into stacked cards by the room its text needs, not by the window, so larger text never makes it scroll", () => {
+  const css = read("site/src/styles.css")
+  // The table's holder is the query container; the switch point is in em, so it moves with the reader's text size.
+  assert.match(css, /#jobs-table, #trend, \.block:has\(> table\.task-table\) \{ container-type: inline-size; \}/)
+  assert.match(css, /@container \(width <= 42\.5em\) \{\n  \.task-table thead/)
+  assert.match(css, /@container \(width > 42\.5em\) \{/)
+  // No task-table rule still switches on the window width.
+  assert.doesNotMatch(css, /@media \((max|min)-width: 72[01]px\) \{\n[^}]*task-table/)
 })

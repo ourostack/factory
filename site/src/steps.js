@@ -1720,6 +1720,53 @@
       ...s, emphasized: !valid || segmentCategory(s) === valid || (valid === "waiting" && !!s.cause),
     })) }));
   }
+  // Layout without sideways scrolling (spec 4.5).
+  // The label of each column, from a header row's cells and their spans, so a
+  // table shown as stacked cards names every value.
+  function columnLabels(cells) {
+    const out = [];
+    for (const c of Array.isArray(cells) ? cells : []) {
+      const span = Number.isSafeInteger(c && c.span) && c.span > 0 ? c.span : 1;
+      for (let i = 0; i < span; i++) out.push(String((c && c.text) || "").trim());
+    }
+    return out;
+  }
+  // The column each body cell starts in, honoring row and column spans.
+  function bodyCellColumns(rows) {
+    const taken = [];
+    return (Array.isArray(rows) ? rows : []).map((cells, r) => {
+      const busy = taken[r] || new Set();
+      let col = 0;
+      return (Array.isArray(cells) ? cells : []).map((c) => {
+        while (busy.has(col)) col++;
+        const start = col;
+        const cs = Number.isSafeInteger(c && c.colSpan) && c.colSpan > 0 ? c.colSpan : 1;
+        const rs = Number.isSafeInteger(c && c.rowSpan) && c.rowSpan > 0 ? c.rowSpan : 1;
+        for (let k = 1; k < rs; k++) { taken[r + k] = taken[r + k] || new Set(); for (let j = 0; j < cs; j++) taken[r + k].add(start + j); }
+        col += cs;
+        return start;
+      });
+    });
+  }
+  // A column chart too wide for its frame wraps into rows of whole columns:
+  // as many as fit in a row, never fewer than one.
+  function chartRows(n, colW, avail) {
+    const per = Math.max(1, Math.floor(avail / Math.max(1, colW)));
+    const rows = [];
+    for (let i = 0; i < n; i += per) rows.push(Array.from({ length: Math.min(per, n - i) }, (_, k) => i + k));
+    return rows;
+  }
+  // Labels that do not fit every slot are shown every nth slot, counted back
+  // from the newest, which always keeps its label; the table keeps them all.
+  function labelStride(n, slotPx, labelPx) {
+    if (!(slotPx > 0)) return Math.max(1, n);
+    return Math.max(1, Math.min(Math.max(1, n), Math.ceil(labelPx / slotPx)));
+  }
+  function thinnedLabels(n, stride) {
+    const kept = [];
+    for (let i = n - 1; i >= 0; i -= Math.max(1, stride)) kept.unshift(i);
+    return kept;
+  }
   // The one plain sentence that opens Improvements: what triage has
   // reviewed, then how many published improvement issues follow.
   function improvementStatus({ queue, issues, issuesVerified }) {
@@ -1792,6 +1839,11 @@
     lifecycleLabel,
     improvementStatus,
     improvementPresentation,
+    columnLabels,
+    bodyCellColumns,
+    chartRows,
+    labelStride,
+    thinnedLabels,
     findingMeaning,
     paretoNames,
     unsplitOf,

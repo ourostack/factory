@@ -248,13 +248,14 @@ main:focus, h1:focus { outline: none; }
 }
 .why-link[aria-current="page"] { text-decoration: underline; }
 
-/* At phone width the four steps sit in a two-by-two grid, so nothing
-   scrolls sideways. */
+/* At phone width the four steps sit two to a row, so nothing scrolls
+   sideways. A step whose name no longer fits half the row (larger text)
+   takes a row of its own instead of being cut. */
 @media (max-width: 600px) {
   .topbar-row { gap: 6px 12px; }
   .site-name { flex: 1 1 auto; }
-  .steps { order: 3; flex: 1 1 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .step { justify-content: flex-start; padding: 6px 10px; font-size: 14px; white-space: normal; border-color: var(--border); border-radius: var(--radius); }
+  .steps { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+  .step { flex: 1 1 calc(50% - 3px); justify-content: flex-start; padding: 6px 10px; font-size: 14px; white-space: normal; border-color: var(--border); border-radius: var(--radius); }
 }
 
 /* ---------- The status line: quiet when normal, loud when abnormal ---------- */
@@ -686,9 +687,12 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .task-table { width: 100%; min-width: 0 !important; }
 .task-table td { vertical-align: top; }
 
-/* At phone width a table row becomes a stacked list item: each cell says
-   what it is. The row holds a link, so it keeps a hairline divider. */
-@media (max-width: 720px) {
+/* When its holder is narrow for its text (a phone, or larger text) a table
+   row becomes a stacked list item: each cell says what it is. The row holds
+   a link, so it keeps a hairline divider. The switch point is in em, so it
+   moves with the reader's text size: 42.5em is a 720px window at 16px. */
+#jobs-table, #trend, .block:has(> table.task-table) { container-type: inline-size; }
+@container (width <= 42.5em) {
   .task-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .task-table, .task-table tbody, .task-table tr, .task-table td { display: block; width: 100%; }
   .task-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
@@ -701,7 +705,7 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
   .task-table td.task-cell { display: block; text-align: left; font-size: 16px; padding-bottom: 4px; }
   .task-table td.task-cell::before { content: none; }
 }
-@media (min-width: 721px) {
+@container (width > 42.5em) {
   /* A figure stays on one line; its "partial" flag may drop below it, so the number columns do not crowd out the task name. */
   .task-table .outcome, .task-table .top-waste { white-space: nowrap; }
   table.data-table.task-table td.num { white-space: normal; }
@@ -717,7 +721,7 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
    the task table's text cells wrap. */
 #jobs-table, .block:has(> table.data-table) { overflow-x: auto; }
 #jobs-table, .block, .table-wrap { position: relative; }
-@media (min-width: 721px) {
+@container (width > 42.5em) {
   table.data-table.task-table td:not(.num) { white-space: normal; }
   /* A task name (or anonymous key) wraps between words only, in a column wide enough to read. */
   table.data-table.task-table td.task-cell { min-width: 18ch; max-width: 30ch; }
@@ -753,11 +757,14 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 /* The task picker: a compact list, the latest to finish first. */
 .picker { margin: 0 0 22px; font-size: 14px; }
 .picker-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 6px; }
-.picker-label { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); flex: 1 1 260px; }
+/* The search box starts at 8em and grows; with larger text it moves under
+   its label rather than past the window's edge. */
+.picker-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; color: var(--text-secondary); flex: 1 1 260px; min-width: 0; }
 .picker-search {
   font: inherit;
   flex: 1 1 auto;
   min-width: 0;
+  width: 8em;
   max-width: 22em;
   padding: 4px 8px;
   border: 1px solid var(--border);
@@ -1111,13 +1118,16 @@ table.data-table.handoffs-table th { white-space: normal; vertical-align: bottom
    under the name; a waiting cause's "Rank this cause" link has its own
    column, so nothing in one row can run into the next. */
 .tw-legend-buttons { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
-.tw-legend-buttons li { display: grid; grid-template-columns: minmax(min(10em, 100%), 1fr) auto; align-items: start; gap: 0 12px; }
+.tw-legend-buttons li { display: flex; flex-wrap: wrap; align-items: start; gap: 0 12px; }
+.tw-legend-buttons li > .tw-row { flex: 1 1 10em; }
+/* With larger text the link moves under the row rather than off screen. */
+.tw-legend-buttons li > .tw-cause-link { flex: 0 1 auto; min-width: 0; }
 .tw-row { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0 8px; font: inherit; color: inherit; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; margin-left: -6px; cursor: pointer; }
 .tw-row > .swatch { align-self: start; margin-top: 0.3em; }
 .tw-row > .tw-ms { grid-column: 2; white-space: normal; }
 .tw-row:hover { background: var(--surface-1); border-color: var(--border); }
 .tw-row[aria-pressed="true"] { background: color-mix(in srgb, var(--focus) 12%, transparent); border-color: var(--focus); }
-.tw-cause-link { font-size: 13px; white-space: nowrap; padding-top: 4px; }
+.tw-cause-link { font-size: 13px; padding-top: 4px; }
 .tw-name { min-width: 0; }
 .tw-ms { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cause-list { margin: 6px 0 4px; padding-left: 22px; }
@@ -1237,7 +1247,8 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 
 /* ---------- Steps 2 to 4: compare, rank, act ---------- */
 .compare-lede, .causes-lede { color: var(--text-primary); }
-.mode-toggle { display: inline-flex; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+/* The choices wrap onto a second line rather than run past the page. */
+.mode-toggle { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .mode-btn, .ot-btn { font: inherit; font-size: 14px; padding: 6px 12px; min-height: 36px; background: var(--surface-1); color: var(--text-secondary); border: 0; cursor: pointer; }
 .mode-btn + .mode-btn, .ot-btn + .ot-btn { border-left: 1px solid var(--border); }
 .mode-btn[aria-pressed="true"], .ot-btn[aria-pressed="true"] { background: var(--text-primary); color: var(--page-plane); font-weight: 600; }
@@ -1320,7 +1331,6 @@ table.data-table.ot-table td:first-child { white-space: nowrap; }
 .fe-hollow { fill: var(--page-plane); }
 .sb-table td:first-child { white-space: normal; min-width: 14em; max-width: 24em; }
 .sb-table td.sb-note { white-space: normal; min-width: 12em; color: var(--text-secondary); }
-table.data-table td, table.data-table th { min-width: 60px; }
 .pareto-bar { stroke-width: 0; }
 .pareto-name { font-size: 11.5px; fill: var(--text-secondary); }
 .pareto-line { fill: none; stroke: var(--text-primary); stroke-width: 1.6; }
@@ -1351,8 +1361,10 @@ table.data-table td, table.data-table th { min-width: 60px; }
 /* Compare's phone table: three columns that fit the screen. */
 table.data-table.sb-compact { min-width: 0; font-size: 13px; }
 table.data-table.sb-compact th, table.data-table.sb-compact td { padding: 5px 6px; }
-/* The task's name takes the room the two figures leave, cut with an ellipsis. */
-table.data-table.sb-compact td:first-child { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The task's name takes the room the two figures leave and wraps there (spec 4.3). */
+table.data-table.sb-compact td:first-child { width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* The two figures' headings wrap between words, so the name keeps the most room. */
+table.data-table.sb-compact th { white-space: normal; }
 table.data-table.sb-compact th:first-child, table.data-table.sb-compact td:first-child { padding-left: 0; }
 table.data-table.sb-compact th:last-child, table.data-table.sb-compact td:last-child { padding-right: 0; }
 details.full-table { margin-top: 10px; }
@@ -1384,7 +1396,10 @@ details.full-table[open] > summary::before, details.unlabeled-list[open] > summa
 .act-head { margin: 0 0 4px; font-weight: 600; }
 .act-ref { font-weight: 450; color: var(--text-muted); font-size: 14px; }
 .act-facts { margin: 0; display: grid; gap: 2px; font-size: 14px; }
-.act-facts > div { display: grid; grid-template-columns: minmax(7.5em, 10em) minmax(0, 1fr); gap: 10px; }
+/* The term and its value sit side by side; with larger text the value moves under the term. */
+.act-facts > div { display: flex; flex-wrap: wrap; gap: 0 10px; }
+.act-facts dt { flex: 0 0 auto; width: min(10em, 100%); }
+.act-facts dd { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
 .act-facts dt { color: var(--text-secondary); }
 .act-facts dd { margin: 0; }
 .owner-list li { margin-bottom: 4px; }
@@ -1509,3 +1524,32 @@ table.data-table.task-list-table td, table.data-table.task-list-table th { white
   .task-list-table td { padding: .35rem 0; }
   .task-list-table td::before { content: attr(data-label) ": "; display: block; font-weight: 600; font-size: .8rem; }
 }
+
+/* ---------- Tables that do not fit wrap, then become stacked cards ----------
+   First, a wide table's text cells wrap (fit-wrap). Each column keeps a
+   text-sized minimum, so a table only stays a table while every column has
+   room for a few words; long identifiers may break inside the word. */
+.fit-wrap > table.data-table td, .fit-wrap > table.data-table th { min-width: 3.5em; max-width: none; white-space: normal !important; overflow-wrap: normal; }
+.fit-wrap > table.data-table td { overflow-wrap: anywhere; }
+.fit-wrap > table.data-table td:first-child { min-width: 6em; }
+.fit-wrap > table.data-table td.num .num-value { white-space: nowrap; }
+.table-wrap { container-type: inline-size; }
+
+/* app.js adds .stacked to a table's holder when the wrapped table is still
+   wider than it. Each row becomes a card and each cell starts with its
+   column heading, on the same line as its value. app.js keeps the table
+   roles (table, row, cell, columnheader) so screen readers keep the
+   structure that display: block would drop. */
+.stacked > table.data-table { min-width: 0 !important; width: 100%; }
+.stacked > table.data-table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.stacked > table.data-table, .stacked > table.data-table > tbody, .stacked > table.data-table > tbody > tr, .stacked > table.data-table > tbody > tr > td, .stacked > table.data-table > tbody > tr > th, .stacked > table.data-table > tfoot, .stacked > table.data-table > tfoot > tr, .stacked > table.data-table > tfoot > tr > td { display: block; width: 100% !important; max-width: none; }
+.stacked > table.data-table > caption { display: block; text-align: left; }
+.stacked > table.data-table tr { border-bottom: 1px solid var(--border); padding: 8px 0; }
+.stacked > table.data-table td, .stacked > table.data-table tbody th { border: 0; padding: 1px 0; text-align: left; white-space: normal !important; overflow-wrap: anywhere; min-width: 0 !important; }
+.stacked > table.data-table td::before, .stacked > table.data-table tbody th::before { content: attr(data-label) ": "; color: var(--text-secondary); font-size: .8em; font-weight: 600; }
+.stacked > table.data-table td:not([data-label])::before, .stacked > table.data-table tbody th:not([data-label])::before, .stacked > table.data-table td[data-label=""]::before { content: none; }
+/* On a wide holder the cards sit side by side. */
+@container (width > 560px) {
+  .stacked > table.data-table > tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 0 24px; }
+}
+
