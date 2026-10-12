@@ -98,6 +98,8 @@ test("pctWords and shortPct follow the rule, swept near both edges; a short boun
     for (const b of [undefined, "lower", "upper", "unknown"]) {
       const t = S.shortPct(v, b)
       assert.doesNotMatch(t, /[≥≤~]\s*</, `${b} ${v}: ${t}`)
+      // An open direction at the edge says its one way off.
+      if (b === "unknown" && (v === 0 || v === 1)) { assert.equal(t, v === 0 ? "≥0%" : "≤100%"); continue }
       const sign = SIGN[b] || ""
       const body = t.startsWith(sign) ? t.slice(sign.length) : t
       if (body === "<1%") { assert.ok(!b && v > 0 && p < 1, `${b} ${v}: ${t}`); continue }
@@ -177,7 +179,7 @@ test("the gate holds each share-mode bar label to its flow-efficiency words, wit
   const { fileURLToPath } = await import("node:url")
   const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
   assert.deepEqual(G.assessSharePairs([{ job: "690331dd", bar: "≤49%", words: "at most 48%" }]), ['690331dd: the bar reads "≤49%", the words "at most 48%"'])
-  assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "≤49%", words: "at most 49%" }, { job: "b", bar: "100%", words: "100% (could be lower)" }, { job: "c", bar: "<1%", words: "under 1%" }, { job: "d", bar: "~42%", words: "42% (partial, direction not known)" }]), [])
+  assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "≤49%", words: "at most 49%" }, { job: "b", bar: "≤100%", words: "100% (could be lower)" }, { job: "c", bar: "<1%", words: "under 1%" }, { job: "d", bar: "~42%", words: "42% (partial, direction not known)" }]), [])
   assert.deepEqual(G.assessSharePairs([{ job: "c87c243f", bar: "≤2%", words: "at most 2%", tip: "1%" }]), ['c87c243f: the bar reads "≤2%", its tooltip "1%"'])
   assert.ok(G.NEGATIVE_CONTROLS.includes("share_label_differs_from_words"))
   const gate = readFileSync(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
@@ -195,9 +197,9 @@ test("a flow efficiency with no known direction carries ~ on its share-mode labe
   assert.equal(label(fe({ bound: "unknown" })), "~96% working")
   assert.equal(label(fe({ bound: null, bound_reason: "bound_not_moved" })), "96% working", "exact for its window")
   assert.equal(label(fe({ bound: "upper" })), "≤96% working")
-  // At the edge the words say the one way it can be off, so the label has no "~".
-  assert.equal(S.shortPct(1, "unknown"), "100%")
-  assert.equal(S.shortPct(0, "unknown"), "0%")
+  // At the edge the words say the one way it can be off, and the label's sign says the same.
+  assert.equal(S.shortPct(1, "unknown"), "≤100%")
+  assert.equal(S.shortPct(0, "unknown"), "≥0%")
   assert.equal(S.shareQualify(1, "unknown"), "100% (could be lower)")
   const [, wait] = S.shareBars([bar], [fe({ bound: null })])[0].groups
   assert.equal(S.shortPct(wait.share_of_lead, wait.share_bound), "~4%")
@@ -209,5 +211,26 @@ test("the gate's pair check holds the open direction on both the label and the w
   const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
   assert.equal(G.assessSharePairs([{ job: "a", bar: "96%", words: "96% (partial, direction not known)" }]).length, 1)
   assert.equal(G.assessSharePairs([{ job: "a", bar: "~96%", words: "96%" }]).length, 1)
-  assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "~96%", words: "96% (partial, direction not known)", tip: "~96%" }, { job: "b", bar: "~0.4%", words: "about 0.4% (direction not known)" }, { job: "c", bar: "100%", words: "100% (could be lower)" }]), [])
+  assert.deepEqual(G.assessSharePairs([{ job: "a", bar: "~96%", words: "96% (partial, direction not known)", tip: "~96%" }, { job: "b", bar: "~0.4%", words: "about 0.4% (direction not known)" }, { job: "c", bar: "≤100%", words: "100% (could be lower)" }]), [])
+})
+
+test("a share exactly at the edge shows its bound on the short label and tooltip, and an exact 0 or 1 stays plain", async () => {
+  const H = 3600000
+  const bar = { job: "j", state: "ok", total_ms: 47 * H, groups: [{ key: "working", label: "Working", ms: 47 * H, segments: [] }, { key: "waiting", label: "Waiting", ms: 0, segments: [] }], segments: [] }
+  const read = (fe) => { const b = S.shareBars([bar], [{ job: "j", flow_efficiency: fe }])[0]; return [b.label, ...b.groups.map((g) => S.shortPct(g.share_of_lead, g.share_bound))] }
+  // No known direction (346c8d50): the words read "100% (could be lower)".
+  assert.deepEqual(read({ state: "partial", value: 1, reasons: ["x"], bound: null }), ["≤100% working", "≤100%", "≥0%"])
+  assert.equal(W.feWords({ flow_efficiency: { state: "partial", value: 1, reasons: ["x"], bound: null } }), "100% (could be lower)")
+  // Exact: measured, or a bound that is exact at its edge.
+  assert.deepEqual(read({ state: "measured", value: 1, reasons: [] }), ["100% working", "100%", "0%"])
+  assert.deepEqual(read({ state: "partial", value: 1, reasons: ["x"], bound: "lower" }), ["100% working", "100%", "0%"], "at least 100% and at most 0% are exact")
+  assert.deepEqual(read({ state: "partial", value: 1, reasons: ["x"], bound: null, bound_reason: "bound_not_moved" }), ["100% working", "100%", "0%"])
+  // An upper bound at 100% already said so.
+  assert.deepEqual(read({ state: "partial", value: 1, reasons: ["x"], bound: "upper" }), ["≤100% working", "≤100%", "≥0%"])
+  const { fileURLToPath } = await import("node:url")
+  const G = await import(fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url)))
+  // The gate holds the label's sign to the words' one way off.
+  assert.deepEqual(G.assessSharePairs([{ job: "346c8d50", bar: "≤100%", words: "100% (could be lower)", tip: "≤100%" }, { job: "z", bar: "≥0%", words: "0% (could be higher)" }, { job: "m", bar: "100%", words: "100%" }]), [])
+  assert.equal(G.assessSharePairs([{ job: "346c8d50", bar: "100%", words: "100% (could be lower)" }]).length, 1)
+  assert.equal(G.assessSharePairs([{ job: "346c8d50", bar: "~100%", words: "100% (could be lower)" }]).length >= 1, true)
 })

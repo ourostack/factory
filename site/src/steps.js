@@ -471,9 +471,10 @@
       const exact = (bound === "lower" && share === 1) || (bound === "upper" && share <= 0);
       return f.strict || exact ? f.text : `${bound === "lower" ? "≥" : "≤"}${f.text}`;
     }
-    // At exactly 0 or 1 an open direction can be off one way only; the words
-    // say which ("100% (could be lower)", W.atEdge), and "~" would say both.
-    if (bound === "unknown") return share <= 0 || share === 1 ? W.pctWords(share) : `~${F.shareFigure(share, 0, "none").text}`;
+    // At exactly 0 or 1 an open direction can be off one way only, so the
+    // sign says which: "≤100%" beside the words' "100% (could be lower)"
+    // (W.atEdge), "≥0%" beside "0% (could be higher)". "~" would say both.
+    if (bound === "unknown") return share <= 0 ? "≥0%" : share === 1 ? "≤100%" : `~${F.shareFigure(share, 0, "none").text}`;
     const p = share * 100;
     if (p > 0 && p < 1) return "<1%";
     return W.pctWords(share);
