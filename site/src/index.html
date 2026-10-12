@@ -100,24 +100,24 @@
   <div class="wrap briefing-wrap">
     <p class="step-label">Factory briefing</p>
     <h1 class="view-title">What needs a closer look?</h1>
-    <p id="overview-conclusion" class="lede overview-conclusion" data-role="conclusion">Loading the published briefing&hellip;</p>
+    <p id="overview-conclusion" class="lede overview-conclusion" data-role="conclusion"><span class="is-loading" aria-busy="true">Loading the published briefing&hellip;</span></p>
     <p class="lede">Start with the work that needs attention, then follow its evidence. This is an open experiment in understanding agent work—not a measure of people or factory-wide utilization.</p>
     <p class="chart-caption">Website briefing and evidence navigation. Production and request clocks are shown where Desk publishes them; automated triage is not demonstrated.</p>
     <p id="overview-changes" class="visit-note"></p>
     <p id="overview-published" class="chart-caption"></p>
-    <p id="overview-state" role="status">Loading the published briefing&hellip;</p>
+    <p id="overview-state" role="status"><span class="is-loading" aria-busy="true">Loading the published briefing&hellip;</span></p>
     <div class="briefing-columns">
       <section class="block" aria-labelledby="attention-title">
         <h2 class="block-title" id="attention-title">Needs your attention</h2>
-        <div id="overview-attention"><p>Loading&hellip;</p></div>
+        <div id="overview-attention"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
       </section>
       <section class="block" aria-labelledby="agents-title">
         <h2 class="block-title" id="agents-title">Agents have this</h2>
-        <div id="overview-agents"><p>Loading&hellip;</p></div>
+        <div id="overview-agents"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
       </section>
       <section class="block" aria-labelledby="investigation-title">
         <h2 class="block-title" id="investigation-title">Worth investigating</h2>
-        <div id="overview-investigation"><p>Loading&hellip;</p></div>
+        <div id="overview-investigation"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
       </section>
     </div>
     <section id="overview-guide" class="block guide" aria-labelledby="guide-title">
@@ -135,7 +135,7 @@
   <div class="wrap">
     <h1 class="view-title">Tasks</h1>
     <p class="lede">Choose recorded work to inspect its evidence. Overall elapsed and recorded working time keep their existing meanings; each task's production clocks are on its page, and Compare draws them side by side.</p>
-    <div id="task-list"><p>Loading recorded tasks&hellip;</p></div>
+    <div id="task-list"><p><span class="is-loading" aria-busy="true">Loading recorded tasks&hellip;</span></p></div>
   </div>
 </div>
 
@@ -154,7 +154,7 @@
     <p class="step-label">Step 1 of 4 &middot; Follow a task</p>
     <p id="landing-note" class="chart-caption landing-note" hidden></p>
     <div id="task-head"></div>
-    <p id="task-lede" class="lede task-lede">Loading&hellip;</p>
+    <p id="task-lede" class="lede task-lede"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
     <section class="block vsm-block" aria-labelledby="vsm-title">
       <h2 class="block-title" id="vsm-title">The value stream map</h2>
       <p class="map-selection" id="map-selection" hidden><span id="map-selection-text">An item on the map is selected.</span> <button type="button" id="map-clear">Clear selection</button></p>
@@ -165,7 +165,7 @@
       <h2 class="block-title" id="time-went-title">Where this task's time went</h2>
       <div id="time-went"></div>
     </section>
-    <div id="job-detail"><p class="chart-empty">Loading&hellip;</p></div>
+    <div id="job-detail"><p class="chart-empty"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     <details id="other-tasks" class="other-tasks">
       <summary>Other recorded tasks</summary>
       <div id="task-picker"></div>
@@ -191,7 +191,7 @@
   <div class="wrap">
     <p class="step-label">Step 2 of 4 &middot; Compare tasks</p>
     <h1 class="view-title">Compare tasks</h1>
-    <p id="comparison-conclusion" class="comparison-conclusion" data-role="conclusion">Loading&hellip;</p>
+    <p id="comparison-conclusion" class="comparison-conclusion" data-role="conclusion"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
     <p class="lede comparison-question">Which recorded tasks have long windows or interruptions worth inspecting? Compare the selected tasks' existing recorded measures, not factory capacity.</p>
     <p id="compare-lede" class="lede compare-lede" data-role="caveat"></p>
     <section class="block" aria-labelledby="stackup-title">
@@ -248,7 +248,7 @@
     <p class="step-label">Step 3 of 4 &middot; Rank causes</p>
     <h1 class="view-title">Rank causes</h1>
     <p class="lede">Which recorded patterns deserve investigation? Findings describe observed task exposure, not proven root causes or savings. A ranking orders the published evidence; it is not a measure of global worker inactivity.</p>
-    <p id="causes-lede" class="lede causes-lede">Loading&hellip;</p>
+    <p id="causes-lede" class="lede causes-lede"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
     <section class="block" aria-labelledby="pareto-title">
       <h2 class="block-title" id="pareto-title">Causes of waste, by time</h2>
       <div class="mode-toggle" role="group" aria-label="What the bars count">
@@ -276,7 +276,7 @@
 <div id="view-cause" class="view" hidden>
   <div class="wrap">
     <p class="step-label">Step 3 of 4 &middot; <a href="#/causes">Rank causes</a> &middot; one cause</p>
-    <div id="cause-detail"><p class="chart-empty">Loading&hellip;</p></div>
+    <div id="cause-detail"><p class="chart-empty"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     <p class="next-step"><a href="#/causes">Back to every cause</a> &middot; <a href="#/act">Next: <span class="step-n" aria-hidden="true">4</span>Act</a></p>
   </div>
 </div>
@@ -288,9 +288,9 @@
     <h1 class="view-title">Improvements</h1>
     <section class="block improvement-alarms" id="improvement-alarms" aria-labelledby="improvement-alarms-title" tabindex="-1">
       <h2 class="block-title" id="improvement-alarms-title">Active improvement-system alarms</h2>
-      <div id="improvement-alarm-list"><p>Loading&hellip;</p></div>
+      <div id="improvement-alarm-list"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     </section>
-    <p id="improvement-status" class="lede improvement-status" role="status">Loading the improvement status&hellip;</p>
+    <p id="improvement-status" class="lede improvement-status" role="status"><span class="is-loading" aria-busy="true">Loading the improvement status&hellip;</span></p>
     <details class="how-to-read" id="improvement-limits">
       <summary>How to read this list</summary>
       <p>These are recorded issues and recommendations, not an execution queue. A route alone grants no claim or new authority. Inspection does not grant authority or create ownership.</p>
@@ -484,7 +484,7 @@
     <section class="block" aria-labelledby="proof-title">
       <h2 class="block-title" id="proof-title">The longest sessions</h2>
       <p class="chart-caption">The three longest single agent sessions in the store, chosen automatically by length among sessions that reference at least one pull request, then checked live against GitHub to confirm those pull requests merged.</p>
-      <div id="featured-grid"><p class="chart-empty">Loading&hellip;</p></div>
+      <div id="featured-grid"><p class="chart-empty"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     </section>
 
     <section class="block" aria-labelledby="counts-title">

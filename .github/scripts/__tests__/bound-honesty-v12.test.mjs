@@ -105,8 +105,8 @@ test("the gate measures every visible chart's text, with a one-task check and a 
   // Round 8 (2): the task page's lead time equals Compare's, with a planted control.
   assert.ok(G.REQUIRED_CHECKS.includes("task_page_lead_time_matches_compare"))
   assert.ok(G.NEGATIVE_CONTROLS.includes("task_lead_differs_from_compare"))
-  assert.deepEqual(G.assessLeadAgreement([{ job: "a", compare: "at least 1 minute", caption: "at least 1 minute", aria: "at least 1 minute: working 1 minute" }]), [])
-  assert.equal(G.assessLeadAgreement([{ job: "a", compare: "at least 1 minute", caption: "at least 2 minutes", aria: "at least 1 minute" }]).length, 1)
+  assert.deepEqual(G.assessLeadAgreement([{ job: "a", compare: "at least 1 minute 38 seconds", caption: "at least 1 minute 38 seconds", aria: "at least 1 minute: working 1 minute" }]), [])
+  assert.equal(G.assessLeadAgreement([{ job: "a", compare: "at least 1 minute 38 seconds", caption: "at least 2 minutes", aria: "at least 1 minute 38 seconds" }]).length, 1)
   assert.equal(G.assessLeadAgreement([{ job: "b", compare: "7.1 days so far", caption: "at least 7 days", aria: "at least 7.1 days" }]).length, 1)
   assert.deepEqual(G.assessLeadAgreement([{ job: "b", compare: "7.1 days so far", caption: "at least 7.1 days", aria: "at least 7.1 days: x" }]), [])
   // A text outside a narrow chart is still reported.
@@ -135,8 +135,9 @@ test("a Compare bar's working figure with no known direction says so in its labe
 test("a qualified duration rounds the way its qualifier reads, everywhere", () => {
   assert.equal(W.qualified("about ", 400), "about 400 milliseconds")
   assert.doesNotMatch(W.qualified("about ", 400), /about under/)
-  assert.equal(W.qualified("at least ", 98172), "at least 1 minute")
-  assert.equal(W.qualified("at most ", 61000), "at most 2 minutes")
+  // Round 9's rule: minutes and seconds from 1 to 10 minutes.
+  assert.equal(W.qualified("at least ", 98172), "at least 1 minute 38 seconds")
+  assert.equal(W.qualified("at most ", 61000), "at most 1 minute 1 second")
   // No call site puts a qualifier in front of an unbounded durationWords.
   const walk = read("site/src/walk.js")
   const app = read("site/src/app.js")
@@ -156,12 +157,12 @@ test("the task page's lead time equals Compare's: a lower bound rounds down on b
   const row = { job: "2b8f4ba0", status: { state: "measured", value: "done", reasons: [] }, lead_time_ms: lead, working_ms: { state: "measured", value: 60000, reasons: [] } }
   const lede = W.lede(row, F.reasonText)
   const tok = lede.parts.find((x) => x && x.key === "lead")
-  assert.equal(`${tok.q}${tok.text}`, "at least 1 minute")
+  assert.equal(`${tok.q}${tok.text}`, "at least 1 minute 38 seconds")
   assert.equal(W.leadQualifierOf(lead), "at least ")
-  assert.equal(W.qualified(W.leadQualifierOf(lead), lead.value), "at least 1 minute")
+  assert.equal(W.qualified(W.leadQualifierOf(lead), lead.value), "at least 1 minute 38 seconds")
   const job = { id: row.job, status: "done", finish_order: { state: "measured", value: 1, reasons: [] }, finish_basis: "labels" }
   const [bar] = S.stackBars([job], [row], [row], { mode: "all", segments: F.SEGMENTS })
-  assert.equal(bar.words, "at least 1 minute")
+  assert.equal(bar.words, "at least 1 minute 38 seconds")
   // An open task's "so far" figure is a minimum too: 7.1 days and 7.1 days.
   const open = { ...lead, value: 7.16 * 86400000, reasons: ["censored"] }
   const orow = { ...row, status: { state: "measured", value: "processing", reasons: [] }, lead_time_ms: open }
@@ -201,10 +202,10 @@ test("format.js describe rounds a lower bound down and an upper bound up", () =>
   assert.equal(d(59.6 * 60000, "lower"), "at least 59m")
   assert.equal(d(2.25 * 86400000, "upper"), "at most 2.3d")
   assert.equal(d(2.29 * 86400000, "lower"), "at least 2.2d")
-  assert.equal(d(400.2, "upper"), "at most 401 ms")
+  assert.equal(d(400.2, "upper"), "at most 401ms")
   assert.equal(d(0.1234, "upper", "pct"), "at most 13%")
   assert.equal(d(0.1294, "lower", "pct1"), "at least 12.9%")
-  assert.equal(d(5.5 * 3600000 + 1, "upper", "hours"), "at most 5.6")
+  assert.equal(d(5.5 * 3600000 + 1, "upper", "hours"), "at most 5.6 hours")
   // No direction keeps nearest rounding.
   assert.equal(F.describe({ state: "partial", value: 52600, bound: null, bound_reason: "bound_not_moved", reasons: ["x"] }, "duration").text, "53s")
 })

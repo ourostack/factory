@@ -28,7 +28,7 @@ test("legacy_and_new_clock_precision", () => {
   const summary = jobSummary(legacy, "legacy.json")
   assert.equal(S.readLifecycleClocks(legacy), null)
   assert.deepEqual(legacy, before)
-  assert.equal(F.toText(summary.lead_time_ms, "duration"), "1m (declared)")
+  assert.equal(F.toText(summary.lead_time_ms, "duration"), "1m 5s (declared)")
   for (const c of fixture.cases) {
     assert.deepEqual(read(c.expected), c.expected, c.id)
     assert.deepEqual(checkNumbers({ jobs: [{ clocks: c.expected }] }), [], c.id)
