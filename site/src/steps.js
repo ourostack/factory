@@ -388,18 +388,20 @@
   function clockShareWords(work, production) {
     const r = shareOf(work, production);
     if (!r || r.state === "unavailable" || val(r) === null) return null;
-    const v = val(r) * 100;
-    // A share under 1% keeps one decimal, so it never reads as a bare 0%.
-    const tiny = v > 0 && v < 1;
-    const pct = tiny ? `${Math.max(0.1, Math.round(v * 10) / 10)}%` : v > 99 && v < 100 ? "99%" : `${Math.round(v)}%`;
-    if (r.state === "measured") return tiny && v < 0.1 ? "under 0.1% of production time" : `${pct} of production time`;
-    if (r.bound === "lower") return val(r) === 1 ? "100% of production time" : tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
-    if (r.bound === "upper" && v <= 0) return "0% of production time";
-    if (r.bound === "upper") return tiny && v < 0.1 ? "under 0.1% of production time" : `at most ${pct} of production time`;
+    const x = val(r);
+    const bound = r.state === "measured" ? null : r.bound === "lower" || r.bound === "upper" ? r.bound : null;
+    // Only exactly 0 and 1 read as 0% and 100% (F.shareFigure): 99.6% keeps
+    // its decimal, and a strict form ("under 0.1%") carries its own side.
+    const fig = F.shareFigure(x, 0, bound);
+    const of = `${fig.text} of production time`;
+    if (r.state === "measured") return of;
+    if (r.bound === "lower") return x === 1 ? "100% of production time" : fig.strict ? of : `at least ${of}`;
+    if (r.bound === "upper" && x <= 0) return "0% of production time";
+    if (r.bound === "upper") return fig.strict ? of : `at most ${of}`;
     // At 0% or 100% a figure with no known direction can be off one way only.
-    if (v <= 0) return "0% of production time (could be higher)";
-    if (val(r) === 1) return "100% of production time (could be lower)";
-    return `about ${pct} of production time (could be higher or lower)`;
+    if (x <= 0) return "0% of production time (could be higher)";
+    if (x === 1) return "100% of production time (could be lower)";
+    return `${fig.strict ? "" : "about "}${of} (could be higher or lower)`;
   }
 
   // The parts of a working bar that carry no evaluator label.
