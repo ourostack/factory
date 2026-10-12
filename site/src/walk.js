@@ -187,7 +187,7 @@
       if (x.state !== "unavailable" && v === null) return { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : ["not_recorded"] };
       if (x.state === "unavailable") return { state: "unavailable", reasons: Array.isArray(x.reasons) ? x.reasons : [] };
       const out = { state: x.state, value: v, reasons: Array.isArray(x.reasons) ? x.reasons : [] };
-      if (x.state === "partial" && (x.bound === "lower" || x.bound === "upper" || x.bound === null)) out.bound = x.bound;
+      if (x.state === "partial" && (x.bound === "lower" || x.bound === "upper" || x.bound === null || x.bound === "unknown")) out.bound = x.bound;
       if (x.state === "partial" && x.bound === null && typeof x.bound_reason === "string") out.bound_reason = x.bound_reason;
       return out;
     }
@@ -208,7 +208,7 @@
     // Missing or lower-bound parts make the sum a lower bound; a part Desk
     // says could be off the other way, or in no known direction, leaves the
     // sum with no direction (bound: null), never a guessed one.
-    const open = known.some((x) => x.state === "partial" && (x.bound === null || x.bound === "upper"));
+    const open = known.some((x) => x.state === "partial" && (x.bound === null || x.bound === "upper" || x.bound === "unknown"));
     return { state: "partial", value, bound: open ? null : "lower", reasons };
   }
 
@@ -219,10 +219,25 @@
     return { ...s, value: xs.map(stated).filter((x) => x.state !== "unavailable").reduce((a, x) => Math.max(a, x.value), 0) };
   }
 
-  // "at least " or "at most " for a partial figure, following its bound; a
-  // partial figure with no bound stated is a lower bound (a sum with parts
-  // missing).
-  const boundWords = (x) => (x.state !== "partial" ? "" : x.bound === "upper" ? "at most " : "at least ");
+  // The words that put a partial figure's direction in front of it: one
+  // rule for every surface, as format.js describe states it. "at least " for
+  // a lower bound, or for a partial figure that states no bound at all (a
+  // sum with parts missing); "at most " for an upper bound; "about " for no
+  // known direction (bound null or "unknown"); nothing for bound_not_moved,
+  // which Desk states for a figure no reason moves (exact for its window).
+  // An explicit null bound is never read as a minimum.
+  function qualifierOf(n) {
+    if (!n || n.state !== "partial") return "";
+    if (n.bound === "lower") return "at least ";
+    if (n.bound === "upper") return "at most ";
+    if (n.bound === null) return n.bound_reason === "bound_not_moved" ? "" : "about ";
+    if (n.bound === "unknown") return "about ";
+    return "at least ";
+  }
+  // How a figure behind each qualifier rounds (durationParts): a lower bound
+  // down, an upper bound up, the rest to nearest.
+  const ROUND_OF = { "at least ": "lower", "at most ": "upper", "about ": true, "": false };
+  const boundWords = qualifierOf;
 
   // A stated count or duration in a few words: "12", "at least 12", "not
   // recorded" (or `none` for an unavailable figure, when given).
@@ -232,13 +247,15 @@
     // A lower bound of zero says nothing a reader can use (format.js says
     // the same).
     if (x.state === "partial" && x.bound !== "upper" && x.value === 0) return "none recorded";
-    const t = kind === "duration" ? durationShort(x.value) : x.value.toLocaleString("en-US");
-    return `${boundWords(x)}${t}`;
+    const q = qualifierOf(x);
+    const t = kind === "duration" ? durationShort(x.value, ROUND_OF[q]) : x.value.toLocaleString("en-US");
+    return `${q}${t}`;
   }
   function statedWords(n) {
     const x = stated(n);
     if (x.state === "unavailable") return null;
-    return `${boundWords(x)}${durationWords(x.value)}`;
+    const q = qualifierOf(x);
+    return `${q}${durationWords(x.value, ROUND_OF[q])}`;
   }
 
   // Reasons that only say the task's window is open or starts at its first
@@ -882,7 +899,7 @@
     const row = (key, label, n, none) => ({ key, label, text: statedText(n, null, none), reasons: why(n) });
     const prs = prsHere || box.prs;
     return [
-      { key: "working", label: "Working time", text: ws.state === "measured" ? durationShort(box.working_ms) : ws.state === "partial" ? (box.working_ms > 0 ? `at least ${durationShort(box.working_ms)}` : "none recorded") : `${durationShort(box.working_ms)} (span)`, reasons: why(box.working_state) },
+      { key: "working", label: "Working time", text: ws.state === "measured" ? durationShort(box.working_ms) : ws.state === "partial" ? (box.working_ms > 0 ? `${qualifierOf(ws)}${durationShort(box.working_ms, ROUND_OF[qualifierOf(ws)])}` : "none recorded") : `${durationShort(box.working_ms)} (span)`, reasons: why(box.working_state) },
       row("agents", "Agents", box.agents),
       row("tool_calls", "Tool calls", box.tool_calls),
       row("tool_failures", "Failed tool calls", box.tool_failures),
@@ -902,7 +919,7 @@
     // "at least" is said once, on the count.
     const dm = stated(box.defect_ms);
     const d = dm.state === "unavailable" ? null : durationWords(dm.value);
-    return `${n.state === "partial" ? "at least " : ""}${n.value} defect stretch${n.value === 1 ? "" : "es"}${d ? `, ${d}` : ""}`;
+    return `${qualifierOf(n)}${n.value} defect stretch${n.value === 1 ? "" : "es"}${d ? `, ${d}` : ""}`;
   }
 
   // A box's title: what it is, in plain words.
@@ -1066,7 +1083,7 @@
     ];
     // Each group's figure says "at least" or "at most" as the lede does.
     const wb = boundOf(workN);
-    groups[0].qualifier = wb === "lower" ? "at least " : wb === "upper" ? "at most " : "";
+    groups[0].qualifier = wb === "lower" ? "at least " : wb === "upper" ? "at most " : workN && workN.state === "partial" && (workN.bound === null || workN.bound === "unknown") ? qualifierOf(workN) : "";
     groups[1].qualifier = idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : "";
     return { state: "ok", total_ms: lead, groups, segments: [...groups[0].segments, ...groups[1].segments], partial, notes, lead_state: leadN.state, why_state: why.state };
   }
@@ -1574,7 +1591,7 @@
     const plain = typeof core === "function" ? core : say;
     const list = (Array.isArray(turns) ? turns : []).filter((t) => t && typeof t === "object");
     const why = (x, fn) => (x.reasons.length ? x.reasons.map(fn).join("; ") : say("not_recorded"));
-    const dir = (x) => (x.state !== "partial" ? "" : x.bound === "lower" ? "at least " : x.bound === "upper" ? "at most " : "about ");
+    const dir = qualifierOf;
     const count = stated(job && job.human_turns);
     let promptText;
     if (count.state === "unavailable") promptText = null;
@@ -1718,8 +1735,7 @@
 
   // "at least ", "at most ", "about " or "" for a stated figure.
   function qualOf(n) {
-    if (!n || n.state !== "partial") return "";
-    return n.bound === "upper" ? "at most " : n.bound === null ? "about " : "at least ";
+    return qualifierOf(n);
   }
 
   // A task row's waiting for the next prompt, split by why (Desk D5):
@@ -2967,6 +2983,7 @@
     durationShort,
     pctWords,
     stated,
+    qualifierOf,
     boundOf,
     feWords,
     barPartialNote,

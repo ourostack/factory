@@ -250,13 +250,17 @@
     // The same formatter as the task's other figures ("7 days", "3.6 hours").
     // The per-task form; with `unit`, a view's unit (a zero keeps its unit).
     // A partial value is bounded, so it never reads "under".
-    const bounded = n.state !== "partial" ? false : n.bound === "lower" || n.bound === "upper" ? n.bound : true;
+    // bound_not_moved: Desk says no reason moves this figure, so it is exact
+    // for its window and reads as the plain figure (format.js describe).
+    const exact = n.state === "partial" && n.bound === null && n.bound_reason === "bound_not_moved";
+    const bounded = n.state !== "partial" || exact ? false : n.bound === "lower" || n.bound === "upper" ? n.bound : true;
     const v = UNIT[unit] ? (val(n) === 0 ? `0 ${UNIT[unit][1]}s` : unitWords(val(n), unit, bounded)) : val(n) === 0 ? "0 seconds" : W.durationWords(val(n), bounded);
     const soFar = n.so_far ? " so far" : "";
     if (n.state !== "partial") return { text: `${v}${soFar}`, why: "", state: "measured" };
     const why = reasonWords(reasonText, [...arr(n.reasons), ...(n.bound === null && n.bound_reason ? [n.bound_reason] : [])]);
     if (n.bound === "lower") return { text: `at least ${v}${soFar}`, why: `This is a lower bound: the true time could be longer, because ${why}.`, state: "partial", bound: "lower" };
     if (n.bound === "upper") return { text: `at most ${v}${soFar}`, why: `This is an upper bound: the true time could be shorter, because ${why}.`, state: "partial", bound: "upper" };
+    if (exact) return { text: `${v}${soFar}`, why: `Partly measured, but exact for the task's window: ${why}.`, state: "partial", bound: undefined };
     return { text: `about ${v}${soFar} (could be higher or lower)`, why: `Partly measured, and the direction is not known, because ${why}.`, state: "partial", bound: null };
   }
 
@@ -330,7 +334,8 @@
       if (val(total) === null) return { ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(total && total.reasons))] };
       const words = clockWords(total, null).text;
       const viewWords = clockWords(total, null, o.unit).text;
-      const shortB = total.state === "partial" ? (total.bound === "lower" ? "≥" : total.bound === "upper" ? "≤" : "~") : "";
+      // One rule with the words: bound_not_moved reads as the plain figure.
+      const shortB = { "at least ": "≥", "at most ": "≤", "about ": "~", "": "" }[W.qualifierOf(total)];
       const label = `${shortB}${W.durationShort(val(total), BOUND_OF[shortB] || false)}`;
       const reasons = [...new Set(arr(total.reasons))];
       let segments = [{ key: "clock_total", label: key === "production_ms" ? "Production time" : "Request to delivery", ms: val(total) }];
@@ -339,11 +344,12 @@
         // bound; the site never subtracts one clock from another.
         const activeN = clocks.active_in_production_ms, restN = clocks.production_remainder_ms;
         const active = val(activeN), rest = val(restN);
-        const boundOf = (n) => (n && n.state === "partial" ? (n.bound === "lower" || n.bound === "upper" ? n.bound : null) : undefined);
+        const boundOf = (n) => (n && n.state === "partial" && W.qualifierOf(n) ? (n.bound === "lower" || n.bound === "upper" ? n.bound : null) : undefined);
         if (active !== null && rest !== null) segments = [{ key: "prod_active", label: "Recorded working inside production", ms: active, bound: boundOf(activeN), words: clockWords(activeN, null).text }, { key: "prod_remainder", label: "Production not recorded as active", ms: rest, bound: boundOf(restN), words: clockWords(restN, null).text }];
         else segments = [{ key: "unsplit", label: "Split not known", ms: val(total) }];
       }
-      return { ...base, state: "ok", partial: total.state === "partial", bound: total.state === "partial" ? (total.bound === "lower" || total.bound === "upper" ? total.bound : null) : undefined, total_ms: val(total), words, view_words: viewWords, label, segments, groups: [], reasons };
+      const directed = total.state === "partial" && !!W.qualifierOf(total);
+      return { ...base, state: "ok", partial: directed, bound: directed ? (total.bound === "lower" || total.bound === "upper" ? total.bound : null) : undefined, total_ms: val(total), words, view_words: viewWords, label, segments, groups: [], reasons };
     });
   }
 

@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -89,7 +89,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "private_decision_fixture_agrees_across_queue_overview_and_page",
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
-  "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under",
+  "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under",
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -389,13 +389,18 @@ export function measureLayout(opts) {
       if (hit) controlOverlaps.push({ a: name(a.e), b: name(b.e), planted: planted(a.e) || planted(b.e) })
     }
   }
-  // Labels drawn on top of each other inside one chart.
+  // Labels drawn on top of each other inside one chart, or past its edge.
+  // Every visible chart is measured, however narrow (a one-task plot is
+  // 72 px wide, its axis 46 px): these checks read only <text>, so an icon
+  // or swatch without text adds nothing and no size floor is needed.
+  const chartsMeasured = []
   for (const svg of charts) {
     if (!shown(svg)) continue
     const sr = svg.getBoundingClientRect()
-    if (sr.width < 100 || sr.height < 50) continue
+    if (!(sr.width > 0 && sr.height > 0)) continue
     const texts = [...svg.querySelectorAll("text")].filter((t) => (t.textContent || "").trim() && getComputedStyle(t).visibility !== "hidden" && getComputedStyle(t).display !== "none" && Number(getComputedStyle(t).opacity) > 0)
       .map((t) => ({ t: t.textContent.trim().slice(0, 30), r: t.getBoundingClientRect() })).filter((x) => x.r.width > 0 && x.r.height > 0)
+    if (texts.length) chartsMeasured.push({ chart: (svg.closest("[id]") || svg).id || "chart", cls: svg.getAttribute("class") || "", width: Math.round(sr.width), height: Math.round(sr.height), texts: texts.length })
     // A label drawn past the chart's own box is cut off: an svg clips at its edge.
     for (const x of texts) {
       if (chartTextOut.length >= 20) break
@@ -421,7 +426,7 @@ export function measureLayout(opts) {
   }
   const sw = document.documentElement.scrollWidth
   return { width: vw, doc: { scrollWidth: sw, clientWidth: vw, bodyScrollWidth: document.body.scrollWidth, planted: sw > vw + 1 && [...document.querySelectorAll("[data-gate-planted]")].some((p) => p.getBoundingClientRect().right > vw + 1) },
-    frames, clipped: clipped.slice(0, 20), clippedY: clippedY.slice(0, 20), offscreen: offscreen.slice(0, 20), overlaps, controlOverlaps, chartTextOut, unnamedLinks }
+    frames, clipped: clipped.slice(0, 20), clippedY: clippedY.slice(0, 20), offscreen: offscreen.slice(0, 20), overlaps, controlOverlaps, chartTextOut, unnamedLinks, chartsMeasured: chartsMeasured.slice(0, 40) }
 }
 
 // Runs in the page: each visible chart has a known equivalent with rows.
@@ -1101,6 +1106,30 @@ export async function main(argv = process.argv.slice(2)) {
         }
       } finally { await context.close() }
     })
+    // A one-task Compare plot is the narrowest chart (72 px, beside a 46 px
+    // axis). Its labels stay inside it at both widths and both text sizes,
+    // and the measurement really covers a chart under 100 px wide.
+    await check("narrow_one_task_plot_keeps_text_in_bounds", async () => {
+      const seen = {}
+      for (const scale of TEXT_SCALES) {
+        for (const width of [390, 1280]) {
+          const { context, page } = await newPage({ width, height: 900, scale })
+          try {
+            await page.goto(url + `#/compare?task=${encodeURIComponent(targets.task)}`)
+            await settle(page, "compare")
+            if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
+            const m = await page.evaluate(measureLayout, { refresh: true })
+            const narrow = (m.chartsMeasured || []).filter((c) => c.width < 100)
+            if (!narrow.some((c) => /sb-plot/.test(c.cls))) throw new Error(`${width} px, ${scale}x text: no one-task plot under 100 px wide was measured (${JSON.stringify((m.chartsMeasured || []).map((c) => [c.cls, c.width]))})`)
+            const bad = assessLayout(m).filter((p) => p.code === "chart_text_out_of_bounds" || p.code === "overlapping_labels")
+            if (bad.length) throw new Error(`${width} px, ${scale}x text: ${bad.slice(0, 3).map((p) => p.detail || p.code).join("; ")}`)
+            seen[`${width}_text${scale}x`] = narrow.map((c) => ({ chart: c.cls || c.chart, width: c.width, texts: c.texts }))
+          } finally { await context.close() }
+        }
+      }
+      return seen
+    })
+
     // Compare's figures, read once per mode and width for the three checks
     // below: page text, accessible labels and tooltips.
     let compareRead = null
@@ -1315,6 +1344,20 @@ export async function main(argv = process.argv.slice(2)) {
             s.setAttribute("width", "300"); s.setAttribute("height", "100"); s.setAttribute("aria-label", "injected"); s.setAttribute("data-gate-planted", "1")
             const e = document.createElementNS(ns, "text"); e.setAttribute("x", "240"); e.setAttribute("y", "40"); e.textContent = "Still open, cut at the edge"; s.appendChild(e)
             document.getElementById("view-compare").appendChild(s)
+          })
+          await mustBeClean("chart_text_out_of_bounds")
+        }, /^planted chart_text_out_of_bounds/)
+        await expectFailure("clipped_text_in_narrow_plot", async () => {
+          await page.goto("about:blank")
+          await page.goto(url + `#/compare?task=${encodeURIComponent(targets.task)}`)
+          await settle(page, "compare")
+          const plot = await page.evaluate(() => { const s = document.querySelector("#stackup .sb-plot"); return s ? Math.round(s.getBoundingClientRect().width) : 0 })
+          if (!(plot > 0 && plot < 100)) throw new Error(`before planting: the one-task plot is ${plot} px wide, not a narrow plot`)
+          await mustBeClean("chart_text_out_of_bounds")
+          // A label pushed past the narrow plot's right edge, where the svg clips it.
+          await page.evaluate(() => {
+            const s = document.querySelector("#stackup .sb-plot"), e = document.createElementNS("http://www.w3.org/2000/svg", "text")
+            s.setAttribute("data-gate-planted", "1"); e.setAttribute("x", String(s.getBoundingClientRect().width - 10)); e.setAttribute("y", "60"); e.textContent = "Cut at the edge"; s.appendChild(e)
           })
           await mustBeClean("chart_text_out_of_bounds")
         }, /^planted chart_text_out_of_bounds/)

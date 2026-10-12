@@ -2908,10 +2908,14 @@
       return;
     }
     const bar = W.timeBar(stackRow, row, idle, F.SEGMENTS);
+    // The lead time's own direction (walk.js qualifierOf); a partial bar
+    // whose lead time is not published as partial stays a lower bound.
+    const leadN = stackRow && stackRow.lead_time_ms;
+    const leadQ = leadN && leadN.state === "partial" ? W.qualifierOf(leadN) : bar.lead_state === "partial" ? "at least " : "";
     if (bar.state === "lead_only") {
       // What is known (the lead time) is drawn; what is not (its split) is said.
       const why = (bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded";
-      const at = bar.lead_state === "partial" && stackRow.lead_time_ms && stackRow.lead_time_ms.bound !== null ? "at least " : "";
+      const at = leadQ;
       container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar: ${at}${W.durationWords(bar.total_ms)}. How it splits into working and waiting is not known, because ${why}.`));
       const track = el("div", "tw-bar");
       track.setAttribute("role", "img");
@@ -2927,7 +2931,7 @@
       container.appendChild(el("p", "chart-empty", `Not measured for this task, because ${(bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded"}. No bar is drawn rather than an empty one.`));
       return;
     }
-    const atLeast = bar.lead_state === "partial" ? "at least " : "";
+    const atLeast = leadQ;
     container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${atLeast}${W.durationWords(bar.total_ms)}. Working time comes first, split by the evaluator's labels; then waiting, idle time, split by what it waited on.`));
     // Each part of the bar, and each legend row, is a button that lights its
     // evidence on the map: a working part lights the boxes that hold it, a
