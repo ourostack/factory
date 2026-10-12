@@ -87,10 +87,10 @@
     tool_failure: { short: "after a failed tool call", long: "the agent was waiting after a tool call failed" },
     long_tool_call: { short: "long tool call", long: "a tool call of five minutes or more was running" },
     queue_before_start: { short: "queued before the first session", long: "the task was waiting for its first session to start" },
-    no_session: { short: "no session running", long: "no session of this task was running" },
+    no_session: { short: "no recorded task session", long: "no session of this task was recorded running" },
     // A session of this task was running, but its agent was working on
     // another task (Desk's "other_task"; the other task is never named).
-    other_task: { short: "agent on another task", long: "the agent was working on another task" },
+    other_task: { short: "recorded work on other tasks", long: "a session of this task was recording work on another task" },
     unknown: { short: "cause not recorded", long: "no agent was working on this task, and the cause was not recorded" },
     mixed: { short: "several causes", long: "several waits with different causes, folded together" },
   };
@@ -136,6 +136,8 @@
     // A sub-cause of waiting for the next prompt, by why the agent stopped.
     if (waste === "waiting" && what === "next_prompt" && why) return `Waiting · next prompt · ${whyName(why).toLowerCase()}`;
     if (waste === "waiting") {
+      // The two interruption categories the spec names stand on their own.
+      if (what === "other_task" || what === "no_session") return waitCauseLabel(what);
       return `Waiting · ${waitedOnWords(what, "short")}`;
     }
     if (waste === "defects" && what && what !== "all") return `Defects · failed ${what} calls`;
@@ -598,8 +600,8 @@
     tool_failure: "after a failed tool call",
     long_tool_call: "during a long tool call",
     queue_before_start: "before the first session",
-    no_session: "with no session running",
-    other_task: "while the agent was on another task",
+    no_session: "with no recorded task session",
+    other_task: "while the session recorded work on other tasks",
     unknown: "with its cause not recorded",
   };
 
@@ -1045,6 +1047,14 @@
   }
 
   // A waiting cause as a legend label: "Next prompt (the agent had stopped)".
+  // A card status seen on the map, in the lifecycle vocabulary: a card moved
+  // to done is a delivery, not an acceptance.
+  function cardStatusWords(status, observed) {
+    const s = String(status || "");
+    const base = s === "done" ? "Delivered (card moved to done" : s === "cancelled" ? "Cancelled" : `In progress (${s || "status not recorded"}`;
+    if (s === "cancelled") return observed ? "Cancelled (last observed)" : "Cancelled";
+    return `${base}${observed ? "; last observed" : ""})`;
+  }
   function waitCauseLabel(key) {
     const w = waitedOnWords(key, "short");
     return w.charAt(0).toUpperCase() + w.slice(1);
@@ -2923,6 +2933,7 @@
     LABELED_PAUSE,
     idleSplit,
     waitCauseLabel,
+    cardStatusWords,
     highlightSelector,
     foldedGapAt,
     waitPlace,

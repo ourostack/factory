@@ -80,7 +80,8 @@ test("finding_keeps_context_while_legacy_compare_modes_remain_compatible", () =>
   assert.equal(F.parseRoute(hash).otmode, "all")
   const improvement = F.contextualRoute("#/improvements", hash)
   assert.equal(F.navigationContext(improvement).cause, "waiting:other_task")
-  assert.equal(F.navigationContext(improvement).selection, "gaps:3")
+  // A selection belongs to the view it was made on; it never travels to another view.
+  assert.equal(F.navigationContext(improvement).selection, undefined)
   assert.equal(F.compareHash({ mode: "working", over: "task", otmode: "all" }), "#/compare?mode=working&over=task&otmode=all")
 })
 
@@ -237,8 +238,10 @@ test("improvements_lead_with_one_status_sentence_and_keep_limits_in_how_to_read"
   const page = html()
   const act = page.slice(page.indexOf('id="view-act"'), page.indexOf('id="view-why"'))
   const h1 = act.indexOf("</h1>")
-  // The first thing after the heading is the plain status sentence.
-  assert.match(act.slice(h1 + 5).trimStart(), /^<p id="improvement-status" class="lede improvement-status" role="status">/)
+  // Active improvement-system alarms come first; then the plain status sentence.
+  const afterAlarms = act.slice(act.indexOf("</section>", h1) + 10)
+  assert.match(act.slice(h1 + 5).trimStart(), /^<section class="block improvement-alarms" id="improvement-alarms"/)
+  assert.match(afterAlarms.trimStart(), /^<p id="improvement-status" class="lede improvement-status" role="status">/)
   const details = act.match(/<details class="how-to-read" id="improvement-limits">\s*<summary>How to read this list<\/summary>([\s\S]*?)<\/details>/)
   assert.ok(details, "one labeled disclosure holds the limits and the A3 explanation")
   for (const limit of [/not an execution queue/, /A route alone grants no claim or new authority/, /Inspection does not grant authority or create ownership/, /not a savings ranking/, /Automated triage is not demonstrated; ownership and private decisions are not published/, /not a task-filtered execution queue/, /<dfn>A3<\/dfn>/]) assert.match(details[1], limit)

@@ -32,14 +32,14 @@ const p = (value, reasons, extra) => ({ state: "partial", value, reasons, ...(ex
 
 test("an idle stretch while the agent worked another task reads as its own cause, never as cause not recorded", () => {
   assert.ok(W.WAIT_KEYS.includes("other_task"))
-  assert.equal(W.causeWords("waiting:other_task"), "Waiting · agent on another task")
-  assert.equal(W.waitCauseLabel("other_task"), "Agent on another task")
-  assert.equal(W.waitedOnWords("other_task", "long"), "the agent was working on another task")
+  assert.equal(W.causeWords("waiting:other_task"), "Recorded work on other tasks")
+  assert.equal(W.waitCauseLabel("other_task"), "Recorded work on other tasks")
+  assert.equal(W.waitedOnWords("other_task", "long"), "a session of this task was recording work on another task")
   assert.ok(S.isCauseKey("waiting:other_task"))
   assert.equal(S.causeRoute("waiting:other_task"), "#/causes/waiting:other_task")
   // The three idle causes that sound alike are worded apart, everywhere.
   assert.equal(W.waitedOnWords("unknown", "long"), "no agent was working on this task, and the cause was not recorded")
-  assert.equal(W.waitedOnWords("no_session", "long"), "no session of this task was running")
+  assert.equal(W.waitedOnWords("no_session", "long"), "no session of this task was recorded running")
   for (const k of ["unknown", "no_session", "other_task"]) assert.doesNotMatch(W.waitedOnWords(k, "long"), /nothing was running/)
   assert.match(read("site/src/styles.css"), /--c-wait-other_task: #[0-9a-f]{6};[\s\S]*--c-wait-other_task: #[0-9a-f]{6};/, "its own color in light and dark")
   assert.match(read("site/src/styles.css"), /\.wait-other_task \{ --sw: var\(--c-wait-other_task\)/)
@@ -62,13 +62,13 @@ test("a task row with an other_task split draws it on the bar, ranks it in the l
   assert.deepEqual(waiting.segments.map((s) => s.key), ["wait_next_prompt", "wait_other_task", "wait_unknown"], "the bar keeps one fixed order")
   assert.equal(waiting.segments.reduce((a, s) => a + s.ms, 0), 9 * H)
   const text = W.ledeText(W.lede(row, F.reasonText, { idle }))
-  assert.match(text, /The largest part, 6 hours, was while the agent was working on another task\./)
+  assert.match(text, /The largest part, 6 hours, was while a session of this task was recording work on another task\./)
   // Compare's lede names it in its own words.
   const all = S.stackBars([{ id: "j", status: "done", finish_order: m(1), finish_basis: "labels" }], [{ job: "j", lead_time_ms: m(10 * H), working_ms: m(H), idle_ms: m(9 * H), working: {}, idle: {} }], [row], { segments: F.SEGMENTS })
-  assert.match(S.compareLede(all, [row]).text, /mostly while the agent was working on another task \(6 hours\)/)
+  assert.match(S.compareLede(all, [row]).text, /mostly while the session recorded work on other tasks \(6 hours\)/)
   // A longest wait on it reads "also" in its words.
   const one = { ...row, waiting_by_waited_on_ms: { other_task: m(9 * H) }, longest_gap: m({ duration_ms: 5 * H, waited_on: "other_task" }) }
-  assert.match(W.ledeText(W.lede(one, F.reasonText)), /The longest single wait was 5 hours, also while the agent was on another task\./)
+  assert.match(W.ledeText(W.lede(one, F.reasonText)), /The longest single wait was 5 hours, also while the session recorded work on other tasks\./)
 })
 
 // ---------------------------------------------------- each gap's own split
@@ -107,7 +107,7 @@ test("the map uses each gap's split for its waits, its folded waits and the task
   assert.deepEqual(box.inner_by, { other_task: 4 * M, next_prompt: M }, "a folded gap keeps its split inside the box")
   const d = W.drawer({ kind: "wait", item: wait }, { model, lead_ms: 13 * H })
   const rows = Object.fromEntries(d.rows)
-  assert.equal(rows["Waited on"], "agent on another task, 7 hours; next prompt (the agent had stopped), 3 hours")
+  assert.equal(rows["Waited on"], "recorded work on other tasks, 7 hours; next prompt (the agent had stopped), 3 hours")
   assert.equal(d.cause, "other_task", "the drawer wears the largest cause's own swatch")
   // The slim map file keeps the split.
   const slim = W.slimMap({ job: { id: "j" }, timeline: { gaps: map.gaps, bursts: [] } })
@@ -390,7 +390,7 @@ test("a partial figure Desk marks bound: null reads with no direction, never a g
   const text = W.ledeText(W.lede(row, F.reasonText, { idle: W.idleSplit(row, null) }))
   assert.match(text, /Agents were working for 1 hour of it;/)
   assert.doesNotMatch(text, /at least|at most|lower bound|upper bound/)
-  assert.match(text, /The largest part, 6 hours, was while the agent was working on another task\./)
+  assert.match(text, /The largest part, 6 hours, was while a session of this task was recording work on another task\./)
   assert.equal(F.describe(pn(H), "duration").text, F.describe(m(H), "duration").text, "no direction word")
 })
 
@@ -411,9 +411,9 @@ test("Desk's new reason codes have words, and a figure with no direction says wh
   const row = { job: "j", lead_time_ms: m(10 * H), working_ms: { ...n }, idle_ms: { state: "partial", value: 9 * H, reasons: ["log_truncated"], bound: null, bound_reason: "bound_not_moved" }, waiting_by_waited_on_ms: { other_task: m(9 * H) }, flow_efficiency: m(0.1) }
   const text = W.ledeText(W.lede(row, F.reasonText))
   assert.match(text, /Agents were working for 1 hour of it \(direction not known, because its reasons pull it both ways, so the true figure may be higher or lower\)/)
-  assert.match(text, /for 9 hours the agent was working on another task\./, "a figure no reason moves reads plain in the lede")
+  assert.match(text, /for 9 hours a session of this task was recording work on another task\./, "a figure no reason moves reads plain in the lede")
   const conflict = W.ledeText(W.lede({ ...row, idle_ms: { ...row.idle_ms, bound_reason: "bound_reasons_conflict" } }, F.reasonText))
-  assert.match(conflict, /for 9 hours the agent was working on another task \(direction not known, because its reasons pull it both ways, so the true figure may be higher or lower\)\./)
+  assert.match(conflict, /for 9 hours a session of this task was recording work on another task \(direction not known, because its reasons pull it both ways, so the true figure may be higher or lower\)\./)
 })
 
 test("the site never turns Desk's bound: null into a direction; only an absent bound falls back to the site's rule (Desk review M-5)", () => {

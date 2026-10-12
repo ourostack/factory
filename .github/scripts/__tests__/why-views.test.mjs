@@ -670,7 +670,7 @@ test("M-4: 'also' only follows a sentence about the same wait, and a share under
   r.idle_ms = m(26 * H + 24 * M)
   r.longest_gap = m({ start_ms: 0, end_ms: 26 * H, duration_ms: 26 * H, waited_on: "no_session" })
   const t = ledeOf(r)
-  assert.match(t, /The longest single wait was 26 hours, when no session of this task was running\./)
+  assert.match(t, /The longest single wait was 26 hours, when no session of this task was recorded running\./)
   assert.doesNotMatch(t, /also with no session/)
   // The next-prompt split is about the same wait, so "also" still reads.
   assert.match(ledeOf(partlyRow()), /The longest single wait was 19 hours, also for the next prompt/)

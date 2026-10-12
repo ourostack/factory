@@ -34,10 +34,12 @@
       return valid(x) ? { ...x, persistent: true } : fallback;
     } catch { return fallback; }
   }
-  function savePreferences(storage, patch) {
+  // `deviceZone` is the zone in effect when nothing is saved yet, so saving
+  // another preference never pins the display to UTC behind the reader's back.
+  function savePreferences(storage, patch, deviceZone) {
     try {
       if (!keys(patch, ["dismissed", "zone", "previous"])) return { saved: false, reason: "invalid_preferences" };
-      const prior = readPreferences(storage, "UTC");
+      const prior = readPreferences(storage, validZone(deviceZone) ? deviceZone : "UTC");
       const { persistent, ...value } = { ...prior, ...patch };
       if (!valid(value)) return { saved: false, reason: "invalid_preferences" };
       if (!storage || typeof storage.setItem !== "function") return { saved: false, reason: "storage_unavailable" };

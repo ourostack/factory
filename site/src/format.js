@@ -842,7 +842,8 @@
     const context = navigationContext(sourceHash);
     // Evidence IDs belong to a particular view. Carry investigation/filter
     // context, but never silently select a task gap in another task/session.
-    if (["task", "session"].includes(targetRoute.view) && path !== sourcePath) delete context.selection;
+    // A selection belongs to its own page: it never travels to another one.
+    if (path !== sourcePath) delete context.selection;
     Object.assign(context, routeContext(at >= 0 ? target.slice(at + 1) : ""));
     // Explicit legacy evidence links keep their own selection when adding
     // context; mixing "&cause" into the old one-key parser would lose it.

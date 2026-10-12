@@ -45,7 +45,7 @@
         if (!exact(row, ["id", "family", "title", "impact", "ownership", "next_action", "href"], ["number", "triage"]) ||
             !ID.test(row.id) || seen.has(row.id) || !["production", "collection", "improvement_system"].includes(row.family) ||
             !["claimed", "not_published"].includes(row.ownership) || ![row.title, row.impact, row.next_action].every(text) ||
-            !F.localDestination(row.href) || (key === "agents" && row.ownership !== "claimed")) return bad();
+            !briefingHref(row.href) || (key === "agents" && row.ownership !== "claimed")) return bad();
         seen.add(row.id);
         if (Object.hasOwn(row, "number")) {
           const n = row.number;
@@ -69,6 +69,15 @@
         ![c.added, c.removed].every((n) => Number.isSafeInteger(n) && n >= 0) ||
         (c.previous_visit !== null && (typeof c.previous_visit !== "string" || !Number.isFinite(Date.parse(c.previous_visit))))) return bad();
     return { ok: true, codes: [] };
+  }
+  // A local destination, optionally with validated selectors in their
+  // canonical order (a filtered list such as "#/tasks?status=awaiting_signoff").
+  function briefingHref(href) {
+    if (typeof href !== "string") return false;
+    const at = href.indexOf("?");
+    if (at < 0) return F.localDestination(href);
+    const path = href.slice(0, at);
+    return F.localDestination(path) && F.routeWithContext(path, F.routeContext(href.slice(at + 1))) === href;
   }
   function buildBriefing({ data, improvements, previous = null, now, validateQueue = null }) {
     if (!data || data.schema !== "factory-site/3") throw new TypeError("overview_data_invalid");
@@ -101,7 +110,7 @@
     }
     if (!doc.investigation.length) {
       const item = arr(data.fix_next).find((r) => r && r.severity !== "alarm" && r.count?.state !== "unavailable" && Number.isFinite(r.count?.value) && r.count.value > 0 && text(r.title) && text(r.action));
-      if (item) doc.investigation.push(row(`finding:${item.id}`, "production", item.title, "A recorded pattern is a reason to investigate, not a proven cause or savings estimate.", item.id === "awaiting_signoff" ? "Inspect the delivered tasks, then ask the operator to accept or return them." : item.action, item.id === "awaiting_signoff" ? "#/tasks" : "#/causes", { number: copy(item.count) }));
+      if (item) doc.investigation.push(row(`finding:${item.id}`, "production", item.title, "A recorded pattern is a reason to investigate, not a proven cause or savings estimate.", item.id === "awaiting_signoff" ? "Inspect the delivered tasks, then ask the operator to accept or return them." : item.action, item.id === "awaiting_signoff" ? "#/tasks?status=awaiting_signoff" : "#/causes", { number: copy(item.count) }));
       else doc.investigation.push(row("check:coverage", "collection", "Check the evidence before choosing an improvement", "The published evidence does not support a specific opportunity yet.", "Inspect recorded tasks, coverage and findings.", "#/tasks"));
     }
     doc.state = doc.attention.length ? "attention" : doc.reasons.length ? "unknown" : "observed";

@@ -23,15 +23,19 @@
   let preferences = P.readPreferences(storage, viewerZone);
   let visitPrevious = preferences.previous;
   let currentData = null;
+  // A section to focus once its view has rendered (the Overview's alarm link).
+  let focusAfterRender = null;
   let currentHealth = null;
-  function setLocalHref(link, value) {
+  function setLocalHref(link, value, opts) {
     const route = typeof value === "string" && value.startsWith("#/") ? F.parseRoute(value, () => null) : { view: "missing" };
     if (["missing", "skip", "redirect"].includes(route.view)) return;
-    const safe = F.contextualRoute(value, window.location.hash);
+    const safe = opts && opts.plain ? (F.localDestination(value.split("?")[0]) ? value : null) : F.contextualRoute(value, window.location.hash);
+    if (!safe) return;
     link.href = safe;
   }
   function saveDisplay(patch) {
-    const result = P.savePreferences(storage, patch);
+    const deviceZone = viewerZone;
+    const result = P.savePreferences(storage, patch, deviceZone);
     preferences = { ...preferences, ...patch, persistent: result.saved };
     const node = document.getElementById("preferences-status");
     if (node) node.textContent = result.saved ? "Preferences saved on this browser." : "Preferences are not saved: browser storage is unavailable.";
@@ -46,7 +50,13 @@
       select.appendChild(option);
     }
     select.value = preferences.zone;
+    const current = document.getElementById("zone-current");
+    const showZone = () => { if (current) current.textContent = select.value === "America/Los_Angeles" ? "Pacific" : select.value; };
+    showZone();
+    const mapClear = document.getElementById("map-clear");
+    if (mapClear) mapClear.addEventListener("click", () => clearEvidenceSelection());
     select.addEventListener("change", () => {
+      showZone();
       saveDisplay({ zone: select.value });
       if (currentData) routeSafely(currentData);
     });
@@ -106,8 +116,12 @@
         details.append(button, status, pre); li.appendChild(details);
       }
       li.appendChild(el("p", "briefing-action", row.next_action));
-      const link = el("a", null, row.href === "#/tasks" ? "Inspect recorded tasks" : row.href === "#/causes" ? "Inspect findings" : "Open Improvements");
-      setLocalHref(link, row.href); li.appendChild(link); list.appendChild(li);
+      const n = row.number && row.number.state === "measured" && typeof row.number.value === "number" ? row.number.value : null;
+      const alarm = row.family === "improvement_system" && row.id.startsWith("alarm:");
+      const link = el("a", null, row.href.startsWith("#/tasks?") ? (n !== null ? `Inspect the ${n} affected deliveries` : "Inspect the affected deliveries") : row.href === "#/tasks" ? "Inspect recorded tasks" : row.href === "#/causes" ? "Inspect findings" : alarm ? "Open this alarm on Improvements" : "Open Improvements");
+      if (alarm) link.addEventListener("click", () => { focusAfterRender = "improvement-alarms"; });
+      setLocalHref(link, row.href, { plain: row.href.includes("?") });
+      li.appendChild(link); list.appendChild(li);
     }
     node.appendChild(list);
   }
@@ -129,47 +143,52 @@
     document.getElementById("overview-guide").hidden = preferences.dismissed;
     saveDisplay({ previous: B.snapshot(doc, new Date().toISOString()) });
   }
-  function renderTaskList(data) {
+  // Tasks: the same task table as the task page, optionally filtered by
+  // lifecycle status from a validated selector (#/tasks?status=…).
+  async function renderTaskList(data) {
     const node = document.getElementById("task-list"); node.innerHTML = "";
     if (!data.jobs.length) return emptyState(node, "No tasks are recorded in this payload yet; this does not prove no work occurred.");
-    const table = el("table", "data-table task-list-table");
-    tableHead(table, [["Task", ""], ["Recorded lifecycle", ""], ["Finish day (UTC)", ""], ["Overall recorded elapsed", ""], ["Recorded working", ""]]);
-    const body = el("tbody");
-    for (const j of data.jobs) {
-      const tr = el("tr"); const name = el("a", null, jobLabel(j)); setLocalHref(name, F.safeRoute("task", j.id));
-      plainCell(tr, "Task", name);
-      plainCell(tr, "Recorded lifecycle", el("span", null, ({ accepted: "Accepted", awaiting_signoff: "Awaiting acceptance", sent_back: "Returned for changes", delivered: "Delivered", in_progress: "In progress" })[j.outcome] || "Not recorded"));
-      plainCell(tr, "Finish day (UTC)", el("span", null, F.finishDay(j.finish_date).words + " (UTC day)"));
-      plainCell(tr, "Overall recorded elapsed", num(j.lead_time_ms, "duration"));
-      plainCell(tr, "Recorded working", num(j.active_time_ms, "duration"));
-      body.appendChild(tr);
+    const context = F.navigationContext(location.hash);
+    const jobs = context.status ? S.selectTaskPopulation(data.jobs, { status: context.status }) : data.jobs;
+    const tasks = await walkFile("rollups/tasks.json");
+    if (context.status) {
+      const note = el("p", "task-filter-note");
+      note.append(`Showing ${jobs.length} of ${data.jobs.length} tasks: ${LIFECYCLE_FILTER_WORD[context.status] || context.status}. `);
+      const all = el("a", null, "Show all tasks"); setLocalHref(all, "#/tasks", { plain: true }); note.appendChild(all);
+      node.appendChild(note);
     }
-    table.appendChild(body); node.appendChild(table);
+    const holder = el("div"); node.appendChild(holder);
+    renderPicker(holder, jobs, tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null, null, { skip: false });
   }
   function renderNavigationContext(route) {
     const node = document.getElementById("navigation-context"); node.innerHTML = "";
     const context = F.navigationContext(window.location.hash);
     const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
-    const selection = route.select ? `${route.select.kind}:${route.select.from}${route.select.to !== route.select.from ? "-" + route.select.to : ""}` : context.selection || (query.has("selection") ? "unsupported" : null);
-    node.hidden = !Object.keys(context).length && !selection;
-    if (node.hidden) return;
-    node.appendChild(el("span", null, context.cause ? `Investigation context: ${context.cause}. ` : "Navigation context retained. "));
-    if (context.return && !(route.view === "cause" && F.parseRoute(context.return).cause === route.cause)) {
-      const back = el("a", null, "Return to investigation"); setLocalHref(back, F.routeWithContext(context.return, Object.fromEntries(Object.entries(context).filter(([k]) => k !== "return")))); node.appendChild(back);
+    const selection = route.select ? `${route.select.kind}:${route.select.from}` : context.selection || (query.has("selection") ? "unsupported" : null);
+    const returning = context.return && !(route.view === "cause" && F.parseRoute(context.return).cause === route.cause);
+    // The bar speaks only for an investigation, a return path or a selection;
+    // filters show in their own controls. No raw code reaches reader text.
+    node.hidden = !(context.cause && route.view !== "cause") && !returning && !selection;
+    if (!node.hidden) {
+      if (context.cause && route.view !== "cause") node.appendChild(el("span", null, `Investigating: ${W.causeWords(context.cause)}. `));
+      if (returning) {
+        const back = el("a", null, "Return to the investigation"); setLocalHref(back, F.routeWithContext(context.return, Object.fromEntries(Object.entries(context).filter(([k]) => k !== "return")))); node.appendChild(back);
+      }
+      if (selection) {
+        node.appendChild(el("p", null, selection === "unsupported" ? "The item in this link is not available. Nothing else was selected." : "An item from this link is selected. If it is no longer recorded, nothing else is selected."));
+        const clear = el("button", null, "Clear selection"); clear.type = "button";
+        clear.addEventListener("click", clearEvidenceSelection);
+        node.appendChild(clear);
+      }
     }
-    if (selection) {
-      node.appendChild(el("p", null, selection === "unsupported" ? "The requested selection is unsupported. No substitute item was selected." : `Selection requested: ${selection}. If its evidence is no longer present, it is unavailable—not another item.`));
-      const clear = el("button", null, "Clear selection"); clear.type = "button";
-      clear.addEventListener("click", clearEvidenceSelection);
-      node.appendChild(clear);
-    }
-    if (["production", "request"].includes(context.mode)) node.appendChild(el("p", null, "This requested clock mode is unavailable until an approved producer supplies its boundaries. Existing charts below retain their legacy labels and meanings; they are not substituted production or original-request clocks."));
-    // Main navigation carries inspection context, never a remote return URL.
+    const mapSel = document.getElementById("map-selection");
+    if (mapSel) mapSel.hidden = !(route.view === "task" && selection && selection !== "unsupported");
+    // The main navigation is a clean general entry: it never carries a task,
+    // filter or selection. Context travels only through labelled links.
     for (const link of document.querySelectorAll("nav.steps a")) {
-      const path = link.dataset.destination || link.getAttribute("href").split("?")[0];
-      link.dataset.destination = path;
-      setLocalHref(link, F.routeWithContext(path, context));
+      link.dataset.destination = link.dataset.destination || link.getAttribute("href").split("?")[0];
     }
+    for (const link of document.querySelectorAll("nav.steps a")) setLocalHref(link, link.dataset.destination, { plain: true });
   }
   function clearEvidenceSelection(replace) {
     for (const n of document.querySelectorAll("#vsm .is-hl")) n.classList.remove("is-hl");
@@ -924,11 +943,13 @@
 
   // --------------------------------------------------------------- tasks
 
+  // The lifecycle filter's words (format.js routeContext "status" values).
+  const LIFECYCLE_FILTER_WORD = { done: "done", cancelled: "cancelled", doing: "in progress", open: "open", in_progress: "in progress", accepted: "accepted", delivered: "delivered", awaiting_signoff: "delivered and awaiting acceptance", sent_back: "returned for changes" };
   const OUTCOME_WORD = {
     accepted: "Accepted",
     sent_back: "Returned for changes",
     awaiting_signoff: "Awaiting acceptance",
-    delivered: "Delivered; no acceptance recorded",
+    delivered: "Delivered",
     in_progress: "In progress",
     cancelled: "Cancelled",
     unknown: "Status not recorded",
@@ -1587,6 +1608,32 @@
   // through its own window (viewBox) and keeps only its own columns (the
   // elements marked data-col), so every bar, link and label appears once;
   // gridlines, lines and axes are repeated per row.
+  // After a chart is drawn: no label may be cut at the chart's edge (an svg
+  // clips there). A group label or callout that runs past a side moves back
+  // inside; rotated names that run past the bottom make the chart taller.
+  function fitChartText(container) {
+    for (const plot of container.querySelectorAll("svg.sb-plot")) {
+      const sr = plot.getBoundingClientRect();
+      if (sr.width < 2 || sr.height < 2) continue;
+      for (const t of plot.querySelectorAll("text.sb-group, text.sb-callout")) {
+        const r = t.getBoundingClientRect();
+        const dx = r.right > sr.right - 1 ? sr.right - 2 - r.right : r.left < sr.left + 1 ? sr.left + 2 - r.left : 0;
+        if (dx) t.setAttribute("x", Number(t.getAttribute("x")) + dx);
+      }
+      let bottom = sr.bottom;
+      for (const t of plot.querySelectorAll("text")) { const r = t.getBoundingClientRect(); if (r.height > 0) bottom = Math.max(bottom, r.bottom); }
+      const extra = Math.ceil(bottom - sr.bottom);
+      if (extra > 0) {
+        const h = Number(plot.getAttribute("height")) + extra + 4;
+        plot.setAttribute("height", h);
+        const vb = plot.getAttribute("viewBox");
+        if (vb) { const [x, y, w] = vb.split(/\s+/); plot.setAttribute("viewBox", `${x} ${y} ${w} ${h}`); }
+        const axis = plot.closest(".sb-row") && plot.closest(".sb-row").querySelector("svg.sb-axis");
+        if (axis) axis.setAttribute("height", h);
+      }
+    }
+  }
+
   function wrapColumnRows(row, plot, n, colW, avail, colX) {
     const rows = S.chartRows(n, colW, avail);
     if (rows.length <= 1) return;
@@ -1828,7 +1875,12 @@
 
   // ---------------------------------------------------------------- picker
 
-  function renderPicker(container, jobs, taskRows, current) {
+  const TASK_COLUMNS = [["Task", ""], ["Recorded lifecycle", ""], ["Finish day (UTC)", ""], ["Recorded elapsed", ""], ["Recorded working", ""]];
+  const TASK_TABLE_KEY = "Recorded elapsed is the task's recorded window; recorded working is its agents' recorded activity. A figure with “at least” or “at most”, or marked partial, was only partly measured: the true figure lies beyond that bound. Some figures rest on a declared record (a card date or status the desk recorded) rather than measured activity. Delivered means the card moved to done; no acceptance recorded is not a refusal.";
+  // The one task table (Tasks and the task page): search, sort by finish
+  // day, lifecycle words and the same columns.
+  function renderPicker(container, jobs, taskRows, current, opts) {
+    const o = opts || {};
     container.innerHTML = "";
     const wrap = el("nav", "picker");
     wrap.setAttribute("aria-label", "Every task");
@@ -1863,6 +1915,8 @@
     });
     sortBox.appendChild(sortControls); head.appendChild(sortBox);
     const jobById = new Map(jobs.map((j) => [j.id, j]));
+    const rowById = new Map((taskRows || []).map((r) => [r.job, r]));
+    head.appendChild(el("p", "chart-caption task-table-key", TASK_TABLE_KEY));
     wrap.appendChild(head);
     const list = el("div", "picker-list");
     list.id = "picker-list";
@@ -1879,7 +1933,7 @@
       const rows = S.sortPicker(W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value), (id) => F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : null), sortDir);
       list.innerHTML = "";
       const table = el("table", "data-table picker-table");
-      tableHead(table, [["Task", ""], ["Recorded lifecycle", ""], ["Finish day (UTC)", ""], ["Recorded elapsed", ""], ["Work / elapsed", ""]]);
+      tableHead(table, TASK_COLUMNS);
       table.querySelector("thead").className = "picker-columns";
       const body = el("tbody"); table.appendChild(body); list.appendChild(table);
       count.textContent = `${rows.length} of ${jobs.length} tasks`;
@@ -1901,15 +1955,18 @@
         const elapsed = el("span", null, fig(r.lead, "duration"));
         if (r.badge) elapsed.appendChild(el("span", "picker-badge", ` · ${r.badge}`));
         plainCell(tr, "Recorded elapsed", elapsed);
-        const flow = el("span", null, r.feText || "no data");
-        if (r.unlabeled) flow.appendChild(el("span", "picker-badge", " · not labeled yet"));
-        plainCell(tr, "Work / elapsed", flow);
+        const taskRow = rowById.get(r.id);
+        const job = jobById.get(r.id);
+        const working = el("span", null, fig((taskRow && taskRow.working_ms) || (job && job.active_time_ms), "duration"));
+        if (r.unlabeled) working.appendChild(el("span", "picker-badge", " · not labeled yet"));
+        plainCell(tr, "Recorded working", working);
         body.appendChild(tr);
       }
       if (!rows.length) list.appendChild(el("p", "chart-empty", "No task matches."));
     };
     input.addEventListener("input", draw);
     draw();
+    if (o.skip === false) { container.appendChild(wrap); list.scrollTop = 0; return; }
     // A link before the list, so the keyboard can pass the picker's rows.
     const skip = el("a", "skip-map", "Skip to the map");
     const safe = F.safeRoute("task", String(current || ""));
@@ -2106,7 +2163,7 @@
       // Status changes over this item.
       const ms = markCells.get(i);
       const info = el("div", "vsm-info");
-      if (ms) for (const m of ms) info.appendChild(el("span", "vsm-status", `card: ${m.status}${m.observed ? " (last seen)" : ""}`));
+      if (ms) for (const m of ms) info.appendChild(el("span", "vsm-status", W.cardStatusWords(m.status, m.observed)));
       // The operator's prompts that fall in this item, as one marker.
       const here = (clock.by_item[i] || []).map((k) => clock.prompts[k]);
       const col = i + off;
@@ -2265,26 +2322,38 @@
     }
     drawLadderMarks(root, clock, phone, openMark, origin);
 
-    // The legend and how the map was folded.
+    // The legend and how the map was folded. It lists the marks this map
+    // draws; every other mark type waits behind "All marker types".
     const legend = el("div", "vsm-legend");
-    const lg = (cls, text) => {
+    const others = el("details", "vsm-legend-more");
+    others.appendChild(el("summary", null, "All marker types"));
+    const present = {
+      box: model.items.some((x) => x.type === "box"),
+      tri: model.items.some((x) => x.type === "wait"),
+      rework: !!root.querySelector(".vsm-rework"),
+      prompt: !!root.querySelector(".lad-mark-prompt, .lad-tick, .vsm-prompt, .glyph-prompt"),
+      pr: !!root.querySelector(".lad-mark-opened, .lad-mark-merged, .lad-mark-pr, .glyph-opened, .glyph-merged"),
+      partial: !!root.querySelector(".is-partial"),
+      multi: !!root.querySelector(".lad-mark-multi"),
+    };
+    const lg = (cls, text, on = true) => {
       const p = el("p", "vsm-legend-item");
       p.appendChild(el("span", `vsm-key ${cls}`));
       p.appendChild(document.createTextNode(text));
-      legend.appendChild(p);
+      (on ? legend : others).appendChild(p);
     };
-    lg("key-box", "A box is a burst of agent work; its data box lists what happened in it.");
-    lg("key-tri", "A triangle is waiting: idle time between bursts of work, when no agent of this task was working, with what it waited on. Waiting always means idle time here; the evaluator's labels describe working time only.");
+    lg("key-box", "A box is a burst of agent work; its data box lists what happened in it.", present.box);
+    lg("key-tri", "A triangle is waiting: idle time between bursts of work, when no agent of this task was working, with what it waited on. Waiting always means idle time here; the evaluator's labels describe working time only.", present.tri);
     lg("key-ladder", `${phone ? "The ladder runs down the left: a line on the left is working time, a line on the right is waiting." : "The ladder under the map: the low line is working time, the high line is waiting, each step labeled with its length."} A step marked “+” (such as “+5m”) is the short waits folded inside the box before it. Select any step for its evidence.`);
-    lg("key-rework", "A loop arrow marks rework: stretches the evaluator labeled as defects inside that box.");
-    const lgGlyph = (kind, text, opts) => {
+    lg("key-rework", "A loop arrow marks rework: stretches the evaluator labeled as defects inside that box.", present.rework);
+    const lgGlyph = (kind, text, opts, on = true) => {
       const p = el("p", "vsm-legend-item");
       const k = el("span", "vsm-key vsm-key-glyph");
       k.appendChild(clockGlyph(kind, opts));
       p.append(k, document.createTextNode(text));
-      legend.appendChild(p);
+      (on ? legend : others).appendChild(p);
     };
-    lgGlyph("prompt", `An operator prompt: above the box it falls in, and as a tick on the ladder's first lane at its time. ${W.whyLegend(clock)}`);
+    lgGlyph("prompt", `An operator prompt: above the box it falls in, and as a tick on the ladder's first lane at its time. ${W.whyLegend(clock)}`, undefined, present.prompt);
     // The classes drawn on this map, each with its color and pattern.
     const whyKeys = [...new Set([...W.whyKeysIn(clock).filter((k) => k !== "not_known" || clock.prompts.some((p) => p.wait && typeof p.wait.why === "string")), ...model.items.map((x) => (x.type === "wait" ? x.why : x.inner_why)).filter(Boolean)])];
     const ordered = W.WHY_KEYS.filter((k) => whyKeys.includes(k));
@@ -2295,16 +2364,17 @@
     } else if (model.items.some((x) => x.type === "wait" && x.by && x.by.next_prompt > 0)) {
       legend.appendChild(el("p", "vsm-legend-item", "Why the agent stopped before each wait for the next prompt is not known yet: Desk does not publish it for this task, so the triangles say only that the agent had stopped."));
     }
-    lgGlyph("opened", W.prLegendWords(map && map.prs));
-    lgGlyph("opened", "An outlined mark is a time known only in part: its evidence says which way the true time lies.", { partial: true });
+    lgGlyph("opened", W.prLegendWords(map && map.prs), undefined, present.pr);
+    lgGlyph("opened", "An outlined mark is a time known only in part: its evidence says which way the true time lies.", { partial: true }, present.partial);
     if (outside.before.count || outside.after.count) lgGlyph("opened", `A time before the task started${clock.open ? " or after its last recorded work" : " or after its lead time ended"} is listed in a dashed margin beside the map, with how far outside it lies, never drawn at the map's edge.`);
     {
       const p = el("p", "vsm-legend-item");
       const k = el("span", "vsm-key vsm-key-glyph");
       k.appendChild(markBadge({ lane: "pr", count: 2, marks: [{ kind: "merged" }] }));
       p.append(k, document.createTextNode(MERGE_RULE));
-      legend.appendChild(p);
+      (present.multi ? legend : others).appendChild(p);
     }
+    if (others.childNodes.length > 1) legend.appendChild(others);
     container.appendChild(legend);
     container.appendChild(el("p", "chart-caption", `${W.foldWords(model)} Lead time ${leadWords || W.durationWords(model.totals.lead_ms)} = working ${W.durationWords(model.totals.working_ms)} + waits inside boxes ${W.durationWords(model.totals.inner_wait_ms)} + waits between boxes ${W.durationWords(model.totals.waiting_ms)}.`));
     // A map Desk states as incomplete (unreadable stretches of a log, or
@@ -2653,7 +2723,7 @@
     const state = W.clockListWords(map.human_turns_state, "Operator prompts", F.reasonText, F.reasonCore);
     const t = W.handoffTable(clock, origin, F.reasonText, leadMs);
     const rows = t.rows;
-    sec.appendChild(el("p", "chart-caption", rows.length ? `Each time the operator prompted an agent of this task, in clock order: ${rows.length} prompt${rows.length === 1 ? "" : "s"}. Each row gives the prompt's time on the task clock, how long the task was idle and the main agent stopped before it, how long the agent then worked, and the size of the prompt and of the output the operator read; never the prompt's text.${state ? ` ${state}.` : ""}` : state ? `${state}, so no prompt is drawn rather than none.` : "No operator prompt is recorded for this task."));
+    sec.appendChild(el("p", "chart-caption", rows.length ? `Each time the operator prompted an agent of this task, in clock order: ${rows.length} prompt${rows.length === 1 ? "" : "s"}. Each row gives the prompt's time on the task clock, how long the task was idle and the main agent stopped before it, how long the agent then worked, and the size of the prompt and of the output the operator read; never the prompt's text.${state ? ` ${state}.` : ""}` : state ? `${state}. No prompt is drawn, because an unrecorded prompt is not the same as no prompt.` : "No operator prompt is recorded for this task."));
     if (rows.length) {
       sec.appendChild(el("p", "chart-caption", `${t.explain}${t.note ? ` ${t.note}` : ""}`));
       const det = el("details", "more-details handoffs");
@@ -3854,6 +3924,7 @@
     row.appendChild(frame);
     container.appendChild(row);
     wrapColumnRows(row, plot, bars.length, colW, avail - 12, (i) => i * colW + 4);
+    fitChartText(container);
 
     // The legend: the parts that appear, in stacking order, then the marks.
     const present = new Set(bars.flatMap((b) => b.segments.map((s) => (s.cause ? `wait_${s.cause}` : s.key))));
@@ -4861,10 +4932,11 @@
     const draw = () => {
       syncToggle();
       const m = modes.causes === "working" ? working || all : all;
-      document.getElementById("pareto-caption").textContent = all.state === "absent" ? "" : S.paretoCaption(m);
       const context = F.navigationContext(location.hash);
       const filtered = ["task", "status", "from", "to", "evidence"].some((k) => context[k]);
-      const unavailable = filtered ? "A selected-population ranking is not published. Inspect a specific finding's selected task evidence or clear task filters to inspect the published all-task ranking." : null;
+      document.getElementById("pareto-caption").textContent = all.state === "absent" || filtered ? "" : S.paretoCaption(m);
+      const unavailable = filtered ? "The cause ranking is published for all tasks only, so it is not shown for the selected tasks. Clear the task filters to see it." : null;
+      if (filtered) conclusion.textContent = "A task filter is on, and the cause ranking is published only for all tasks, so no ranking is shown for this selection.";
       if (!filtered && m.bars?.length) {
         const first = m.bars[0];
         const label = first.key === "waiting:other_task" ? "Recorded work on other tasks" : first.key === "waiting:no_session" ? "No recorded task session" : first.label;
@@ -4879,8 +4951,8 @@
           location.hash = F.routeWithContext("#/causes", next);
         });
         document.getElementById("pareto").appendChild(clear);
-        document.getElementById("causes-lede").textContent = "Selected evidence context is retained. No global aggregate is shown as a selected-population measure.";
-        document.getElementById("pareto-note").textContent = "Clear task filters for the published all-task denominator. Category emphasis and navigation context do not create evidence.";
+        document.getElementById("causes-lede").textContent = "Clear the task filters to see the cause ranking for all published tasks.";
+        document.getElementById("pareto-note").textContent = "";
       }
     };
     wireModes("view-causes", "causes", draw);
@@ -5276,10 +5348,44 @@
     if (!rows.length) node.appendChild(el("p", "chart-empty", "Public annotation presentation is unavailable; no ownership or execution state is inferred."));
   }
 
+  // The improvement system's own alarms lead Improvements: each says what it
+  // is, its effect, who is on it (or that no one is) and the next action,
+  // with the public issue when one exists.
+  function renderImprovementAlarms(node, data) {
+    node.innerHTML = "";
+    const status = F.statusLine({ verdict: { status: "unknown", reason: "not part of this list" }, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues, alarmIssuesVerification: data.alarm_issues_verification });
+    const alarms = S.improvementAlarms(status);
+    if (!alarms.length) {
+      const watched = data.loop_health && data.loop_health.verdict && data.loop_health.verdict.status === "healthy";
+      node.appendChild(el("p", null, watched ? "No improvement-system alarm is active in this build." : "The improvement loop's health is not recorded in this build, so an alarm may exist that this page cannot show."));
+      return;
+    }
+    const ul = el("ul", "alarm-list");
+    for (const a of alarms) {
+      const li = el("li", "alarm-row");
+      li.appendChild(el("h3", "alarm-title", a.title));
+      const dl = el("dl", "act-facts");
+      const fact = (label, content) => { const d = el("div"); d.appendChild(el("dt", null, label)); const dd = el("dd"); dd.append(content); d.appendChild(dd); dl.appendChild(d); };
+      fact("Effect", a.effect);
+      if (a.owner) { const span = el("span"); span.append("Owned by public issue "); span.appendChild(safeLink(a.owner.ref, a.owner.url)); span.append("."); fact("Owner", span); }
+      else fact("Owner", a.ownerText);
+      fact("Next action", a.next);
+      li.appendChild(dl);
+      ul.appendChild(li);
+    }
+    node.appendChild(ul);
+  }
+
   async function renderAct(data) {
     const seq = ++stepSeq;
     const box = document.getElementById("problems");
     const triageNode = document.getElementById("triage-brief");
+    safely("improvement-alarm-list", () => renderImprovementAlarms(document.getElementById("improvement-alarm-list"), data));
+    if (focusAfterRender === "improvement-alarms") {
+      focusAfterRender = null;
+      const target = document.getElementById("improvement-alarms");
+      if (target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: "start" }); }
+    }
     safely("triage-brief", () => renderPublicImprovements(triageNode, data));
     const causes = await walkFile("rollups/causes.json");
     if (seq !== stepSeq) return;
