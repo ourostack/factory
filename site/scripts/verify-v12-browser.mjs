@@ -715,6 +715,20 @@ export function settleBudget(times, budget = SETTLE_BUDGET_MS, retimes = RETIMES
 export function sameUrl(a, b) {
   try { return new URL(a).href === new URL(b).href } catch { return a === b }
 }
+// A goto that changes only the hash loads nothing: the page that is already
+// open redraws, as it does after a click.
+export function hashOnly(from, to) {
+  try { const a = new URL(from), b = new URL(to); a.hash = ""; b.hash = ""; return a.href === b.href } catch { return false }
+}
+// A navigation is a settle at the URL the last goto asked for or landed on,
+// with no settle since, when that goto loaded the page. Anything else
+// followed an action on the page: no goto, a goto and then a click that
+// moved the page on, or a goto that only changed the hash. `nav` is
+// { from, asked, landed }.
+export function settleAfter(nav, url) {
+  if (!nav || hashOnly(nav.from, nav.asked)) return "interaction"
+  return sameUrl(nav.asked, url) || (nav.landed != null && sameUrl(nav.landed, url)) ? "navigation" : "interaction"
+}
 // A view is ready when it is shown, no request is in flight, nothing in it
 // is marked as loading (aria-busy, or the site's shared is-loading class,
 // whatever its words), and its markup is the same on two reads 300 ms apart
@@ -744,12 +758,9 @@ async function settle(page, view, timeout = 20000, networkTimeout = 60000) {
         const ms = Date.now() - t0
         const size = page.viewportSize() || {}
         const kind = PAGE_KIND.get(page) || {}
-        // A navigation is a settle at the URL the last goto asked for, with no
-        // settle since. Anything else followed an action on the page: no
-        // goto, or a goto and then a click that moved the page on.
         const asked = NAVIGATED.get(page)
         NAVIGATED.delete(page)
-        const after = asked !== undefined && (sameUrl(asked.asked, page.url()) || (asked.landed !== null && sameUrl(asked.landed, page.url()))) ? "navigation" : "interaction"
+        const after = settleAfter(asked, page.url())
         ;(SINKS.get(page) || SETTLE_TIMES).push({ view, ms, where: page.url().replace(/^https?:\/\/[^/]+\//, ""), width: size.width, height: size.height, scale: kind.scale, theme: kind.theme, after, altered: !!kind.altered })
         return ms
       }
@@ -806,7 +817,7 @@ export async function main(argv = process.argv.slice(2)) {
       const goto = page.goto.bind(page)
       // `landed` is where the page stood when the goto resolved: the site's
       // own redirect of a legacy route is part of the navigation.
-      page.goto = async (to, ...a) => { const nav = { asked: to, landed: null }; NAVIGATED.set(page, nav); const r = await goto(to, ...a); nav.landed = page.url(); return r }
+      page.goto = async (to, ...a) => { const nav = { from: page.url(), asked: to, landed: null }; NAVIGATED.set(page, nav); const r = await goto(to, ...a); nav.landed = page.url(); return r }
       // A route override changes what the page loads, so its settles cannot
       // be re-timed in a fresh page.
       const route = page.route.bind(page)
@@ -1854,8 +1865,13 @@ export async function main(argv = process.argv.slice(2)) {
             await clicked.page.waitForSelector('a[href="#/tasks"]')
             await clicked.page.evaluate(() => { location.hash = "#/tasks" })
             await settle(clicked.page, "tasks")
+            // A goto that only changes the hash loads nothing, so its settle
+            // is an action as well.
+            await clicked.page.goto(url + "#/compare")
+            await settle(clicked.page, "compare")
           } finally { await clicked.context.close() }
           if (!sink2.length || sink2[0].after !== "interaction") throw new Error(`a settle after a goto and a click was recorded as ${sink2.length ? sink2[0].after : "nothing"}`)
+          if (sink2.length < 2 || sink2[1].after !== "interaction") throw new Error(`a settle after a goto that only changed the hash was recorded as ${sink2.length < 2 ? "nothing" : sink2[1].after}`)
           settleBudget([t], SETTLE_BUDGET_MS, new Map([[settleKey(t), { ms: 600, main_ms: 590 }]]))
         }, /^1 of 1 over 5 s: task \(#\/task\/[^)]*\) at 1280 px: \d+\.\d s, after an action on the page, so not re-timed/)
         await expectFailure("loading_marker_never_clears", async () => {
