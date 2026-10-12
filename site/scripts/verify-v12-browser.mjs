@@ -23,6 +23,7 @@
 
 import { createHash } from "node:crypto"
 import { createServer } from "node:http"
+import { loadavg } from "node:os"
 import { existsSync, statSync } from "node:fs"
 import { mkdir, readFile, readdir, stat, writeFile, chmod } from "node:fs/promises"
 import { createRequire } from "node:module"
@@ -73,7 +74,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "loading_marker_never_clears",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "loading_marker_never_clears",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -653,23 +654,34 @@ export function trackRequests(page) {
   return open
 }
 // How long a route may take to settle against the local server. Every
-// settle() is timed and recorded; pages_settle_within_budget fails a route
-// over budget, so a slow view cannot pass by being slow but finished.
+// settle() is timed and recorded. A route over budget is timed again on main
+// (the baseline build) in the same run, and pages_settle_within_budget fails
+// it only when it is also more than SETTLE_RATIO times main's: a busy machine
+// slows both builds, a real slowdown only this one.
 export const SETTLE_BUDGET_MS = 5000
+export const SETTLE_RATIO = 2
 const SETTLE_TIMES = []
+// Main's settle time for each route over budget, by where (its URL path).
+const BASELINE_TIMES = new Map()
 // A page whose settle times go to its own list instead (a control's page).
 const SINKS = new WeakMap()
-export function assessSettle(times, budget = SETTLE_BUDGET_MS) {
-  return (times || []).filter((t) => t.ms > budget).map((t) => `${t.view}${t.where ? ` (${t.where})` : ""}: ${(t.ms / 1000).toFixed(1)} s`)
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`
+export function assessSettle(times, budget = SETTLE_BUDGET_MS, baselines = new Map()) {
+  const main = (t) => (baselines.has(t.where) ? baselines.get(t.where) : null)
+  return (times || [])
+    .filter((t) => t.ms > budget && !(main(t) !== null && t.ms <= SETTLE_RATIO * main(t)))
+    .map((t) => `${t.view}${t.where ? ` (${t.where})` : ""}: ${secs(t.ms)} (main ${main(t) === null ? "not timed" : secs(main(t))})`)
 }
 // The body of pages_settle_within_budget: throws when no route was timed or
-// any route is over budget; the slow-file control runs this same function.
-export function settleBudget(times, budget = SETTLE_BUDGET_MS) {
+// any route is over budget and over SETTLE_RATIO times main's; the slow-file
+// controls run this same function.
+export function settleBudget(times, budget = SETTLE_BUDGET_MS, baselines = BASELINE_TIMES) {
   if (!times.length) throw new Error("no route was timed")
-  const over = assessSettle(times, budget)
-  if (over.length) throw new Error(`${over.length} of ${times.length} over ${budget / 1000} s: ${over.slice(0, 5).join("; ")}`)
+  const over = assessSettle(times, budget, baselines)
+  if (over.length) throw new Error(`${over.length} of ${times.length} over ${budget / 1000} s and over ${SETTLE_RATIO}x main: ${over.slice(0, 5).join("; ")}`)
   const sorted = [...times].sort((a, b) => a.ms - b.ms)
-  return { settled: times.length, budget_ms: budget, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse() }
+  const slowOnBoth = times.filter((t) => t.ms > budget).map((t) => ({ ...t, main_ms: baselines.get(t.where) }))
+  return { settled: times.length, budget_ms: budget, ratio: SETTLE_RATIO, median_ms: sorted[Math.floor(sorted.length / 2)].ms, slowest: sorted.slice(-5).reverse(), over_budget_but_main_slow_too: slowOnBoth, load: loadavg() }
 }
 // A view is ready when it is shown, no request is in flight, nothing in it
 // is marked as loading (aria-busy, or the site's shared is-loading class,
@@ -714,7 +726,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (args.error) { process.stderr.write(args.error + "\n"); return 2 }
   await mkdir(args.out, { recursive: true })
   const cases = [], screenshots = []
-  const resources = { pid: process.pid, server: null, server_closed: false, browser_closed: false }
+  const resources = { pid: process.pid, server: null, server_closed: false, browser_closed: false, load_at_start: loadavg() }
   const record = (name, passed, extra = {}) => { cases.push({ name, passed, ...extra }); if (!passed) process.stderr.write(`FAIL ${name}: ${extra.error || JSON.stringify(extra.problems || "").slice(0, 400)}\n`) }
   const check = async (name, fn) => {
     try { const details = await fn(); record(name, true, details ? { details } : {}) }
@@ -1521,6 +1533,25 @@ export async function main(argv = process.argv.slice(2)) {
     // 10. Negative controls: each injected defect must make the real check
     // fail on the planted element itself (data-gate-planted), so a defect
     // the page already has can never stand in for the one injected.
+    // A route timed on main (the baseline build), into its own list. `delay`
+    // holds one data file back, for the slowdown controls.
+    let mainServer = null
+    const timeOnMain = async (where, view, delay = 0) => {
+      if (!mainServer) { mainServer = await serve(args.baseline); resources.main_server = `http://127.0.0.1:${mainServer.address().port}/` }
+      const { context, page } = await newPage({ width: 1280 })
+      const sink = []
+      SINKS.set(page, sink)
+      try {
+        if (delay) await page.route("**/rollups/causes.json", async (r) => { await new Promise((ok) => setTimeout(ok, delay)); await r.continue() })
+        await page.goto(resources.main_server + where)
+        await settle(page, view)
+      } finally { await context.close() }
+      return sink[0].ms
+    }
+    // Main's time for each route over budget that has none yet.
+    const timeMainFor = async (times) => {
+      for (const t of times) if (t.ms > SETTLE_BUDGET_MS && !BASELINE_TIMES.has(t.where)) BASELINE_TIMES.set(t.where, await timeOnMain(t.where, t.view))
+    }
     const expectFailure = async (name, fn, mustMatch) => {
       let failed = false, why = ""
       try { await fn() } catch (e) { why = String(e && e.message || e).slice(0, 300); failed = mustMatch.test(why) }
@@ -1720,8 +1751,29 @@ export async function main(argv = process.argv.slice(2)) {
             await settle(slow.page, "cause")
           } finally { await slow.context.close() }
           if (!sink.length) throw new Error("the slow page was not timed")
+          await timeMainFor([...SETTLE_TIMES, ...sink])
           settleBudget([...SETTLE_TIMES, ...sink])
-        }, /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\): 1\d\.\d s/)
+        }, /^1 of \d+ over 5 s and over 2x main: cause \(#\/causes\/[^)]*\): 1\d\.\d s \(main \d+\.\d s\)/)
+        await expectFailure("slowdown_3x_over_budget", async () => {
+          // Main is held back 2.5 s; this build three times as long. Over the
+          // budget and over twice main's time, it must fail, while the same
+          // time beside a main that is as slow passes.
+          const where = routeHash(ROUTES.find((x) => x.name === "cause"), targets)
+          const main = await timeOnMain(where, "cause", 2500)
+          const slow = await newPage({ width: 1280 })
+          const sink = []
+          SINKS.set(slow.page, sink)
+          try {
+            await slow.page.route("**/rollups/causes.json", async (r) => { await new Promise((ok) => setTimeout(ok, 3 * main)); await r.continue() })
+            await slow.page.goto(url + where)
+            await settle(slow.page, "cause")
+          } finally { await slow.context.close() }
+          if (!sink.length) throw new Error("the slow page was not timed")
+          const t = { ...sink[0], where }
+          if (t.ms < 3 * main) throw new Error(`not a 3x slowdown: ${secs(t.ms)} against main ${secs(main)}`)
+          settleBudget([t], SETTLE_BUDGET_MS, new Map([[where, t.ms * 0.6]]))
+          settleBudget([t], SETTLE_BUDGET_MS, new Map([[where, main]]))
+        }, /^1 of 1 over 5 s and over 2x main: cause \(#\/causes\/[^)]*\): \d+\.\d s \(main [2-4]\.\d s\)/)
         await expectFailure("loading_marker_never_clears", async () => {
           // A loading marker left in a settled view must keep settle() from passing.
           const stuck = await newPage({ width: 1280 })
@@ -1772,6 +1824,10 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 390, init: [rejecting, lie] })
       try { await clipboardFailure(page) } finally { await context.close() }
     }, /status after a refused copy/)
+    // Main's time for every route over budget, in this run, for
+    // pages_settle_within_budget below.
+    await timeMainFor(SETTLE_TIMES)
+    if (mainServer) await new Promise((resolve) => mainServer.close(resolve))
   } catch (e) {
     record("gate_run", false, { error: String(e && e.stack || e) })
   } finally {
@@ -1785,6 +1841,7 @@ export async function main(argv = process.argv.slice(2)) {
   const ran = new Set(cases.map((c) => c.name))
   const missing = [...REQUIRED_CHECKS, ...NEGATIVE_CONTROLS.map((n) => `negative_control_${n}`)].filter((n) => !ran.has(n))
   record("gate_ran_every_required_check", missing.length === 0, missing.length ? { error: `not run: ${missing.join(", ")}` } : { details: { required: REQUIRED_CHECKS.length + NEGATIVE_CONTROLS.length } })
+  resources.load_at_end = loadavg()
   const report = {
     passed: cases.filter((c) => c.passed).length,
     failed: cases.filter((c) => !c.passed).length,
