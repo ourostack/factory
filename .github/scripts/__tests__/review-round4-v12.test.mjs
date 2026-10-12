@@ -42,7 +42,7 @@ test("the clock for recorded work inside production has its own name, and clock 
   assert.match(active.text, /^about 3\.6 hours/)
   assert.match(S.productionJourney(clocks(), F.reasonText).items[0].words, /^7 days, from 17 seconds after the task's start to 7 days after the task's start/)
   // A zero clock is a stated zero, never "none".
-  assert.equal(S.clockWords(p(0, null), null).text, "about 0 seconds (could be higher or lower)")
+  assert.equal(S.clockWords(p(0, null), null).text, "0 seconds (could be higher)")
 })
 
 test("one line relates production elapsed to the task's overall recorded elapsed", () => {

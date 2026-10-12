@@ -25,7 +25,13 @@ const write = (path, text) => {
 const H = 3600000
 const M = 60000
 const m = (value, reasons = []) => ({ class: "inferred", state: "measured", value, reasons })
-const p = (value, reasons) => ({ class: "inferred", state: "partial", value, reasons })
+// Desk states a direction on every partial figure: a figure whose reasons only
+// say the task's window is open or starts at its first session is exact for
+// that window (bound_not_moved); any other reason here makes a lower bound. A
+// lead time's open or first-session window is itself a lower bound (lp).
+const WINDOW = new Set(["censored", "card_dates_shorter_than_work", "finish_time_not_known", "open_job", "labels_from_shared_session"])
+const lp = (value, reasons) => ({ class: "inferred", state: "partial", value, reasons, bound: "lower" })
+const p = (value, reasons) => (reasons.every((r) => WINDOW.has(r)) ? { class: "inferred", state: "partial", value, reasons, bound: null, bound_reason: "bound_not_moved" } : { class: "inferred", state: "partial", value, reasons, bound: "lower" })
 const u = (reasons) => ({ class: "inferred", state: "unavailable", reasons })
 const waits = (next_prompt, extra = {}) => ({ next_prompt: m(next_prompt), api_retry: m(0), tool_failure: m(0), long_tool_call: m(0), unknown: m(0), ...extra })
 
@@ -36,10 +42,11 @@ function row825(over = {}) {
     job: "825084c9676f1da79f49e868ff950abb",
     status: { class: "declared", state: "measured", value: "done", reasons: [] },
     labels_from_shared_session: false,
-    lead_time_ms: p(193344986, r),
+    lead_time_ms: lp(193344986, r),
     working_ms: p(62609950, r),
     value_in_working_ms: p(532, r),
-    flow_efficiency: p(0.32382505124803185, r),
+    // A lead time that is a lower bound makes flow efficiency an upper one.
+    flow_efficiency: { ...p(0.32382505124803185, r), bound: "upper", bound_reason: undefined },
     waiting_by_waited_on_ms: { next_prompt: p(130484670, r), api_retry: p(0, r), tool_failure: p(0, r), long_tool_call: p(0, r), unknown: p(0, r) },
     agents_working_unlabeled_ms: p(12721842, r),
     top_causes: p([{ cause: "waiting:next_prompt", hours: 36.2, total_ms: 130484670 }, { cause: "defects:shell", hours: 0.05, total_ms: 164857 }], r),
@@ -67,10 +74,10 @@ test("the lede: partial, counted from the first session, with working and value-
   assert.match(text, /Agents were working for 17 hours of it; the evaluator \(an independent agent that labels the work\) judged under a second of that work value-adding/)
   // One cause covers 95% or more: one sentence, one number (I3).
   // 4 of its minutes have no recorded cause, so it is "nearly all", never "all" (R5).
-  assert.match(text, /Most of the 2.2 days was waiting, not work: 36 hours, nearly all of it \(99% of the waiting\) while the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.match(text, /Most of the 2.2 days was waiting, not work: at least 36 hours, nearly all of it \(99% of the waiting\) while the agent had stopped and was waiting for the operator's next prompt\./)
   // When one cause is all of it, the sentence says so without a share.
   const whole = W.idleSplit(row, { bursts: [{ start_ms: 0, end_ms: 62609950, working_ms: 62609950 }], gaps: [{ start_ms: 62609950, end_ms: 193344986, waited_on: "next_prompt" }] })
-  assert.match(W.ledeText(W.lede(row, F.reasonText, { idle: whole })), /Most of the 2.2 days was waiting, not work: for 36 hours the agent had stopped and was waiting for the operator's next prompt\./)
+  assert.match(W.ledeText(W.lede(row, F.reasonText, { idle: whole })), /Most of the 2.2 days was waiting, not work: for at least 36 hours the agent had stopped and was waiting for the operator's next prompt\./)
   assert.doesNotMatch(text, /in all/)
   assert.match(text, /The longest single wait was 19 hours, also for the next prompt\./)
   // Flow efficiency is defined in place; a lead time that is a lower bound makes it an upper bound.
@@ -117,7 +124,7 @@ test("the lede: a partial working time prints as at least, and the waiting deriv
   const up = row825({ lead_time_ms: m(10 * H), working_ms: { ...p(4 * H, ["log_truncated"]), bound: "upper" } })
   assert.equal(W.idleSplit(up, null).bound, "lower")
   // A lead time and a working time both partial in other ways leave the waiting unbounded, and the lede says so.
-  const both = row825({ lead_time_ms: p(10 * H, ["log_truncated"]), working_ms: p(4 * H, ["log_truncated"]), longest_gap: u(["log_truncated"]) })
+  const both = row825({ lead_time_ms: lp(10 * H, ["log_truncated"]), working_ms: p(4 * H, ["log_truncated"]), longest_gap: u(["log_truncated"]) })
   const bi = W.idleSplit(both, null)
   assert.equal(bi.bound, "unknown")
   assert.match(W.ledeText(W.lede(both, F.reasonText, { idle: bi })), /about 6 hours .*not bounded/)
@@ -153,14 +160,14 @@ test("the lede: a measured task, a generic partial, an open task, and labels fro
   assert.match(t, /The longest single wait was 2\.3 hours, also with its cause not recorded\./)
   assert.match(t, /here it is 15%\./)
 
-  const generic = W.ledeText(W.lede(row825({ lead_time_ms: p(4 * H, ["log_truncated"]), flow_efficiency: p(0.5, ["log_truncated"]), working_ms: m(2 * H) }), F.reasonText))
-  assert.match(generic, /^This task took 4 hours, a partial figure: a session's log was cut short\./)
-  assert.match(generic, /here it is 50% \(partial\)/)
+  const generic = W.ledeText(W.lede(row825({ lead_time_ms: lp(4 * H, ["log_truncated"]), flow_efficiency: { ...p(0.5, ["log_truncated"]), bound: "upper" }, working_ms: m(2 * H) }), F.reasonText))
+  assert.match(generic, /^This task took at least 4 hours, a partial figure: a session's log was cut short\./)
+  assert.match(generic, /here it is at most 50%/)
 
-  const open = row825({ lead_time_ms: p(377807798, ["censored"]), working_ms: p(115353171, ["censored"]), value_in_working_ms: u(["open_job"]), flow_efficiency: p(0.31, ["censored"]), waiting_by_waited_on_ms: { next_prompt: u(["open_job"]) } })
+  const open = row825({ lead_time_ms: lp(377807798, ["censored"]), working_ms: lp(115353171, ["censored"]), value_in_working_ms: u(["open_job"]), flow_efficiency: p(0.31, ["censored"]), waiting_by_waited_on_ms: { next_prompt: u(["open_job"]) } })
   const ot = W.ledeText(W.lede(open, F.reasonText))
-  assert.match(ot, /^This task is still open\. So far it has taken at least 4\.4 days\./)
-  assert.match(ot, /Agents were working for at least 32 hours of it; that work is not labeled yet \(the job is still open\), so how much of it added value is not known\./)
+  assert.match(ot, /^This task is still open\. So far it has taken at least 4\.3 days\./)
+  assert.match(ot, /Agents were working for at least 32 hours of it \(a lower bound: [^)]*\); that work is not labeled yet \(the job is still open\), so how much of it added value is not known\./)
   assert.match(ot, /here it is 31% so far\./)
 })
 
@@ -335,14 +342,14 @@ test("the task's bar has two groups that sum to its lead time: working by label,
   const r = ["card_dates_shorter_than_work"]
   // Today's stack-up row: labels may also cover idle time, and "not labeled yet" covers both.
   const stack = {
-    lead_time_ms: p(10 * H, r),
+    lead_time_ms: lp(10 * H, r),
     class_ms: { value: p(1 * H, r), support: p(2 * H, r) },
     waste_ms: { waiting: p(5 * H, r), defects: p(0.5 * H, r), extra_processing: p(0, r), unknown: p(0, r) },
     agents_working_unlabeled_ms: p(0.25 * H, r),
     not_labeled_ms: p(1.25 * H, r),
     no_session_ms: p(0, r),
   }
-  const row = { lead_time_ms: p(10 * H, r), working_ms: p(4 * H, r) }
+  const row = { lead_time_ms: lp(10 * H, r), working_ms: p(4 * H, r) }
   const idle = W.idleSplit(row, { bursts: [{ start_ms: 0, end_ms: 4.5 * H, working_ms: 4 * H }], gaps: [{ start_ms: 4.5 * H, end_ms: 10 * H, waited_on: "next_prompt" }] })
   const bar = W.timeBar(stack, row, idle, F.SEGMENTS)
   assert.equal(bar.state, "ok")
@@ -449,13 +456,14 @@ test("the picker lists every task, the latest to finish first, with badges for p
   ]
   const rows = [
     { job: "aaaa1111", status: m("done"), lead_time_ms: m(H), flow_efficiency: m(0.2), labels_from_shared_session: false },
-    { job: "bbbb2222", status: m("done"), lead_time_ms: p(H, ["card_dates_shorter_than_work"]), flow_efficiency: p(0.2, ["card_dates_shorter_than_work"]), labels_from_shared_session: false },
+    { job: "bbbb2222", status: m("done"), lead_time_ms: lp(H, ["card_dates_shorter_than_work"]), flow_efficiency: p(0.2, ["card_dates_shorter_than_work"]), labels_from_shared_session: false },
     { job: "dddd4444", status: m("cancelled"), lead_time_ms: u(["cancelled"]), flow_efficiency: u(["cancelled"]), labels_from_shared_session: false },
   ]
   const name = (j) => j.name || `Private task ${j.id.slice(0, 8)}`
   const out = W.pickerRows(jobs, rows, name, "")
   assert.deepEqual(out.map((r) => r.id), ["bbbb2222", "dddd4444", "aaaa1111", "cccc3333"])
-  assert.deepEqual(out.map((r) => r.badge), ["partial", "no data", null, "no data"])
+  // bbbb2222's flow efficiency already reads "20% (partial)", so no second badge.
+  assert.deepEqual(out.map((r) => r.badge), [null, "no data", null, "no data"])
   assert.equal(out[0].status, "done")
   assert.deepEqual(W.pickerRows(jobs, rows, name, "newest").map((r) => r.id), ["bbbb2222"])
   assert.deepEqual(W.pickerRows(jobs, rows, name, "DDDD").map((r) => r.id), ["dddd4444"])
@@ -944,7 +952,7 @@ test("for every real task, the lede's waiting = the map's triangles plus short w
     }
     const model = W.lede(row, F.reasonText, { idle })
     const tok = model.parts.find((x) => x && x.key === "waiting")
-    if (idle.value > 0) assert.equal(tok && tok.text, W.durationWords(idle.value), `${row.job.slice(0, 8)}: the lede states the same waiting`)
+    if (idle.value > 0) assert.equal(tok && tok.text, W.durationWords(idle.value, W.ROUND_OF[(tok && tok.q) || ""] || false), `${row.job.slice(0, 8)}: the lede states the same waiting`)
     const stackRow = stackup.find((x) => x.job === row.job)
     if (!stackRow) continue
     const bar = W.timeBar(stackRow, row, idle, F.SEGMENTS)

@@ -73,7 +73,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare",
 ])
 
 // Fixed-name checks a run must record; a run that misses one fails.
@@ -89,7 +89,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "private_decision_fixture_agrees_across_queue_overview_and_page",
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
-  "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under",
+  "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under", "task_page_lead_time_matches_compare",
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -191,6 +191,30 @@ export function assessViewUnits(r) {
   const off = parts.slice(1).filter(([, u]) => u !== baseUnit).map(([n, u]) => `the ${n} in ${u}, the ${baseName} in ${baseUnit}`)
   return off.length ? off.join("; ") : null
 }
+// A task's lead time reads the same on its own page (the one-bar caption and
+// its accessible label) as in Compare's all-mode Lead time cell: the same
+// number in the same unit, and the same bound where Compare states one
+// (Compare's "so far" stands in for "at least"). Rows are
+// { job, compare, caption, aria }.
+export function assessLeadAgreement(rows) {
+  const out = []
+  for (const r of rows || []) {
+    const c = durationForm(r.compare)
+    if (!c) continue
+    for (const [key, name] of [["caption", "caption"], ["aria", "accessible label"]]) {
+      const f = durationForm(r[key])
+      if (!f) { out.push(`${r.job}: the task page's ${name} has no lead time, Compare reads "${r.compare}"`); continue }
+      if (f.value !== c.value || f.unit !== c.unit || (c.bound && f.bound !== c.bound)) out.push(`${r.job}: the task page's ${name} reads "${String(r[key]).slice(0, 70)}", Compare "${r.compare}"`)
+    }
+  }
+  return out
+}
+// Runs in the page: the task page's lead time, from its one-bar chart.
+export function taskLeadFigures() {
+  const t = document.querySelector("#view-task .tw-title"), b = document.querySelector("#view-task .tw-bar")
+  const cap = t ? t.textContent : null
+  return { caption: cap ? (cap.match(/(?:one bar: |scale 0 to )(.*)$/) || [null, cap])[1] : null, aria: b ? (b.getAttribute("aria-label") || "").replace(/^Lead time /, "") : null }
+}
 // A bound sign or word followed by "<" or "under" says two things at once.
 export function boundsBeforeUnder(texts) {
   const out = []
@@ -235,7 +259,7 @@ export function compareFigures() {
   const one = (sel) => { const e = view.querySelector(sel); return e ? e.textContent.trim() : null }
   const conclusion = one("#comparison-conclusion")
   return {
-    mode, rows, cells: cells.size, column: columnShown,
+    mode, rows, cells: cells.size, cellsByJob: Object.fromEntries(cells), column: columnShown,
     axis: one("#stackup .axis-title"), sum: one("#stackup .clock-exposure"), lead: conclusion ? after(conclusion) : null,
     texts: [view.innerText, ...[...view.querySelectorAll("[aria-label]")].map((e) => e.getAttribute("aria-label")), ...tips],
   }
@@ -1106,30 +1130,6 @@ export async function main(argv = process.argv.slice(2)) {
         }
       } finally { await context.close() }
     })
-    // A one-task Compare plot is the narrowest chart (72 px, beside a 46 px
-    // axis). Its labels stay inside it at both widths and both text sizes,
-    // and the measurement really covers a chart under 100 px wide.
-    await check("narrow_one_task_plot_keeps_text_in_bounds", async () => {
-      const seen = {}
-      for (const scale of TEXT_SCALES) {
-        for (const width of [390, 1280]) {
-          const { context, page } = await newPage({ width, height: 900, scale })
-          try {
-            await page.goto(url + `#/compare?task=${encodeURIComponent(targets.task)}`)
-            await settle(page, "compare")
-            if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
-            const m = await page.evaluate(measureLayout, { refresh: true })
-            const narrow = (m.chartsMeasured || []).filter((c) => c.width < 100)
-            if (!narrow.some((c) => /sb-plot/.test(c.cls))) throw new Error(`${width} px, ${scale}x text: no one-task plot under 100 px wide was measured (${JSON.stringify((m.chartsMeasured || []).map((c) => [c.cls, c.width]))})`)
-            const bad = assessLayout(m).filter((p) => p.code === "chart_text_out_of_bounds" || p.code === "overlapping_labels")
-            if (bad.length) throw new Error(`${width} px, ${scale}x text: ${bad.slice(0, 3).map((p) => p.detail || p.code).join("; ")}`)
-            seen[`${width}_text${scale}x`] = narrow.map((c) => ({ chart: c.cls || c.chart, width: c.width, texts: c.texts }))
-          } finally { await context.close() }
-        }
-      }
-      return seen
-    })
-
     // Compare's figures, read once per mode and width for the three checks
     // below: page text, accessible labels and tooltips.
     let compareRead = null
@@ -1148,6 +1148,58 @@ export async function main(argv = process.argv.slice(2)) {
       }
       return (compareRead = out)
     }
+    // A one-task Compare plot is the narrowest chart (72 px, beside a 46 px
+    // axis). In every mode with a drawn bar, its labels stay inside it at both
+    // widths and both text sizes, and the measurement really covers a chart
+    // under 100 px wide.
+    await check("narrow_one_task_plot_keeps_text_in_bounds", async () => {
+      const seen = {}
+      const firstBar = {}
+      for (const r of await readCompare()) if (r.width === 1280 && !firstBar[r.mode] && r.rows.length) firstBar[r.mode] = r.rows[0].job
+      const modes = ["all", "working", "production", "request"]
+      for (const mode of modes) {
+        const task = mode === "all" ? targets.task : firstBar[mode]
+        if (!task) { seen[mode] = "no bar drawn in this mode"; continue }
+        for (const scale of TEXT_SCALES) {
+          for (const width of [390, 1280]) {
+            const { context, page } = await newPage({ width, height: 900, scale })
+            try {
+              await page.goto(url + `#/compare?mode=${mode}&task=${encodeURIComponent(task)}`)
+              await settle(page, "compare")
+              if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
+              const m = await page.evaluate(measureLayout, { refresh: true })
+              const narrow = (m.chartsMeasured || []).filter((c) => c.width < 100)
+              if (!narrow.some((c) => /sb-plot/.test(c.cls))) throw new Error(`${mode}, ${width} px, ${scale}x text: no one-task plot under 100 px wide was measured (${JSON.stringify((m.chartsMeasured || []).map((c) => [c.cls, c.width]))})`)
+              const bad = assessLayout(m).filter((p) => p.code === "chart_text_out_of_bounds" || p.code === "overlapping_labels")
+              if (bad.length) throw new Error(`${mode}, ${width} px, ${scale}x text: ${bad.slice(0, 3).map((p) => p.detail || p.code).join("; ")}`)
+              seen[`${mode}_${width}_text${scale}x`] = narrow.map((c) => ({ chart: c.cls || c.chart, width: c.width, texts: c.texts }))
+            } finally { await context.close() }
+          }
+        }
+      }
+      if (Object.values(seen).every((v) => typeof v === "string")) throw new Error("no mode drew a bar to measure")
+      return seen
+    })
+    // Every task's lead time on its own page equals Compare's.
+    await check("task_page_lead_time_matches_compare", async () => {
+      const all = (await readCompare()).find((r) => r.mode === "all" && r.width === 1280)
+      if (!all || !all.cellsByJob) throw new Error("Compare's all-mode table was not read")
+      const jobs = Object.entries(all.cellsByJob).filter(([, c]) => durationForm(c))
+      if (!jobs.length) throw new Error("no Compare lead time to compare")
+      const rows = []
+      const { context, page } = await newPage({ width: 1280 })
+      try {
+        for (const [job, compare] of jobs) {
+          await page.goto("about:blank")
+          await page.goto(url + `#/task/${encodeURIComponent(job)}`)
+          await settle(page, "task")
+          rows.push({ job, compare, ...(await page.evaluate(taskLeadFigures)) })
+        }
+      } finally { await context.close() }
+      const off = assessLeadAgreement(rows)
+      if (off.length) throw new Error(`${off.length} of ${rows.length * 2} lead times differ: ${off.slice(0, 4).join("; ")}`)
+      return { tasks: rows.length, sample: rows.slice(0, 5) }
+    })
     await check("compare_axis_sum_and_lead_share_one_unit", async () => {
       const seen = {}
       for (const r of await readCompare()) {
@@ -1428,6 +1480,23 @@ export async function main(argv = process.argv.slice(2)) {
           const off = assessTaskForms((await page.evaluate(compareFigures)).rows)
           if (off.length) throw new Error(`planted task figure: ${off[0]}`)
         }, /^planted task figure: .*the (table cell|tooltip|accessible label) reads/)
+        await expectFailure("task_lead_differs_from_compare", async () => {
+          await page.goto("about:blank")
+          await page.goto(url + "#/compare?mode=all")
+          await settle(page, "compare")
+          const cells = (await page.evaluate(compareFigures)).cellsByJob
+          const [job, compare] = Object.entries(cells).find(([, c]) => durationForm(c)) || []
+          if (!job) throw new Error("before planting: no Compare lead time")
+          await page.goto("about:blank")
+          await page.goto(url + `#/task/${encodeURIComponent(job)}`)
+          await settle(page, "task")
+          const before = assessLeadAgreement([{ job, compare, ...(await page.evaluate(taskLeadFigures)) }])
+          if (before.length) throw new Error(`before planting: ${before[0]}`)
+          // The caption's number moves; Compare's cell and the accessible label do not.
+          await page.evaluate(() => { const t = document.querySelector("#view-task .tw-title"); t.dataset.gatePlanted = "1"; t.textContent = t.textContent.replace(/(\d[\d,]*(?:\.\d+)?)( (?:day|hour|minute|second|millisecond)s?\b)/, (m, n, u) => `${Number(n.replace(/,/g, "")) + 1}${u}`) })
+          const off = assessLeadAgreement([{ job, compare, ...(await page.evaluate(taskLeadFigures)) }])
+          if (off.length) throw new Error(`planted lead time: ${off[0]}`)
+        }, /^planted lead time: .*the task page's caption reads/)
         await expectFailure("bound_before_under_on_compare", async () => {
           await openFresh()
           const before = boundsBeforeUnder((await page.evaluate(compareFigures)).texts)

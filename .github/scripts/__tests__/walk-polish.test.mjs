@@ -384,7 +384,8 @@ test("the store's intake chart gives every day its place on the axis (M-5), and 
 test("a partial figure Desk marks bound: null reads with no direction, never a guessed one", () => {
   const pn = (v) => p(v, ["log_truncated"], { bound: null })
   assert.equal(W.boundOf(pn(1)), null)
-  assert.equal(W.boundOf(p(1, ["log_truncated"])), "lower", "an absent bound keeps the reason-based reading")
+  // Round 8: an absent bound reads as format.js describe reads it, with no direction.
+  assert.equal(W.boundOf(p(1, ["log_truncated"])), null, "an absent bound is no direction, as describe reads it")
   assert.equal(S.feBound({ flow_efficiency: pn(0.1), working_ms: p(H, ["log_truncated"], { bound: "lower" }) }), null)
   const row = { job: "j", lead_time_ms: pn(10 * H), working_ms: pn(H), idle_ms: pn(9 * H), waiting_by_waited_on_ms: { other_task: pn(6 * H), unknown: pn(3 * H) }, flow_efficiency: pn(0.1), value_in_working_ms: pn(20 * M) }
   const text = W.ledeText(W.lede(row, F.reasonText, { idle: W.idleSplit(row, null) }))
@@ -416,7 +417,7 @@ test("Desk's new reason codes have words, and a figure with no direction says wh
   assert.match(conflict, /for 9 hours a session of this task was recording work on another task \(direction not known, because its reasons pull it both ways, so the true figure may be higher or lower\)\./)
 })
 
-test("the site never turns Desk's bound: null into a direction; only an absent bound falls back to the site's rule (Desk review M-5)", () => {
+test("the site never turns Desk's bound: null, or an absent bound, into a direction (Desk review M-5; round 8)", () => {
   const pn = (v, why) => ({ state: "partial", value: v, reasons: ["log_truncated"], bound: null, bound_reason: why || "bound_reasons_conflict" })
   // stated() keeps null and its reason.
   assert.deepEqual(W.stated(pn(5)), { state: "partial", value: 5, reasons: ["log_truncated"], bound: null, bound_reason: "bound_reasons_conflict" })
@@ -426,19 +427,20 @@ test("the site never turns Desk's bound: null into a direction; only an absent b
   assert.equal(W.sumStated([m(1), p(2, ["log_truncated"], { bound: "upper" })]).bound, null)
   assert.equal(W.sumStated([m(1), { state: "unavailable", reasons: ["x"] }]).bound, "lower")
   assert.equal(W.sumStated([m(1), p(2, ["log_truncated"])]).bound, "lower")
-  // Flow efficiency: Desk's lower/upper wins; null says no direction; absent uses the site's rule.
+  // Flow efficiency: Desk's lower/upper wins; null says no direction; absent reads as describe does.
   const lead = p(10 * H, ["card_dates_shorter_than_work"])
   assert.equal(W.feWords({ flow_efficiency: { ...pn(0.3), bound: "lower" }, lead_time_ms: lead, working_ms: m(3 * H) }), "at least 30%")
   assert.equal(W.feWords({ flow_efficiency: pn(0.3), lead_time_ms: lead, working_ms: m(3 * H) }), "30% (partial, direction not known)")
-  assert.equal(W.feWords({ flow_efficiency: p(0.3, ["card_dates_shorter_than_work"]), lead_time_ms: lead, working_ms: m(3 * H) }), "at most 30%")
+  assert.equal(W.feWords({ flow_efficiency: p(0.3, ["card_dates_shorter_than_work"]), lead_time_ms: lead, working_ms: m(3 * H) }), "30% (partial)")
   // An open task's working time is "at least" only when Desk did not say null.
   const open = (w) => W.ledeText(W.lede({ status: "open", lead_time_ms: p(10 * H, ["censored"]), working_ms: w, idle_ms: p(7 * H, ["censored"]), waiting_by_waited_on_ms: { next_prompt: m(7 * H) }, flow_efficiency: p(0.3, ["censored"]) }, F.reasonText))
   assert.doesNotMatch(open({ ...pn(3 * H), reasons: ["censored"], bound_reason: "bound_not_moved" }), /working for at least/)
-  // A box's figure capped by a task-wide partial takes Desk's direction, or lower for older data.
+  // A box's figure capped by a task-wide partial takes Desk's direction, and none when Desk states none.
   const map = { bursts: [{ start_ms: 0, end_ms: H, working_ms: H, operator_turns: 2 }], gaps: [] }
   const capped = (env) => W.mapModel(map, { maxBoxes: 3, jobStates: { operator_turns: env } }).items[0].operator_turns
   assert.equal(capped({ state: "partial", value: 2, reasons: ["log_truncated"], bound: null, bound_reason: "bound_not_moved" }).bound, null)
-  assert.equal(capped({ state: "partial", value: 2, reasons: ["log_truncated"] }).bound, "lower")
+  assert.equal(capped({ state: "partial", value: 2, reasons: ["log_truncated"] }).bound, undefined)
+  assert.equal(W.qualifierOf(capped({ state: "partial", value: 2, reasons: ["log_truncated"] })), "")
 })
 
 test("the final review's fixes: one legend shape, a padded Pareto frame, the picker's single partial, two new glossary entries", () => {

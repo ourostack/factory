@@ -2,8 +2,8 @@
 // null bound has no direction, so it never reads as a minimum. One rule for
 // every surface, following format.js describe: lower is "at least", upper
 // "at most", null with bound_not_moved is the plain figure (exact for its
-// window), any other null bound is "about", and only a partial figure that
-// states no bound at all (a sum with parts missing) is "at least".
+// window), any other null bound is "about", and a partial figure that
+// states no bound at all reads as describe reads it, the plain figure.
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { createRequire } from "node:module"
@@ -29,7 +29,17 @@ test("one qualifier rule: an explicit null bound is never a minimum", () => {
   assert.equal(W.qualifierOf({ ...noDirection, bound: "unknown" }), "about ")
   assert.equal(W.qualifierOf(lower), "at least ")
   assert.equal(W.qualifierOf(upper), "at most ")
-  assert.equal(W.qualifierOf(unstated), "at least ", "a partial figure with no bound stated is a sum with parts missing")
+  assert.equal(W.qualifierOf(unstated), "", "describe reads a partial figure with no bound stated as the plain figure")
+  // boundOf agrees: no direction for null, "unknown" or no bound stated.
+  assert.equal(W.boundOf(noDirection), null)
+  assert.equal(W.boundOf({ ...noDirection, bound: "unknown" }), null)
+  assert.equal(W.boundOf(unstated), null)
+  assert.equal(W.boundOf(lower), "lower")
+  assert.equal(W.boundOf(upper), "upper")
+  // Round 8: every stated shape reads as describe's text does.
+  // Round 8: every stated shape carries describe's qualifier (or none).
+  const qual = (t) => (t.match(/^(at least |at most |about )/) || [""])[0]
+  for (const n of [notMoved, lower, upper, unstated]) assert.equal(qual(W.statedText(n, "duration")), qual(F.describe(n, "duration").text), JSON.stringify(n))
   assert.equal(W.qualifierOf({ state: "measured", value: 1, reasons: [] }), "")
   // The same rule as the canonical formatter.
   assert.equal(F.describe(notMoved, "duration").text.startsWith("at least"), false)
@@ -57,7 +67,7 @@ test("sentences, counts and the other walk.js paths follow the same rule", () =>
   assert.equal(W.dataBox({ ...box, working_state: notMoved }, 1).find((r) => r.key === "working").text, "52s")
   assert.equal(W.dataBox({ ...box, working_state: lower }, 1).find((r) => r.key === "working").text, "at least 52s")
   const walk = read("site/src/walk.js")
-  assert.match(walk, /groups\[0\]\.qualifier = wb === "lower" \? "at least " : wb === "upper" \? "at most " : workN && workN\.state === "partial" && \(workN\.bound === null \|\| workN\.bound === "unknown"\) \? qualifierOf\(workN\) : "";/)
+  assert.match(walk, /groups\[0\]\.qualifier = qualifierOf\(workN\);/)
 })
 
 test("Compare clocks: bound_not_moved reads as the plain figure in the label, table, tooltip and sum", () => {
@@ -90,8 +100,16 @@ test("the gate measures every visible chart's text, with a one-task check and a 
   assert.match(loop, /chartsMeasured\.push/)
   assert.ok(G.REQUIRED_CHECKS.includes("narrow_one_task_plot_keeps_text_in_bounds"))
   assert.ok(G.NEGATIVE_CONTROLS.includes("clipped_text_in_narrow_plot"))
-  assert.match(gate, /check\("narrow_one_task_plot_keeps_text_in_bounds"[\s\S]{0,700}for \(const scale of TEXT_SCALES\)[\s\S]{0,200}for \(const width of \[390, 1280\]\)/)
-  assert.match(gate, /#\/compare\?task=\$\{encodeURIComponent\(targets\.task\)\}/)
+  // Round 8 (5): in every Compare mode with a drawn bar.
+  assert.match(gate, /check\("narrow_one_task_plot_keeps_text_in_bounds"[\s\S]{0,500}const modes = \["all", "working", "production", "request"\][\s\S]{0,300}for \(const scale of TEXT_SCALES\)[\s\S]{0,200}for \(const width of \[390, 1280\]\)/)
+  assert.match(gate, /#\/compare\?mode=\$\{mode\}&task=\$\{encodeURIComponent\(task\)\}/)
+  // Round 8 (2): the task page's lead time equals Compare's, with a planted control.
+  assert.ok(G.REQUIRED_CHECKS.includes("task_page_lead_time_matches_compare"))
+  assert.ok(G.NEGATIVE_CONTROLS.includes("task_lead_differs_from_compare"))
+  assert.deepEqual(G.assessLeadAgreement([{ job: "a", compare: "at least 1 minute", caption: "at least 1 minute", aria: "at least 1 minute: working 1 minute" }]), [])
+  assert.equal(G.assessLeadAgreement([{ job: "a", compare: "at least 1 minute", caption: "at least 2 minutes", aria: "at least 1 minute" }]).length, 1)
+  assert.equal(G.assessLeadAgreement([{ job: "b", compare: "7.1 days so far", caption: "at least 7 days", aria: "at least 7.1 days" }]).length, 1)
+  assert.deepEqual(G.assessLeadAgreement([{ job: "b", compare: "7.1 days so far", caption: "at least 7.1 days", aria: "at least 7.1 days: x" }]), [])
   // A text outside a narrow chart is still reported.
   const m = { doc: { scrollWidth: 390, clientWidth: 390, bodyScrollWidth: 390 }, chartTextOut: [{ chart: "stackup", text: "Cut at the edge", planted: true }] }
   assert.deepEqual(G.assessLayout(m).map((p) => p.code), ["chart_text_out_of_bounds"])
@@ -111,4 +129,66 @@ test("a Compare bar's working figure with no known direction says so in its labe
   const app = read("site/src/app.js")
   assert.match(app, /const rx = rightW - 13 \* k;/)
   assert.match(app, /"chart-caption sb-group-note"/)
+})
+
+// Round 8 (1): a qualifier and its duration are one figure, rounded the way
+// the qualifier reads, at every call site.
+test("a qualified duration rounds the way its qualifier reads, everywhere", () => {
+  assert.equal(W.qualified("about ", 400), "about 400 milliseconds")
+  assert.doesNotMatch(W.qualified("about ", 400), /about under/)
+  assert.equal(W.qualified("at least ", 98172), "at least 1 minute")
+  assert.equal(W.qualified("at most ", 61000), "at most 2 minutes")
+  // No call site puts a qualifier in front of an unbounded durationWords.
+  const walk = read("site/src/walk.js")
+  const app = read("site/src/app.js")
+  assert.doesNotMatch(walk, /\$\{(?:q|vq|totalW|dir\(att\)|qualOf\([^)]*\))\}\$\{durationWords\([^,()]*\)\}/)
+  assert.doesNotMatch(app, /\$\{(?:at|atLeast|leadQ|g\.qualifier \|\| "")\}\$\{W\.durationWords\(/)
+  assert.doesNotMatch(app, /W\.qualOf\(s\) : ""\}\$\{W\.durationWords/)
+  // A working time of 400 ms with no known direction, on the task page's bar.
+  const row = { job: "a", lead_time_ms: { state: "measured", value: 10000, reasons: [] }, working_ms: { state: "partial", value: 400, bound: null, bound_reason: "bound_reasons_conflict", reasons: ["log_truncated"] } }
+  const bar = W.timeBar(row, row, W.idleSplit(row, null), F.SEGMENTS)
+  assert.equal(bar.groups[0].qualifier, "about ")
+  assert.equal(W.qualified(bar.groups[0].qualifier, bar.groups[0].ms), "about 400 milliseconds")
+})
+
+// Round 8 (2): the task page's lead time rounds a lower bound down, as Compare does.
+test("the task page's lead time equals Compare's: a lower bound rounds down on both", () => {
+  const lead = { state: "partial", value: 98172, bound: "lower", reasons: ["card_dates_shorter_than_work"] }
+  const row = { job: "2b8f4ba0", status: { state: "measured", value: "done", reasons: [] }, lead_time_ms: lead, working_ms: { state: "measured", value: 60000, reasons: [] } }
+  const lede = W.lede(row, F.reasonText)
+  const tok = lede.parts.find((x) => x && x.key === "lead")
+  assert.equal(`${tok.q}${tok.text}`, "at least 1 minute")
+  assert.equal(W.leadQualifierOf(lead), "at least ")
+  assert.equal(W.qualified(W.leadQualifierOf(lead), lead.value), "at least 1 minute")
+  const job = { id: row.job, status: "done", finish_order: { state: "measured", value: 1, reasons: [] }, finish_basis: "labels" }
+  const [bar] = S.stackBars([job], [row], [row], { mode: "all", segments: F.SEGMENTS })
+  assert.equal(bar.words, "at least 1 minute")
+  // An open task's "so far" figure is a minimum too: 7.1 days and 7.1 days.
+  const open = { ...lead, value: 7.16 * 86400000, reasons: ["censored"] }
+  const orow = { ...row, status: { state: "measured", value: "processing", reasons: [] }, lead_time_ms: open }
+  const [ob] = S.stackBars([{ ...job, status: "processing" }], [orow], [orow], { mode: "all", segments: F.SEGMENTS })
+  const otok = W.lede(orow, F.reasonText).parts.find((x) => x && x.key === "lead")
+  assert.equal(ob.words, `${otok.text} so far`)
+  const app = read("site/src/app.js")
+  assert.match(app, /const leadText = W\.qualified\(leadQ, bar\.total_ms\);/)
+})
+
+// Round 8 (6): a figure at its domain's edge can be off one way only.
+test("at a domain edge a figure with no known direction says the one way it can be off", () => {
+  const z = { state: "partial", value: 0, bound: null, bound_reason: "bound_reasons_conflict", reasons: ["log_truncated"] }
+  assert.equal(W.qualified("about ", 0), "0 seconds (could be higher)")
+  assert.equal(W.qualified("at most ", 0), "0 seconds")
+  assert.equal(W.statedText(z, "duration"), "0s (could be higher)")
+  assert.equal(S.clockWords(z, null).text, "0 seconds (could be higher)")
+  const na = { state: "unavailable", reasons: ["not_recorded"] }
+  const clocks = { production_ms: z, active_in_production_ms: na, production_remainder_ms: na, request_to_delivery_ms: na, queue_ms: na }
+  const [bar] = S.clockBars([{ id: "z".repeat(16), status: "done", finish_date: na, clocks }], "production", {})
+  assert.equal(bar.label, "0s")
+  const share = (w, p) => S.clockShareWords(w, p)
+  const conflict = (v) => ({ state: "partial", value: v, bound: null, bound_reason: "bound_reasons_conflict", reasons: ["log_truncated"] })
+  assert.equal(share(conflict(0), { state: "measured", value: 1000, reasons: [] }), "0% of production time (could be higher)")
+  assert.equal(share(conflict(1000), { state: "measured", value: 1000, reasons: [] }), "100% of production time (could be lower)")
+  assert.deepEqual(W.atEdge("about ", 1, undefined, 1), ["", " (could be lower)"])
+  assert.deepEqual(W.atEdge("at least ", 1, undefined, 1), ["", ""])
+  assert.deepEqual(W.atEdge("about ", 0.5, 0, 1), ["about ", ""])
 })

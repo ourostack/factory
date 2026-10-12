@@ -219,12 +219,19 @@
     return { ...s, value: xs.map(stated).filter((x) => x.state !== "unavailable").reduce((a, x) => Math.max(a, x.value), 0) };
   }
 
-  // The words that put a partial figure's direction in front of it: one
-  // rule for every surface, as format.js describe states it. "at least " for
-  // a lower bound, or for a partial figure that states no bound at all (a
-  // sum with parts missing); "at most " for an upper bound; "about " for no
-  // known direction (bound null or "unknown"); nothing for bound_not_moved,
-  // which Desk states for a figure no reason moves (exact for its window).
+  // The words that put a partial figure's direction in front of it, one
+  // rule for every surface, agreeing with format.js describe (the single
+  // source of truth) and with boundOf below:
+  //   lower                       "at least "
+  //   upper                       "at most "
+  //   null with bound_not_moved   ""        (exact for its window)
+  //   null otherwise, "unknown"   "about "  (describe: "direction not known"
+  //                                          in its reason; a compact figure
+  //                                          carries it as "about")
+  //   no bound stated             ""        (describe's plain figure; Desk
+  //                                          never leaves the key out of a
+  //                                          partial figure, so only older
+  //                                          rows reach this)
   // An explicit null bound is never read as a minimum.
   function qualifierOf(n) {
     if (!n || n.state !== "partial") return "";
@@ -232,11 +239,35 @@
     if (n.bound === "upper") return "at most ";
     if (n.bound === null) return n.bound_reason === "bound_not_moved" ? "" : "about ";
     if (n.bound === "unknown") return "about ";
-    return "at least ";
+    return "";
+  }
+  // A figure at its domain's edge (a duration or share of 0, a share of
+  // 100%) can be off one way only, so it says that way: "0 seconds (could
+  // be higher)", "100% (could be lower)"; "at most 0" and "at least 100%"
+  // are exact. Returns [qualifier, tail]. One rule for every domain bound.
+  function atEdge(q, v, lo, hi) {
+    if (typeof lo === "number" && v <= lo) {
+      if (q === "about ") return ["", " (could be higher)"];
+      if (q === "at most ") return ["", ""];
+    }
+    if (typeof hi === "number" && v >= hi) {
+      if (q === "about ") return ["", " (could be lower)"];
+      if (q === "at least ") return ["", ""];
+    }
+    return [q, ""];
+  }
+  // A duration behind its qualifier, rounded the way the qualifier reads:
+  // "at least 1 minute" for 98 s, never "at least 2 minutes".
+  function qualified(q0, ms) {
+    const [q, tail] = atEdge(q0, ms, 0);
+    return `${q}${q0 && ms === 0 ? "0 seconds" : durationWords(ms, ROUND_OF[q0] || false)}${tail}`;
   }
   // How a figure behind each qualifier rounds (durationParts): a lower bound
   // down, an upper bound up, the rest to nearest.
   const ROUND_OF = { "at least ": "lower", "at most ": "upper", "about ": true, "": false };
+  // A task's lead time's qualifier, the one the lede, the task page's bar
+  // and Compare all read (qualifierOf: no other rule).
+  const leadQualifierOf = qualifierOf;
   const boundWords = qualifierOf;
 
   // A stated count or duration in a few words: "12", "at least 12", "not
@@ -246,16 +277,16 @@
     if (x.state === "unavailable") return none || "no data";
     // A lower bound of zero says nothing a reader can use (format.js says
     // the same).
-    if (x.state === "partial" && x.bound !== "upper" && x.value === 0) return "none recorded";
-    const q = qualifierOf(x);
-    const t = kind === "duration" ? durationShort(x.value, ROUND_OF[q]) : x.value.toLocaleString("en-US");
-    return `${q}${t}`;
+    if (x.state === "partial" && x.bound === "lower" && x.value === 0) return "none recorded";
+    const q0 = qualifierOf(x);
+    const [q, tail] = atEdge(q0, x.value, 0);
+    const t = kind === "duration" ? durationShort(x.value, ROUND_OF[q0]) : x.value.toLocaleString("en-US");
+    return `${q}${t}${tail}`;
   }
   function statedWords(n) {
     const x = stated(n);
     if (x.state === "unavailable") return null;
-    const q = qualifierOf(x);
-    return `${q}${durationWords(x.value, ROUND_OF[q])}`;
+    return qualified(qualifierOf(x), x.value);
   }
 
   // Reasons that only say the task's window is open or starts at its first
@@ -263,8 +294,8 @@
   const WINDOW_REASONS = new Set(["censored", "card_dates_shorter_than_work", "finish_time_not_known", "open_job", "labels_from_shared_session"]);
 
   // Which way a partial figure may be off: "lower" (the true value is at
-  // least this), "upper" (at most this), "window" (exact within the task's
-  // counted window), or null for a measured figure.
+  // least this), "upper" (at most this), or null for a measured figure or
+  // one with no stated direction.
   // Desk's "no direction" for a partial figure (bound: null), with its
   // reason: "direction not known, because …". The lede says it only when
   // the figure could truly be off either way (its reasons pull both ways);
@@ -279,11 +310,11 @@
   function boundOf(n) {
     if (!n || n.state !== "partial") return null;
     if (n.bound === "lower" || n.bound === "upper") return n.bound;
-    // Desk states bound: null when it does not know which way a figure is
-    // off; that is said as no direction, never guessed from its reasons.
-    if (n.bound === null) return null;
-    const rs = Array.isArray(n.reasons) ? n.reasons : [];
-    return rs.length && rs.every((r) => WINDOW_REASONS.has(r)) ? "window" : "lower";
+    // Desk states bound: null (or the site's "unknown") when it does not
+    // know which way a figure is off; that is said as no direction, never
+    // guessed from its reasons. A partial figure with no bound stated reads
+    // as describe reads it: the plain figure, no direction (qualifierOf).
+    return null;
   }
 
   // --------------------------------------------------------------- the lede
@@ -368,8 +399,8 @@
   // lower bound. Both at once leave no bound ("unknown").
   function idleBound(leadN, workN) {
     const flip = { lower: "upper", upper: "lower" };
-    const lb = boundOf(leadN) === "window" ? null : boundOf(leadN);
-    const wb = boundOf(workN) === "window" ? null : boundOf(workN);
+    const lb = boundOf(leadN);
+    const wb = boundOf(workN);
     if (!lb && !wb) return null;
     if (!lb) return flip[wb];
     if (!wb) return lb;
@@ -493,9 +524,12 @@
     const tok = (key, text, extra) => ({ key, text, ...(extra || {}) });
 
     const lead = val(row.lead_time_ms);
-    const leadW = lead === null ? null : durationWords(lead);
     const open = has(row.lead_time_ms, "censored");
     const fromFirst = has(row.lead_time_ms, "card_dates_shorter_than_work");
+    // A lead time reads with the qualifier Compare gives it and rounds the
+    // way that qualifier reads: an "at least" figure rounds down.
+    const leadQ = lead === null ? "" : leadQualifierOf(row.lead_time_ms);
+    const leadW = lead === null ? null : durationWords(lead, ROUND_OF[leadQ] || false);
 
     // 1. Lead time.
     if (lead === null) {
@@ -503,11 +537,11 @@
     } else if (row.lead_time_ms.state === "measured") {
       add("This task took ", tok("lead", leadW), " from the creation of its card (its record on the desk) to its end.");
     } else if (open) {
-      add("This task is still open. So far it has taken at least ", tok("lead", leadW, { q: "at least " }), fromFirst ? ", counted from its first session because its card (its record on the desk) was created after work began." : ".");
+      add(`This task is still open. So far it has taken ${leadQ}`, tok("lead", leadW, leadQ ? { q: leadQ } : undefined), fromFirst ? ", counted from its first session because its card (its record on the desk) was created after work began." : ".");
     } else if (fromFirst) {
-      add("This task took at least ", tok("lead", leadW, { q: "at least " }), ", counted from its first session because its card (its record on the desk) was created after work began.");
+      add(`This task took ${leadQ}`, tok("lead", leadW, leadQ ? { q: leadQ } : undefined), ", counted from its first session because its card (its record on the desk) was created after work began.");
     } else {
-      add("This task took ", tok("lead", leadW), `, a partial figure: ${reasons(row.lead_time_ms)}.`);
+      add(`This task took ${leadQ}`, tok("lead", leadW, leadQ ? { q: leadQ } : undefined), `, a partial figure: ${reasons(row.lead_time_ms)}.`);
     }
 
     // 2. Working time, with its own state, and how much of it the evaluator
@@ -518,8 +552,9 @@
     if (working === null) {
       add(` How long agents were working is not measured, because ${reasons(row.working_ms)}.`);
     } else {
-      const q = wb === "lower" ? "at least " : wb === "upper" ? "at most " : open && row.working_ms.bound !== null ? "at least " : "";
-      add(` Agents were working for ${q}`, tok("working", durationWords(working), { q }), lead === null ? "" : " of it");
+      // Desk's direction only; no bound stated reads plain (qualifierOf).
+      const q = wb === "lower" ? "at least " : wb === "upper" ? "at most " : "";
+      add(` Agents were working for ${q}`, tok("working", durationWords(working, ROUND_OF[q] || false), { q }), lead === null ? "" : " of it");
       // Only the reasons that make it a bound are given here; a shared
       // session's labels are said once, below.
       if (saysNoDirection(row.working_ms)) add(` (${noDirectionWords(row.working_ms, words)})`);
@@ -537,7 +572,7 @@
       } else {
         const vb = boundOf(row.value_in_working_ms);
         const vq = vb === "lower" ? "at least " : vb === "upper" ? "at most " : "";
-        add(`; the evaluator (an independent agent that labels the work) judged ${vq}`, tok("value", durationWords(value), { q: vq }), " of that work value-adding, and the rest necessary steps, rework, or work not labeled.");
+        add(`; the evaluator (an independent agent that labels the work) judged ${vq}`, tok("value", durationWords(value, ROUND_OF[vq] || false), { q: vq }), " of that work value-adding, and the rest necessary steps, rework, or work not labeled.");
         if (row.labels_from_shared_session) add(" Those labels come from a session this task shared with other tasks, so that split is partial.");
       }
       // More than half the working time carries no label: say so, so a
@@ -562,12 +597,12 @@
         // "All of it" only when it is all of it; 95-99% reads "nearly all".
         const all = waiting - top.ms <= SECOND;
         const share = `nearly all of it (${Math.min(99, Math.floor((top.ms / waiting) * 100))}% of the waiting)`;
-        if (most && all) add(` Most of the ${leadW} was waiting, not work: for ${q}`, tok("waiting", durationWords(waiting), { q }), ` ${why}${tail}.`);
-        else if (most) add(` Most of the ${leadW} was waiting, not work: ${q}`, tok("waiting", durationWords(waiting), { q }), `${tail}, ${share} while ${why}.`);
-        else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting), { q }), ` was waiting${tail}, ${all ? "all of it" : share} while ${why}.`);
+        if (most && all) add(` Most of the ${leadW} was waiting, not work: for ${q}`, tok("waiting", durationWords(waiting, ROUND_OF[q] || false), { q }), ` ${why}${tail}.`);
+        else if (most) add(` Most of the ${leadW} was waiting, not work: ${q}`, tok("waiting", durationWords(waiting, ROUND_OF[q] || false), { q }), `${tail}, ${share} while ${why}.`);
+        else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting, ROUND_OF[q] || false), { q }), ` was waiting${tail}, ${all ? "all of it" : share} while ${why}.`);
       } else {
-        if (most) add(` Most of the ${leadW} was waiting, not work: ${q}`, tok("waiting", durationWords(waiting), { q }), ` in all${tail}.`);
-        else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting), { q }), ` was waiting${tail}.`);
+        if (most) add(` Most of the ${leadW} was waiting, not work: ${q}`, tok("waiting", durationWords(waiting, ROUND_OF[q] || false), { q }), ` in all${tail}.`);
+        else add(` Of the ${leadW}, ${q}`, tok("waiting", durationWords(waiting, ROUND_OF[q] || false), { q }), ` was waiting${tail}.`);
         if (top) {
           add(" The largest part, ", tok("wait_cause", durationWords(top.ms), { cause: top.key }), `, was while ${waitedOnWords(top.key, "long")}.`);
           const unknown = by.find((x) => x.key === "unknown");
@@ -614,13 +649,11 @@
     if (n.state !== "partial") return t;
     if (n.bound === "upper") return `at most ${t}`;
     if (n.bound === "lower") return `at least ${t}`;
-    // Desk's bound: null is no direction; only an absent key (older data)
-    // falls back to the site's own rule below.
-    if (n.bound === null) return `${t} (partial, direction not known)`;
-    const wb = boundOf(row.working_ms);
+    // Desk's bound: null is no direction, except bound_not_moved, which is
+    // exact for its window; an absent key (older data) reads as describe
+    // reads it, the plain figure (qualifierOf), never a derived bound.
+    if (qualifierOf(n) === "about ") return `${t} (partial, direction not known)`;
     if (has(row.lead_time_ms, "censored")) return `${t} so far`;
-    if (has(row.lead_time_ms, "card_dates_shorter_than_work") && wb !== "lower") return `at most ${t}`;
-    if (wb === "lower" && row.lead_time_ms && row.lead_time_ms.state === "measured") return `at least ${t}`;
     return `${t} (partial)`;
   }
 
@@ -860,10 +893,11 @@
     const cap = (x, env) => {
       if (!env || env.state === "measured") return x;
       if (env.state === "unavailable") return { state: "unavailable", reasons: env.reasons || [] };
-      // The task-wide figure's direction carries over: Desk's own bound when
-      // it states one (null is no direction), else lower (older data).
-      const bound = Object.prototype.hasOwnProperty.call(env, "bound") ? env.bound : "lower";
-      return x.state === "unavailable" ? x : { state: "partial", value: x.value, bound, reasons: [...new Set([...(x.reasons || []), ...(env.reasons || [])])] };
+      // The task-wide figure's direction carries over as Desk states it (null
+      // is no direction); an absent bound stays absent, so the box reads as
+      // the task-wide figure does (qualifierOf).
+      const dir = Object.prototype.hasOwnProperty.call(env, "bound") ? { bound: env.bound, ...(env.bound_reason ? { bound_reason: env.bound_reason } : {}) } : {};
+      return x.state === "unavailable" ? x : { state: "partial", value: x.value, ...dir, reasons: [...new Set([...(x.reasons || []), ...(env.reasons || [])])] };
     };
     for (const b of boxes) {
       b.operator_turns = cap(b.operator_turns, js.operator_turns && stated(js.operator_turns));
@@ -1082,8 +1116,7 @@
       { key: "waiting", label: "Waiting", ms: idle.value, segments: waitSegs.sort((a, b) => WAIT_KEYS.indexOf(a.cause) - WAIT_KEYS.indexOf(b.cause)).map(share) },
     ];
     // Each group's figure says "at least" or "at most" as the lede does.
-    const wb = boundOf(workN);
-    groups[0].qualifier = wb === "lower" ? "at least " : wb === "upper" ? "at most " : workN && workN.state === "partial" && (workN.bound === null || workN.bound === "unknown") ? qualifierOf(workN) : "";
+    groups[0].qualifier = qualifierOf(workN);
     groups[1].qualifier = idle.bound === "upper" ? "at most " : idle.bound === "lower" ? "at least " : idle.bound === "unknown" ? "about " : "";
     return { state: "ok", total_ms: lead, groups, segments: [...groups[0].segments, ...groups[1].segments], partial, notes, lead_state: leadN.state, why_state: why.state };
   }
@@ -1472,7 +1505,7 @@
       const ws = stated(it.working_state || it.working_ms);
       const workText = ws.state === "unavailable" ? `not recorded (${(ws.reasons || []).map(words).join("; ") || "no recorded working duration"}); the legacy layout uses burst spans`
         : ws.state === "measured" ? `${durationWords(ws.value)} (${share(ws.value)})`
-        : `${ws.bound === "upper" ? "at most " : ws.bound === null ? "" : "at least "}${durationWords(ws.value)} (partial${saysNoDirection(ws) ? `; ${noDirectionWords(ws, words)}` : ""}; ${(ws.reasons || []).map(words).join("; ") || "incomplete recorded work"})`;
+        : `${qualified(ws.bound === "upper" ? "at most " : ws.bound === null ? "" : "at least ", ws.value)} (partial${saysNoDirection(ws) ? `; ${noDirectionWords(ws, words)}` : ""}; ${(ws.reasons || []).map(words).join("; ") || "incomplete recorded work"})`;
       const rows = [
         ["Which", `Work box ${it.box_no}${nOf}: ${range(it.burst_range, "burst", "bursts")}`],
         ["What it is", it.count === 1 ? "One work burst: a run of agent activity with no idle stretch of 15 minutes or more and no operator turn inside it" : `${it.count} work bursts, folded into one box with ${fold}`],
@@ -1612,7 +1645,7 @@
       const head0 = promptText ? `${promptText} ` : "";
       return { state: "ok", attention: "none recorded", text: `${head0}Desk's estimate of the operator's attention on this task, their reading and answering time, has no recorded prompt to rest on, so it reads none recorded; it is the same estimate the Store page averages over delivered tasks.` };
     }
-    const value = `${dir(att)}${durationWords(att.value)}`;
+    const value = qualified(dir(att), att.value);
     const known = att.state === "partial" && (att.bound === "lower" || att.bound === "upper");
     const note = att.state === "partial" ? ` (partial: ${known ? why(att, say) : `${why(att, plain)}; which way the true figure lies is not known`})` : "";
     const head = promptText ? `${promptText} ` : "";
@@ -1802,7 +1835,7 @@
     if (s.state === "mismatch") return [` Why the agent stopped is published for this task, but its parts do not add up to its ${durationWords(s.total.value)} of waiting for the next prompt, so no split is shown.`];
     if (s.state !== "ok" || s.template === "none") return [];
     const q = qualOf(s.total);
-    const totalW = `${q}${durationWords(s.total.value)}`;
+    const totalW = qualified(q, s.total.value);
     if (s.template === "not_labeled") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known yet: the evaluator has not labeled those stops.`];
     if (s.template === "not_recorded") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known: ${notKnownWords(s.not_known)}.`];
     if (s.template === "not_known") return [` Why the agent stopped before its ${totalW} of waiting for the operator's next prompt is not known (why: ${notKnownWords(s.not_known)}).`];
@@ -1824,7 +1857,7 @@
     // While some of it has no known why, each class is at least its figure
     // and at most its figure plus the time not known (addendum §4, Bounds).
     const nkMs = s.not_known.ms > 0 ? s.not_known.ms : 0;
-    const fig = (ms, n) => (nkMs > 0 ? boundedWords(ms, ms + nkMs, durationWords) : `${qualOf(n)}${durationWords(ms)}`);
+    const fig = (ms, n) => (nkMs > 0 ? boundedWords(ms, ms + nkMs, durationWords) : qualified(qualOf(n), ms));
     shown.forEach((x, i) => {
       const qq = nkMs > 0 ? "at least " : qualOf(x.n);
       if (i > 0) out.push(i === shown.length - 1 && !rest.length && s.template === "all" ? ", and " : ", ");
@@ -1834,7 +1867,7 @@
       const ms = rest.reduce((a, x) => a + x.ms, 0);
       out.push(`${s.template === "all" ? ", and " : ", "}${fig(ms, rest[0].n)} after ${rest.length} other kind${rest.length === 1 ? "" : "s"} of stop`);
     }
-    if (s.template === "partly") out.push(", and ", t("why", `${qualOf(s.not_known.n)}${durationWords(s.not_known.ms)}`, { why: "not_known" }), ` is not known (why: ${notKnownWords(s.not_known)})`);
+    if (s.template === "partly") out.push(", and ", t("why", qualified(qualOf(s.not_known.n), s.not_known.ms), { why: "not_known" }), ` is not known (why: ${notKnownWords(s.not_known)})`);
     out.push(".");
     return out;
   }
@@ -2237,7 +2270,7 @@
   function idleWords(p) {
     const x = p.idle || { kind: "none" };
     if (x.kind === "gap") return durationWords(x.ms);
-    if (x.kind === "burst") return `at most ${durationWords(x.ms)} (idle inside the burst before it; when is not recorded)`;
+    if (x.kind === "burst") return `${qualified("at most ", x.ms)} (idle inside the burst before it; when is not recorded)`;
     if (x.kind === "start") return "none: the task starts here";
     return "none: an agent of this task was working";
   }
@@ -2466,7 +2499,7 @@
     if (mb) rows.push(["Merged, from", mb]);
     if (isMs(pr.opened_at_ms) && isMs(pr.merged_at_ms)) {
       const partial = [pr.opened_state, pr.merged_state].some((s) => s && s.state === "partial");
-      rows.push(["Opening to merge", `${partial ? "about " : ""}${durationWords(pr.merged_at_ms - pr.opened_at_ms)}`]);
+      rows.push(["Opening to merge", qualified(partial ? "about " : "", pr.merged_at_ms - pr.opened_at_ms)]);
     }
     if (isMs(pr.uncertainty_ms)) rows.push(["How far off", `up to ${durationWords(pr.uncertainty_ms)}, as far as the task's pull requests show`]);
     const partialReasons = [...new Set([pr.opened_state, pr.merged_state].filter((s) => s && s.state === "partial").flatMap((s) => s.reasons || []))];
@@ -2984,6 +3017,10 @@
     pctWords,
     stated,
     qualifierOf,
+    qualified,
+    atEdge,
+    leadQualifierOf,
+    ROUND_OF,
     boundOf,
     feWords,
     barPartialNote,

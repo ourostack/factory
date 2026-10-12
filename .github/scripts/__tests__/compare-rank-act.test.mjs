@@ -18,7 +18,8 @@ const snap = () => JSON.parse(read(".github/fixtures/walk/snapshot.json"))
 const H = 3600000
 const M = 60000
 const m = (value, extra) => ({ state: "measured", value, reasons: [], ...(extra || {}) })
-const p = (value, reasons, extra) => ({ state: "partial", value, reasons, ...(extra || {}) })
+// Desk states a direction on every partial figure; these fixtures' reasons make a lower bound unless they say otherwise.
+const p = (value, reasons, extra) => ({ state: "partial", value, reasons, bound: "lower", ...(extra || {}) })
 const u = (reasons) => ({ state: "unavailable", reasons })
 const job = (id, pos, basis, status) => ({ id, status: status || "done", finish_order: pos === null ? u(["no_facts"]) : m(pos), finish_basis: basis })
 const nameOf = (j) => `Task ${j.id}`
@@ -243,7 +244,7 @@ test("on the real store the lede names the finished tasks, a bound, and the caus
   const l = S.compareLede(bars, tasks, F.reasonText)
   assert.equal(l.state, "ok")
   // Every done or cancelled task is finished, labeled or not (A1 I1).
-  assert.match(l.text, /^Across the 9 finished tasks whose time splits into working and waiting, agents were working about \d+% \(direction not known\) of the elapsed time \(about \d+ of at least \d+ hours\)/)
+  assert.match(l.text, /^Across the 9 finished tasks whose time splits into working and waiting, agents were working at most \d+% of the elapsed time \(\d+ of \d+ hours\)/)
   assert.equal(l.facts.top.key, "unknown")
   assert.ok(Math.abs(l.facts.lead_ms - l.facts.working_ms - l.facts.waiting_ms) < 1)
 })
@@ -353,7 +354,10 @@ test("on a phone, Compare's table is three columns (task, lead time, waiting), w
   assert.deepEqual(Object.keys(first), ["job", "name", "href", "lead", "waiting"])
   assert.equal(first.lead, "4.2d")
   assert.equal(first.waiting, "4.2d")
-  assert.ok(rowsC.some((r) => r.lead.startsWith("≥") && /^[≤~≥]?\d/.test(r.waiting)))
+  // This older snapshot states no bound on its lead times, so each reads as
+  // format.js describe reads it, the plain figure (walk.js qualifierOf).
+  assert.ok(rowsC.every((r) => !/^[≤~≥]/.test(r.lead)))
+  assert.ok(rowsC.some((r) => /^\d/.test(r.lead) && /^[≤~≥]?\d/.test(r.waiting)))
   assert.ok(rowsC.some((r) => r.lead === "no data" && r.waiting === "not known"))
   assert.equal(S.fullTableSummary(31), "Every figure, as a table (31 tasks)")
   assert.equal(S.fullTableSummary(1), "Every figure, as a table (1 task)")

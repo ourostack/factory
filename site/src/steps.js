@@ -78,11 +78,15 @@
 
   // A duration in the charts' unit, hours, for sentences: "191 hours",
   // "5.5 hours", or minutes and seconds under an hour (walk.js words).
-  function hoursWords(ms) {
+  // `bound` rounds as its qualifier reads (walk.js durationParts): "lower"
+  // down, "upper" up.
+  function hoursWords(ms, bound) {
     const x = Math.max(0, Number(ms) || 0);
-    if (x < HOUR) return W.durationWords(x);
+    if (x < HOUR) return W.durationWords(x, bound || false);
     const h = x / HOUR;
-    const t = h >= 10 ? Math.round(h).toLocaleString("en-US") : String(Math.round(h * 10) / 10);
+    const r = bound === "lower" ? Math.floor : bound === "upper" ? Math.ceil : Math.round;
+    const e = 1e-9;
+    const t = h >= 10 ? r(h + (bound === "upper" ? -e : e)).toLocaleString("en-US") : String(r(h * 10 + (bound === "upper" ? -e : e)) / 10);
     return `${t} hour${t === "1" ? "" : "s"}`;
   }
   // The same for a bar's value label: "309h", "5.5h", "48m", "37s".
@@ -132,13 +136,12 @@
   // upper one, "so far" (after the figure) for a task still open. A lead
   // time counted from the first session (the card was created after work
   // began) is a lower bound.
+  // One rule with the task page (walk.js leadQualifierOf): an explicit null
+  // (or unknown) bound reads "about", or the plain figure for
+  // bound_not_moved, never a minimum.
+  const TOTAL_BOUND = { "at least ": "lower", "at most ": "upper", "about ": "about", "": null };
   function totalBound(n) {
-    // An explicit null (or unknown) bound has no direction: "about", or the
-    // plain figure for bound_not_moved (walk.js qualifierOf), never a minimum.
-    if (n && n.state === "partial" && (n.bound === null || n.bound === "unknown")) return W.qualifierOf(n) ? "about" : null;
-    const b = W.boundOf(n);
-    if (b === "window") return has(n, "card_dates_shorter_than_work") || has(n, "finish_time_not_known") ? "lower" : null;
-    return b;
+    return TOTAL_BOUND[W.leadQualifierOf(n)];
   }
   // A task's figure in the per-task form (walk.js durationWords), or with
   // `unit`, in a view's unit for its lead sentence.
@@ -147,9 +150,12 @@
     if (v === null) return null;
     const fmt = (x, bounded) => (UNIT[unit] ? unitWords(x, unit, bounded) : W.durationWords(x, bounded));
     const b = totalBound(n);
+    // A zero with no known direction can only be higher (walk.js atEdge).
+    if (v === 0 && b === "about") return `0 ${UNIT[unit] ? UNIT[unit][1] : "second"}s${open ? " so far" : ""} (could be higher)`;
     // An open task's figure reads "so far"; one with no known direction
-    // still says "about".
-    if (open) return b === "about" ? `about ${fmt(v, true)} so far` : `${fmt(v, false)} so far`;
+    // still says "about". A lower bound rounds down even where "so far"
+    // stands in for its "at least", as on the task page.
+    if (open) return b === "about" ? `about ${fmt(v, true)} so far` : `${fmt(v, b === "lower" ? "lower" : false)} so far`;
     return `${b === "upper" ? "at most " : b === "lower" ? "at least " : b === "about" ? "about " : ""}${fmt(v, b === "upper" || b === "lower" ? b : b === "about")}`;
   }
   // The same, in a bar's short value label: "≥47h", "12.9d".
@@ -158,7 +164,8 @@
     if (v === null) return "no data";
     if (v === 0) return "none";
     const b = open ? (totalBound(n) === "about" ? "about" : null) : totalBound(n);
-    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : b === "about" ? "~" : ""}${W.durationShort(v, b === "upper" || b === "lower" ? b : b === "about")}`;
+    const round = open ? (b === "about" ? true : totalBound(n) === "lower" ? "lower" : false) : b === "upper" || b === "lower" ? b : b === "about";
+    return `${b === "upper" ? "≤" : b === "lower" ? "≥" : b === "about" ? "~" : ""}${W.durationShort(v, round)}`;
   }
 
   // One bar per task for the stack-up, in walkOrder. `mode` is "all" (the
@@ -264,8 +271,11 @@
     if (n.state !== "partial") return { text: `${v}${soFar}`, why: "", state: "measured" };
     const why = reasonWords(reasonText, [...arr(n.reasons), ...(n.bound === null && n.bound_reason ? [n.bound_reason] : [])]);
     if (n.bound === "lower") return { text: `at least ${v}${soFar}`, why: `This is a lower bound: the true time could be longer, because ${why}.`, state: "partial", bound: "lower" };
-    if (n.bound === "upper") return { text: `at most ${v}${soFar}`, why: `This is an upper bound: the true time could be shorter, because ${why}.`, state: "partial", bound: "upper" };
+    if (n.bound === "upper") return { text: `${val(n) === 0 ? "" : "at most "}${v}${soFar}`, why: `This is an upper bound: the true time could be shorter, because ${why}.`, state: "partial", bound: "upper" };
     if (exact) return { text: `${v}${soFar}`, why: `Partly measured, but exact for the task's window: ${why}.`, state: "partial", bound: undefined };
+    // At the domain's edge a figure with no known direction can only be
+    // higher (walk.js atEdge).
+    if (val(n) === 0) return { text: `${v}${soFar} (could be higher)`, why: `Partly measured, and the direction is not known, because ${why}.`, state: "partial", bound: null };
     return { text: `about ${v}${soFar} (could be higher or lower)`, why: `Partly measured, and the direction is not known, because ${why}.`, state: "partial", bound: null };
   }
 
@@ -340,7 +350,8 @@
       const words = clockWords(total, null).text;
       const viewWords = clockWords(total, null, o.unit).text;
       // One rule with the words: bound_not_moved reads as the plain figure.
-      const shortB = { "at least ": "≥", "at most ": "≤", "about ": "~", "": "" }[W.qualifierOf(total)];
+      // At zero the label drops its sign; the words say which way (atEdge).
+      const shortB = { "at least ": "≥", "at most ": "≤", "about ": "~", "": "" }[W.atEdge(W.qualifierOf(total), val(total), 0)[0]];
       const label = `${shortB}${W.durationShort(val(total), BOUND_OF[shortB] || false)}`;
       const reasons = [...new Set(arr(total.reasons))];
       let segments = [{ key: "clock_total", label: key === "production_ms" ? "Production time" : "Request to delivery", ms: val(total) }];
@@ -366,9 +377,10 @@
     const total = drawn.reduce((a, b) => a + b.total_ms, 0);
     // A sum keeps a direction only when every partial member shares it.
     const dirs = new Set(drawn.filter((b) => b.partial).map((b) => (b.bound === "lower" || b.bound === "upper" ? b.bound : null)));
-    const lead = !dirs.size ? "" : dirs.size === 1 && dirs.has("lower") ? "at least " : dirs.size === 1 && dirs.has("upper") ? "at most " : "about ";
-    const tail = lead === "about " ? " (could be higher or lower)" : "";
-    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${unitWords(total, u, BOUND_OF[lead] || false)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
+    const lead0 = !dirs.size ? "" : dirs.size === 1 && dirs.has("lower") ? "at least " : dirs.size === 1 && dirs.has("upper") ? "at most " : "about ";
+    const [lead, edge] = W.atEdge(lead0, total, 0);
+    const tail = edge || (lead === "about " ? " (could be higher or lower)" : "");
+    return `Summed over the ${plural(drawn.length, "drawn task")}: ${lead}${total === 0 && edge ? `0 ${UNIT[u] ? UNIT[u][1] : "second"}s` : unitWords(total, u, BOUND_OF[lead0] || false)} of task exposure${tail}. This is task exposure, not factory time: tasks overlap, so the sum can be more than the wall-clock time they spanned.`;
   }
 
   // Recorded working as a share of production, keeping mixed bounds honest:
@@ -381,8 +393,12 @@
     const tiny = v > 0 && v < 1;
     const pct = tiny ? `${Math.max(0.1, Math.round(v * 10) / 10)}%` : v > 99 && v < 100 ? "99%" : `${Math.round(v)}%`;
     if (r.state === "measured") return tiny && v < 0.1 ? "under 0.1% of production time" : `${pct} of production time`;
-    if (r.bound === "lower") return tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
+    if (r.bound === "lower") return v >= 100 ? "100% of production time" : tiny && v < 0.1 ? "more than 0% of production time" : `at least ${pct} of production time`;
+    if (r.bound === "upper" && v <= 0) return "0% of production time";
     if (r.bound === "upper") return tiny && v < 0.1 ? "under 0.1% of production time" : `at most ${pct} of production time`;
+    // At 0% or 100% a figure with no known direction can be off one way only.
+    if (v <= 0) return "0% of production time (could be higher)";
+    if (v >= 100) return "100% of production time (could be lower)";
     return `about ${pct} of production time (could be higher or lower)`;
   }
 
@@ -544,6 +560,7 @@
     return set.size === 1 ? [...set][0] : "unknown";
   }
   const Q = { lower: "at least ", upper: "at most ", unknown: "about " };
+  const QB = { lower: "lower", upper: "upper", unknown: true };
 
   // Compare tasks' lede, with real numbers: across the finished tasks whose
   // time splits, the share of the elapsed time agents were working (flow
@@ -589,7 +606,9 @@
     // The sums carry their members' direction, in the marks Over time uses,
     // and the share has none when its parts pull the same way (A1 pass 2
     // M-n6, as I6 ruled).
-    const pdir = (n, b) => (!n || n.state !== "partial" || (n.bound === null && n.bound_reason === "bound_not_moved") ? null : b === "lower" || b === "upper" ? b : "unknown");
+    // A part that reads as the plain figure (measured, bound_not_moved, or no
+    // bound stated: walk.js qualifierOf) gives the sum no direction.
+    const pdir = (n, b) => (!n || !W.qualifierOf(n) ? null : b === "lower" || b === "upper" ? b : "unknown");
     const sumDir = (ds) => {
       const set = new Set(ds.filter(Boolean));
       return !set.size ? null : set.size === 1 ? [...set][0] : "unknown";
@@ -609,13 +628,13 @@
     const top = Object.entries(waitBy).sort((a, b) => b[1] - a[1])[0];
     const parts = [];
     const shareWords = bound === "unknown" ? `about ${W.pctWords(share)} (direction not known)` : `${Q[bound] || ""}${W.pctWords(share)}`;
-    parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${shareWords} of the elapsed time (${Q[workDir] || ""}${hoursWords(work).replace(/ hours?$/, "")} of ${Q[leadDir] || ""}${hoursWords(lead)}).`);
+    parts.push(`Across the ${plural(split.length, "finished task")} whose time splits into working and waiting, agents were working ${shareWords} of the elapsed time (${Q[workDir] || ""}${hoursWords(work, QB[workDir]).replace(/ hours?$/, "")} of ${Q[leadDir] || ""}${hoursWords(lead, QB[leadDir])}).`);
     if (waiting > 0 && top) {
       const most = top[1] >= 0.5 * waiting;
-      parts.push(` The rest, ${Q[waitDir] || ""}${hoursWords(waiting)}, was waiting, ${most ? "mostly" : "the largest part"} ${MOSTLY[top[0]] || MOSTLY.unknown} (${hoursWords(top[1])}).`);
+      parts.push(` The rest, ${Q[waitDir] || ""}${hoursWords(waiting, QB[waitDir])}, was waiting, ${most ? "mostly" : "the largest part"} ${MOSTLY[top[0]] || MOSTLY.unknown} (${hoursWords(top[1])}).`);
     } else parts.push(" None of it was waiting.");
     const longest = split.slice().sort((a, b) => b.groups[1].ms - a.groups[1].ms)[0];
-    if (longest && longest.groups[1].ms > 0) parts.push(` The finished task that waited longest is “${longest.name}”: ${longest.groups[1].qualifier || ""}${hoursWords(longest.groups[1].ms)} of waiting in a lead time of ${longest.words}.`);
+    if (longest && longest.groups[1].ms > 0) parts.push(` The finished task that waited longest is “${longest.name}”: ${longest.groups[1].qualifier || ""}${hoursWords(longest.groups[1].ms, W.ROUND_OF[longest.groups[1].qualifier || ""] || false)} of waiting in a lead time of ${longest.words}.`);
     const unsplit = fin.filter((b) => !split.includes(b));
     if (unsplit.length) {
       const why = [...new Set(unsplit.flatMap((b) => b.reasons || []))].map(words).join("; ") || "it was not recorded";
