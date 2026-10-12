@@ -1422,6 +1422,8 @@ export async function main(argv = process.argv.slice(2)) {
           await openFresh()
           await page.setViewportSize({ width: 1280, height: 900 })
           try {
+            // The page re-lays out after the resize; give it that moment before reading.
+            await page.waitForFunction(() => ![...document.querySelectorAll(".stacked")].some((h) => h.getBoundingClientRect().height > 0), null, { timeout: 5000 }).catch(() => {})
             if ((await page.evaluate(findCardTables)).length) throw new Error("cards already shown before planting")
             await plant('<div class="stacked"><table><tbody><tr><td>planted</td></tr></tbody></table></div>')
             const hit = (await page.evaluate(findCardTables)).filter((c) => c.planted)
