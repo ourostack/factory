@@ -309,7 +309,7 @@ test("coverage_says_what_one_machine_counted_and_never_sums", () => {
   // Unknown coverage says why as far as the queue tells, and never a number.
   const never = published(publish([], { coverage: { reviewed: 0, unreviewed: null, refused: null, deferred: null, more_unreviewed: null }, runner: { state: "no_agent_cli", last_success_age: "never" } }))
   assert.deepEqual(S.triageCoverageWords(never), [
-    "How many improvement cards triage has covered is not known: the publishing machine's last scan was incomplete, or it has not yet recorded every count.",
+    "How many improvement cards triage has covered is not known: the publishing machine's last scan was incomplete, it has not yet recorded every count, or its newest publications give different counts.",
     "A review listed here is therefore not shown as current, and an empty list does not mean nothing is waiting.",
   ])
   const two = published(publish([fixtureRow()], { coverage: { reviewed: 5 } }), publish([fixtureRow({ id: hex("1") })], { coverage: { generation: hex("f"), reviewed: 7 } }))
@@ -320,6 +320,15 @@ test("coverage_says_what_one_machine_counted_and_never_sums", () => {
   assert.match(S.triageCoverageWords(quiet)[0], /no single machine published in the last 72 hours/)
   const invalid = deriveImprovementQueue({ batches: [publish([fixtureRow()]), { path: "triage/0000000000000000.json", bytes: "bad", committedAtMs: T0 }], now: T0 })
   assert.match(S.triageCoverageWords(invalid)[0], /is not known: a published triage file could not be read\.$/)
+  const unreadable = deriveImprovementQueue({ batches: null, now: T0 })
+  assert.match(S.triageCoverageWords({ ...unreadable, state: "unknown" })[0], /is not known: the published triage files could not be read\.$/)
+  // Reviews counted but none published: the status sentence does not say "none reviewed".
+  const countedOnly = published(publish([], { coverage: { reviewed: 3 } }))
+  assert.equal(countedOnly.state, "not_reviewed")
+  const status = S.improvementStatus({ queue: countedOnly, issues: 0, issuesVerified: true })
+  assert.match(status, /^Triage reports reviews, but none is published that this build can show; /)
+  assert.doesNotMatch(status, /no improvement has been reviewed/)
+  assert.match(S.improvementStatus({ queue: published(), issues: 0, issuesVerified: true }), /^Not reviewed yet: no improvement has been reviewed by triage; /)
   // Nothing published: the status sentence already says so.
   assert.deepEqual(S.triageCoverageWords(deriveImprovementQueue({ batches: [], now: T0 })), [])
   for (const bad of [null, undefined, {}, { schema: "factory-improvements/1" }, { schema: "other", coverage: known.coverage }]) assert.deepEqual(S.triageCoverageWords(bad), [])
@@ -332,6 +341,7 @@ test("runner_words_say_when_it_last_succeeded_and_why_it_cannot_run", async () =
   const said = (runner) => S.triageRunnerWords(published(publish([fixtureRow()], { runner })))
   assert.equal(said({}), "The triage runner on the publishing machine ran. Its last successful run was within the last day. Both are that machine's own report, as of its last publication.")
   assert.equal(said({ state: "no_agent_cli", last_success_age: "never" }), "The triage runner on the publishing machine cannot run: no agent command is installed on that machine. It has never completed a run. Both are that machine's own report, as of its last publication.")
+  assert.equal(said({ state: "ran", last_success_age: "never" }), "The triage runner on the publishing machine reports that it ran, but it has no successful run on record. Both are that machine's own report, as of its last publication.")
   assert.match(said({ state: "disabled_would_bill", last_success_age: "stale" }), /is switched off: a run would be billed per token\. Its last successful run was more than three days ago\./)
   assert.match(said({ state: "timeout", last_success_age: "aging" }), /timed out on its last run\. Its last successful run was between one and three days ago\./)
   assert.match(said({ state: "failed", last_success_age: "unknown" }), /failed on its last run\. When it last succeeded is not recorded\./)
@@ -372,7 +382,7 @@ test("row_facts_name_source_review_state_and_route_without_creating_a_claim", ()
   assert.equal(withdrawn.Review, "Withdrawn: its card changed or was removed, so this review no longer applies")
   assert.equal(withdrawn["Proposed route"], "none")
   const conflict = facts({}, publish([fixtureRow({ route: "investigate", gate: null })]))
-  assert.match(conflict.Review, /^In conflict: two publications disagree/)
+  assert.equal(conflict.Review, "In conflict: publications disagree about this review, or another review names the same public issue, so it is not used")
   assert.match(conflict["Last proposed route"], /it cannot support action now$/)
   const unknown = facts({}, publish([], { coverage: { generation: hex("f") } }))
   assert.match(unknown.Review, /^Not current: its source could not be read completely, or the queue's coverage is unknown/)

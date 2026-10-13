@@ -2042,6 +2042,9 @@
       : `${n} published improvement ${n === 1 ? "issue" : "issues"} ${verb === "follow" ? (n === 1 ? "follows" : "follow") : (n === 1 ? "is listed below" : "are listed below")} under Problems in hand`;
     const valid = queue && queue.schema === "factory-improvements/1" && Array.isArray(queue.rows);
     if (!valid) return `Improvement review details are unavailable; ${issuesWords("listed")}.`;
+    // A machine may report reviews and publish none of them: say that, not "none reviewed".
+    const counted = queue.coverage && queue.coverage.state === "known" && queue.coverage.reviewed > 0;
+    if (queue.state === "not_reviewed" && counted) return `Triage reports reviews, but none is published that this build can show; ${issuesWords("listed")}.`;
     if (queue.state === "not_reviewed") return `Not reviewed yet: no improvement has been reviewed by triage; ${issuesWords("listed")}.`;
     if (!queue.rows.length) return `No current reviewed improvement is published; ${issuesWords("listed")}.`;
     // Count only the rows the page draws; a conflict is named apart from staleness.
@@ -2072,8 +2075,9 @@
       return out;
     }
     const runnerKnown = queue.runner && queue.runner.state !== "unknown";
-    const why = reasons.includes("triage_invalid") ? "a published triage file could not be read"
-      : runnerKnown ? "the publishing machine's last scan was incomplete, or it has not yet recorded every count"
+    const why = reasons.includes("triage_read_unavailable") ? "the published triage files could not be read"
+      : reasons.includes("triage_invalid") ? "a published triage file could not be read"
+      : runnerKnown ? "the publishing machine's last scan was incomplete, it has not yet recorded every count, or its newest publications give different counts"
       : "no single machine published in the last 72 hours (none did, or more than one did, and their counts are never added together)";
     return [`How many improvement cards triage has covered is not known: ${why}.`, "A review listed here is therefore not shown as current, and an empty list does not mean nothing is waiting."];
   }
@@ -2104,6 +2108,8 @@
   function triageRunnerWords(queue) {
     const r = queue && queue.schema === "factory-improvements/1" ? queue.runner : null;
     if (!r || !Object.hasOwn(RUNNER_WORDS, r.state) || !Object.hasOwn(SUCCESS_AGE_WORDS, r.last_success_age)) return null;
+    // The transport allows "ran" with no success on record; the two are not said as one fact.
+    if (r.state === "ran" && r.last_success_age === "never") return "The triage runner on the publishing machine reports that it ran, but it has no successful run on record. Both are that machine's own report, as of its last publication.";
     return `The triage runner on the publishing machine ${RUNNER_WORDS[r.state]}. ${SUCCESS_AGE_WORDS[r.last_success_age]}. Both are that machine's own report, as of its last publication.`;
   }
   // Whether Desk's triage has published anything this build can read.
@@ -2133,7 +2139,7 @@
     const stale = p.state !== "reviewed" || p.conflict || p.availability === "stale_or_conflicting";
     const facts = [];
     if (Object.hasOwn(SOURCE_LABEL, p.source)) facts.push({ label: "Raised by", text: SOURCE_LABEL[p.source] });
-    const state = p.conflict ? "In conflict: two publications disagree about this review, so neither is used"
+    const state = p.conflict ? "In conflict: publications disagree about this review, or another review names the same public issue, so it is not used"
       : p.state === "withdrawn" ? "Withdrawn: its card changed or was removed, so this review no longer applies"
       : p.state === "source_unknown" ? "Not current: its source could not be read completely, or the queue's coverage is unknown"
       : p.state === "stale" ? "Stale: its evidence changed or it was not published again within 72 hours"
