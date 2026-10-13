@@ -828,8 +828,12 @@ export async function main(argv = process.argv.slice(2)) {
       page.on("pageerror", (e) => errors.push(String(e)))
       return { context, page, errors }
     }
+    // Every route is loaded from a blank page, so its settle times a full
+    // load, as the re-timing does. A goto from another route of the site
+    // would change only the hash, and a settle after that is never excused.
+    const load = async (page, to) => { await page.goto("about:blank"); await page.goto(to) }
     const open = async (page, route, scale = 1) => {
-      await page.goto(url + routeHash(route, targets))
+      await load(page, url + routeHash(route, targets))
       await settle(page, route.view)
       if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
     }
@@ -907,7 +911,7 @@ export async function main(argv = process.argv.slice(2)) {
             return { charts: r.seen }
           })
         }
-        await page.goto(url + "#/compare")
+        await load(page, url + "#/compare")
         await settle(page, "compare")
         await page.locator("#over-time").evaluate((n) => { const d = n.closest("details"); if (d) d.open = true })
         await page.waitForTimeout(300)
@@ -1010,7 +1014,7 @@ export async function main(argv = process.argv.slice(2)) {
           if (out.length) throw new Error(out.slice(0, 10).join("; "))
         })
         await check("filter_change_updates_aggregates_and_coverage", async () => {
-          await page.goto(url + "#/compare")
+          await load(page, url + "#/compare")
           await settle(page, "compare")
           const read = () => page.evaluate(() => ({
             scope: (document.getElementById("compare-scope") || {}).textContent || "",
@@ -1035,7 +1039,7 @@ export async function main(argv = process.argv.slice(2)) {
           return { before: { bars: before.bars, rows: before.rows }, after: { bars: after.bars, rows: after.rows }, expected }
         })
         await check("clear_selection_without_the_original_link", async () => {
-          await page.goto(url + routeHash(ROUTES.find((r) => r.name === "task"), targets) + "?selection=bursts%3A1-1")
+          await load(page, url + routeHash(ROUTES.find((r) => r.name === "task"), targets) + "?selection=bursts%3A1-1")
           await settle(page, "task")
           // An address selection may open its evidence; close it first, as a reader would.
           if (await page.evaluate(() => !!document.getElementById("evidence-drawer")?.open)) {
@@ -1112,7 +1116,7 @@ export async function main(argv = process.argv.slice(2)) {
       const baseServer = await serve(args.baseline)
       const baseUrl = `http://127.0.0.1:${baseServer.address().port}/`
       const height = async (page, at, route) => {
-        await page.goto(at + route.hash)
+        await load(page, at + route.hash)
         await settle(page, route.view)
         await page.waitForTimeout(600)
         return page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(document.documentElement.scrollHeight))))
@@ -1280,7 +1284,7 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 390 })
       try {
         await page.route("**/data.json", (r) => r.abort())
-        await page.goto(url + "#/")
+        await load(page, url + "#/")
         await page.waitForFunction(() => /could not/i.test(document.getElementById("status-line")?.textContent || ""))
         for (const [link, view] of [["Why Lean?", "why"], ["Help", "help"]]) {
           await page.getByRole("link", { name: link, exact: true }).first().click()
@@ -1295,7 +1299,7 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 390 })
       try {
         await page.route("**/data.json", async (r) => r.fulfill({ json: { ...targets.data, overview: { malformed: true } } }))
-        await page.goto(url + "#/")
+        await load(page, url + "#/")
         await page.waitForFunction(() => /malformed|could not|unavailable/i.test(document.getElementById("overview-state")?.textContent || ""))
         await page.getByRole("link", { name: "Tasks", exact: true }).first().click()
         await settle(page, "tasks")
@@ -1310,7 +1314,7 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 768 })
       try {
         for (const [mode, key] of [["production", "production_ms"], ["request", "request_to_delivery_ms"]]) {
-          await page.goto(url + `#/compare?mode=${mode}`)
+          await load(page, url + `#/compare?mode=${mode}`)
           await settle(page, "compare")
           const r = await page.evaluate(() => ({
             drawn: [...document.querySelectorAll("#stackup .sb-col")].filter((c) => (c.querySelector(".sb-value") || {}).textContent).length,
@@ -1334,7 +1338,7 @@ export async function main(argv = process.argv.slice(2)) {
         const { context, page } = await newPage({ width })
         try {
           for (const mode of ["all", "working", "production", "request"]) {
-            await page.goto(url + `#/compare?mode=${mode}`)
+            await load(page, url + `#/compare?mode=${mode}`)
             await settle(page, "compare")
             out.push({ width, ...(await page.evaluate(compareFigures)) })
           }
@@ -1358,7 +1362,7 @@ export async function main(argv = process.argv.slice(2)) {
           for (const width of [390, 1280]) {
             const { context, page } = await newPage({ width, height: 900, scale })
             try {
-              await page.goto(url + `#/compare?mode=${mode}&task=${encodeURIComponent(task)}`)
+              await load(page, url + `#/compare?mode=${mode}&task=${encodeURIComponent(task)}`)
               await settle(page, "compare")
               if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
               const m = await page.evaluate(measureLayout, { refresh: true })
@@ -1451,7 +1455,7 @@ export async function main(argv = process.argv.slice(2)) {
       for (const width of [1280, 390]) {
         const { context, page } = await newPage({ width })
         try {
-          await page.goto(url + "#/compare?mode=share")
+          await load(page, url + "#/compare?mode=share")
           await settle(page, "compare")
           out.push({ width, mode: "share", ...(await page.evaluate(compareFigures)), pairs: await page.evaluate(shareModePairs) })
         } finally { await context.close() }

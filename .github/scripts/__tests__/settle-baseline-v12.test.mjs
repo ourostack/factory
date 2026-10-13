@@ -130,3 +130,15 @@ test("a goto that only changes the hash counts as an action, so its settle is ne
   const loaded = at(6600, "#/compare", { after: G.settleAfter(fresh, `${o}#/compare`) })
   assert.deepEqual(G.assessSettle([loaded], 5000, re(loaded, 600, 590)), [], "a fresh load can still be excused")
 })
+
+test("every route the gate opens is loaded from a blank page, so its settle can be re-timed", () => {
+  assert.match(gate, /const load = async \(page, to\) => \{ await page\.goto\("about:blank"\); await page\.goto\(to\) \}/)
+  const lines = gate.split("\n")
+  // A goto on a shared page straight to a route of the site would change only
+  // the hash when the page already shows the site.
+  const direct = lines.flatMap((l, i) => (/^\s*await page\.goto\((url|at) \+/.test(l) && !/^\s*await page\.goto\("about:blank"\)$/.test(lines[i - 1]) ? [`${i + 1}: ${l.trim()}`] : []))
+  assert.deepEqual(direct, [])
+  assert.ok(lines.filter((l) => /^\s*await load\(page, /.test(l)).length >= 11)
+  assert.match(gate, /const open = async \(page, route, scale = 1\) => \{\n\s*await load\(page, url \+ routeHash\(route, targets\)\)/)
+  assert.equal(G.settleAfter({ from: "about:blank", asked: "http://127.0.0.1:1/#/help", landed: "http://127.0.0.1:1/#/help" }, "http://127.0.0.1:1/#/help"), "navigation")
+})
