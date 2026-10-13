@@ -1296,7 +1296,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 /* Compare: over time */
 .ot-base { margin: 6px 0 10px; font-size: 15px; max-width: 72ch; }
 .ot-base p { margin: 0 0 6px; }
-.ot-base-more summary { cursor: pointer; }
+.ot-base-more summary { cursor: pointer; min-height: 24px; }
 .ot-base-more p { font-size: 14px; }
 .ot-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
 .ot-toggle { flex-wrap: wrap; }
@@ -1316,7 +1316,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .ot-q { font-size: 10px; fill: var(--text-secondary); font-weight: 700; }
 .ot-bracket { fill: none; stroke: var(--text-secondary); stroke-width: 1.3; }
 .ot-undated { margin-top: 14px; }
-.ot-undated summary { cursor: pointer; font-size: 14.5px; }
+.ot-undated summary { cursor: pointer; font-size: 14.5px; min-height: 24px; }
 .ot-undated-title { margin: 8px 0 4px; font-size: 14px; font-weight: 600; }
 table.data-table.ot-cause-table { width: auto; }
 table.data-table.ot-cause-table th, table.data-table.ot-cause-table td { min-width: 0; padding: 6px 6px; vertical-align: bottom; }

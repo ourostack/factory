@@ -83,7 +83,8 @@ test("the gate must catch every planned negative control, and each control is ac
   const names = ["injected_document_overflow", "overflow_hidden_clipping", "vertical_clipping", "overlapping_labels", "overlapping_controls", "unmarked_scroll_frame",
     "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link",
     "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-    "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears"]
+    "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
+    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -101,7 +102,11 @@ test("every required check is recorded by name, and a run that skips one fails",
     "data_fetch_failure_says_so_and_navigation_works", "render_error_is_isolated", "json_twins_match_data_and_rendered_meaning"]
   for (const name of required) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
   const source = readFileSync(SCRIPT, "utf8")
-  for (const name of G.REQUIRED_CHECKS) assert.ok(source.includes(`check("${name}"`), `${name} is a check in the source`)
+  // The triage checks are one loop over TRIAGE_QUEUES, so their names are built, not written out.
+  const triage = G.TRIAGE_QUEUES.map((n) => `triage_queue_${n}_page_says_what_the_queue_says`)
+  for (const name of triage) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  assert.ok(source.includes("for (const name of TRIAGE_QUEUES) {\n      await check(`triage_queue_${name}_page_says_what_the_queue_says`"))
+  for (const name of G.REQUIRED_CHECKS.filter((n) => !triage.includes(n))) assert.ok(source.includes(`check("${name}"`), `${name} is a check in the source`)
   assert.match(source, /gate_ran_every_required_check/)
   // The selection note uses the reader wording, never the old internal status line.
   assert.match(source, /An item from this link is selected/)
@@ -171,4 +176,39 @@ test("doubled text has a height budget against the baseline's doubled text", () 
   const source = readFileSync(SCRIPT, "utf8")
   assert.match(source, /check\("page_height_within_budget_at_doubled_text"/)
   assert.ok(G.REQUIRED_CHECKS.includes("page_height_within_budget_at_doubled_text"))
+})
+
+test("the Improvements page is checked against triage queues the real reducer built", () => {
+  assert.deepEqual([...G.TRIAGE_QUEUES], ["known_counts", "counts_changed_newest_wins", "two_sources_never_summed", "reattested_identical_rows",
+    "null_counts_runner_cannot_run", "job_report_row", "withdrawn_last", "related_and_duplicate"])
+  const source = readFileSync(SCRIPT, "utf8")
+  // Every named queue is derived, validated and read back; none is a literal.
+  for (const name of G.TRIAGE_QUEUES) assert.equal(source.split(`\n      ${name}: { queue: derive(publish(`).length - 1, 1, name)
+  assert.match(source, /const derive = \(\.\.\.batches\) => deriveImprovementQueue\(\{ batches, now \}\)/)
+  assert.match(source, /for \(const \[name, t\] of Object\.entries\(triage\)\) if \(!validateImprovementQueue\(t\.queue\)\.ok\) record\(/)
+  // The v1.2 limit is checked on every row: no link out, nothing read as verified.
+  assert.match(source, /if \(r\.links\) throw new Error\(/)
+  assert.match(source, /Verified public context\/i\.test\(r\.text\)/)
+})
+
+test("the in-page pass clicks through the reader's links on one loaded page, under its own budget rule", () => {
+  assert.deepEqual(G.IN_PAGE_STEPS.map((s) => s.route), ["tasks", "compare", "findings", "improvements", "why", "help", "overview"])
+  for (const step of G.IN_PAGE_STEPS) assert.ok(G.ROUTES.some((r) => r.name === step.route) && /a(\.[\w-]+)?\[href="#\//.test(step.click), step.route)
+  assert.deepEqual([...G.IN_PAGE_WIDTHS], [1280, 390])
+  assert.equal(G.IN_PAGE_BUDGET_MS, 5000)
+  for (const name of ["in_page_navigation_keeps_layout_charts_tab_order_and_targets", "in_page_navigation_settles_within_budget"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  const t = (ms, after = "interaction") => ({ view: "tasks", width: 1280, ms, after })
+  assert.deepEqual(G.inPageBudget([t(400), t(5000)], 2), { settled: 2, budget_ms: 5000, slowest_ms: 5000 })
+  // Over budget is never excused, and there is no re-timing to appeal to.
+  assert.throws(() => G.inPageBudget([t(400), t(5001)], 2), /1 of 2 in-page settles over 5 s, never excused: tasks at 1280 px 5\.0 s/)
+  assert.throws(() => G.inPageBudget([t(400), t(NaN)], 2), /over 5 s/)
+  // A step that was not timed, or that loaded the page instead of clicking, fails.
+  assert.throws(() => G.inPageBudget([t(400)], 2), /1 in-page settles were timed, not 2/)
+  assert.throws(() => G.inPageBudget(null, 14), /0 in-page settles were timed, not 14/)
+  assert.throws(() => G.inPageBudget([t(400), t(400, "navigation")], 2), /1 of 2 were page loads, not clicks/)
+  const source = readFileSync(SCRIPT, "utf8")
+  // The pass reads each view where the click lands, and proves the page was never reloaded.
+  assert.match(source, /if \(!\(await page\.evaluate\(\(\) => window\.__gateInPage === true\)\)\) throw new Error\(/)
+  for (const read of ["await layout(page)", "page.evaluate(checkChartEquivalents, CHART_EQUIVALENTS)", "await smallTargets(page, step.route)", "await tabOrderProblems(page, step.route)"]) assert.ok(source.split("await inPageWalk(page, IN_PAGE_TIMES")[1].split("in_page_navigation_settles_within_budget")[0].includes(read), read)
+  assert.match(source, /inPageBudget\(IN_PAGE_TIMES, IN_PAGE_STEPS\.length \* IN_PAGE_WIDTHS\.length\)/)
 })
