@@ -218,3 +218,12 @@ test("the in-page pass clicks through the reader's links on one loaded page, und
   for (const read of ["await layout(page)", "page.evaluate(checkChartEquivalents, CHART_EQUIVALENTS)", "await smallTargets(page, step.route, DATA_SIZED_MARKS[step.route] || null)", "await tabOrderProblems(page, step.route)"]) assert.ok(source.split("await inPageWalk(page, IN_PAGE_TIMES")[1].split("in_page_navigation_settles_within_budget")[0].includes(read), read)
   assert.match(source, /inPageBudget\(IN_PAGE_TIMES, IN_PAGE_STEPS\.length \* IN_PAGE_WIDTHS\.length\)/)
 })
+
+test("a swimlane label that would run past the plot's right edge ends at its mark instead", () => {
+  // Found by the in-page pass: a session opened at 390 px drew its last tick label past the svg, where it is cut off.
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const pass = app.split("      plot.appendChild(s);\n")[1].split("focusStretch = ")[0]
+  assert.match(pass, /for \(const tl of s\.querySelectorAll\("text\.lane-tick, text\.lane-pr-label"\)\) \{/)
+  assert.match(pass, /const box = tl\.getBBox\(\);\s*if \(box\.x \+ box\.width <= width\) continue;/)
+  assert.match(pass, /tl\.setAttribute\("text-anchor", "end"\);/)
+})

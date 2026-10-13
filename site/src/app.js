@@ -3585,6 +3585,16 @@
       s.appendChild(row);
       drawClockLanes(s, { clock, sessionId, t0, t1, x, width, openMark, map, origin });
       plot.appendChild(s);
+      // A tick or pull request label that starts near the right edge would run
+      // past the plot, where an svg cuts it off: it is turned to end at its
+      // mark instead, measured as drawn so it holds at any text size.
+      for (const tl of s.querySelectorAll("text.lane-tick, text.lane-pr-label")) {
+        const box = tl.getBBox();
+        if (box.x + box.width <= width) continue;
+        const gap = tl.classList.contains("lane-tick") ? 3 : 8;
+        tl.setAttribute("x", String(Math.max(box.width, Number(tl.getAttribute("x")) - 2 * gap)));
+        tl.setAttribute("text-anchor", "end");
+      }
       focusStretch = (k) => {
         const m = marks[k];
         if (!m) return;
