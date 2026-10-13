@@ -79,7 +79,7 @@ Paths are relative to the site. A file up to {{READ_WHOLE}} is marked small enou
 {{FILES}}
 ### Factory briefing and evidence navigation (consumer milestone)
 
-`#/` is Overview; `#/tasks`, `#/compare`, `#/improvements` and `#/why` are directly usable. `#/help` replays the optional three-stop guide. Existing task/session/cause links and `#/act` remain supported. Production and request clocks are shown where Desk publishes them; active automation is not demonstrated.
+`#/` is Overview; `#/tasks`, `#/compare`, `#/improvements` and `#/why` are directly usable. `#/help` replays the optional three-stop guide. Existing task/session/cause links and `#/act` remain supported. Production and request clocks are shown where Desk publishes them. Triage reviews appear in the improvements queue only when Desk has published them; `state:"not_reviewed"` means none has.
 
 `data.json.overview` and `rollups/overview.json` are identical `factory-overview/1` projections with `generation`, `attention`, `agents`, `investigation`, `changes`, `state` and `reasons`. The overview is a closed public presentation contract checked separately at this exact top-level path; other measurements remain governed by the stated-number checks. Work/quality, collection and improvement-system problems remain distinct. Alarms precede suggested investigations. Missing monitoring is unknown, never all-clear. A triage route cannot create ownership, activity or execution authority.
 

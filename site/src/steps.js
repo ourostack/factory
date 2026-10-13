@@ -2048,10 +2048,119 @@
     const shown = queue.rows.filter((r) => improvementPresentation(r));
     if (!shown.length) return `Reviewed improvements are published but none can be shown; ${issuesWords("listed")}.`;
     const conflicting = shown.filter((r) => r.conflict === true).length;
-    const stale = shown.filter((r) => r.conflict !== true && (r.state !== "reviewed" || r.availability === "stale_or_conflicting")).length;
-    const refresh = [stale && `${stale} stale`, conflicting && `${conflicting} in conflict`].filter(Boolean);
+    const withdrawn = shown.filter((r) => r.conflict !== true && r.state === "withdrawn").length;
+    // "Not current" is a review whose source or coverage could not be read:
+    // nothing says its own evidence changed, so it is not called stale.
+    const notCurrent = shown.filter((r) => r.conflict !== true && r.state === "source_unknown").length;
+    const stale = shown.filter((r) => r.conflict !== true && !["withdrawn", "source_unknown"].includes(r.state) && (r.state !== "reviewed" || r.availability === "stale_or_conflicting")).length;
+    const refresh = [stale && `${stale} stale`, notCurrent && `${notCurrent} not current`, conflicting && `${conflicting} in conflict`].filter(Boolean);
     const k = shown.length;
-    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} listed first${refresh.length ? `, those needing a refresh first (${refresh.join(", ")})` : ""}; ${issuesWords("follow")}.`;
+    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} listed first${refresh.length ? `, those needing a refresh first (${refresh.join(", ")})` : ""}${withdrawn ? `${refresh.length ? "," : ""} with ${withdrawn} withdrawn ${withdrawn === 1 ? "review" : "reviews"} last` : ""}; ${issuesWords("follow")}.`;
+  }
+  // What triage covered, from the queue's own coverage: one source's count,
+  // never a sum. Unknown coverage says so and why as far as the queue tells.
+  const cards = (n) => `${n} improvement ${n === 1 ? "card" : "cards"}`;
+  function triageCoverageWords(queue) {
+    if (!queue || queue.schema !== "factory-improvements/1" || !queue.coverage || queue.state === "not_reviewed" && queue.coverage.state !== "known") return [];
+    const c = queue.coverage, reasons = Array.isArray(queue.reasons) ? queue.reasons : [];
+    const count = (v) => Number.isSafeInteger(v) && v >= 0;
+    if (c.state === "known" && ["reviewed", "unreviewed", "refused", "deferred"].every((k) => count(c[k]))) {
+      const rest = [c.unreviewed && `${c.unreviewed} not yet reviewed`, c.refused && `${c.refused} whose review was refused`, c.deferred && `${c.deferred} put off to a later run`].filter(Boolean);
+      const out = [`Triage on the publishing machine has reviewed ${cards(c.reviewed)}${rest.length ? `; it also counts ${rest.join(", ")}` : "; it counts none waiting, refused or put off"}.`];
+      if (c.more_unreviewed === true) out.push("More cards are waiting than this count shows.");
+      out.push("This is one machine's count from its last complete scan, published in the last 72 hours; it is not a count of every desk.");
+      return out;
+    }
+    const runnerKnown = queue.runner && queue.runner.state !== "unknown";
+    const why = reasons.includes("triage_invalid") ? "a published triage file could not be read"
+      : runnerKnown ? "the publishing machine's last scan was incomplete, or it has not yet recorded every count"
+      : "no single machine published in the last 72 hours (none did, or more than one did, and their counts are never added together)";
+    return [`How many improvement cards triage has covered is not known: ${why}.`, "A review listed here is therefore not shown as current, and an empty list does not mean nothing is waiting."];
+  }
+  // When the publishing machine's triage runner last succeeded and, if it
+  // cannot run, why: Desk's closed runner states in reader words.
+  const RUNNER_WORDS = {
+    ran: "ran",
+    no_agent_cli: "cannot run: no agent command is installed on that machine",
+    unsupported_host: "cannot run: that kind of machine is not supported",
+    no_credentials: "cannot run: the agent command is not signed in",
+    disabled_would_bill: "is switched off: a run would be billed per token",
+    sign_in_unknown: "did not run: its sign-in could not be read",
+    scope_unqualified: "did not run: the limits on what it may touch are not qualified on that machine",
+    scope_changed: "did not run: the limits on what it may touch changed since they were qualified",
+    timeout: "timed out on its last run",
+    budget_exceeded: "went over its budget on its last run",
+    failed: "failed on its last run",
+    headless_session: "did not run: it was asked from inside an unattended session",
+    no_time_for_a_run: "did not run: the loop had no time left for a whole run",
+  };
+  const SUCCESS_AGE_WORDS = {
+    recent: "Its last successful run was within the last day",
+    aging: "Its last successful run was between one and three days ago",
+    stale: "Its last successful run was more than three days ago",
+    never: "It has never completed a run",
+    unknown: "When it last succeeded is not recorded",
+  };
+  function triageRunnerWords(queue) {
+    const r = queue && queue.schema === "factory-improvements/1" ? queue.runner : null;
+    if (!r || !Object.hasOwn(RUNNER_WORDS, r.state) || !Object.hasOwn(SUCCESS_AGE_WORDS, r.last_success_age)) return null;
+    return `The triage runner on the publishing machine ${RUNNER_WORDS[r.state]}. ${SUCCESS_AGE_WORDS[r.last_success_age]}. Both are that machine's own report, as of its last publication.`;
+  }
+  // Whether Desk's triage has published anything this build can read.
+  function triagePublished(queue) {
+    return !!queue && queue.schema === "factory-improvements/1" && Array.isArray(queue.rows) && queue.state !== "not_reviewed";
+  }
+  // The one sentence on Overview and in "How to read this list" that says
+  // whether triage reviews are part of this build. It claims no more than
+  // that they are published: how current they are is said beside them.
+  function triageNote(queue) {
+    return triagePublished(queue) ? "Triage reviews from Desk are published in this build; Improvements says what they cover and how current they are." : "No triage review is published in this build.";
+  }
+  const SOURCE_LABEL = {
+    andon: "an andon alarm", friction_candidate: "recorded friction", reconcile_class: "a reconcile finding", desk_problem: "a Desk problem report",
+    store_build: "a store build", evaluator: "the waste evaluator", loop_alarm: "a loop alarm", flush_health: "delivery health",
+  };
+  const ROUTE_WORDS = {
+    agent_ready: "an agent can take the next step under existing authority; the engineering workflow's gates still apply",
+    investigate: "a fact or cause is still to be established by inspection or a bounded experiment",
+    human_decision: "a decision outside existing authority is needed from its owner",
+  };
+  const GATE_LABEL = { intent: "intent", scope: "scope", approval: "approval", voice: "public wording", spend: "spending", account: "an account change", irreversible: "an irreversible action" };
+  // The row's own facts in reader words: where the card came from, the route
+  // triage proposed (never a claim) and what state the review is in.
+  function improvementFacts(p) {
+    if (!p) return [];
+    const stale = p.state !== "reviewed" || p.conflict || p.availability === "stale_or_conflicting";
+    const facts = [];
+    if (Object.hasOwn(SOURCE_LABEL, p.source)) facts.push({ label: "Raised by", text: SOURCE_LABEL[p.source] });
+    const state = p.conflict ? "In conflict: two publications disagree about this review, so neither is used"
+      : p.state === "withdrawn" ? "Withdrawn: its card changed or was removed, so this review no longer applies"
+      : p.state === "source_unknown" ? "Not current: its source could not be read completely, or the queue's coverage is unknown"
+      : p.state === "stale" ? "Stale: its evidence changed or it was not published again within 72 hours"
+      : "Reviewed and published within the last 72 hours";
+    facts.push({ label: "Review", text: state });
+    if (Object.hasOwn(ROUTE_WORDS, p.route)) facts.push({ label: stale ? "Last proposed route" : "Proposed route", text: `${ROUTE_WORDS[p.route]}${p.route === "human_decision" && Object.hasOwn(GATE_LABEL, p.gate) ? ` (gate: ${GATE_LABEL[p.gate]})` : ""}${stale ? "; it cannot support action now" : ""}` });
+    else facts.push({ label: "Proposed route", text: "none" });
+    return facts;
+  }
+  // "Improvement 2 of 5", and which other drawn rows this one names as
+  // related or duplicate. An id the page does not draw is counted, not linked.
+  function improvementLinks(rows) {
+    const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+    const at = new Map(list.map((p, i) => [p.id, i + 1]));
+    const words = (ids, kind) => {
+      const all = Array.isArray(ids) ? [...new Set(ids)] : [];
+      if (!all.length) return null;
+      const here = all.filter((id) => at.has(id)).map((id) => at.get(id)).sort((a, b) => a - b);
+      const away = all.length - here.length;
+      const parts = [here.length && `improvement${here.length === 1 ? "" : "s"} ${here.join(", ")} on this page`, away && `${away} not listed on this page`].filter(Boolean);
+      return `${kind}: ${parts.join(" and ")}.`;
+    };
+    return list.map((p, i) => ({
+      id: p.id, n: i + 1, of: list.length,
+      related: words(p.related_ids, "Related, not shown to be the same problem"),
+      duplicates: words(p.duplicate_ids, "Suggested duplicate, sharing evidence; nothing is merged or closed"),
+    }));
   }
   // Reader-facing names for the public queue's lifecycle identifiers.
   const LIFECYCLE_LABEL = {
@@ -2061,11 +2170,14 @@
   function lifecycleLabel(lifecycle) {
     return Object.hasOwn(LIFECYCLE_LABEL, lifecycle) ? LIFECYCLE_LABEL[lifecycle] : "Not recorded";
   }
+  // A job pointer is the address of the job's public report, as the triage
+  // transport validates it.
+  const JOB_REPORT = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/blob\/reports\/jobs\/[0-9a-f]{32}\.md$/;
   // Consumes the Node2 validated public projection, never local prose.
   function improvementPresentation(row) {
     const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
     const pointer = (p) => exact(p, ["kind", "ref", "revision"]) && Number.isSafeInteger(p.revision) && p.revision >= 1 &&
-      (p.kind === "job" ? /^[0-9a-f]{32}$/.test(p.ref) : ["issue", "pr"].includes(p.kind) && F.safeGithubUrl(p.ref) === p.ref);
+      (p.kind === "job" ? JOB_REPORT.test(p.ref) : ["issue", "pr"].includes(p.kind) && F.safeGithubUrl(p.ref) === p.ref);
     if (!row || !/^[0-9a-f]{32}$/.test(row.id) || !row.handoff ||
         !Number.isSafeInteger(row.revision) || row.revision < 1 ||
         ![null, "agent_ready", "investigate", "human_decision"].includes(row.route) ||
@@ -2091,7 +2203,8 @@
         closed_confirmed: "Confirmed in the published lifecycle; no savings inferred",
         closed_unverified: "Closed without a confirmed result",
       })[row.lifecycle] || "Result not published or checked";
-    const out = { id: row.id, state: row.state, route: row.route, lifecycle: row.lifecycle, ownership: row.ownership, verification };
+    const ids = (v) => (Array.isArray(v) ? v.filter((id) => typeof id === "string" && /^[0-9a-f]{32}$/.test(id) && id !== row.id).slice(0, 16) : []);
+    const out = { id: row.id, state: row.state, conflict: row.conflict === true, route: row.route, gate: row.gate, source: row.source, lifecycle: row.lifecycle, ownership: row.ownership, verification, related_ids: ids(row.related_ids), duplicate_ids: ids(row.duplicate_ids) };
     for (const key of ["availability", "gate_explanation", "context", "decision", "recommendation", "safe_continuation", "next_action", "handoff"]) out[key] = copy(row[key]);
     return out;
   }
@@ -2105,6 +2218,12 @@
     lifecycleLabel,
     improvementStatus,
     improvementPresentation,
+    improvementFacts,
+    improvementLinks,
+    triageCoverageWords,
+    triageRunnerWords,
+    triagePublished,
+    triageNote,
     columnLabels,
     bodyCellColumns,
     chartRows,
