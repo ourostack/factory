@@ -75,7 +75,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
   "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items",
+  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items", "session_chart_stale_after_resize",
 ])
 
 // The triage queues the Improvements page is checked against. Each is built
@@ -127,6 +127,29 @@ export const EVERY_TASK_WIDTHS = Object.freeze([1280, 390])
 // at a middle width as well: a label that fits a wide and a narrow plot can
 // still meet its neighbour in between.
 export const EVERY_SESSION_WIDTHS = Object.freeze([1280, 768, 390])
+// A session page is loaded at one of these widths and the window is then
+// resized to the other, in both directions: the chart must become what a
+// fresh load at that width draws.
+export const RESIZE_WIDTHS = Object.freeze([390, 1280])
+// Runs in the page: what the session chart drew, to compare a resized page
+// with a fresh one.
+export function readSessionChart() {
+  const svg = document.querySelector("#swimlane .lane-plot svg")
+  const below = document.querySelector("#swimlane .lane-notes-below")
+  if (!svg) return null
+  return {
+    plot_width: Math.round(svg.getBoundingClientRect().width),
+    frame_width: Math.round(document.querySelector("#swimlane .lane-frame").clientWidth),
+    ticks: [...svg.querySelectorAll("text.lane-tick")].map((t) => t.textContent + (t.getAttribute("text-anchor") === "end" ? " (turned)" : "")),
+    notes_in_plot: [...svg.querySelectorAll("text.lane-note")].map((t) => t.textContent),
+    notes_below: below && !below.hidden ? below.textContent : "",
+  }
+}
+export function chartDiffers(resized, fresh) {
+  if (!resized || !fresh) return "no session chart was drawn"
+  for (const k of ["plot_width", "frame_width", "ticks", "notes_in_plot", "notes_below"]) if (JSON.stringify(resized[k]) !== JSON.stringify(fresh[k])) return `${k}: resized ${JSON.stringify(resized[k]).slice(0, 120)}, fresh ${JSON.stringify(fresh[k]).slice(0, 120)}`
+  return null
+}
 export const IN_PAGE_WIDTHS = Object.freeze([1280, 390])
 // A click to another view loads no page, so it has the settle budget with no
 // re-timing and no excuse: every step must be timed, each as an action on
@@ -158,6 +181,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under", "task_page_lead_time_matches_compare", "task_pages_no_bound_before_under", "pages_settle_within_budget",
   "in_page_navigation_keeps_layout_charts_tab_order_and_targets", "in_page_navigation_settles_within_budget",
   "ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_and_one_session_each_layout_is_clean",
+  "session_chart_follows_the_window_width_both_ways",
   ...TRIAGE_QUEUES.map((n) => `triage_queue_${n}_page_says_what_the_queue_says`),
 ])
 
@@ -973,6 +997,10 @@ export async function main(argv = process.argv.slice(2)) {
             for (let i = WIDTHS.length - 1; i >= 0; i--) {
               const w = WIDTHS[i]
               await page.setViewportSize({ width: w, height: 900 })
+              // A view that redraws on resize (the task map, the session chart)
+              // does so after a 150 ms debounce, so this reading can be of the
+              // chart drawn a few widths ago; at 1 px steps that is the same
+              // chart, and any problem found is judged again once settled.
               let problems = await layout(page, i % 16 === 0)
               if (problems.length) {
                 // A chart redraw is debounced after a resize; judge the settled page.
@@ -1894,6 +1922,67 @@ export async function main(argv = process.argv.slice(2)) {
       return { tasks: ids.length, widths: [...EVERY_TASK_WIDTHS], sessions: firstSession.size, session_widths: [...EVERY_SESSION_WIDTHS] }
     })
 
+    // 9f. A session chart follows the window: resized after load, it is what
+    // a fresh load at the new width draws, in both directions. Read on the
+    // sampled session and on one whose lane note is too long for a phone.
+    const sessionChartAt = async (init, where, from, to) => {
+      const { context, page, errors } = await newPage({ width: from, init })
+      try {
+        await load(page, url + `#/task/${where.task}/session/${where.session}`)
+        await settle(page, "session")
+        if (to !== from) {
+          await page.setViewportSize({ width: to, height: 900 })
+          // The redraw is debounced; then the view must be still again.
+          await page.waitForTimeout(400)
+          await settle(page, "session")
+        }
+        const chart = await page.evaluate(readSessionChart)
+        const problems = await layout(page)
+        if (problems.length) throw new Error(`${from} to ${to} px: ${JSON.stringify(problems).slice(0, 400)}`)
+        if (errors.length) throw new Error(`page errors: ${errors.slice(0, 2).join("; ")}`)
+        return chart
+      } finally { await context.close() }
+    }
+    // The sampled session, and one whose fresh load at the narrow width says a
+    // lane note under the plot: the note must move into the chart when the
+    // window widens and back under it when it narrows. A build with no such
+    // session cannot prove that, so the check fails rather than pass without it.
+    let noteSession = null
+    const resizeSessions = async () => {
+      if (!noteSession) {
+        let tried = 0
+        search: for (const job of targets.data.jobs.map((j) => j.id)) {
+          let files = []
+          try { files = (await readdir(join(args.site, "jobs", job))).filter((f) => f.endsWith(".json")).sort() } catch { continue }
+          for (const f of files) {
+            if (tried++ >= 60) break search
+            const where = { task: job, session: f.slice(0, -5) }
+            const chart = await sessionChartAt([], where, RESIZE_WIDTHS[0], RESIZE_WIDTHS[0]).catch(() => null)
+            if (chart && chart.notes_below) { noteSession = where; break search }
+          }
+        }
+        if (!noteSession) throw new Error(`no session among ${tried} says a lane note under its plot at ${RESIZE_WIDTHS[0]} px, so the note's move cannot be checked`)
+      }
+      return [{ task: targets.task, session: targets.session }, noteSession]
+    }
+    const resizeCheck = async (init = []) => {
+      const out = []
+      for (const where of await resizeSessions()) {
+        for (const [from, to] of [[RESIZE_WIDTHS[0], RESIZE_WIDTHS[1]], [RESIZE_WIDTHS[1], RESIZE_WIDTHS[0]]]) {
+          const fresh = await sessionChartAt([], where, to, to)
+          const resized = await sessionChartAt(init, where, from, to)
+          const differs = chartDiffers(resized, fresh)
+          if (differs) throw new Error(`session ${where.session.slice(0, 8)} resized from ${from} to ${to} px is not what a fresh load draws: ${differs}`)
+          out.push({ session: where.session.slice(0, 8), from, to, plot_width: resized.plot_width, notes_below: !!resized.notes_below })
+        }
+      }
+      // The note session really moved its note: under the plot when narrow, not when wide.
+      const [wide, narrow] = out.slice(-2)
+      if (wide.notes_below || !narrow.notes_below) throw new Error(`the lane note did not move with the width: under the plot at ${wide.to} px ${wide.notes_below}, at ${narrow.to} px ${narrow.notes_below}`)
+      return out
+    }
+    await check("session_chart_follows_the_window_width_both_ways", async () => resizeCheck())
+
     // 10. Negative controls: each injected defect must make the real check
     // fail on the planted element itself (data-gate-planted), so a defect
     // the page already has can never stand in for the one injected.
@@ -2255,6 +2344,10 @@ export async function main(argv = process.argv.slice(2)) {
         })
       } finally { await context.close() }
     }, /^planted overlapping_controls/)
+    await expectFailure("session_chart_stale_after_resize", async () => {
+      // The page never hears the window resize, as before the redraw existed.
+      await resizeCheck([{ fn: () => window.addEventListener("resize", (e) => e.stopImmediatePropagation(), true) }])
+    }, /is not what a fresh load draws: plot_width/)
     await expectFailure("slow_in_page_navigation", async () => {
       // The same walk with every data file 6 s late after the first load:
       // the in-page rule has no re-timing, so it must fail.

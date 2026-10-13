@@ -84,7 +84,7 @@ test("the gate must catch every planned negative control, and each control is ac
     "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link",
     "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
     "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items"]
+    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items", "session_chart_stale_after_resize"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -262,4 +262,30 @@ test("marks set aside from the touch-target rule must have full-size equivalents
   // A lane note longer than a narrow plot is said whole under the plot, never cut off.
   assert.match(pass, /for \(const n of s\.querySelectorAll\("text\.lane-note"\)\) \{/)
   assert.match(pass, /notesBelow\.textContent = moved\.join\(" "\);\s*notesBelow\.hidden = moved\.length === 0;/)
+})
+
+test("a session chart resized after load must be what a fresh load at that width draws, both ways", () => {
+  assert.ok(G.REQUIRED_CHECKS.includes("session_chart_follows_the_window_width_both_ways"))
+  assert.deepEqual([...G.RESIZE_WIDTHS], [390, 1280])
+  const chart = { plot_width: 246, frame_width: 358, ticks: ["0m", "30m (turned)"], notes_in_plot: [], notes_below: "Operator lane: no operator prompt recorded in this session." }
+  assert.equal(G.chartDiffers(chart, structuredClone(chart)), null)
+  // A chart left at its old width, a note left under a wide plot, or no chart at all, differs.
+  assert.match(G.chartDiffers({ ...chart, plot_width: 246 }, { ...chart, plot_width: 928 }), /^plot_width: resized 246, fresh 928$/)
+  assert.match(G.chartDiffers(chart, { ...chart, notes_below: "", notes_in_plot: ["no operator prompt recorded in this session"] }), /^notes_in_plot: /)
+  assert.match(G.chartDiffers(chart, { ...chart, ticks: ["0m", "30m"] }), /^ticks: /)
+  assert.equal(G.chartDiffers(null, chart), "no session chart was drawn")
+  const gate = readFileSync(SCRIPT, "utf8")
+  // Both directions, each against a fresh load at the destination width.
+  assert.match(gate, /for \(const \[from, to\] of \[\[RESIZE_WIDTHS\[0\], RESIZE_WIDTHS\[1\]\], \[RESIZE_WIDTHS\[1\], RESIZE_WIDTHS\[0\]\]\]\) \{/)
+  assert.match(gate, /const fresh = await sessionChartAt\(\[\], where, to, to\)/)
+  // One session must say a lane note under its narrow plot, and the note must move with the width.
+  assert.match(gate, /if \(chart && chart\.notes_below\) \{ noteSession = where; break search \}/)
+  assert.match(gate, /if \(!noteSession\) throw new Error\(/)
+  assert.match(gate, /if \(wide\.notes_below \|\| !narrow\.notes_below\) throw new Error\(/)
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  assert.match(app, /document\.body\.dataset\.view !== "session" \|\| l\.frame\.clientWidth === l\.width\) return;\s*l\.width = l\.frame\.clientWidth;\s*l\.redraw\(\);/)
+  // Until the reader chooses a zoom, the redraw fits the chart again as a load does.
+  assert.match(app, /if \(taskB && !chose\) fitTask\(\); else zoomTo\(zoom\);/)
+  // Keyboard focus that was in the plot returns to its stretch after the redraw.
+  assert.match(app, /const inPlot = plot\.contains\(document\.activeElement\);[\s\S]{0,120}if \(inPlot\) focusStretch\(current\);/)
 })

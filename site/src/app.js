@@ -3200,6 +3200,21 @@
     });
   }
 
+  // A session's swimlane sizes its plot from its frame when drawn, so a
+  // window that changes width redraws it: at the same zoom, about the same
+  // centre. Without this a chart drawn on a phone stays phone-wide.
+  let lastLane = null;
+  let laneResizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(laneResizeTimer);
+    laneResizeTimer = setTimeout(() => {
+      const l = lastLane;
+      if (!l || !l.frame.isConnected || document.body.dataset.view !== "session" || l.frame.clientWidth === l.width) return;
+      l.width = l.frame.clientWidth;
+      l.redraw();
+    }, 150);
+  });
+
   let lastMapWidth = 0;
   let lastMapRender = null;
   let resizeTimer = null;
@@ -3642,7 +3657,9 @@
       draw();
       frame.scrollLeft = Math.max(0, center * frame.scrollWidth - frame.clientWidth / 2);
     };
-    fitB.addEventListener("click", () => zoomTo(1));
+    // Until the reader chooses a zoom, a redraw fits the chart again as on load.
+    let chose = false;
+    fitB.addEventListener("click", () => { chose = true; zoomTo(1); });
     const fitTask = () => {
       const frameW = Math.max(200, frame.clientWidth - LABELS_W);
       const steps = W.zoomSteps(span, frameW, 32768);
@@ -3651,9 +3668,9 @@
       draw();
       frame.scrollLeft = Math.max(0, ((taskPart[0] - t0) / span) * frameW * zoom - 8);
     };
-    if (taskB) taskB.addEventListener("click", fitTask);
-    inB.addEventListener("click", () => zoomTo(zoom * 2));
-    outB.addEventListener("click", () => zoomTo(zoom / 2));
+    if (taskB) taskB.addEventListener("click", () => { chose = false; fitTask(); });
+    inB.addEventListener("click", () => { chose = true; zoomTo(zoom * 2); });
+    outB.addEventListener("click", () => { chose = true; zoomTo(zoom / 2); });
     if (expandB) {
       expandB.addEventListener("click", () => {
         expanded = !expanded;
@@ -3665,6 +3682,17 @@
     }
     if (taskB) fitTask();
     else draw();
+    lastLane = {
+      frame,
+      width: frame.clientWidth,
+      redraw: () => {
+        // A redraw replaces the marks: keyboard focus that was in the plot
+        // goes back to the stretch it was on, not to the top of the page.
+        const inPlot = plot.contains(document.activeElement);
+        if (taskB && !chose) fitTask(); else zoomTo(zoom);
+        if (inPlot) focusStretch(current);
+      },
+    };
     // A deep link (?stretch=17) focuses that stretch and opens its evidence.
     if (select && select.kind === "stretch" && stretches[select.from - 1]) {
       const k = select.from - 1;
