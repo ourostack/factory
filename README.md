@@ -175,8 +175,14 @@ highest revision of each opaque public ID. Equal-revision disagreement or
 two IDs for the same public issue is a conflict. Omission never withdraws an
 annotation. Stale/source-unknown/withdrawn rows remain explicit. Publication
 age is coarse: a batch is fresh for at most 72 hours; it is not an exact review
-time. Conflicting or incomplete coverage stays unknown and is never summed
-across hosts. With no batches the state is `not_reviewed`, not a healthy queue.
+time. A row is as fresh as the newest batch that holds it byte for byte, so a
+source keeps a quiet queue fresh by publishing the same rows again in a new
+batch file; a row that is not published again goes stale. Coverage is one
+source's count: a source keeps one coverage generation for its life, and the
+newest fresh batch of that generation speaks for it. When more than one
+generation is fresh, or the newest batch's scan is incomplete or a count is
+null, coverage stays unknown; it is never summed across hosts. With no batches
+the state is `not_reviewed`, not a healthy queue.
 
 Each row's availability is `verified_public_context`,
 `private_detail_not_published` or `stale_or_conflicting`. Only positively public,

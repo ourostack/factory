@@ -11,6 +11,10 @@ const stable = (v) => {
 }
 const same = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b))
 const fresh = (at, now) => Number.isFinite(at) && Number.isFinite(now) && at <= now && now - at <= MAX_AGE_MS
+// The newer of two commit times that are known and not in the future. A time
+// that is unknown or ahead of `now` never replaces one that can be read.
+const readable = (at, now) => Number.isFinite(at) && Number.isFinite(now) && at <= now
+const newest = (a, b, now) => (!readable(b, now) ? a : !readable(a, now) ? b : Math.max(a, b))
 const pointerEqual = (a, b) => a.kind === b.kind && a.ref === b.ref && a.revision === b.revision
 const GATE_WORDS = {
   intent: "The desired outcome needs its owner's decision",
@@ -125,23 +129,39 @@ export function deriveImprovementQueue(input = {}) {
     accepted.push({ value, at: input.committedAtMs })
     for (const r of value.rows) {
       const prior = identities.get(r.id)
-      const current = { row: clone(r), at: input.committedAtMs, conflict: false }
+      const current = { row: clone(r), at: input.committedAtMs, oldest: input.committedAtMs, conflict: false }
       if (!prior || r.revision > prior.row.revision) identities.set(r.id, current)
       else if (r.revision === prior.row.revision) {
         // Equal conflict is deterministic and never silently last-writer wins.
         const conflict = prior.conflict || !same(prior.row, r)
         const chosen = JSON.stringify(stable(prior.row)) <= JSON.stringify(stable(r)) ? prior.row : clone(r)
-        identities.set(r.id, { row: chosen, at: Math.min(prior.at ?? -Infinity, input.committedAtMs ?? -Infinity), conflict })
+        // The same row published again is a fresh attestation of it, so it is
+        // as fresh as its newest publication. Rows that disagree read from the
+        // oldest time, as before: a conflict is never made fresher by being
+        // repeated. Both times are kept, so the order of batches cannot matter.
+        const oldest = Math.min(prior.oldest ?? -Infinity, input.committedAtMs ?? -Infinity)
+        const at = newest(prior.at, input.committedAtMs, now)
+        identities.set(r.id, { row: chosen, at, oldest, conflict })
       }
     }
   }
-  const freshBatches = accepted.filter((b) => fresh(b.at, now))
+  // Coverage is one source's own count, never a sum. A source keeps one
+  // generation for its life and republishes its counts as they change, so the
+  // newest fresh batch of a generation speaks for it. Two fresh generations
+  // are two sources (or one that restarted): their counts are not combined.
+  const generations = new Map()
+  for (const b of accepted.filter((b) => fresh(b.at, now))) {
+    const g = b.value.coverage.generation, prior = generations.get(g)
+    if (!prior || b.at > prior.at) generations.set(g, { at: b.at, coverage: b.value.coverage, agreed: true })
+    // Two batches of one generation committed at the same time cannot be
+    // ordered, so they speak for it only when they say the same.
+    else if (b.at === prior.at && !same(b.value.coverage, prior.coverage)) prior.agreed = false
+  }
   let coverage = unknownCoverage()
-  if (freshBatches.length) {
-    const first = freshBatches[0].value.coverage
-    if (first.scan === "complete" && freshBatches.every((b) => same(b.value.coverage, first)) &&
-        ["reviewed", "unreviewed", "refused", "deferred", "more_unreviewed"].every((k) => first[k] !== null) &&
-        reasons.size === 0) coverage = { state: "known", ...clone(first) }
+  if (generations.size === 1 && reasons.size === 0) {
+    const [{ coverage: latest, agreed }] = generations.values()
+    if (agreed && latest.scan === "complete" &&
+        ["reviewed", "unreviewed", "refused", "deferred", "more_unreviewed"].every((k) => latest[k] !== null)) coverage = { state: "known", ...clone(latest) }
   }
   if (accepted.length && coverage.state === "unknown") reasons.add("triage_coverage_unknown")
   const issueIds = new Map()
@@ -152,7 +172,9 @@ export function deriveImprovementQueue(input = {}) {
       issueIds.get(p.ref).add(r.id)
     }
   }
-  const rows = [...identities.values()].map(({ row: r, at, conflict }) => {
+  const rows = [...identities.values()].map(({ row: r, at: latest, oldest, conflict: differs }) => {
+    let conflict = differs
+    const at = differs ? oldest : latest
     conflict ||= r.evidence.some((p) => p.kind === "issue" && issueIds.get(p.ref)?.size > 1)
     if (conflict) reasons.add("triage_conflict")
     if (!fresh(at, now)) { reasons.add("triage_publication_stale"); if (r.state === "reviewed") r.state = "stale" }
