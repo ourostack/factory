@@ -58,7 +58,7 @@
         if (key === "agents" && (row.triage?.state !== "reviewed" || row.triage?.conflict || row.triage?.availability === "stale_or_conflicting" || TERMINAL_LIFECYCLES.has(row.triage?.lifecycle))) return bad();
         if (Object.hasOwn(row, "triage")) {
           if (!row.triage || typeof row.triage !== "object") return bad();
-          if (validateQueue && !validateQueue({ schema: "factory-improvements/1", state: "unknown", rows: [row.triage], coverage: emptyCoverage, reasons: [] }).ok) return bad();
+          if (validateQueue && !validateQueue({ schema: "factory-improvements/1", state: "unknown", rows: [row.triage], coverage: emptyCoverage, runner: { state: "unknown", last_success_age: "unknown" }, reasons: [] }).ok) return bad();
           if (row.id !== `triage:${row.triage.id}` || row.ownership !== row.triage.ownership || row.triage.handoff?.authority_limit !== "inspect_only_no_new_authority") return bad();
         }
       }

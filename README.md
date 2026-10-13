@@ -182,7 +182,13 @@ source's count: a source keeps one coverage generation for its life, and the
 newest fresh batch of that generation speaks for it. When more than one
 generation is fresh, or the newest batch's scan is incomplete or a count is
 null, coverage stays unknown; it is never summed across hosts. With no batches
-the state is `not_reviewed`, not a healthy queue.
+the state is `not_reviewed`, not a healthy queue. The queue's `runner` is that
+same source's report of its triage runner (`state` and a coarse
+`last_success_age`), read from the same newest fresh batch; it is known even
+when the counts are not. It is `{state:"unknown",last_success_age:"unknown"}`
+when no single fresh source speaks, when any batch file is invalid, or when the
+newest batches of the one generation share a commit time and disagree about
+the runner.
 
 Each row's availability is `verified_public_context`,
 `private_detail_not_published` or `stale_or_conflicting`. Only positively public,
@@ -190,7 +196,11 @@ exactly matching evidence and basis revisions can supply context labels.
 Current public issue/PR/job shapes supply no validated structured triage
 decision, recommendation or continuation, so those fields remain
 `{state:"unavailable",reason:"detail_not_published"}`. A title or gate code is
-not a decision. Private human decisions remain actionable without publishing
+not a decision. Known limit of v1.2: the build passes no public evidence to
+the queue, because a public issue, pull request or job report carries no
+revision the store can check against a pointer's revision. So no row reads
+`verified_public_context` or links to its public issue yet, even when its
+evidence points at one. Private human decisions remain actionable without publishing
 their details: “Ask your linked agent to inspect the local annotation.”
 The handoff carries only the public opaque annotation ID/revision, public
 basis/pointers and `authority_limit:"inspect_only_no_new_authority"`. Its

@@ -1,6 +1,6 @@
 // Pure reduction of authentic, already-accepted main-branch transport batches.
 // This is not an execution queue, a claim writer, or an authorization source.
-import { validateTriageChangeValues, validateTriageValues } from "../../.github/scripts/triage-values.mjs"
+import { TRIAGE_RUNNER_STATES, validateTriageChangeValues, validateTriageValues } from "../../.github/scripts/triage-values.mjs"
 
 const MAX_AGE_MS = 72 * 3600000
 const clone = (v) => structuredClone(v)
@@ -66,6 +66,12 @@ const unknownCoverage = () => ({
   refused: null, deferred: null, more_unreviewed: null,
 })
 
+// What the publishing source said about its own triage runner. `state` is
+// one of the transport's runner states, or "unknown" when no one fresh
+// source speaks for the queue; the age is then "unknown" too.
+const unknownRunner = () => ({ state: "unknown", last_success_age: "unknown" })
+const AGES = ["recent", "aging", "stale", "never", "unknown"]
+
 const QUEUE_REASONS = ["triage_read_unavailable", "triage_invalid", "triage_coverage_unknown", "triage_conflict", "triage_publication_stale"]
 const exactKeys = (v, keys) => v !== null && typeof v === "object" && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k))
@@ -88,7 +94,7 @@ function validPublicRow(row) {
 // presentation is checked against the same pure transform that produces it.
 export function validateImprovementQueue(doc) {
   const invalid = () => ({ ok: false, codes: ["triage_projection_invalid"] })
-  if (!exactKeys(doc, ["schema", "rows", "coverage", "state", "reasons"]) ||
+  if (!exactKeys(doc, ["schema", "rows", "coverage", "runner", "state", "reasons"]) ||
       doc.schema !== "factory-improvements/1" || !Array.isArray(doc.rows) ||
       !["not_reviewed", "reviewed", "unknown", "stale", "conflicting"].includes(doc.state) ||
       !Array.isArray(doc.reasons) || doc.reasons.some((r) => !QUEUE_REASONS.includes(r)) ||
@@ -100,6 +106,8 @@ export function validateImprovementQueue(doc) {
   } else if (doc.coverage.state !== "known" || !/^[0-9a-f]{32}$/u.test(doc.coverage.generation) ||
       doc.coverage.scan !== "complete" || !["reviewed", "unreviewed", "refused", "deferred"].every((k) => validCount(doc.coverage[k])) ||
       typeof doc.coverage.more_unreviewed !== "boolean") return invalid()
+  if (!exactKeys(doc.runner, ["state", "last_success_age"]) || !AGES.includes(doc.runner.last_success_age) ||
+      (doc.runner.state === "unknown" ? doc.runner.last_success_age !== "unknown" : !TRIAGE_RUNNER_STATES.includes(doc.runner.state))) return invalid()
   const ids = new Set()
   for (const row of doc.rows) {
     if (!exactKeys(row, [...ROW_KEYS, "conflict", ...PRESENTATION_KEYS]) || typeof row.conflict !== "boolean") return invalid()
@@ -152,16 +160,22 @@ export function deriveImprovementQueue(input = {}) {
   const generations = new Map()
   for (const b of accepted.filter((b) => fresh(b.at, now))) {
     const g = b.value.coverage.generation, prior = generations.get(g)
-    if (!prior || b.at > prior.at) generations.set(g, { at: b.at, coverage: b.value.coverage, agreed: true })
+    if (!prior || b.at > prior.at) generations.set(g, { at: b.at, coverage: b.value.coverage, runner: b.value.runner, agreed: true, runnerAgreed: true })
     // Two batches of one generation committed at the same time cannot be
     // ordered, so they speak for it only when they say the same.
-    else if (b.at === prior.at && !same(b.value.coverage, prior.coverage)) prior.agreed = false
+    else if (b.at === prior.at) {
+      if (!same(b.value.coverage, prior.coverage)) prior.agreed = false
+      if (!same(b.value.runner, prior.runner)) prior.runnerAgreed = false
+    }
   }
-  let coverage = unknownCoverage()
+  let coverage = unknownCoverage(), runner = unknownRunner()
   if (generations.size === 1 && reasons.size === 0) {
-    const [{ coverage: latest, agreed }] = generations.values()
+    const [{ coverage: latest, agreed, runner: said, runnerAgreed }] = generations.values()
     if (agreed && latest.scan === "complete" &&
         ["reviewed", "unreviewed", "refused", "deferred", "more_unreviewed"].every((k) => latest[k] !== null)) coverage = { state: "known", ...clone(latest) }
+    // The runner state is the one fresh source's own report. It is read even
+    // when that source's counts are not known: "no agent command" is why.
+    if (runnerAgreed) runner = clone(said)
   }
   if (accepted.length && coverage.state === "unknown") reasons.add("triage_coverage_unknown")
   const issueIds = new Map()
@@ -189,5 +203,5 @@ export function deriveImprovementQueue(input = {}) {
     coverage.state === "unknown" || rows.some((r) => r.state === "source_unknown") || reasons.has("triage_invalid") ||
       (rows.length === 0 && ["unreviewed", "refused", "deferred"].some((k) => coverage[k] > 0)) ? "unknown" :
     rows.some((r) => r.state === "stale") ? "stale" : rows.length ? "reviewed" : "not_reviewed"
-  return { schema: "factory-improvements/1", rows, coverage, state, reasons: [...reasons].sort() }
+  return { schema: "factory-improvements/1", rows, coverage, runner, state, reasons: [...reasons].sort() }
 }

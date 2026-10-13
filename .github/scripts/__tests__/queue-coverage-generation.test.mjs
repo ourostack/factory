@@ -20,8 +20,8 @@ const row = (over = {}) => ({ ...clone(fixture.public.rows[0]), ...over })
 const second = (over = {}) => row({ id: "1".repeat(32), route: "investigate", gate: null, ...over })
 let serial = 0
 // Each batch is its own file, as Desk writes it: a new batch id every time.
-const batch = (rows, coverage = {}, hoursAgo = 0) => {
-  const value = { ...clone(fixture.public), batch: (++serial).toString(16).padStart(16, "0"), rows, coverage: { ...fixture.public.coverage, ...coverage } }
+const batch = (rows, coverage = {}, hoursAgo = 0, runner = {}) => {
+  const value = { ...clone(fixture.public), batch: (++serial).toString(16).padStart(16, "0"), rows, coverage: { ...fixture.public.coverage, ...coverage }, runner: { ...fixture.public.runner, ...runner } }
   return { path: `triage/${value.batch}.json`, bytes: bytes(value), committedAtMs: hoursAgo === null ? null : now - hoursAgo * HOUR }
 }
 const orders = (list) => list.length < 2 ? [list] : list.flatMap((x, i) => orders([...list.slice(0, i), ...list.slice(i + 1)]).map((rest) => [x, ...rest]))
@@ -166,4 +166,39 @@ test("a new batch file may repeat rows an earlier file already holds", () => {
     const out = spawnSync("bash", [new URL("../check-triage.sh", import.meta.url).pathname, base, git("rev-parse", "HEAD"), "true"], { cwd: dir, encoding: "utf8" })
     assert.equal(out.status, 0, `${out.stdout} ${out.stderr}`)
   } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test("the runner state is the one fresh source's own latest report", () => {
+  const UNKNOWN = { state: "unknown", last_success_age: "unknown" }
+  // The fixture's batch says the runner ran recently.
+  assert.deepEqual(queue(batch([row()], {}, 1)).runner, { state: "ran", last_success_age: "recent" })
+  // The newest batch of the generation speaks, as for coverage.
+  const later = queue(batch([row()], {}, 30), batch([], {}, 1, { state: "timeout", last_success_age: "aging" }))
+  assert.deepEqual(later.runner, { state: "timeout", last_success_age: "aging" })
+  assert.equal(later.coverage.state, "known")
+  // A machine that has never completed a run publishes null counts: its
+  // coverage is unknown, and its runner state says why.
+  const never = queue(batch([], { reviewed: 0, unreviewed: null, refused: null, deferred: null, more_unreviewed: null }, 1, { state: "no_agent_cli", last_success_age: "never" }))
+  assert.equal(never.coverage.state, "unknown")
+  assert.deepEqual(never.runner, { state: "no_agent_cli", last_success_age: "never" })
+  assert.equal(never.state, "unknown")
+  // An incomplete scan does not hide the runner state either.
+  assert.deepEqual(queue(batch([row()], { scan: "truncated", reviewed: null, unreviewed: null, refused: null, deferred: null, more_unreviewed: null }, 1, { state: "budget_exceeded", last_success_age: "stale" })).runner, { state: "budget_exceeded", last_success_age: "stale" })
+  // Unknown when no one fresh source speaks: none, none fresh, two sources,
+  // a tie that disagrees, or an invalid batch.
+  assert.deepEqual(derive({ batches: [], now }).runner, UNKNOWN)
+  assert.deepEqual(queue(batch([row()], {}, 73)).runner, UNKNOWN)
+  assert.deepEqual(queue(batch([row()], {}, 2), batch([second()], { generation: OTHER }, 1)).runner, UNKNOWN)
+  const tie = queue(batch([row()], {}, 2), batch([second()], {}, 2, { state: "failed", last_success_age: "aging" }))
+  assert.deepEqual(tie.runner, UNKNOWN)
+  assert.equal(tie.coverage.state, "known", "the tied batches agree on coverage")
+  assert.deepEqual(queue(batch([row()], {}, 2), batch([second()], {}, 2)).runner, { state: "ran", last_success_age: "recent" })
+  assert.deepEqual(derive({ batches: [batch([row()], {}, 1), { path: "triage/0000000000000000.json", bytes: "bad", committedAtMs: now }], now }).runner, UNKNOWN)
+  // The twin's validator holds the shape.
+  const good = derive({ batches: [batch([row()], {}, 1)], now })
+  for (const runner of [undefined, null, {}, { state: "ran" }, { state: "ran", last_success_age: "yesterday" }, { state: "sleeping", last_success_age: "recent" }, { state: "unknown", last_success_age: "recent" }, { state: "ran", last_success_age: "recent", host: "x" }]) {
+    assert.deepEqual(validateImprovementQueue({ ...good, runner }), { ok: false, codes: ["triage_projection_invalid"] }, JSON.stringify(runner))
+  }
+  const { runner: _dropped, ...without } = good
+  assert.equal(validateImprovementQueue(without).ok, false)
 })

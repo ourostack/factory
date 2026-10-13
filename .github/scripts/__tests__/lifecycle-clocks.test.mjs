@@ -239,12 +239,20 @@ test("whole golden legacy facts build retains pinned baseline numbers and report
     }
     const { built_at: oldStamp, ...oldData } = old
     const { built_at: nowStamp, overview: additiveOverview, ...nowRest } = now
-    const nowData = { ...nowRest, jobs: nowRest.jobs.map(({ clocks, ...row }) => row) }
+    // The queue's runner state is additive too: with no triage batch in the golden store it is unknown,
+    // and the rest of the queue equals the baseline's.
+    const { runner: additiveRunner, ...queueWithoutRunner } = nowRest.improvements
+    assert.deepEqual(additiveRunner, { state: "unknown", last_success_age: "unknown" })
+    const nowData = { ...nowRest, improvements: queueWithoutRunner, jobs: nowRest.jobs.map(({ clocks, ...row }) => row) }
     assert.equal(additiveOverview.schema, "factory-overview/1")
     assert.deepEqual(checkNumbers({ overview: additiveOverview }), [])
     assert.deepEqual(JSON.parse(readFileSync(join(current, "rollups/overview.json"), "utf8")), additiveOverview)
-    assert.deepEqual(nowData, oldData, "only the build timestamp and separately checked additive overview may differ")
-    for (const [sub, names] of [["jobs", readdirSync(join(reports, "jobs")).filter((n) => n.endsWith(".json"))], ["rollups", ["tasks.json", "stackup.json", "by_week.json", "improvements.json"]]]) {
+    assert.deepEqual(nowData, oldData, "only the build timestamp, the separately checked additive overview and the queue's additive runner may differ")
+    // The queue twin is the data's queue exactly, and the baseline's plus the runner.
+    const queueTwin = JSON.parse(readFileSync(join(current, "rollups/improvements.json"), "utf8"))
+    assert.deepEqual(queueTwin, now.improvements)
+    if (existsSync(join(baseline, "rollups/improvements.json"))) assert.deepEqual({ ...JSON.parse(readFileSync(join(baseline, "rollups/improvements.json"), "utf8")), runner: additiveRunner }, queueTwin)
+    for (const [sub, names] of [["jobs", readdirSync(join(reports, "jobs")).filter((n) => n.endsWith(".json"))], ["rollups", ["tasks.json", "stackup.json", "by_week.json"]]]) {
       for (const file of names) {
         if (existsSync(join(baseline, sub, file))) assert.deepEqual(readFileSync(join(current, sub, file)), readFileSync(join(baseline, sub, file)), `${sub}/${file}`)
       }
