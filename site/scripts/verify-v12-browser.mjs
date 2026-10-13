@@ -87,11 +87,12 @@ export const TRIAGE_QUEUES = Object.freeze([
 
 // The in-page pass: one page is loaded once, then the reader's own links are
 // clicked from view to view with no reload, and each view is read where it
-// lands. `route` names the ROUTES entry the click must arrive at.
+// lands. `route` names the ROUTES entry the click must arrive at; {task}
+// and {session} are the task and session every other check reads.
 export const IN_PAGE_STEPS = Object.freeze([
   { route: "tasks", click: 'nav.steps a[href="#/tasks"]' },
-  { route: "task", click: '#view-tasks a[href^="#/task/"]' },
-  { route: "session", click: '#view-task a[href*="/session/"]' },
+  { route: "task", click: '#view-tasks a[href^="#/task/{task}"]' },
+  { route: "session", click: '#view-task a[href*="/session/{session}"]' },
   { route: "compare", click: 'nav.steps a[href="#/compare"]' },
   { route: "findings", click: '#view-compare .next-step a[href="#/causes"]' },
   { route: "improvements", click: 'nav.steps a[href="#/improvements"]' },
@@ -1775,7 +1776,7 @@ export async function main(argv = process.argv.slice(2)) {
       SINKS.set(page, sink)
       for (const step of IN_PAGE_STEPS) {
         const route = ROUTES.find((r) => r.name === step.route)
-        await page.locator(step.click).first().click()
+        await page.locator(step.click.replace("{task}", targets.task).replace("{session}", targets.session || "")).first().click()
         await settle(page, route.view)
         if (!(await page.evaluate(() => window.__gateInPage === true))) throw new Error(`${step.route}: the click reloaded the page`)
         if (each) await each(step, route)

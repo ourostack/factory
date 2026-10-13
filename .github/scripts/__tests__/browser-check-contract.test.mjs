@@ -194,6 +194,9 @@ test("the Improvements page is checked against triage queues the real reducer bu
 test("the in-page pass clicks through the reader's links on one loaded page, under its own budget rule", () => {
   assert.deepEqual(G.IN_PAGE_STEPS.map((s) => s.route), ["tasks", "task", "session", "compare", "findings", "improvements", "why", "help", "overview"])
   for (const step of G.IN_PAGE_STEPS) assert.ok(G.ROUTES.some((r) => r.name === step.route) && /a(\.[\w-]+)?\[href[\^*]?="(#\/|\/session\/)/.test(step.click), step.route)
+  // The task and session reached by click are the ones every other check reads.
+  assert.equal(G.IN_PAGE_STEPS[1].click, '#view-tasks a[href^="#/task/{task}"]')
+  assert.equal(G.IN_PAGE_STEPS[2].click, '#view-task a[href*="/session/{session}"]')
   assert.deepEqual([...G.IN_PAGE_WIDTHS], [1280, 390])
   assert.equal(G.IN_PAGE_BUDGET_MS, 5000)
   // Only a task's data-sized chart marks are set aside from the touch-target reading, and only in this pass.
