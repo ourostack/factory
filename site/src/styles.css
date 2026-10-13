@@ -1187,9 +1187,9 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .copy-status { margin-left: 10px; font-size: 13px; color: var(--text-secondary); }
 .prompt-text { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .stretch-list { list-style: none; margin: 0; padding: 0; max-height: 18rem; overflow-y: auto; }
-.stretch-row { font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 1px solid var(--gridline); width: 100%; text-align: left; padding: 5px 2px; cursor: pointer; color: var(--text-primary); display: flex; gap: 8px; align-items: baseline; }
+.stretch-row { min-height: 24px; font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 1px solid var(--gridline); width: 100%; text-align: left; padding: 5px 2px; cursor: pointer; color: var(--text-primary); display: flex; gap: 8px; align-items: baseline; }
 .stretch-row:hover { background: var(--surface-1); }
-.link-button { background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; text-align: left; }
+.link-button { background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; text-align: left; min-height: 24px; }
 @media (max-width: 640px) {
   .drawer { margin: auto; width: calc(100vw - 16px); max-height: 90vh; }
   .drawer-facts > div { grid-template-columns: 1fr; gap: 0; }

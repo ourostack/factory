@@ -75,7 +75,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
   "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt",
+  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered",
 ])
 
 // The triage queues the Improvements page is checked against. Each is built
@@ -90,6 +90,8 @@ export const TRIAGE_QUEUES = Object.freeze([
 // lands. `route` names the ROUTES entry the click must arrive at.
 export const IN_PAGE_STEPS = Object.freeze([
   { route: "tasks", click: 'nav.steps a[href="#/tasks"]' },
+  { route: "task", click: '#view-tasks a[href^="#/task/"]' },
+  { route: "session", click: '#view-task a[href*="/session/"]' },
   { route: "compare", click: 'nav.steps a[href="#/compare"]' },
   { route: "findings", click: '#view-compare .next-step a[href="#/causes"]' },
   { route: "improvements", click: 'nav.steps a[href="#/improvements"]' },
@@ -97,6 +99,11 @@ export const IN_PAGE_STEPS = Object.freeze([
   { route: "help", click: 'a.why-link[href="#/help"]' },
   { route: "overview", click: 'nav.steps a[href="#/"]' },
 ].map((x) => Object.freeze(x)))
+// Marks on a task's charts are sized by the time they stand for, so they can
+// be narrower than a touch target; the same prompts and stretches are also
+// opened from the full-size "Prompt N" buttons and rows beside them. Only the
+// in-page pass reads the task page's targets, and only these are set aside.
+export const DATA_SIZED_MARKS = Object.freeze({ task: ".lad-mark, .tw-seg" })
 export const IN_PAGE_WIDTHS = Object.freeze([1280, 390])
 // A click to another view loads no page, so it has the settle budget with no
 // re-timing and no excuse: every step must be timed, each as an action on
@@ -909,10 +916,11 @@ export async function main(argv = process.argv.slice(2)) {
       await page.evaluate(() => { for (const e of document.querySelectorAll("[data-gate-tab]")) delete e.dataset.gateTab })
       return out
     }
-    const smallTargets = (page, routeName) => page.evaluate((rn) => {
+    const smallTargets = (page, routeName, setAside = null) => page.evaluate(([rn, setAside]) => {
       const view = document.getElementById(`view-${document.body.dataset.view}`)
       const out = []
       for (const e of view.querySelectorAll("button, select, input, summary, .mode-btn")) {
+        if (setAside && e.matches(setAside)) continue
         const r = e.getBoundingClientRect()
         if (r.width > 0 && r.height > 0 && (r.width < 24 || r.height < 24)) out.push(`${rn}: ${e.tagName.toLowerCase()} "${(e.textContent || e.id).trim().slice(0, 30)}" ${Math.round(r.width)}x${Math.round(r.height)}`)
       }
@@ -921,7 +929,7 @@ export async function main(argv = process.argv.slice(2)) {
         if (row.getBoundingClientRect().height < 24) out.push(`${rn}: evidence row ${Math.round(row.getBoundingClientRect().height)}px`)
       }
       return out
-    }, routeName)
+    }, [routeName, setAside])
 
     // 1. The width sweep: every route, every width, both themes, both text
     // scales. Each configuration has its own browser process and each route
@@ -1654,12 +1662,14 @@ export async function main(argv = process.argv.slice(2)) {
     const jobPointer = { kind: "job", ref: `https://github.com/example/project/blob/reports/jobs/${hex("a")}.md`, revision: 1 }
     const triage = {
       known_counts: { queue: derive(publish([triageRow(), triageRow({ id: B, route: "agent_ready", gate: null })], { coverage: { reviewed: 12, unreviewed: 3, refused: 1, deferred: 2, more_unreviewed: true } })),
-        says: [/has reviewed 12 improvement cards; it also counts 3 not yet reviewed, 1 whose review was refused, 2 put off to a later run\./, /More cards are waiting than this count shows\./, /runner on the publishing machine ran\. Its last successful run was within the last day\./] },
+        says: [/has reviewed 12 improvement cards; it also counts 3 not yet reviewed, 1 whose review was refused, 2 put off to a later run\./, /More cards are waiting than this count shows\./, /runner on the publishing machine ran\. Its last successful run was within the last day\./],
+        rowsSay: [[/^Improvement 1 of 2: Recorded decision gate/, /Reviewed and published within the last 72 hours/], [/^Improvement 2 of 2: Reviewed improvement — inspect the proposed route/, /an agent can take the next step under existing authority/]] },
       // The same machine published twice: the newest count stands, the older is not added.
       counts_changed_newest_wins: { queue: derive(publish([triageRow()], { coverage: { reviewed: 4, unreviewed: 9 }, hoursAgo: 30 }), publish([triageRow()], { coverage: { reviewed: 7, unreviewed: 2 }, hoursAgo: 1 })),
         says: [/has reviewed 7 improvement cards; it also counts 2 not yet reviewed\./], never: [/\b(4|11) improvement cards?\b/, /\b(9|11) not yet reviewed/] },
       two_sources_never_summed: { queue: derive(publish([triageRow()], { coverage: { reviewed: 5 } }), publish([triageRow({ id: B })], { coverage: { generation: hex("f"), reviewed: 7 } })),
-        says: [/is not known: no single machine published in the last 72 hours/, /not shown as current/], never: [/\d+ improvement cards?\b/, /Reviewed and published within the last 72 hours/], notCurrent: 2 },
+        says: [/is not known: no single machine published in the last 72 hours/, /not shown as current/], never: [/\d+ improvement cards?\b/, /Reviewed and published within the last 72 hours/], notCurrent: 2,
+        rowsSay: [[/Not current: /, /Review needs refreshing/], [/Not current: /, /Review needs refreshing/]] },
       // The same rows attested again in a newer batch stay current.
       reattested_identical_rows: { queue: derive(publish([triageRow()], { hoursAgo: 100 }), publish([triageRow()], { hoursAgo: 2 })),
         says: [/has reviewed 1 improvement card;/, /Reviewed and published within the last 72 hours/], never: [/Stale:|In conflict|Not current/] },
@@ -1668,9 +1678,14 @@ export async function main(argv = process.argv.slice(2)) {
       job_report_row: { queue: derive(publish([triageRow({ evidence: [jobPointer], basis: { ...row0.basis, evidence_revisions: [jobPointer] } })])),
         says: [/Improvement 1 of 1: /, /Decision details are private or not published/] },
       withdrawn_last: { queue: derive(publish([triageRow({ revision: 2, state: "withdrawn", route: null, gate: null }), triageRow({ id: B, route: "agent_ready", gate: null }), triageRow({ id: C, state: "stale", age: "stale" })], { coverage: { reviewed: 2 } })),
-        says: [/with 1 withdrawn review last/, /A later publication withdrew this review\./], withdrawn: 1 },
+        says: [/with 1 withdrawn review last/, /A later publication withdrew this review\./], withdrawn: 1,
+        // The stale review leads, the current one follows, the withdrawn one is last.
+        rowsSay: [[/^Improvement 1 of 3: Review needs refreshing/, /Stale: its evidence changed or it was not published again within 72 hours/], [/^Improvement 2 of 3: Reviewed improvement/, /Reviewed and published within the last 72 hours/], [/^Improvement 3 of 3: Review withdrawn/, /Withdrawn: its card changed or was removed/]] },
       related_and_duplicate: { queue: derive(publish([triageRow({ related_ids: [B], duplicate_ids: [C] }), triageRow({ id: B, route: "agent_ready", gate: null, related_ids: [row0.id] }), triageRow({ id: C, route: "investigate", gate: null, duplicate_ids: [row0.id] })], { coverage: { reviewed: 3 } })),
-        says: [/Related, not shown to be the same problem: improvement \d on this page\./, /Suggested duplicate, sharing evidence; nothing is merged or closed: improvement \d on this page\./] },
+        // The decision gate is drawn first, then the two others in queue order: each line names the other row's own number.
+        rowsSay: [[/Related, not shown to be the same problem: improvement 2 on this page\./, /Suggested duplicate, sharing evidence; nothing is merged or closed: improvement 3 on this page\./],
+          [/Related, not shown to be the same problem: improvement 1 on this page\./], [/Suggested duplicate, sharing evidence; nothing is merged or closed: improvement 1 on this page\./]],
+        rowsNever: [[], [/Suggested duplicate/], [/Related, not shown/]] },
     }
     for (const [name, t] of Object.entries(triage)) if (!validateImprovementQueue(t.queue).ok) record(`fixture_queue_${name}_valid`, false, { error: "derived queue failed validation" })
     // Reads the Improvements page for one queue and compares it with the
@@ -1708,6 +1723,9 @@ export async function main(argv = process.argv.slice(2)) {
         if (/Verified public context/i.test(r.text)) throw new Error(`row ${i + 1} reads as verified public context`)
         for (const s of fixture.privacy_sentinels) if (r.text.includes(s)) throw new Error("private sentinel rendered")
       })
+      // Each row says its own review, in its own place on the page.
+      ;(t.rowsSay || []).forEach((musts, i) => { for (const must of musts) if (!read.rows[i] || !must.test(read.rows[i].text)) throw new Error(`row ${i + 1} does not say ${must}`) })
+      ;(t.rowsNever || []).forEach((nots, i) => { for (const not of nots) if (read.rows[i] && not.test(read.rows[i].text)) throw new Error(`row ${i + 1} says ${not}`) })
       // Withdrawn reviews come last and offer no prompt; every other row offers exactly its own.
       const withdrawn = q.rows.filter((r) => r.state === "withdrawn" && !r.conflict).length
       if (withdrawn !== (t.withdrawn || 0)) throw new Error(`fixture has ${withdrawn} withdrawn rows`)
@@ -1774,7 +1792,7 @@ export async function main(argv = process.argv.slice(2)) {
             const charts = await page.evaluate(checkChartEquivalents, CHART_EQUIVALENTS)
             for (const key of EXPECTED_CHARTS[step.route] || []) if (!charts.seen.includes(key)) charts.problems.push(`expected_chart_not_drawn: ${key}`)
             for (const p of charts.problems) found.push(`${where}: ${p}`)
-            for (const p of await smallTargets(page, step.route)) found.push(`${width} px, ${p}`)
+            for (const p of await smallTargets(page, step.route, DATA_SIZED_MARKS[step.route] || null)) found.push(`${width} px, ${p}`)
             for (const p of await tabOrderProblems(page, step.route)) found.push(`${width} px, ${p}`)
           })
           for (const e of errors) found.push(`${width} px: page error ${e}`)
@@ -2125,6 +2143,14 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page, errors } = await newPage({ width: 390 })
       try { await triagePage(page, errors, "withdrawn_last", () => { const b = document.createElement("button"); b.type = "button"; b.textContent = "Copy as a prompt for your agent"; b.dataset.gatePlanted = "1"; const rows = document.querySelectorAll("#view-act .improvement-row"); rows[rows.length - 1].appendChild(b) }) } finally { await context.close() }
     }, /withdrawn review at row 3 offers a prompt/)
+    await expectFailure("triage_coverage_count_altered", async () => {
+      const { context, page, errors } = await newPage({ width: 390 })
+      try { await triagePage(page, errors, "known_counts", () => { const p = document.querySelector("#view-act .triage-coverage p"); p.dataset.gatePlanted = "1"; p.textContent = p.textContent.replace("reviewed 12 improvement cards", "reviewed 15 improvement cards") }) } finally { await context.close() }
+    }, /^coverage: page \["Triage on the publishing machine has reviewed 15 improvement cards/)
+    await expectFailure("triage_row_misnumbered", async () => {
+      const { context, page, errors } = await newPage({ width: 390 })
+      try { await triagePage(page, errors, "known_counts", () => { const h = document.querySelector("#view-act .improvement-row h3"); h.dataset.gatePlanted = "1"; h.textContent = h.textContent.replace("Improvement 1 of 2", "Improvement 2 of 2") }) } finally { await context.close() }
+    }, /^row 1 is headed "Improvement 2 of 2/)
     await expectFailure("slow_in_page_navigation", async () => {
       // The same walk with every data file 6 s late after the first load:
       // the in-page rule has no re-timing, so it must fail.
