@@ -997,6 +997,10 @@ export async function main(argv = process.argv.slice(2)) {
             for (let i = WIDTHS.length - 1; i >= 0; i--) {
               const w = WIDTHS[i]
               await page.setViewportSize({ width: w, height: 900 })
+              // A view that redraws on resize (the task map, the session chart)
+              // does so after a 150 ms debounce, so this reading can be of the
+              // chart drawn a few widths ago; at 1 px steps that is the same
+              // chart, and any problem found is judged again once settled.
               let problems = await layout(page, i % 16 === 0)
               if (problems.length) {
                 // A chart redraw is debounced after a resize; judge the settled page.
@@ -1921,17 +1925,6 @@ export async function main(argv = process.argv.slice(2)) {
     // 9f. A session chart follows the window: resized after load, it is what
     // a fresh load at the new width draws, in both directions. Read on the
     // sampled session and on one whose lane note is too long for a phone.
-    const resizeSessions = async () => {
-      const list = [{ task: targets.task, session: targets.session }]
-      for (const job of targets.data.jobs.map((j) => j.id)) {
-        if (list.length > 1) break
-        let map = null, files = []
-        try { map = JSON.parse(await readFile(join(args.site, "map", `${job}.json`), "utf8")); files = (await readdir(join(args.site, "jobs", job))).filter((f) => f.endsWith(".json")).sort() } catch { continue }
-        // No prompt recorded on the task: its sessions' Operator lane carries the long note.
-        if (files.length && map && map.human_turns_state && map.human_turns_state.state === "unavailable" && job !== targets.task) list.push({ task: job, session: files[0].slice(0, -5) })
-      }
-      return list
-    }
     const sessionChartAt = async (init, where, from, to) => {
       const { context, page, errors } = await newPage({ width: from, init })
       try {
@@ -1950,6 +1943,28 @@ export async function main(argv = process.argv.slice(2)) {
         return chart
       } finally { await context.close() }
     }
+    // The sampled session, and one whose fresh load at the narrow width says a
+    // lane note under the plot: the note must move into the chart when the
+    // window widens and back under it when it narrows. A build with no such
+    // session cannot prove that, so the check fails rather than pass without it.
+    let noteSession = null
+    const resizeSessions = async () => {
+      if (!noteSession) {
+        let tried = 0
+        search: for (const job of targets.data.jobs.map((j) => j.id)) {
+          let files = []
+          try { files = (await readdir(join(args.site, "jobs", job))).filter((f) => f.endsWith(".json")).sort() } catch { continue }
+          for (const f of files) {
+            if (tried++ >= 60) break search
+            const where = { task: job, session: f.slice(0, -5) }
+            const chart = await sessionChartAt([], where, RESIZE_WIDTHS[0], RESIZE_WIDTHS[0]).catch(() => null)
+            if (chart && chart.notes_below) { noteSession = where; break search }
+          }
+        }
+        if (!noteSession) throw new Error(`no session among ${tried} says a lane note under its plot at ${RESIZE_WIDTHS[0]} px, so the note's move cannot be checked`)
+      }
+      return [{ task: targets.task, session: targets.session }, noteSession]
+    }
     const resizeCheck = async (init = []) => {
       const out = []
       for (const where of await resizeSessions()) {
@@ -1961,6 +1976,9 @@ export async function main(argv = process.argv.slice(2)) {
           out.push({ session: where.session.slice(0, 8), from, to, plot_width: resized.plot_width, notes_below: !!resized.notes_below })
         }
       }
+      // The note session really moved its note: under the plot when narrow, not when wide.
+      const [wide, narrow] = out.slice(-2)
+      if (wide.notes_below || !narrow.notes_below) throw new Error(`the lane note did not move with the width: under the plot at ${wide.to} px ${wide.notes_below}, at ${narrow.to} px ${narrow.notes_below}`)
       return out
     }
     await check("session_chart_follows_the_window_width_both_ways", async () => resizeCheck())

@@ -278,8 +278,14 @@ test("a session chart resized after load must be what a fresh load at that width
   // Both directions, each against a fresh load at the destination width.
   assert.match(gate, /for \(const \[from, to\] of \[\[RESIZE_WIDTHS\[0\], RESIZE_WIDTHS\[1\]\], \[RESIZE_WIDTHS\[1\], RESIZE_WIDTHS\[0\]\]\]\) \{/)
   assert.match(gate, /const fresh = await sessionChartAt\(\[\], where, to, to\)/)
+  // One session must say a lane note under its narrow plot, and the note must move with the width.
+  assert.match(gate, /if \(chart && chart\.notes_below\) \{ noteSession = where; break search \}/)
+  assert.match(gate, /if \(!noteSession\) throw new Error\(/)
+  assert.match(gate, /if \(wide\.notes_below \|\| !narrow\.notes_below\) throw new Error\(/)
   const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
   assert.match(app, /document\.body\.dataset\.view !== "session" \|\| l\.frame\.clientWidth === l\.width\) return;\s*l\.width = l\.frame\.clientWidth;\s*l\.redraw\(\);/)
   // Until the reader chooses a zoom, the redraw fits the chart again as a load does.
-  assert.match(app, /lastLane = \{ frame, width: frame\.clientWidth, redraw: \(\) => \(taskB && !chose \? fitTask\(\) : zoomTo\(zoom\)\) \};/)
+  assert.match(app, /if \(taskB && !chose\) fitTask\(\); else zoomTo\(zoom\);/)
+  // Keyboard focus that was in the plot returns to its stretch after the redraw.
+  assert.match(app, /const inPlot = plot\.contains\(document\.activeElement\);[\s\S]{0,120}if \(inPlot\) focusStretch\(current\);/)
 })

@@ -3682,7 +3682,17 @@
     }
     if (taskB) fitTask();
     else draw();
-    lastLane = { frame, width: frame.clientWidth, redraw: () => (taskB && !chose ? fitTask() : zoomTo(zoom)) };
+    lastLane = {
+      frame,
+      width: frame.clientWidth,
+      redraw: () => {
+        // A redraw replaces the marks: keyboard focus that was in the plot
+        // goes back to the stretch it was on, not to the top of the page.
+        const inPlot = plot.contains(document.activeElement);
+        if (taskB && !chose) fitTask(); else zoomTo(zoom);
+        if (inPlot) focusStretch(current);
+      },
+    };
     // A deep link (?stretch=17) focuses that stretch and opens its evidence.
     if (select && select.kind === "stretch" && stretches[select.from - 1]) {
       const k = select.from - 1;
