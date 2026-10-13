@@ -138,6 +138,8 @@
     if (!B.validateBriefing(doc).ok) throw new Error("The published briefing is unavailable or malformed; other views remain usable.");
     document.getElementById("overview-published").textContent = `Published data build: ${F.formatInstant(data.built_at, preferences.zone)}. This is not a task finish or acceptance timestamp.`;
     document.getElementById("overview-conclusion").textContent = B.conclusionWords(doc);
+    const triageNote = document.getElementById("overview-triage-note");
+    if (triageNote) triageNote.textContent = S.triageNote(data.improvements);
     document.getElementById("overview-state").textContent = doc.state === "attention" ? "Start with the recorded problems below. Monitoring and ownership may still be incomplete." : "Monitoring or review evidence is incomplete. This is not an all-clear.";
     renderBriefRows(document.getElementById("overview-attention"), doc.attention, "No specific attention item is supported by this payload. Missing monitoring does not mean there are no problems.");
     renderBriefRows(document.getElementById("overview-agents"), doc.agents, "No current public claim is available for this briefing. This does not mean local work is unowned.");
@@ -5484,27 +5486,63 @@
   function renderPublicImprovements(node, data) {
     node.innerHTML = "";
     const context = F.navigationContext(location.hash);
+    const queue = data.improvements;
+    const note = document.getElementById("improvement-triage-note");
+    if (note) note.textContent = S.triageNote(queue);
+    if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows)) return;
+    // What triage covered and whether its runner works come before any row:
+    // a review is only as current as the count it came from.
+    const covered = [...S.triageCoverageWords(queue), S.triageRunnerWords(queue)].filter(Boolean);
+    if (covered.length) {
+      const section = el("section", "triage-coverage");
+      section.setAttribute("aria-labelledby", "triage-coverage-title");
+      const title = el("h2", "block-title", "What triage has covered"); title.id = "triage-coverage-title";
+      section.appendChild(title);
+      for (const words of covered) section.appendChild(el("p", null, words));
+      node.appendChild(section);
+    }
     // The status sentence above says when there is nothing reviewed; the
     // limits live in "How to read this list".
-    const queue = data.improvements;
-    if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows) || queue.state === "not_reviewed" || !queue.rows.length) return;
+    if (queue.state === "not_reviewed" || !queue.rows.length) return;
     const question = el("h2", "block-title", context.cause ? "What public improvement review can I inspect with this investigation context?" : "Which published improvement needs inspection next?");
     question.id = "improvement-question"; node.appendChild(question);
     const rows = queue.rows.map(S.improvementPresentation).filter(Boolean);
-    rows.sort((a, b) => Number(b.availability === "stale_or_conflicting") - Number(a.availability === "stale_or_conflicting") || Number(b.route === "human_decision") - Number(a.route === "human_decision"));
-    for (const p of rows) {
+    // Reviews that need a refresh first, then decision gates; a withdrawn
+    // review has nothing to act on and comes last.
+    const rank = (p) => (p.state === "withdrawn" && !p.conflict ? 3 : p.availability === "stale_or_conflicting" ? 0 : p.route === "human_decision" ? 1 : 2);
+    rows.sort((a, b) => rank(a) - rank(b));
+    const links = S.improvementLinks(rows);
+    rows.forEach((p, i) => {
       // One malformed row says so in its own place; the rest still draw.
       try {
         const item = el("section", "improvement-row");
-        item.appendChild(el("h3", null, p.route === "human_decision" ? "Recorded decision gate — inspect acknowledged context" : p.availability === "stale_or_conflicting" ? "Review needs refreshing" : "Reviewed improvement — inspect the proposed route"));
+        const kind = p.state === "withdrawn" && !p.conflict ? "Review withdrawn — nothing to act on"
+          : p.availability === "stale_or_conflicting" ? "Review needs refreshing"
+          : p.route === "human_decision" ? "Recorded decision gate — inspect acknowledged context" : "Reviewed improvement — inspect the proposed route";
+        const heading = el("h3", null, `Improvement ${links[i].n} of ${links[i].of}: ${kind}`);
+        heading.id = `improvement-${links[i].n}`;
+        item.setAttribute("aria-labelledby", heading.id);
+        item.appendChild(heading);
+        const dl = el("dl", "act-facts improvement-facts");
+        for (const f of S.improvementFacts(p)) { const d = el("div"); d.append(el("dt", null, f.label), el("dd", null, f.text)); dl.appendChild(d); }
+        item.appendChild(dl);
+        if (p.state === "withdrawn" && !p.conflict) {
+          // A withdrawn review supports nothing: it stays listed so the record
+          // is visible, with no route, gate or prompt to act on.
+          item.appendChild(el("p", "improvement-next", "A later publication withdrew this review. It stays listed so the record is visible; there is nothing here to inspect or act on."));
+          node.appendChild(item);
+          return;
+        }
         item.appendChild(el("p", null, `Published lifecycle: ${S.lifecycleLabel(p.lifecycle)}. ${p.verification}`));
         item.appendChild(el("p", "improvement-owner", p.ownership === "claimed" ? "A public claim is recorded; current execution is not established by this page." : "Ownership not published."));
         item.appendChild(el("p", null, p.gate_explanation));
         item.appendChild(el("p", null, p.availability === "private_detail_not_published" ? "Decision details are private or not published. Specific decision, recommendation and continuation are unavailable." : p.availability === "stale_or_conflicting" ? "Stale or conflicting evidence cannot support execution." : "Verified public context is available; a specific decision, recommendation and continuation remain unavailable."));
         for (const c of p.context) item.appendChild(safeLink(c.label, c.ref));
+        for (const words of [links[i].duplicates, links[i].related]) if (words) item.appendChild(el("p", "improvement-links", words));
         item.appendChild(el("p", "improvement-next", p.next_action));
         const prompt = `Inspect acknowledged improvement annotation ${p.handoff.annotation_id}, revision ${p.handoff.revision}, in ${p.handoff.data_path}. Resolve authorized local detail with the linked agent. Do not guess private associations, claim work, start implementation or publish private detail. Authority limit: ${p.handoff.authority_limit}. Investigation context: ${JSON.stringify(context)}. Public handoff: ${JSON.stringify(p.handoff)}`;
         const button = el("button", "copy-prompt", "Copy as a prompt for your agent"); button.type = "button";
+        button.setAttribute("aria-label", `Copy as a prompt for your agent: improvement ${links[i].n}`);
         const status = el("p", "improvement-copy-status"); status.setAttribute("role", "status");
         const details = el("details", "improvement-prompt"); const pre = el("pre", "copy-prompt", prompt); pre.tabIndex = 0;
         details.append(el("summary", null, "Inspect the agent prompt and public basis"), pre);
@@ -5522,7 +5560,7 @@
         broken.appendChild(el("p", "chart-empty", `This improvement could not be shown (${err && err.message ? err.message : "an error"}). Other improvements are unaffected; no ownership or execution state is inferred.`));
         node.appendChild(broken);
       }
-    }
+    });
     if (!rows.length) node.appendChild(el("p", "chart-empty", "Public annotation presentation is unavailable; no ownership or execution state is inferred."));
   }
 

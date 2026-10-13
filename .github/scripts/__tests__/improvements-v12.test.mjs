@@ -244,11 +244,214 @@ test("improvements_lead_with_one_status_sentence_and_keep_limits_in_how_to_read"
   assert.match(afterAlarms.trimStart(), /^<p id="improvement-status" class="lede improvement-status" role="status">/)
   const details = act.match(/<details class="how-to-read" id="improvement-limits">\s*<summary>How to read this list<\/summary>([\s\S]*?)<\/details>/)
   assert.ok(details, "one labeled disclosure holds the limits and the A3 explanation")
-  for (const limit of [/not an execution queue/, /A route alone grants no claim or new authority/, /Inspection does not grant authority or create ownership/, /not a savings ranking/, /Automated triage is not demonstrated; ownership and private decisions are not published/, /not a task-filtered execution queue/, /<dfn>A3<\/dfn>/]) assert.match(details[1], limit)
+  for (const limit of [/not an execution queue/, /A route alone grants no claim or new authority/, /Inspection does not grant authority or create ownership/, /not a savings ranking/, /<span id="improvement-triage-note">No triage review is published in this build\.<\/span> Ownership and private decisions are not published/, /not a task-filtered execution queue/, /<dfn>A3<\/dfn>/]) assert.match(details[1], limit)
   // No caveat paragraph stands between the status sentence and the list.
   assert.equal((act.slice(0, act.indexOf('id="improvement-limits"')).match(/<p /g) || []).length, 2, "step label and status sentence only")
   const fn = appSource().slice(appSource().indexOf("function renderPublicImprovements"), appSource().indexOf("async function renderAct"))
   assert.doesNotMatch(fn, /Inspection does not grant authority|Automated triage is not demonstrated|not a task-filtered execution queue/)
   // A failed data load replaces "Loading" with an explicit status.
   assert.match(appSource(), /status\.textContent = "The improvement status could not be loaded/)
+})
+
+// ---- Published triage on Improvements (plan Task 12F) ----
+const HOUR = 3600000
+const T0 = Date.parse("2026-10-10T12:00:00Z")
+let batchSerial = 0
+const publish = (rows, { coverage = {}, runner = {}, hoursAgo = 1 } = {}) => {
+  const value = { ...structuredClone(fixture.public), batch: (++batchSerial).toString(16).padStart(16, "0"), rows, coverage: { ...fixture.public.coverage, ...coverage }, runner: { ...fixture.public.runner, ...runner } }
+  return { path: `triage/${value.batch}.json`, bytes: JSON.stringify(value) + "\n", committedAtMs: T0 - hoursAgo * HOUR }
+}
+const fixtureRow = (over = {}) => ({ ...structuredClone(fixture.public.rows[0]), ...over })
+const published = (...batches) => {
+  const q = deriveImprovementQueue({ batches, now: T0 })
+  assert.deepEqual(validateImprovementQueue(q), { ok: true, codes: [] })
+  return q
+}
+const hex = (c) => c.repeat(32)
+
+test("a_row_whose_evidence_names_a_job_report_is_drawn", () => {
+  const job = { kind: "job", ref: `https://github.com/example/project/blob/reports/jobs/${hex("a")}.md`, revision: 1 }
+  const issue = { kind: "issue", ref: "https://github.com/example/project/issues/1", revision: 1 }
+  const pr = { kind: "pr", ref: "https://github.com/example/project/pull/2", revision: 3 }
+  for (const pointers of [[job], [issue], [pr], [job, issue, pr]]) {
+    const q = published(publish([fixtureRow({ evidence: pointers, basis: { ...fixture.public.rows[0].basis, evidence_revisions: pointers } })]))
+    assert.equal(q.state, "reviewed")
+    const p = S.improvementPresentation(q.rows[0])
+    assert.ok(p, JSON.stringify(pointers.map((x) => x.kind)))
+    assert.deepEqual(p.handoff.basis.evidence_revisions, pointers)
+    // v1.2 verifies no public context: the row carries no link.
+    assert.equal(p.availability, "private_detail_not_published")
+    assert.deepEqual(p.context, [])
+  }
+  // A pointer that is not the transport's shape still refuses the row.
+  const good = published(publish([fixtureRow()])).rows[0]
+  for (const ref of [hex("a"), `https://github.com/example/project/blob/main/jobs/${hex("a")}.md`, `https://example.com/example/project/blob/reports/jobs/${hex("a")}.md`, `https://github.com/example/project/blob/reports/jobs/${hex("a")}.md?x=1`]) {
+    const bad = structuredClone(good)
+    bad.handoff.basis.evidence_revisions = [{ kind: "job", ref, revision: 1 }]
+    assert.equal(S.improvementPresentation(bad), null, ref)
+  }
+})
+
+test("coverage_says_what_one_machine_counted_and_never_sums", () => {
+  const known = published(publish([fixtureRow()], { coverage: { reviewed: 12, unreviewed: 3, refused: 1, deferred: 2, more_unreviewed: true } }))
+  assert.deepEqual(S.triageCoverageWords(known), [
+    "Triage on the publishing machine has reviewed 12 improvement cards; it also counts 3 not yet reviewed, 1 whose review was refused, 2 put off to a later run.",
+    "More cards are waiting than this count shows.",
+    "This is one machine's count from its last complete scan, published in the last 72 hours; it is not a count of every desk.",
+  ])
+  const one = published(publish([fixtureRow()]))
+  assert.equal(S.triageCoverageWords(one)[0], "Triage on the publishing machine has reviewed 1 improvement card; it counts none waiting, refused or put off.")
+  assert.equal(S.triageCoverageWords(one).length, 2)
+  // An empty publication with a known count is still a count.
+  const empty = published(publish([], { coverage: { reviewed: 0, unreviewed: 4 } }))
+  assert.equal(empty.rows.length, 0)
+  assert.equal(S.triageCoverageWords(empty)[0], "Triage on the publishing machine has reviewed 0 improvement cards; it also counts 4 not yet reviewed.")
+  // Unknown coverage says why as far as the queue tells, and never a number.
+  const never = published(publish([], { coverage: { reviewed: 0, unreviewed: null, refused: null, deferred: null, more_unreviewed: null }, runner: { state: "no_agent_cli", last_success_age: "never" } }))
+  assert.deepEqual(S.triageCoverageWords(never), [
+    "How many improvement cards triage has covered is not known: the publishing machine's last scan was incomplete, it has not yet recorded every count, or its newest publications give different counts.",
+    "A review listed here is therefore not shown as current, and an empty list does not mean nothing is waiting.",
+  ])
+  const two = published(publish([fixtureRow()], { coverage: { reviewed: 5 } }), publish([fixtureRow({ id: hex("1") })], { coverage: { generation: hex("f"), reviewed: 7 } }))
+  assert.equal(two.coverage.state, "unknown")
+  assert.match(S.triageCoverageWords(two)[0], /is not known: no single machine published in the last 72 hours \(none did, or more than one did, and their counts are never added together\)\.$/)
+  assert.doesNotMatch(S.triageCoverageWords(two).join(" "), /\d+ improvement cards?|12/)
+  const quiet = published(publish([fixtureRow()], { hoursAgo: 73 }))
+  assert.match(S.triageCoverageWords(quiet)[0], /no single machine published in the last 72 hours/)
+  const invalid = deriveImprovementQueue({ batches: [publish([fixtureRow()]), { path: "triage/0000000000000000.json", bytes: "bad", committedAtMs: T0 }], now: T0 })
+  assert.match(S.triageCoverageWords(invalid)[0], /is not known: a published triage file could not be read\.$/)
+  const unreadable = deriveImprovementQueue({ batches: null, now: T0 })
+  assert.match(S.triageCoverageWords({ ...unreadable, state: "unknown" })[0], /is not known: the published triage files could not be read\.$/)
+  // Reviews counted but none published: the status sentence does not say "none reviewed".
+  const countedOnly = published(publish([], { coverage: { reviewed: 3 } }))
+  assert.equal(countedOnly.state, "not_reviewed")
+  const status = S.improvementStatus({ queue: countedOnly, issues: 0, issuesVerified: true })
+  assert.match(status, /^Triage reports reviews, but none is published that this build can show; /)
+  assert.doesNotMatch(status, /no improvement has been reviewed/)
+  assert.match(S.improvementStatus({ queue: published(), issues: 0, issuesVerified: true }), /^Not reviewed yet: no improvement has been reviewed by triage; /)
+  // Nothing published: the status sentence already says so.
+  assert.deepEqual(S.triageCoverageWords(deriveImprovementQueue({ batches: [], now: T0 })), [])
+  for (const bad of [null, undefined, {}, { schema: "factory-improvements/1" }, { schema: "other", coverage: known.coverage }]) assert.deepEqual(S.triageCoverageWords(bad), [])
+  // A count that is not a whole number is never printed.
+  assert.match(S.triageCoverageWords({ ...known, coverage: { ...known.coverage, refused: -1 } })[0], /is not known/)
+})
+
+test("runner_words_say_when_it_last_succeeded_and_why_it_cannot_run", async () => {
+  const { TRIAGE_RUNNER_STATES } = await import("../triage-values.mjs")
+  const said = (runner) => S.triageRunnerWords(published(publish([fixtureRow()], { runner })))
+  assert.equal(said({}), "The triage runner on the publishing machine ran. Its last successful run was within the last day. Both are that machine's own report, as of its last publication.")
+  assert.equal(said({ state: "no_agent_cli", last_success_age: "never" }), "The triage runner on the publishing machine cannot run: no agent command is installed on that machine. It has never completed a run. Both are that machine's own report, as of its last publication.")
+  assert.equal(said({ state: "ran", last_success_age: "never" }), "The triage runner on the publishing machine reports that it ran, but it has no successful run on record. Both are that machine's own report, as of its last publication.")
+  assert.match(said({ state: "disabled_would_bill", last_success_age: "stale" }), /is switched off: a run would be billed per token\. Its last successful run was more than three days ago\./)
+  assert.match(said({ state: "timeout", last_success_age: "aging" }), /timed out on its last run\. Its last successful run was between one and three days ago\./)
+  assert.match(said({ state: "failed", last_success_age: "unknown" }), /failed on its last run\. When it last succeeded is not recorded\./)
+  // Every state Desk can publish has words, and none is a raw code.
+  const seen = new Set()
+  for (const state of TRIAGE_RUNNER_STATES) {
+    const words = said({ state, last_success_age: "recent" })
+    assert.equal(typeof words, "string", state)
+    assert.doesNotMatch(words, /_/, state)
+    seen.add(words)
+  }
+  assert.equal(seen.size, TRIAGE_RUNNER_STATES.length)
+  // Unknown runner, or anything that is not the queue, says nothing.
+  assert.equal(S.triageRunnerWords(deriveImprovementQueue({ batches: [], now: T0 })), null)
+  assert.equal(S.triageRunnerWords(published(publish([fixtureRow()], { hoursAgo: 73 }))), null)
+  for (const bad of [null, {}, { schema: "factory-improvements/1", runner: { state: "sleeping", last_success_age: "recent" } }, { schema: "factory-improvements/1", runner: { state: "ran", last_success_age: "yesterday" } }]) assert.equal(S.triageRunnerWords(bad), null)
+})
+
+test("row_facts_name_source_review_state_and_route_without_creating_a_claim", () => {
+  const facts = (over, ...more) => {
+    const q = published(publish([fixtureRow(over)]), ...more)
+    return Object.fromEntries(S.improvementFacts(S.improvementPresentation(q.rows.find((r) => r.id === fixture.public.rows[0].id))).map((f) => [f.label, f.text]))
+  }
+  assert.deepEqual(facts({}), {
+    "Raised by": "the waste evaluator",
+    "Review": "Reviewed and published within the last 72 hours",
+    "Proposed route": "a decision outside existing authority is needed from its owner (gate: intent)",
+  })
+  assert.equal(facts({ route: "agent_ready", gate: null, source: "andon" })["Proposed route"], "an agent can take the next step under existing authority; the engineering workflow's gates still apply")
+  assert.equal(facts({ route: "agent_ready", gate: null, source: "andon" })["Raised by"], "an andon alarm")
+  assert.equal(facts({ route: "investigate", gate: null })["Proposed route"], "a fact or cause is still to be established by inspection or a bounded experiment")
+  // A stale review keeps its last route for context, and says it cannot support action.
+  const stale = facts({ state: "stale", age: "stale" })
+  assert.equal(stale.Review, "Stale: its evidence changed or it was not published again within 72 hours")
+  assert.equal(stale["Last proposed route"], "a decision outside existing authority is needed from its owner (gate: intent); it cannot support action now")
+  assert.equal(stale["Proposed route"], undefined)
+  const withdrawn = facts({ revision: 2, state: "withdrawn", route: null, gate: null })
+  assert.equal(withdrawn.Review, "Withdrawn: its card changed or was removed, so this review no longer applies")
+  assert.equal(withdrawn["Proposed route"], "none")
+  const conflict = facts({}, publish([fixtureRow({ route: "investigate", gate: null })]))
+  assert.equal(conflict.Review, "In conflict: publications disagree about this review, or another review names the same public issue, so it is not used")
+  assert.match(conflict["Last proposed route"], /it cannot support action now$/)
+  const unknown = facts({}, publish([], { coverage: { generation: hex("f") } }))
+  assert.match(unknown.Review, /^Not current: its source could not be read completely, or the queue's coverage is unknown/)
+  // Every source the transport allows has a label; no fact claims ownership.
+  for (const source of ["andon", "friction_candidate", "reconcile_class", "desk_problem", "store_build", "evaluator", "loop_alarm", "flush_health"]) {
+    const f = facts({ source })
+    assert.ok(f["Raised by"] && !/_/.test(f["Raised by"]), source)
+    assert.doesNotMatch(Object.values(f).join(" "), /claimed|owned by|assigned|working on/i)
+  }
+  assert.deepEqual(S.improvementFacts(null), [])
+})
+
+test("related_and_duplicate_rows_are_named_by_their_place_on_the_page", () => {
+  const A = fixture.public.rows[0].id, B = hex("b"), C = hex("c"), GONE = hex("d")
+  const q = published(publish([
+    fixtureRow({ related_ids: [B, GONE], duplicate_ids: [C] }),
+    fixtureRow({ id: B, route: "agent_ready", gate: null, related_ids: [A] }),
+    fixtureRow({ id: C, route: "investigate", gate: null, duplicate_ids: [A, A] }),
+  ], { coverage: { reviewed: 3 } }))
+  const rows = q.rows.map(S.improvementPresentation)
+  assert.ok(rows.every(Boolean))
+  const links = S.improvementLinks(rows)
+  assert.deepEqual(links.map((l) => [l.n, l.of]), [[1, 3], [2, 3], [3, 3]])
+  const at = Object.fromEntries(links.map((l) => [l.id, l]))
+  const n = (id) => at[id].n
+  assert.equal(at[A].related, `Related, not shown to be the same problem: improvement ${n(B)} on this page and 1 not listed on this page.`)
+  assert.equal(at[A].duplicates, `Suggested duplicate, sharing evidence; nothing is merged or closed: improvement ${n(C)} on this page.`)
+  assert.equal(at[B].related, `Related, not shown to be the same problem: improvement ${n(A)} on this page.`)
+  assert.equal(at[B].duplicates, null)
+  assert.equal(at[C].duplicates, `Suggested duplicate, sharing evidence; nothing is merged or closed: improvement ${n(A)} on this page.`)
+  // A row never names itself, and a malformed id is dropped.
+  const self = S.improvementPresentation({ ...q.rows[0], related_ids: [A, "not-an-id", B] })
+  assert.deepEqual(self.related_ids, [B])
+  assert.deepEqual(S.improvementLinks([]), [])
+  assert.deepEqual(S.improvementLinks(null), [])
+})
+
+test("withdrawn_reviews_are_counted_apart_and_the_triage_note_follows_the_data", () => {
+  const q = published(publish([
+    fixtureRow({ revision: 2, state: "withdrawn", route: null, gate: null }),
+    fixtureRow({ id: hex("b"), route: "agent_ready", gate: null }),
+    fixtureRow({ id: hex("c"), state: "stale", age: "stale" }),
+  ], { coverage: { reviewed: 2 } }))
+  assert.equal(S.improvementStatus({ queue: q, issues: 2, issuesVerified: true }),
+    "3 reviewed improvements are listed first, those needing a refresh first (1 stale), with 1 withdrawn review last; 2 published improvement issues follow under Problems in hand.")
+  const only = published(publish([fixtureRow({ revision: 2, state: "withdrawn", route: null, gate: null }), fixtureRow({ id: hex("b"), route: "agent_ready", gate: null })], { coverage: { reviewed: 1 } }))
+  assert.equal(S.improvementStatus({ queue: only, issues: 0, issuesVerified: true }),
+    "2 reviewed improvements are listed first with 1 withdrawn review last; no improvement issue has been published yet.")
+  // A review that is not current because coverage is unknown is not called stale.
+  const two = published(publish([fixtureRow()]), publish([fixtureRow({ id: hex("b"), route: "agent_ready", gate: null })], { coverage: { generation: hex("f") } }))
+  assert.equal(S.improvementStatus({ queue: two, issues: 1, issuesVerified: true }),
+    "2 reviewed improvements are listed first, those needing a refresh first (2 not current); 1 published improvement issue follows under Problems in hand.")
+  // The page gives a withdrawn review no route, gate or prompt.
+  assert.match(appSource(), /if \(p\.state === "withdrawn" && !p\.conflict\) \{[\s\S]{0,400}A later publication withdrew this review\.[^"]*"\)\);\s*node\.appendChild\(item\);\s*return;/)
+  assert.equal(S.triagePublished(q), true)
+  assert.equal(S.triageNote(q), "Triage reviews from Desk are published in this build; Improvements says what they cover and how current they are.")
+  const none = deriveImprovementQueue({ batches: [], now: T0 })
+  assert.equal(S.triagePublished(none), false)
+  assert.equal(S.triageNote(none), "No triage review is published in this build.")
+  assert.equal(S.triageNote(null), "No triage review is published in this build.")
+  // The page's static words before data loads are the "none published" words.
+  const page = html()
+  assert.match(page, /<span id="overview-triage-note">No triage review is published in this build\.<\/span>/)
+  assert.match(page, /<span id="improvement-triage-note">No triage review is published in this build\.<\/span>/)
+  assert.doesNotMatch(page, /triage is not demonstrated/i)
+  const app = appSource()
+  const fn = app.slice(app.indexOf("function renderPublicImprovements"), app.indexOf("// The improvement system's own alarms lead Improvements"))
+  assert.match(fn, /S\.triageCoverageWords\(queue\), S\.triageRunnerWords\(queue\)/)
+  assert.match(fn, /`Improvement \$\{links\[i\]\.n\} of \$\{links\[i\]\.of\}: \$\{kind\}`/)
+  assert.match(fn, /S\.improvementFacts\(p\)/)
+  assert.match(app, /triageNote\.textContent = S\.triageNote\(data\.improvements\)/)
 })
