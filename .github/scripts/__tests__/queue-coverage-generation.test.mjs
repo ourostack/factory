@@ -78,6 +78,14 @@ test("a re-attested row is fresh past 72 hours from its first commit", () => {
   assert.equal(q.rows[0].conflict, false)
   assert.equal(q.rows[0].availability, "private_detail_not_published")
   assert.equal(q.coverage.state, "known")
+  // The contract's case: published, then attested again at 48 and 96 hours,
+  // read at 100 hours. An attestation with no rows refreshes coverage only.
+  const quiet = queue(batch([row()], {}, 100), batch([row()], {}, 52), batch([row()], {}, 4))
+  assert.equal(quiet.state, "reviewed")
+  assert.equal(quiet.coverage.state, "known")
+  const empty = queue(batch([row()], {}, 100), batch([], {}, 4))
+  assert.equal(empty.coverage.state, "known")
+  assert.equal(empty.rows[0].state, "stale")
   // A publication whose time is unknown or in the future refreshes nothing
   // and hides nothing.
   for (const bad of [null, -1]) {
