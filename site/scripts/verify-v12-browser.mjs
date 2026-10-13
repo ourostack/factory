@@ -75,7 +75,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
   "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered",
+  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items",
 ])
 
 // The triage queues the Improvements page is checked against. Each is built
@@ -105,6 +105,10 @@ export const IN_PAGE_STEPS = Object.freeze([
 // opened from the full-size "Prompt N" buttons and rows beside them. Only the
 // in-page pass reads the task page's targets, and only these are set aside.
 export const DATA_SIZED_MARKS = Object.freeze({ task: ".lad-mark, .tw-seg" })
+// Every published task page is loaded at these widths and its layout read:
+// the other checks read one sampled task, and one task's shape can break a
+// chart that every other task draws well.
+export const EVERY_TASK_WIDTHS = Object.freeze([1280, 390])
 export const IN_PAGE_WIDTHS = Object.freeze([1280, 390])
 // A click to another view loads no page, so it has the settle budget with no
 // re-timing and no excuse: every step must be timed, each as an action on
@@ -135,6 +139,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
   "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under", "task_page_lead_time_matches_compare", "task_pages_no_bound_before_under", "pages_settle_within_budget",
   "in_page_navigation_keeps_layout_charts_tab_order_and_targets", "in_page_navigation_settles_within_budget",
+  "ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_layout_is_clean",
   ...TRIAGE_QUEUES.map((n) => `triage_queue_${n}_page_says_what_the_queue_says`),
 ])
 
@@ -1804,6 +1809,53 @@ export async function main(argv = process.argv.slice(2)) {
     })
     await check("in_page_navigation_settles_within_budget", async () => inPageBudget(IN_PAGE_TIMES, IN_PAGE_STEPS.length * IN_PAGE_WIDTHS.length))
 
+    // 9d. A task whose prompts fall at the end of one item and the start of
+    // the next: the marks of neighbouring items must not draw on one
+    // another. The map is a published task's, with its identities replaced.
+    const ladderMap = { ...JSON.parse(await readFile(join(here, "..", "..", ".github", "scripts", "__tests__", "fixtures", "v12-ladder-neighbours-map.json"), "utf8")), job: targets.task }
+    const ladderPage = async (page, errors, plant = null) => {
+      await page.route(`**/map/${targets.task}.json`, (r) => r.fulfill({ json: ladderMap }))
+      await open(page, ROUTES.find((r) => r.name === "task"))
+      // The fixture must draw what it is for: marks in neighbouring items, close enough to meet.
+      const marks = await page.evaluate(() => [...document.querySelectorAll("#vsm .mark-lane-prompt .lad-mark")].map((b) => ({ item: Number(b.dataset.item), r: b.getBoundingClientRect().toJSON() })))
+      const phone = await page.evaluate(() => !!document.querySelector("#vsm .vsm-phone, .vsm-phone #vsm, #vsm.vsm-phone"))
+      const [a, z] = phone ? ["top", "bottom"] : ["left", "right"]
+      const close = marks.some((m) => marks.some((n) => n.item === m.item + 1 && n.r[a] - m.r[z] < 4 && n.r[a] - m.r[z] > -40))
+      if (!close) throw new Error(`the fixture drew no prompt marks meeting across an item boundary (${marks.length} marks)`)
+      if (plant) await page.evaluate(plant)
+      const hit = (await layout(page)).filter((p) => p.code === "overlapping_controls" && (!plant || p.planted))
+      if (hit.length) throw new Error(`${plant ? "planted " : ""}overlapping_controls: ${JSON.stringify(hit.slice(0, 2))}`)
+      if (errors.length) throw new Error(`page errors: ${errors.slice(0, 2).join("; ")}`)
+      return marks.length
+    }
+    await check("ladder_marks_at_an_item_boundary_stay_apart", async () => {
+      const out = {}
+      for (const width of [1280, 390]) {
+        const { context, page, errors } = await newPage({ width })
+        try { out[width] = { prompt_marks: await ladderPage(page, errors) } } finally { await context.close() }
+      }
+      return out
+    })
+    // 9e. Every published task page, not only the sampled one.
+    await check("every_task_page_layout_is_clean", async () => {
+      const ids = targets.data.jobs.map((j) => j.id).filter((id) => typeof id === "string" && /^[0-9a-f]{32}$/.test(id))
+      if (!ids.length) throw new Error("no task is published")
+      const found = []
+      for (const width of EVERY_TASK_WIDTHS) {
+        const { context, page, errors } = await newPage({ width })
+        try {
+          for (const id of ids) {
+            await load(page, url + `#/task/${id}`)
+            await settle(page, "task")
+            for (const p of await layout(page)) found.push(`${id.slice(0, 8)} at ${width} px: ${p.code} ${p.detail || ""}`)
+          }
+          for (const e of errors) found.push(`${width} px: page error ${e}`)
+        } finally { await context.close() }
+      }
+      if (found.length) throw new Error(`${found.length} problems: ${found.slice(0, 8).join("; ")}`)
+      return { tasks: ids.length, widths: [...EVERY_TASK_WIDTHS] }
+    })
+
     // 10. Negative controls: each injected defect must make the real check
     // fail on the planted element itself (data-gate-planted), so a defect
     // the page already has can never stand in for the one injected.
@@ -2152,6 +2204,19 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page, errors } = await newPage({ width: 390 })
       try { await triagePage(page, errors, "known_counts", () => { const h = document.querySelector("#view-act .improvement-row h3"); h.dataset.gatePlanted = "1"; h.textContent = h.textContent.replace("Improvement 1 of 2", "Improvement 2 of 2") }) } finally { await context.close() }
     }, /^row 1 is headed "Improvement 2 of 2/)
+    await expectFailure("ladder_marks_overlap_across_items", async () => {
+      // The second of two neighbouring prompt marks is moved back onto the first.
+      const { context, page, errors } = await newPage({ width: 1280 })
+      try {
+        await ladderPage(page, errors, () => {
+          const marks = [...document.querySelectorAll("#vsm .mark-lane-prompt .lad-mark")]
+          const pair = marks.map((m, i) => [marks[i - 1], m]).find(([p, m]) => p && Number(m.dataset.item) === Number(p.dataset.item) + 1)
+          const [p, m] = pair
+          m.dataset.gatePlanted = "1"
+          m.style.left = `${parseFloat(m.style.left) - (m.getBoundingClientRect().left - p.getBoundingClientRect().left)}px`
+        })
+      } finally { await context.close() }
+    }, /^planted overlapping_controls/)
     await expectFailure("slow_in_page_navigation", async () => {
       // The same walk with every data file 6 s late after the first load:
       // the in-page rule has no re-timing, so it must fail.
