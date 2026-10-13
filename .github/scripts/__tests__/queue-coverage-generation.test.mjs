@@ -102,6 +102,13 @@ test("a re-attested row is fresh past 72 hours from its first commit", () => {
   assert.equal(conflict.state, "conflicting")
   assert.equal(conflict.rows[0].conflict, true)
   assert.ok(conflict.reasons.includes("triage_publication_stale"))
+  // Two batches agree and a third disagrees, in every order: the conflict
+  // reads from the oldest time whichever batch is read first.
+  const mixed = queue(batch([row()], {}, 100), batch([row()], {}, 1), batch([row({ route: "investigate", gate: null })], {}, 2))
+  assert.equal(mixed.state, "conflicting")
+  assert.equal(mixed.rows[0].conflict, true)
+  assert.equal(mixed.rows[0].state, "stale")
+  assert.deepEqual(mixed.reasons, ["triage_conflict", "triage_publication_stale"])
   // A withdrawal still wins over any later attestation of the row it withdrew.
   const withdrawn = queue(batch([row()], {}, 96), batch([row({ revision: 2, state: "withdrawn", route: null, gate: null })], {}, 50), batch([row()], {}, 1))
   assert.equal(withdrawn.rows[0].state, "withdrawn")

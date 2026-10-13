@@ -129,17 +129,19 @@ export function deriveImprovementQueue(input = {}) {
     accepted.push({ value, at: input.committedAtMs })
     for (const r of value.rows) {
       const prior = identities.get(r.id)
-      const current = { row: clone(r), at: input.committedAtMs, conflict: false }
+      const current = { row: clone(r), at: input.committedAtMs, oldest: input.committedAtMs, conflict: false }
       if (!prior || r.revision > prior.row.revision) identities.set(r.id, current)
       else if (r.revision === prior.row.revision) {
         // Equal conflict is deterministic and never silently last-writer wins.
         const conflict = prior.conflict || !same(prior.row, r)
         const chosen = JSON.stringify(stable(prior.row)) <= JSON.stringify(stable(r)) ? prior.row : clone(r)
         // The same row published again is a fresh attestation of it, so it is
-        // as fresh as its newest publication. Rows that disagree keep the
-        // oldest time: a conflict is never made fresher by being repeated.
-        const at = conflict ? Math.min(prior.at ?? -Infinity, input.committedAtMs ?? -Infinity) : newest(prior.at, input.committedAtMs, now)
-        identities.set(r.id, { row: chosen, at, conflict })
+        // as fresh as its newest publication. Rows that disagree read from the
+        // oldest time, as before: a conflict is never made fresher by being
+        // repeated. Both times are kept, so the order of batches cannot matter.
+        const oldest = Math.min(prior.oldest ?? -Infinity, input.committedAtMs ?? -Infinity)
+        const at = newest(prior.at, input.committedAtMs, now)
+        identities.set(r.id, { row: chosen, at, oldest, conflict })
       }
     }
   }
@@ -170,7 +172,9 @@ export function deriveImprovementQueue(input = {}) {
       issueIds.get(p.ref).add(r.id)
     }
   }
-  const rows = [...identities.values()].map(({ row: r, at, conflict }) => {
+  const rows = [...identities.values()].map(({ row: r, at: latest, oldest, conflict: differs }) => {
+    let conflict = differs
+    const at = differs ? oldest : latest
     conflict ||= r.evidence.some((p) => p.kind === "issue" && issueIds.get(p.ref)?.size > 1)
     if (conflict) reasons.add("triage_conflict")
     if (!fresh(at, now)) { reasons.add("triage_publication_stale"); if (r.state === "reviewed") r.state = "stale" }
