@@ -3240,7 +3240,7 @@
     const yPr = AXIS_H + OP_H;
     for (const y of [yOp + OP_H, yPr + OP_H]) s.appendChild(svg("line", { x1: 0, x2: width, y1: y, y2: y, class: "lane-rule" }));
     const note = (y, text) => {
-      const t = svg("text", { x: 6, y: y + OP_H - 7, class: "lane-outside-label" });
+      const t = svg("text", { x: 6, y: y + OP_H - 7, class: "lane-outside-label lane-note", "data-lane": y === yOp ? "Operator lane" : "Pull requests lane" });
       t.textContent = text;
       s.appendChild(t);
     };
@@ -3441,6 +3441,10 @@
     inner.append(labels, plot);
     frame.appendChild(inner);
     container.appendChild(frame);
+    // Lane notes too long for a narrow plot are said here instead (draw()).
+    const notesBelow = el("p", "chart-caption lane-notes-below");
+    notesBelow.hidden = true;
+    container.appendChild(notesBelow);
 
     let zoom = 1;
     let expanded = false;
@@ -3589,6 +3593,17 @@
       // A tick or pull request label that starts near the right edge would run
       // past the plot, where an svg cuts it off: it is turned to end at its
       // mark instead, measured as drawn so it holds at any text size.
+      // A lane's note ("no operator prompt recorded…") that is longer than a
+      // narrow plot is said under the plot, whole, rather than cut off.
+      const moved = [];
+      for (const n of s.querySelectorAll("text.lane-note")) {
+        const box = n.getBBox();
+        if (box.x + box.width <= width) continue;
+        moved.push(`${n.getAttribute("data-lane")}: ${n.textContent}.`);
+        n.remove();
+      }
+      notesBelow.textContent = moved.join(" ");
+      notesBelow.hidden = moved.length === 0;
       for (const tl of s.querySelectorAll("text.lane-tick, text.lane-pr-label")) {
         const box = tl.getBBox();
         if (box.x + box.width <= width) continue;

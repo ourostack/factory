@@ -259,4 +259,7 @@ test("marks set aside from the touch-target rule must have full-size equivalents
   const pass = app.split("      plot.appendChild(s);\n")[1].split("focusStretch = ")[0]
   assert.match(pass, /if \(!tl\.classList\.contains\("lane-pr-label"\)\) continue;/)
   assert.match(pass, /if \(meets\) tl\.remove\(\);/)
+  // A lane note longer than a narrow plot is said whole under the plot, never cut off.
+  assert.match(pass, /for \(const n of s\.querySelectorAll\("text\.lane-note"\)\) \{/)
+  assert.match(pass, /notesBelow\.textContent = moved\.join\(" "\);\s*notesBelow\.hidden = moved\.length === 0;/)
 })
