@@ -2656,17 +2656,18 @@
         if (g.count > 1) b.style.setProperty(phone ? "top" : "left", `${range[1] - range[0] > 2 * half ? Math.min(Math.max(g.pos, range[0] + half), range[1] - half) : (range[0] + range[1]) / 2}px`);
         buttons.push(b);
       }
-      // Marks in neighbouring steps can still meet at the step boundary: move
-      // each one clear of the one before it in its strip, so no two marks
-      // (each a button) draw on top of one another.
-      const side = phone ? ["top", "bottom", "offsetHeight"] : ["left", "right", "offsetWidth"];
-      for (const st of strips) {
-        const own = buttons.filter((b) => st.contains(b)).sort((a, b) => a.getBoundingClientRect()[side[0]] - b.getBoundingClientRect()[side[0]]);
-        for (let i = 1; i < own.length; i++) {
-          const prev = own[i - 1].getBoundingClientRect()[side[1]];
-          const start = own[i].getBoundingClientRect()[side[0]];
-          if (start < prev + 1) own[i].style.setProperty(side[0], `${parseFloat(own[i].style.getPropertyValue(side[0])) + (prev + 1 - start)}px`);
-        }
+      // Marks in neighbouring steps can still meet at a step boundary, and a
+      // mark at the end of one item hangs over the start of the next: move
+      // each one clear of the one before it along the lane, across items,
+      // so no two marks (each a button) draw on top of one another. Marks
+      // on different lines of a wrapped map are not neighbours.
+      const side = phone ? ["top", "bottom", "left", "right"] : ["left", "right", "top", "bottom"];
+      const along = buttons.map((b) => ({ b, r: b.getBoundingClientRect() })).sort((p, q) => Math.round(p.r[side[2]]) - Math.round(q.r[side[2]]) || p.r[side[0]] - q.r[side[0]]);
+      for (let i = 1; i < along.length; i++) {
+        const prev = along[i - 1].b.getBoundingClientRect();
+        const cur = along[i].b.getBoundingClientRect();
+        if (Math.min(prev[side[3]], cur[side[3]]) - Math.max(prev[side[2]], cur[side[2]]) <= 0) continue;
+        if (cur[side[0]] < prev[side[1]] + 1) along[i].b.style.setProperty(side[0], `${parseFloat(along[i].b.style.getPropertyValue(side[0])) + (prev[side[1]] + 1 - cur[side[0]])}px`);
       }
       roving(buttons);
     }
@@ -3239,7 +3240,7 @@
     const yPr = AXIS_H + OP_H;
     for (const y of [yOp + OP_H, yPr + OP_H]) s.appendChild(svg("line", { x1: 0, x2: width, y1: y, y2: y, class: "lane-rule" }));
     const note = (y, text) => {
-      const t = svg("text", { x: 6, y: y + OP_H - 7, class: "lane-outside-label" });
+      const t = svg("text", { x: 6, y: y + OP_H - 7, class: "lane-outside-label lane-note", "data-lane": y === yOp ? "Operator lane" : "Pull requests lane" });
       t.textContent = text;
       s.appendChild(t);
     };
@@ -3440,6 +3441,10 @@
     inner.append(labels, plot);
     frame.appendChild(inner);
     container.appendChild(frame);
+    // Lane notes too long for a narrow plot are said here instead (draw()).
+    const notesBelow = el("p", "chart-caption lane-notes-below");
+    notesBelow.hidden = true;
+    container.appendChild(notesBelow);
 
     let zoom = 1;
     let expanded = false;
@@ -3588,12 +3593,34 @@
       // A tick or pull request label that starts near the right edge would run
       // past the plot, where an svg cuts it off: it is turned to end at its
       // mark instead, measured as drawn so it holds at any text size.
+      // A lane's note ("no operator prompt recorded…") that is longer than a
+      // narrow plot is said under the plot, whole, rather than cut off.
+      const moved = [];
+      for (const n of s.querySelectorAll("text.lane-note")) {
+        const box = n.getBBox();
+        if (box.x + box.width <= width) continue;
+        moved.push(`${n.getAttribute("data-lane")}: ${n.textContent}.`);
+        n.remove();
+      }
+      notesBelow.textContent = moved.join(" ");
+      notesBelow.hidden = moved.length === 0;
       for (const tl of s.querySelectorAll("text.lane-tick, text.lane-pr-label")) {
         const box = tl.getBBox();
         if (box.x + box.width <= width) continue;
         const gap = tl.classList.contains("lane-tick") ? 3 : 8;
         tl.setAttribute("x", String(Math.max(box.width, Number(tl.getAttribute("x")) - 2 * gap)));
         tl.setAttribute("text-anchor", "end");
+        // Turned back, a pull request number can land on its neighbour's:
+        // then it is not drawn (its mark still names it and opens it), as
+        // when two marks are too close for a number.
+        if (!tl.classList.contains("lane-pr-label")) continue;
+        const mine = tl.getBBox();
+        const meets = [...s.querySelectorAll("text.lane-pr-label, text.lane-pr-count")].some((o) => {
+          if (o === tl) return false;
+          const b = o.getBBox();
+          return Math.min(mine.x + mine.width, b.x + b.width) - Math.max(mine.x, b.x) > 0 && Math.min(mine.y + mine.height, b.y + b.height) - Math.max(mine.y, b.y) > 0;
+        });
+        if (meets) tl.remove();
       }
       focusStretch = (k) => {
         const m = marks[k];

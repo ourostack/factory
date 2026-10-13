@@ -84,7 +84,7 @@ test("the gate must catch every planned negative control, and each control is ac
     "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link",
     "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
     "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered"]
+    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -226,4 +226,40 @@ test("a swimlane label that would run past the plot's right edge ends at its mar
   assert.match(pass, /for \(const tl of s\.querySelectorAll\("text\.lane-tick, text\.lane-pr-label"\)\) \{/)
   assert.match(pass, /const box = tl\.getBBox\(\);\s*if \(box\.x \+ box\.width <= width\) continue;/)
   assert.match(pass, /tl\.setAttribute\("text-anchor", "end"\);/)
+})
+
+test("marks of neighbouring items never draw on one another, and every task page is read", () => {
+  for (const name of ["ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_and_one_session_each_layout_is_clean"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  assert.deepEqual([...G.EVERY_TASK_WIDTHS], [1280, 390])
+  assert.deepEqual([...G.EVERY_SESSION_WIDTHS], [1280, 768, 390])
+  // The fixture is a published task's map with its identities replaced.
+  const map = JSON.parse(readFileSync(new URL("./fixtures/v12-ladder-neighbours-map.json", import.meta.url), "utf8"))
+  assert.equal(map.schema, "factory.site.map/2")
+  assert.equal(map.job, "00000000000000000000000000000001")
+  assert.deepEqual(map.sessions.map((x) => x.id), ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"])
+  assert.deepEqual([...new Set(map.prs.map((p) => p.repo))], ["example/project"])
+  // The page moves each mark clear of the one before it along the whole lane, not only inside one item.
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const pass = app.split("// Marks in neighbouring steps can still meet at a step boundary")[1].split("roving(buttons);")[0]
+  assert.doesNotMatch(pass, /for \(const st of strips\)/)
+  assert.match(pass, /const along = buttons\.map\(/)
+  assert.match(pass, /if \(cur\[side\[0\]\] < prev\[side\[1\]\] \+ 1\)/)
+  const gate = readFileSync(SCRIPT, "utf8")
+  assert.match(gate, /the fixture drew no prompt marks meeting across an item boundary/)
+  assert.match(gate, /const ids = targets\.data\.jobs\.map\(\(j\) => j\.id\)/)
+})
+
+test("marks set aside from the touch-target rule must have full-size equivalents, and a turned label never lands on its neighbour", () => {
+  const gate = readFileSync(SCRIPT, "utf8")
+  assert.equal(typeof G.setAsideEquivalents, "function")
+  assert.match(gate, /if \(DATA_SIZED_MARKS\[step\.route\]\) for \(const p of \(await page\.evaluate\(setAsideEquivalents\)\)\.problems\) found\.push\(/)
+  assert.match(gate, /if \(prompts > buttons\.size\) out\.push\(/)
+  assert.match(gate, /if \(!names\.has\(seg\.getAttribute\("aria-label"\)\)\) out\.push\(/)
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const pass = app.split("      plot.appendChild(s);\n")[1].split("focusStretch = ")[0]
+  assert.match(pass, /if \(!tl\.classList\.contains\("lane-pr-label"\)\) continue;/)
+  assert.match(pass, /if \(meets\) tl\.remove\(\);/)
+  // A lane note longer than a narrow plot is said whole under the plot, never cut off.
+  assert.match(pass, /for \(const n of s\.querySelectorAll\("text\.lane-note"\)\) \{/)
+  assert.match(pass, /notesBelow\.textContent = moved\.join\(" "\);\s*notesBelow\.hidden = moved\.length === 0;/)
 })
