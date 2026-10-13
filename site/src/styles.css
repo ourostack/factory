@@ -1187,9 +1187,9 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .copy-status { margin-left: 10px; font-size: 13px; color: var(--text-secondary); }
 .prompt-text { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .stretch-list { list-style: none; margin: 0; padding: 0; max-height: 18rem; overflow-y: auto; }
-.stretch-row { font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 1px solid var(--gridline); width: 100%; text-align: left; padding: 5px 2px; cursor: pointer; color: var(--text-primary); display: flex; gap: 8px; align-items: baseline; }
+.stretch-row { min-height: 24px; font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 1px solid var(--gridline); width: 100%; text-align: left; padding: 5px 2px; cursor: pointer; color: var(--text-primary); display: flex; gap: 8px; align-items: baseline; }
 .stretch-row:hover { background: var(--surface-1); }
-.link-button { background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; text-align: left; }
+.link-button { background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; text-align: left; min-height: 24px; }
 @media (max-width: 640px) {
   .drawer { margin: auto; width: calc(100vw - 16px); max-height: 90vh; }
   .drawer-facts > div { grid-template-columns: 1fr; gap: 0; }
@@ -1296,7 +1296,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 /* Compare: over time */
 .ot-base { margin: 6px 0 10px; font-size: 15px; max-width: 72ch; }
 .ot-base p { margin: 0 0 6px; }
-.ot-base-more summary { cursor: pointer; }
+.ot-base-more summary { cursor: pointer; min-height: 24px; }
 .ot-base-more p { font-size: 14px; }
 .ot-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
 .ot-toggle { flex-wrap: wrap; }
@@ -1316,7 +1316,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .ot-q { font-size: 10px; fill: var(--text-secondary); font-weight: 700; }
 .ot-bracket { fill: none; stroke: var(--text-secondary); stroke-width: 1.3; }
 .ot-undated { margin-top: 14px; }
-.ot-undated summary { cursor: pointer; font-size: 14.5px; }
+.ot-undated summary { cursor: pointer; font-size: 14.5px; min-height: 24px; }
 .ot-undated-title { margin: 8px 0 4px; font-size: 14px; font-weight: 600; }
 table.data-table.ot-cause-table { width: auto; }
 table.data-table.ot-cause-table th, table.data-table.ot-cause-table td { min-width: 0; padding: 6px 6px; vertical-align: bottom; }

@@ -75,7 +75,50 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
   "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
+  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered",
 ])
+
+// The triage queues the Improvements page is checked against. Each is built
+// by the real reducer from published batches, never written by hand.
+export const TRIAGE_QUEUES = Object.freeze([
+  "known_counts", "counts_changed_newest_wins", "two_sources_never_summed", "reattested_identical_rows",
+  "null_counts_runner_cannot_run", "job_report_row", "withdrawn_last", "related_and_duplicate",
+])
+
+// The in-page pass: one page is loaded once, then the reader's own links are
+// clicked from view to view with no reload, and each view is read where it
+// lands. `route` names the ROUTES entry the click must arrive at; {task}
+// and {session} are the task and session every other check reads.
+export const IN_PAGE_STEPS = Object.freeze([
+  { route: "tasks", click: 'nav.steps a[href="#/tasks"]' },
+  { route: "task", click: '#view-tasks a[href^="#/task/{task}"]' },
+  { route: "session", click: '#view-task a[href*="/session/{session}"]' },
+  { route: "compare", click: 'nav.steps a[href="#/compare"]' },
+  { route: "findings", click: '#view-compare .next-step a[href="#/causes"]' },
+  { route: "improvements", click: 'nav.steps a[href="#/improvements"]' },
+  { route: "why", click: 'a.why-link[href="#/why"]' },
+  { route: "help", click: 'a.why-link[href="#/help"]' },
+  { route: "overview", click: 'nav.steps a[href="#/"]' },
+].map((x) => Object.freeze(x)))
+// Marks on a task's charts are sized by the time they stand for, so they can
+// be narrower than a touch target; the same prompts and stretches are also
+// opened from the full-size "Prompt N" buttons and rows beside them. Only the
+// in-page pass reads the task page's targets, and only these are set aside.
+export const DATA_SIZED_MARKS = Object.freeze({ task: ".lad-mark, .tw-seg" })
+export const IN_PAGE_WIDTHS = Object.freeze([1280, 390])
+// A click to another view loads no page, so it has the settle budget with no
+// re-timing and no excuse: every step must be timed, each as an action on
+// the page, and each within the budget.
+export const IN_PAGE_BUDGET_MS = 5000
+export function inPageBudget(times, expected, budget = IN_PAGE_BUDGET_MS) {
+  const list = times || []
+  if (list.length !== expected) throw new Error(`${list.length} in-page settles were timed, not ${expected}`)
+  const loaded = list.filter((t) => t.after !== "interaction")
+  if (loaded.length) throw new Error(`${loaded.length} of ${list.length} were page loads, not clicks: ${loaded.slice(0, 3).map((t) => t.view).join(", ")}`)
+  const over = list.filter((t) => !(t.ms <= budget))
+  if (over.length) throw new Error(`${over.length} of ${list.length} in-page settles over ${budget / 1000} s, never excused: ${over.slice(0, 5).map((t) => `${t.view} at ${t.width} px ${(t.ms / 1000).toFixed(1)} s`).join("; ")}`)
+  return { settled: list.length, budget_ms: budget, slowest_ms: Math.max(...list.map((t) => t.ms)) }
+}
 
 // Fixed-name checks a run must record; a run that misses one fails.
 export const REQUIRED_CHECKS = Object.freeze([
@@ -91,6 +134,8 @@ export const REQUIRED_CHECKS = Object.freeze([
   "wide_screen_tables_stay_tables_at_normal_text", "page_height_within_budget_of_baseline", "stacked_tables_keep_table_roles",
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
   "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under", "task_page_lead_time_matches_compare", "task_pages_no_bound_before_under", "pages_settle_within_budget",
+  "in_page_navigation_keeps_layout_charts_tab_order_and_targets", "in_page_navigation_settles_within_budget",
+  ...TRIAGE_QUEUES.map((n) => `triage_queue_${n}_page_says_what_the_queue_says`),
 ])
 
 // Spec 4.5: a wide screen uses its room for information. Against the
@@ -838,6 +883,54 @@ export async function main(argv = process.argv.slice(2)) {
       if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
     }
     const layout = async (page, refresh = true) => assessLayout(await page.evaluate(measureLayout, { refresh }))
+    // The tab-order and touch-target readings of the page as it stands, so a
+    // page reached by a click is read the same way as one loaded afresh.
+    const tabOrderProblems = async (page, routeName) => {
+      const out = []
+      // Start from the top of the document: a throwaway focus point before everything else.
+      await page.evaluate(() => { const s = document.createElement("span"); s.tabIndex = -1; s.id = "gate-tab-start"; document.body.prepend(s); s.focus(); window.scrollTo(0, 0) })
+      const positive = await page.evaluate(() => [...document.querySelectorAll("[tabindex]")].filter((e) => e.tabIndex > 0).length)
+      if (positive) out.push(`${routeName}: ${positive} positive tabindex`)
+      let prev = null
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press("Tab")
+        const f = await page.evaluate((i) => {
+          const e = document.activeElement
+          if (!e || e === document.body) return { none: true }
+          e.dataset.gateTab = ((e.dataset.gateTab || "") + " " + i).trim()
+          const r = e.getBoundingClientRect()
+          const label = (e.getAttribute("aria-label") || e.textContent || e.id || e.tagName).trim().slice(0, 30)
+          const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth
+          return { label, visible, inDialog: !!e.closest("dialog[open]") }
+        }, i)
+        if (i === 0) await page.evaluate(() => { const s = document.getElementById("gate-tab-start"); if (s) s.remove() })
+        if (f.none) break
+        if (!f.visible) out.push(`${routeName}: tab ${i + 1} "${f.label}" is not on screen when focused`)
+        if (i === 0 && !/skip/i.test(f.label)) out.push(`${routeName}: first tab is "${f.label}", not the skip link`)
+        if (prev !== null && !f.inDialog) {
+          // A date input's month, day and year are one element: staying on it is not moving backward.
+          const forward = await page.evaluate(([a, b]) => { const x = document.querySelector(`[data-gate-tab~="${a}"]`), y = document.querySelector(`[data-gate-tab~="${b}"]`); return !!(x && y && (x === y || (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING))) }, [prev, i])
+          if (!forward) out.push(`${routeName}: tab ${i + 1} "${f.label}" moves backward in the page`)
+        }
+        prev = i
+      }
+      await page.evaluate(() => { for (const e of document.querySelectorAll("[data-gate-tab]")) delete e.dataset.gateTab })
+      return out
+    }
+    const smallTargets = (page, routeName, setAside = null) => page.evaluate(([rn, setAside]) => {
+      const view = document.getElementById(`view-${document.body.dataset.view}`)
+      const out = []
+      for (const e of view.querySelectorAll("button, select, input, summary, .mode-btn")) {
+        if (setAside && e.matches(setAside)) continue
+        const r = e.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0 && (r.width < 24 || r.height < 24)) out.push(`${rn}: ${e.tagName.toLowerCase()} "${(e.textContent || e.id).trim().slice(0, 30)}" ${Math.round(r.width)}x${Math.round(r.height)}`)
+      }
+      for (const a of view.querySelectorAll(".cause-spans a, .cause-tasks a")) {
+        const row = a.closest("li, tr") || a
+        if (row.getBoundingClientRect().height < 24) out.push(`${rn}: evidence row ${Math.round(row.getBoundingClientRect().height)}px`)
+      }
+      return out
+    }, [routeName, setAside])
 
     // 1. The width sweep: every route, every width, both themes, both text
     // scales. Each configuration has its own browser process and each route
@@ -980,36 +1073,8 @@ export async function main(argv = process.argv.slice(2)) {
         await check("tab_order_follows_the_page_on_primary_routes", async () => {
           const out = []
           for (const routeName of ["overview", "tasks", "task", "compare", "findings", "improvements"]) {
-            const route = ROUTES.find((r) => r.name === routeName)
-            await open(page, route)
-            // Start from the top of the document: a throwaway focus point before everything else.
-            await page.evaluate(() => { const s = document.createElement("span"); s.tabIndex = -1; s.id = "gate-tab-start"; document.body.prepend(s); s.focus(); window.scrollTo(0, 0) })
-            const positive = await page.evaluate(() => [...document.querySelectorAll("[tabindex]")].filter((e) => e.tabIndex > 0).length)
-            if (positive) out.push(`${routeName}: ${positive} positive tabindex`)
-            let prev = null
-            for (let i = 0; i < 30; i++) {
-              await page.keyboard.press("Tab")
-              const f = await page.evaluate((i) => {
-                const e = document.activeElement
-                if (!e || e === document.body) return { none: true }
-                e.dataset.gateTab = ((e.dataset.gateTab || "") + " " + i).trim()
-                const r = e.getBoundingClientRect()
-                const label = (e.getAttribute("aria-label") || e.textContent || e.id || e.tagName).trim().slice(0, 30)
-                const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth
-                return { label, visible, inDialog: !!e.closest("dialog[open]") }
-              }, i)
-              if (i === 0) await page.evaluate(() => { const s = document.getElementById("gate-tab-start"); if (s) s.remove() })
-              if (f.none) break
-              if (!f.visible) out.push(`${routeName}: tab ${i + 1} "${f.label}" is not on screen when focused`)
-              if (i === 0 && !/skip/i.test(f.label)) out.push(`${routeName}: first tab is "${f.label}", not the skip link`)
-              if (prev !== null && !f.inDialog) {
-                // A date input's month, day and year are one element: staying on it is not moving backward.
-                const forward = await page.evaluate(([a, b]) => { const x = document.querySelector(`[data-gate-tab~="${a}"]`), y = document.querySelector(`[data-gate-tab~="${b}"]`); return !!(x && y && (x === y || (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING))) }, [prev, i])
-                if (!forward) out.push(`${routeName}: tab ${i + 1} "${f.label}" moves backward in the page`)
-              }
-              prev = i
-            }
-            await page.evaluate(() => { for (const e of document.querySelectorAll("[data-gate-tab]")) delete e.dataset.gateTab })
+            await open(page, ROUTES.find((r) => r.name === routeName))
+            out.push(...await tabOrderProblems(page, routeName))
           }
           if (out.length) throw new Error(out.slice(0, 10).join("; "))
         })
@@ -1078,19 +1143,7 @@ export async function main(argv = process.argv.slice(2)) {
           const small = []
           for (const routeName of ["compare", "cause", "improvements", "tasks"]) {
             await open(page, ROUTES.find((r) => r.name === routeName))
-            small.push(...await page.evaluate((rn) => {
-              const view = document.getElementById(`view-${document.body.dataset.view}`)
-              const out = []
-              for (const e of view.querySelectorAll("button, select, input, summary, .mode-btn")) {
-                const r = e.getBoundingClientRect()
-                if (r.width > 0 && r.height > 0 && (r.width < 24 || r.height < 24)) out.push(`${rn}: ${e.tagName.toLowerCase()} "${(e.textContent || e.id).trim().slice(0, 30)}" ${Math.round(r.width)}x${Math.round(r.height)}`)
-              }
-              for (const a of view.querySelectorAll(".cause-spans a, .cause-tasks a")) {
-                const row = a.closest("li, tr") || a
-                if (row.getBoundingClientRect().height < 24) out.push(`${rn}: evidence row ${Math.round(row.getBoundingClientRect().height)}px`)
-              }
-              return out
-            }, routeName))
+            small.push(...await smallTargets(page, routeName))
           }
           if (small.length) throw new Error(small.slice(0, 12).join("; ") + (small.length > 12 ? ` (+${small.length - 12} more)` : ""))
         })
@@ -1597,6 +1650,160 @@ export async function main(argv = process.argv.slice(2)) {
       })
     }
 
+    // 9b. The Improvements page against triage queues built by the real
+    // reducer: what the page says is read back and compared with the queue.
+    const HOUR = 3600000
+    const hex = (c) => c.repeat(32)
+    const row0 = fixture.public.rows[0]
+    const triageRow = (over = {}) => ({ ...structuredClone(row0), ...over })
+    let serial = 0
+    const publish = (rows, { coverage = {}, runner = {}, hoursAgo = 1 } = {}) => batch({ ...structuredClone(fixture.public), batch: (++serial).toString(16).padStart(16, "0"), rows, coverage: { ...fixture.public.coverage, ...coverage }, runner: { ...fixture.public.runner, ...runner } }, now - hoursAgo * HOUR)
+    const derive = (...batches) => deriveImprovementQueue({ batches, now })
+    const B = hex("b"), C = hex("c")
+    const jobPointer = { kind: "job", ref: `https://github.com/example/project/blob/reports/jobs/${hex("a")}.md`, revision: 1 }
+    const triage = {
+      known_counts: { queue: derive(publish([triageRow(), triageRow({ id: B, route: "agent_ready", gate: null })], { coverage: { reviewed: 12, unreviewed: 3, refused: 1, deferred: 2, more_unreviewed: true } })),
+        says: [/has reviewed 12 improvement cards; it also counts 3 not yet reviewed, 1 whose review was refused, 2 put off to a later run\./, /More cards are waiting than this count shows\./, /runner on the publishing machine ran\. Its last successful run was within the last day\./],
+        rowsSay: [[/^Improvement 1 of 2: Recorded decision gate/, /Reviewed and published within the last 72 hours/], [/^Improvement 2 of 2: Reviewed improvement — inspect the proposed route/, /an agent can take the next step under existing authority/]] },
+      // The same machine published twice: the newest count stands, the older is not added.
+      counts_changed_newest_wins: { queue: derive(publish([triageRow()], { coverage: { reviewed: 4, unreviewed: 9 }, hoursAgo: 30 }), publish([triageRow()], { coverage: { reviewed: 7, unreviewed: 2 }, hoursAgo: 1 })),
+        says: [/has reviewed 7 improvement cards; it also counts 2 not yet reviewed\./], never: [/\b(4|11) improvement cards?\b/, /\b(9|11) not yet reviewed/] },
+      two_sources_never_summed: { queue: derive(publish([triageRow()], { coverage: { reviewed: 5 } }), publish([triageRow({ id: B })], { coverage: { generation: hex("f"), reviewed: 7 } })),
+        says: [/is not known: no single machine published in the last 72 hours/, /not shown as current/], never: [/\d+ improvement cards?\b/, /Reviewed and published within the last 72 hours/], notCurrent: 2,
+        rowsSay: [[/Not current: /, /Review needs refreshing/], [/Not current: /, /Review needs refreshing/]] },
+      // The same rows attested again in a newer batch stay current.
+      reattested_identical_rows: { queue: derive(publish([triageRow()], { hoursAgo: 100 }), publish([triageRow()], { hoursAgo: 2 })),
+        says: [/has reviewed 1 improvement card;/, /Reviewed and published within the last 72 hours/], never: [/Stale:|In conflict|Not current/] },
+      null_counts_runner_cannot_run: { queue: derive(publish([], { coverage: { reviewed: 0, unreviewed: null, refused: null, deferred: null, more_unreviewed: null }, runner: { state: "no_agent_cli", last_success_age: "never" } })),
+        says: [/is not known: /, /an empty list does not mean nothing is waiting/, /cannot run: no agent command is installed on that machine\. It has never completed a run\./], never: [/\d+ improvement cards?\b/] },
+      job_report_row: { queue: derive(publish([triageRow({ evidence: [jobPointer], basis: { ...row0.basis, evidence_revisions: [jobPointer] } })])),
+        says: [/Improvement 1 of 1: /, /Decision details are private or not published/] },
+      withdrawn_last: { queue: derive(publish([triageRow({ revision: 2, state: "withdrawn", route: null, gate: null }), triageRow({ id: B, route: "agent_ready", gate: null }), triageRow({ id: C, state: "stale", age: "stale" })], { coverage: { reviewed: 2 } })),
+        says: [/with 1 withdrawn review last/, /A later publication withdrew this review\./], withdrawn: 1,
+        // The stale review leads, the current one follows, the withdrawn one is last.
+        rowsSay: [[/^Improvement 1 of 3: Review needs refreshing/, /Stale: its evidence changed or it was not published again within 72 hours/], [/^Improvement 2 of 3: Reviewed improvement/, /Reviewed and published within the last 72 hours/], [/^Improvement 3 of 3: Review withdrawn/, /Withdrawn: its card changed or was removed/]] },
+      related_and_duplicate: { queue: derive(publish([triageRow({ related_ids: [B], duplicate_ids: [C] }), triageRow({ id: B, route: "agent_ready", gate: null, related_ids: [row0.id] }), triageRow({ id: C, route: "investigate", gate: null, duplicate_ids: [row0.id] })], { coverage: { reviewed: 3 } })),
+        // The decision gate is drawn first, then the two others in queue order: each line names the other row's own number.
+        rowsSay: [[/Related, not shown to be the same problem: improvement 2 on this page\./, /Suggested duplicate, sharing evidence; nothing is merged or closed: improvement 3 on this page\./],
+          [/Related, not shown to be the same problem: improvement 1 on this page\./], [/Suggested duplicate, sharing evidence; nothing is merged or closed: improvement 1 on this page\./]],
+        rowsNever: [[], [/Suggested duplicate/], [/Related, not shown/]] },
+    }
+    for (const [name, t] of Object.entries(triage)) if (!validateImprovementQueue(t.queue).ok) record(`fixture_queue_${name}_valid`, false, { error: "derived queue failed validation" })
+    // Reads the Improvements page for one queue and compares it with the
+    // queue. `plant` alters the drawn page first (a negative control).
+    const triagePage = async (page, errors, name, plant = null) => {
+      const t = triage[name], q = t.queue
+      await page.unroute("**/data.json").catch(() => {})
+      await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(q) }))
+      await open(page, ROUTES.find((r) => r.name === "improvements"))
+      if (plant) await page.evaluate(plant)
+      const read = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll("#view-act .improvement-row")]
+        return {
+          text: document.getElementById("view-act").innerText.replace(/\s+/g, " "),
+          covered: [...document.querySelectorAll("#view-act .triage-coverage p")].map((p) => p.textContent),
+          note: (document.getElementById("improvement-triage-note") || {}).textContent || "",
+          rows: rows.map((r) => ({ heading: (r.querySelector("h3") || {}).textContent || "", text: r.innerText.replace(/\s+/g, " "), buttons: [...r.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") || b.textContent), links: r.querySelectorAll("a[href]").length, planted: r.querySelectorAll("[data-gate-planted]").length })),
+        }
+      })
+      const drawable = q.rows.filter((r) => S.improvementPresentation(r))
+      if (drawable.length !== q.rows.length) throw new Error(`${q.rows.length - drawable.length} queue rows cannot be drawn`)
+      if (read.rows.length !== q.rows.length) throw new Error(`rows: page ${read.rows.length}, queue ${q.rows.length}`)
+      // The coverage and runner sentences are the queue's, in order, and nothing else.
+      const expected = [...S.triageCoverageWords(q), S.triageRunnerWords(q)].filter(Boolean)
+      if (JSON.stringify(read.covered) !== JSON.stringify(expected)) throw new Error(`coverage: page ${JSON.stringify(read.covered)}, queue ${JSON.stringify(expected)}`)
+      if (read.note !== S.triageNote(q)) throw new Error(`triage note: "${read.note}"`)
+      for (const must of t.says || []) if (!must.test(read.text)) throw new Error(`the page does not say ${must}`)
+      // What must not be said is looked for in the coverage section and the rows, not in the page's fixed guidance.
+      const drawn = [...read.covered, ...read.rows.map((r) => r.text)].join(" ")
+      for (const not of t.never || []) if (not.test(drawn)) throw new Error(`the page says ${not}`)
+      read.rows.forEach((r, i) => {
+        if (!r.heading.startsWith(`Improvement ${i + 1} of ${read.rows.length}: `)) throw new Error(`row ${i + 1} is headed "${r.heading}"`)
+        // The v1.2 limit: no review links out or reads as verified.
+        if (r.links) throw new Error(`row ${i + 1} links out: no review links to its public issue in this version`)
+        if (/Verified public context/i.test(r.text)) throw new Error(`row ${i + 1} reads as verified public context`)
+        for (const s of fixture.privacy_sentinels) if (r.text.includes(s)) throw new Error("private sentinel rendered")
+      })
+      // Each row says its own review, in its own place on the page.
+      ;(t.rowsSay || []).forEach((musts, i) => { for (const must of musts) if (!read.rows[i] || !must.test(read.rows[i].text)) throw new Error(`row ${i + 1} does not say ${must}`) })
+      ;(t.rowsNever || []).forEach((nots, i) => { for (const not of nots) if (read.rows[i] && not.test(read.rows[i].text)) throw new Error(`row ${i + 1} says ${not}`) })
+      // Withdrawn reviews come last and offer no prompt; every other row offers exactly its own.
+      const withdrawn = q.rows.filter((r) => r.state === "withdrawn" && !r.conflict).length
+      if (withdrawn !== (t.withdrawn || 0)) throw new Error(`fixture has ${withdrawn} withdrawn rows`)
+      read.rows.forEach((r, i) => {
+        const last = i >= read.rows.length - withdrawn
+        if (last !== /^Improvement \d+ of \d+: Review withdrawn/.test(r.heading)) throw new Error(`row ${i + 1} of ${read.rows.length}: withdrawn reviews are not last`)
+        if (last && r.buttons.length) throw new Error(`withdrawn review at row ${i + 1} offers a prompt`)
+        if (!last && JSON.stringify(r.buttons) !== JSON.stringify([`Copy as a prompt for your agent: improvement ${i + 1}`])) throw new Error(`row ${i + 1} buttons: ${JSON.stringify(r.buttons)}`)
+      })
+      if (t.notCurrent != null) {
+        const n = read.rows.filter((r) => /Not current: /.test(r.text)).length
+        if (n !== t.notCurrent) throw new Error(`${n} rows read as not current, expected ${t.notCurrent}`)
+      }
+      if (plant) return {}
+      const problems = await layout(page)
+      if (problems.length) throw new Error(JSON.stringify(problems).slice(0, 600))
+      if (errors.length) throw new Error(`page errors: ${errors.slice(0, 2).join("; ")}`)
+      // Overview says the same about whether triage reviews are published.
+      await open(page, ROUTES[0])
+      const overviewNote = await page.evaluate(() => (document.getElementById("overview-triage-note") || {}).textContent || "")
+      if (overviewNote !== S.triageNote(q)) throw new Error(`overview triage note: "${overviewNote}"`)
+      return { rows: read.rows.length, state: q.state, coverage: q.coverage.state, runner: q.runner.state }
+    }
+    for (const name of TRIAGE_QUEUES) {
+      await check(`triage_queue_${name}_page_says_what_the_queue_says`, async () => {
+        const out = {}
+        for (const width of [390, 1280]) {
+          const { context, page, errors } = await newPage({ width })
+          try {
+            out[width] = await triagePage(page, errors, name)
+            if (width === 390) { await open(page, ROUTES.find((r) => r.name === "improvements")); await page.screenshot({ path: join(args.out, `triage-${name}-390.png`), fullPage: true }); screenshots.push(`triage-${name}-390.png`) }
+          } finally { await context.close() }
+        }
+        return out
+      })
+    }
+
+    // 9c. The in-page pass: one load, then the reader's own links from view
+    // to view. Each view is read where the click lands: layout, charts and
+    // their equivalents, tab order and touch targets. Its settles go to
+    // their own list, under their own rule (inPageBudget).
+    const IN_PAGE_TIMES = []
+    const inPageWalk = async (page, sink, each) => {
+      SINKS.set(page, [])
+      await open(page, ROUTES[0])
+      await page.evaluate(() => { window.__gateInPage = true })
+      SINKS.set(page, sink)
+      for (const step of IN_PAGE_STEPS) {
+        const route = ROUTES.find((r) => r.name === step.route)
+        await page.locator(step.click.replace("{task}", targets.task).replace("{session}", targets.session || "")).first().click()
+        await settle(page, route.view)
+        if (!(await page.evaluate(() => window.__gateInPage === true))) throw new Error(`${step.route}: the click reloaded the page`)
+        if (each) await each(step, route)
+      }
+    }
+    await check("in_page_navigation_keeps_layout_charts_tab_order_and_targets", async () => {
+      const found = []
+      for (const width of IN_PAGE_WIDTHS) {
+        const { context, page, errors } = await newPage({ width })
+        try {
+          await inPageWalk(page, IN_PAGE_TIMES, async (step) => {
+            const where = `${step.route} at ${width} px`
+            for (const p of await layout(page)) found.push(`${where}: ${p.code} ${JSON.stringify(p).slice(0, 160)}`)
+            const charts = await page.evaluate(checkChartEquivalents, CHART_EQUIVALENTS)
+            for (const key of EXPECTED_CHARTS[step.route] || []) if (!charts.seen.includes(key)) charts.problems.push(`expected_chart_not_drawn: ${key}`)
+            for (const p of charts.problems) found.push(`${where}: ${p}`)
+            for (const p of await smallTargets(page, step.route, DATA_SIZED_MARKS[step.route] || null)) found.push(`${width} px, ${p}`)
+            for (const p of await tabOrderProblems(page, step.route)) found.push(`${width} px, ${p}`)
+          })
+          for (const e of errors) found.push(`${width} px: page error ${e}`)
+        } finally { await context.close() }
+      }
+      if (found.length) throw new Error(found.slice(0, 12).join("; ") + (found.length > 12 ? ` (+${found.length - 12} more)` : ""))
+      return { steps: IN_PAGE_STEPS.map((s) => s.route), widths: [...IN_PAGE_WIDTHS] }
+    })
+    await check("in_page_navigation_settles_within_budget", async () => inPageBudget(IN_PAGE_TIMES, IN_PAGE_STEPS.length * IN_PAGE_WIDTHS.length))
+
     // 10. Negative controls: each injected defect must make the real check
     // fail on the planted element itself (data-gate-planted), so a defect
     // the page already has can never stand in for the one injected.
@@ -1929,6 +2136,39 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page } = await newPage({ width: 390, init: [rejecting, lie] })
       try { await clipboardFailure(page) } finally { await context.close() }
     }, /status after a refused copy/)
+    await expectFailure("triage_row_links_out", async () => {
+      const { context, page, errors } = await newPage({ width: 390 })
+      try { await triagePage(page, errors, "known_counts", () => { const a = document.createElement("a"); a.href = "https://github.com/example/project/issues/1"; a.textContent = "Public issue"; a.dataset.gatePlanted = "1"; document.querySelector("#view-act .improvement-row").appendChild(a) }) } finally { await context.close() }
+    }, /row 1 links out/)
+    await expectFailure("withdrawn_review_offers_a_prompt", async () => {
+      const { context, page, errors } = await newPage({ width: 390 })
+      try { await triagePage(page, errors, "withdrawn_last", () => { const b = document.createElement("button"); b.type = "button"; b.textContent = "Copy as a prompt for your agent"; b.dataset.gatePlanted = "1"; const rows = document.querySelectorAll("#view-act .improvement-row"); rows[rows.length - 1].appendChild(b) }) } finally { await context.close() }
+    }, /withdrawn review at row 3 offers a prompt/)
+    await expectFailure("triage_coverage_count_altered", async () => {
+      const { context, page, errors } = await newPage({ width: 390 })
+      try { await triagePage(page, errors, "known_counts", () => { const p = document.querySelector("#view-act .triage-coverage p"); p.dataset.gatePlanted = "1"; p.textContent = p.textContent.replace("reviewed 12 improvement cards", "reviewed 15 improvement cards") }) } finally { await context.close() }
+    }, /^coverage: page \["Triage on the publishing machine has reviewed 15 improvement cards/)
+    await expectFailure("triage_row_misnumbered", async () => {
+      const { context, page, errors } = await newPage({ width: 390 })
+      try { await triagePage(page, errors, "known_counts", () => { const h = document.querySelector("#view-act .improvement-row h3"); h.dataset.gatePlanted = "1"; h.textContent = h.textContent.replace("Improvement 1 of 2", "Improvement 2 of 2") }) } finally { await context.close() }
+    }, /^row 1 is headed "Improvement 2 of 2/)
+    await expectFailure("slow_in_page_navigation", async () => {
+      // The same walk with every data file 6 s late after the first load:
+      // the in-page rule has no re-timing, so it must fail.
+      const { context, page } = await newPage({ width: 1280 })
+      const sink = []
+      try {
+        SINKS.set(page, [])
+        await open(page, ROUTES[0])
+        await page.route("**/*.json", async (r) => { await new Promise((ok) => setTimeout(ok, 6000)); await r.continue() })
+        SINKS.set(page, sink)
+        await page.locator(IN_PAGE_STEPS[0].click).first().click()
+        await settle(page, "tasks")
+        await page.evaluate((job) => { location.hash = `#/task/${job}` }, targets.task)
+        await settle(page, "task")
+      } finally { await context.close() }
+      inPageBudget(sink, 2)
+    }, /in-page settles over 5 s, never excused/)
     // Every route over budget is re-timed beside main, in this run, for
     // pages_settle_within_budget below.
     await retimeOver(SETTLE_TIMES)
