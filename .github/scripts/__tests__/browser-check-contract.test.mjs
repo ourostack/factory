@@ -229,8 +229,9 @@ test("a swimlane label that would run past the plot's right edge ends at its mar
 })
 
 test("marks of neighbouring items never draw on one another, and every task page is read", () => {
-  for (const name of ["ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_layout_is_clean"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+  for (const name of ["ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_and_one_session_each_layout_is_clean"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
   assert.deepEqual([...G.EVERY_TASK_WIDTHS], [1280, 390])
+  assert.deepEqual([...G.EVERY_SESSION_WIDTHS], [1280, 768, 390])
   // The fixture is a published task's map with its identities replaced.
   const map = JSON.parse(readFileSync(new URL("./fixtures/v12-ladder-neighbours-map.json", import.meta.url), "utf8"))
   assert.equal(map.schema, "factory.site.map/2")
@@ -246,4 +247,16 @@ test("marks of neighbouring items never draw on one another, and every task page
   const gate = readFileSync(SCRIPT, "utf8")
   assert.match(gate, /the fixture drew no prompt marks meeting across an item boundary/)
   assert.match(gate, /const ids = targets\.data\.jobs\.map\(\(j\) => j\.id\)/)
+})
+
+test("marks set aside from the touch-target rule must have full-size equivalents, and a turned label never lands on its neighbour", () => {
+  const gate = readFileSync(SCRIPT, "utf8")
+  assert.equal(typeof G.setAsideEquivalents, "function")
+  assert.match(gate, /if \(DATA_SIZED_MARKS\[step\.route\]\) for \(const p of \(await page\.evaluate\(setAsideEquivalents\)\)\.problems\) found\.push\(/)
+  assert.match(gate, /if \(prompts > buttons\.size\) out\.push\(/)
+  assert.match(gate, /if \(!names\.has\(seg\.getAttribute\("aria-label"\)\)\) out\.push\(/)
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
+  const pass = app.split("      plot.appendChild(s);\n")[1].split("focusStretch = ")[0]
+  assert.match(pass, /if \(!tl\.classList\.contains\("lane-pr-label"\)\) continue;/)
+  assert.match(pass, /if \(meets\) tl\.remove\(\);/)
 })

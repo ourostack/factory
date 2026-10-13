@@ -105,10 +105,28 @@ export const IN_PAGE_STEPS = Object.freeze([
 // opened from the full-size "Prompt N" buttons and rows beside them. Only the
 // in-page pass reads the task page's targets, and only these are set aside.
 export const DATA_SIZED_MARKS = Object.freeze({ task: ".lad-mark, .tw-seg" })
+// Runs in the page: what setting those marks aside rests on. Every prompt a
+// ladder mark stands for has a full-size "Prompt N" button, and every
+// time-split segment has a full-size control with the same accessible name.
+export function setAsideEquivalents() {
+  const view = document.getElementById("view-task")
+  const big = (e) => { const r = e.getBoundingClientRect(); return r.width >= 24 && r.height >= 24 }
+  const out = []
+  const prompts = [...view.querySelectorAll(".mark-lane-prompt .lad-mark")].reduce((n, b) => n + (Number((b.querySelector(".lad-mark-count") || {}).textContent) || 1), 0)
+  const buttons = new Set([...view.querySelectorAll("button.link-button")].filter((b) => /^Prompt \d+$/.test(b.textContent.trim()) && big(b)).map((b) => b.textContent.trim()))
+  if (prompts > buttons.size) out.push(`${prompts} prompts on the ladder marks but ${buttons.size} full-size "Prompt N" buttons`)
+  const names = new Set([...view.querySelectorAll("button:not(.tw-seg)")].filter(big).map((b) => b.getAttribute("aria-label")))
+  for (const seg of view.querySelectorAll("button.tw-seg")) if (!names.has(seg.getAttribute("aria-label"))) out.push(`no full-size control named "${(seg.getAttribute("aria-label") || "").slice(0, 60)}"`)
+  return { problems: out, prompts, prompt_buttons: buttons.size, segments: view.querySelectorAll("button.tw-seg").length }
+}
 // Every published task page is loaded at these widths and its layout read:
 // the other checks read one sampled task, and one task's shape can break a
 // chart that every other task draws well.
 export const EVERY_TASK_WIDTHS = Object.freeze([1280, 390])
+// One session of every task (its first published swimlane file) is read too,
+// at a middle width as well: a label that fits a wide and a narrow plot can
+// still meet its neighbour in between.
+export const EVERY_SESSION_WIDTHS = Object.freeze([1280, 768, 390])
 export const IN_PAGE_WIDTHS = Object.freeze([1280, 390])
 // A click to another view loads no page, so it has the settle budget with no
 // re-timing and no excuse: every step must be timed, each as an action on
@@ -139,7 +157,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
   "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under", "task_page_lead_time_matches_compare", "task_pages_no_bound_before_under", "pages_settle_within_budget",
   "in_page_navigation_keeps_layout_charts_tab_order_and_targets", "in_page_navigation_settles_within_budget",
-  "ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_layout_is_clean",
+  "ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_and_one_session_each_layout_is_clean",
   ...TRIAGE_QUEUES.map((n) => `triage_queue_${n}_page_says_what_the_queue_says`),
 ])
 
@@ -1799,6 +1817,8 @@ export async function main(argv = process.argv.slice(2)) {
             for (const key of EXPECTED_CHARTS[step.route] || []) if (!charts.seen.includes(key)) charts.problems.push(`expected_chart_not_drawn: ${key}`)
             for (const p of charts.problems) found.push(`${where}: ${p}`)
             for (const p of await smallTargets(page, step.route, DATA_SIZED_MARKS[step.route] || null)) found.push(`${width} px, ${p}`)
+            // Marks set aside from the touch-target reading must have their full-size equivalents.
+            if (DATA_SIZED_MARKS[step.route]) for (const p of (await page.evaluate(setAsideEquivalents)).problems) found.push(`${where}: ${p}`)
             for (const p of await tabOrderProblems(page, step.route)) found.push(`${width} px, ${p}`)
           })
           for (const e of errors) found.push(`${width} px: page error ${e}`)
@@ -1837,7 +1857,7 @@ export async function main(argv = process.argv.slice(2)) {
       return out
     })
     // 9e. Every published task page, not only the sampled one.
-    await check("every_task_page_layout_is_clean", async () => {
+    await check("every_task_page_and_one_session_each_layout_is_clean", async () => {
       const ids = targets.data.jobs.map((j) => j.id).filter((id) => typeof id === "string" && /^[0-9a-f]{32}$/.test(id))
       if (!ids.length) throw new Error("no task is published")
       const found = []
@@ -1852,8 +1872,26 @@ export async function main(argv = process.argv.slice(2)) {
           for (const e of errors) found.push(`${width} px: page error ${e}`)
         } finally { await context.close() }
       }
+      // The first swimlane file of each task that has one.
+      const firstSession = new Map()
+      for (const id of ids) {
+        let files = []
+        try { files = (await readdir(join(args.site, "jobs", id))).filter((f) => f.endsWith(".json")).sort() } catch { /* no swimlane published for this task */ }
+        if (files.length) firstSession.set(id, files[0].slice(0, -5))
+      }
+      for (const width of EVERY_SESSION_WIDTHS) {
+        const { context, page, errors } = await newPage({ width })
+        try {
+          for (const [id, session] of firstSession) {
+            await load(page, url + `#/task/${id}/session/${session}`)
+            await settle(page, "session")
+            for (const p of await layout(page)) found.push(`session ${session.slice(0, 8)} of ${id.slice(0, 8)} at ${width} px: ${p.code} ${p.detail || ""}`)
+          }
+          for (const e of errors) found.push(`${width} px: page error ${e}`)
+        } finally { await context.close() }
+      }
       if (found.length) throw new Error(`${found.length} problems: ${found.slice(0, 8).join("; ")}`)
-      return { tasks: ids.length, widths: [...EVERY_TASK_WIDTHS] }
+      return { tasks: ids.length, widths: [...EVERY_TASK_WIDTHS], sessions: firstSession.size, session_widths: [...EVERY_SESSION_WIDTHS] }
     })
 
     // 10. Negative controls: each injected defect must make the real check

@@ -3595,6 +3595,17 @@
         const gap = tl.classList.contains("lane-tick") ? 3 : 8;
         tl.setAttribute("x", String(Math.max(box.width, Number(tl.getAttribute("x")) - 2 * gap)));
         tl.setAttribute("text-anchor", "end");
+        // Turned back, a pull request number can land on its neighbour's:
+        // then it is not drawn (its mark still names it and opens it), as
+        // when two marks are too close for a number.
+        if (!tl.classList.contains("lane-pr-label")) continue;
+        const mine = tl.getBBox();
+        const meets = [...s.querySelectorAll("text.lane-pr-label, text.lane-pr-count")].some((o) => {
+          if (o === tl) return false;
+          const b = o.getBBox();
+          return Math.min(mine.x + mine.width, b.x + b.width) - Math.max(mine.x, b.x) > 0 && Math.min(mine.y + mine.height, b.y + b.height) - Math.max(mine.y, b.y) > 0;
+        });
+        if (meets) tl.remove();
       }
       focusStretch = (k) => {
         const m = marks[k];
