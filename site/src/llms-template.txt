@@ -43,8 +43,10 @@ incomplete/conflicting coverage is unknown, never summed across machines.
 `runner` is the publishing machine's own report of its triage runner, from
 the same newest fresh batch as coverage: `state` is one of Desk's runner
 states (`ran`, `no_agent_cli`, `timeout` and so on) and `last_success_age` is
-`recent`, `aging`, `stale`, `never` or `unknown`. With no single fresh source
-it is `{state:"unknown",last_success_age:"unknown"}`. It is a coarse age, not
+`recent`, `aging`, `stale`, `never` or `unknown`. It is
+`{state:"unknown",last_success_age:"unknown"}` with no single fresh source,
+with any invalid batch file, or when the newest batches of the one generation
+share a commit time and disagree about the runner. It is a coarse age, not
 a time, and a runner that ran says nothing about any one row.
 
 Rows carry `availability`, fixed `gate_explanation`, public `context`, specific

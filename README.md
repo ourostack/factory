@@ -185,8 +185,10 @@ null, coverage stays unknown; it is never summed across hosts. With no batches
 the state is `not_reviewed`, not a healthy queue. The queue's `runner` is that
 same source's report of its triage runner (`state` and a coarse
 `last_success_age`), read from the same newest fresh batch; it is known even
-when the counts are not, and `{state:"unknown",last_success_age:"unknown"}`
-when no single fresh source speaks.
+when the counts are not. It is `{state:"unknown",last_success_age:"unknown"}`
+when no single fresh source speaks, when any batch file is invalid, or when the
+newest batches of the one generation share a commit time and disagree about
+the runner.
 
 Each row's availability is `verified_public_context`,
 `private_detail_not_published` or `stale_or_conflicting`. Only positively public,
