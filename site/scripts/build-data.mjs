@@ -935,6 +935,8 @@ const harnesses = harnessSummary(scopedFacts).map((h) => ({
 const data = {
   // Current issue/PR/job shapes have no exact triage revision or structured
   // decision fields. Do not promote their titles into verified decisions.
+  // Known limit of v1.2 (README): no public evidence is passed, so no row
+  // reads verified_public_context or links to its public issue.
   improvements: deriveImprovementQueue({ batches: readTriageBatches(mainDir), publicEvidence: [], now: Date.now() }),
   schema: "factory-site/3",
   built_at: builtAt,

@@ -40,6 +40,13 @@ or shared-public-issue conflicts remain explicit. Omission is never withdrawal.
 Publication freshness is at most 72 hours, not an exact review timestamp;
 incomplete/conflicting coverage is unknown, never summed across machines.
 
+`runner` is the publishing machine's own report of its triage runner, from
+the same newest fresh batch as coverage: `state` is one of Desk's runner
+states (`ran`, `no_agent_cli`, `timeout` and so on) and `last_success_age` is
+`recent`, `aging`, `stale`, `never` or `unknown`. With no single fresh source
+it is `{state:"unknown",last_success_age:"unknown"}`. It is a coarse age, not
+a time, and a runner that ran says nothing about any one row.
+
 Rows carry `availability`, fixed `gate_explanation`, public `context`, specific
 `decision`/`recommendation`/`safe_continuation` availability, `next_action` and
 `handoff`. With no verified matching public context, decision details are
@@ -47,6 +54,14 @@ private or not published. Current public issue/PR/job sources do not supply
 validated specific decisions or continuations: unavailable fields are
 `{state:"unavailable",reason:"detail_not_published"}`, never guessed from titles.
 Ownership not published is unknown.
+
+Known limit of this version: the store verifies no public context. A public
+issue, pull request or job report carries no revision the store can check
+against a pointer's revision, so the build passes no public evidence to the
+queue. Every row therefore reads `private_detail_not_published` or
+`stale_or_conflicting` and has an empty `context`, even when its evidence
+points at a public issue. `verified_public_context` is defined but not
+produced.
 
 The action is “Ask your linked agent to inspect the local annotation.”
 The handoff contains the public opaque annotation ID/revision and public
