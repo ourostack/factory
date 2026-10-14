@@ -486,7 +486,7 @@ const teach = (id, order, d, lead, opts = {}) => ({
   waste: { sessions_labeled: measured(1) },
 })
 
-test("Fix 1 I-1: #/ lands on the latest-finished task that has something to teach", () => {
+test("Fix 1 I-1: the legacy recommendation retains its teaching criteria without overriding the overview", () => {
   const thin = job("thin", "done", 9, { date: day("2026-10-07"), lead: measured(126 * H) })
   const a = teach("a", 5, "2026-09-30", 26)
   const b = teach("b", 4, "2026-09-29", 54)
@@ -515,8 +515,9 @@ test("Fix 1 I-1: #/ lands on the latest-finished task that has something to teac
   assert.equal(none.teaches, false)
   assert.equal(none.why, "No finished task has all of a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt, so this page opens on the latest-finished task whose lead time is at least an hour instead.")
   assert.equal(F.landingChoice([]).job, null)
-  // The page shows the reason, and llms.txt and About state the rule.
-  assert.match(read("site/src/app.js"), /F\.landingChoice\(data\.jobs\)/)
+  assert.equal(F.parseRoute("#/").view, "overview")
+  assert.equal(F.parseRoute("#/task").view, "missing")
+  assert.doesNotMatch(read("site/src/app.js"), /F\.landingChoice\(data\.jobs\)/)
   assert.match(read("site/src/llms-template.txt"), /`active_time_ms` is measured, or partial with a value, at 300000 ms or more; `map_bursts` has a value of 1 or more and is not `unavailable`; `human_turns` has a value of 1 or more/)
   assert.match(read("site/src/index.html"), /at least 5 minutes of known working time, at least one work burst on its map, at least one recorded operator prompt and evaluator waste labels/)
 })
