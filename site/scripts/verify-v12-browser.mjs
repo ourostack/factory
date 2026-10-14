@@ -2340,7 +2340,8 @@ export async function main(argv = process.argv.slice(2)) {
           const pair = marks.map((m, i) => [marks[i - 1], m]).find(([p, m]) => p && Number(m.dataset.item) === Number(p.dataset.item) + 1)
           const [p, m] = pair
           m.dataset.gatePlanted = "1"
-          m.style.left = `${parseFloat(m.style.left) - (m.getBoundingClientRect().left - p.getBoundingClientRect().left)}px`
+          const axis = m.closest(".vsm-phone") ? "top" : "left"
+          m.style[axis] = `${parseFloat(m.style[axis]) - (m.getBoundingClientRect()[axis] - p.getBoundingClientRect()[axis])}px`
         })
       } finally { await context.close() }
     }, /^planted overlapping_controls/)
