@@ -1,3 +1,9 @@
+<!-- ourostack:brand:start -->
+<p align="center">
+  <a href="https://github.com/ourostack"><img src="https://raw.githubusercontent.com/ourostack/.github/main/brand/ouro.png" alt="Ourostack" width="96" height="96"></a>
+</p>
+<!-- ourostack:brand:end -->
+
 # Factory
 
 This is the public factory store for [Desk](https://github.com/ourostack/desk). It holds published session facts and the job reports built from them. It measures how agent work flows, never the people who do it.
