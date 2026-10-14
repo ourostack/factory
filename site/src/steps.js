@@ -152,19 +152,17 @@
     const b = totalBound(n);
     // A zero with no known direction can only be higher (walk.js atEdge).
     if (v === 0 && b === "about") return `0 ${UNIT[unit] ? UNIT[unit][1] : "second"}s${open ? " so far" : ""} (could be higher)`;
-    // An open task's figure reads "so far"; one with no known direction
-    // still says "about". A lower bound rounds down even where "so far"
-    // stands in for its "at least", as on the task page.
-    if (open) return b === "about" ? `about ${fmt(v, true)} so far` : `${fmt(v, b === "lower" ? "lower" : false)} so far`;
-    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : b === "about" ? "about " : ""}${fmt(v, b === "upper" || b === "lower" ? b : b === "about")}`;
+    // Observation horizon and uncertainty are independent: "so far"
+    // never replaces a source bound or its directed rounding.
+    return `${b === "upper" ? "at most " : b === "lower" ? "at least " : b === "about" ? "about " : ""}${fmt(v, b === "upper" || b === "lower" ? b : b === "about")}${open ? " so far" : ""}`;
   }
   // The same, in a bar's short value label: "≥47h", "12.9d".
-  function totalShort(n, open) {
+  // Private: timeBar has already admitted this finite envelope.
+  function totalShort(n) {
     const v = val(n);
-    if (v === null) return "no data";
     if (v === 0) return "none";
-    const b = open ? (totalBound(n) === "about" ? "about" : null) : totalBound(n);
-    const round = open ? (b === "about" ? true : totalBound(n) === "lower" ? "lower" : false) : b === "upper" || b === "lower" ? b : b === "about";
+    const b = totalBound(n);
+    const round = b === "upper" || b === "lower" ? b : b === "about";
     return `${b === "upper" ? "≤" : b === "lower" ? "≥" : b === "about" ? "~" : ""}${W.durationShort(v, round)}`;
   }
 
@@ -211,7 +209,7 @@
       const noData = (reasons) => ({ ...base, state: "no_data", total_ms: null, label: "no data", segments: [], groups: [], reasons: [...new Set(arr(reasons))] });
       if (!stack && !task) return noData(["not_published"]);
       const bar = W.timeBar(stack, task, W.idleSplit(task, null), o.segments || []);
-      if (bar.state === "absent" || bar.state === "unavailable") return noData(bar.reasons || (leadN && leadN.reasons));
+      if (bar.state === "unavailable") return noData(bar.reasons);
       if (bar.state === "lead_only") {
         if (mode === "working") return noData(bar.reasons);
         return {
@@ -220,10 +218,10 @@
           total_ms: bar.total_ms,
           words: totalWords(leadN, open),
           view_words: totalWords(leadN, open, unit),
-          label: totalShort(leadN, open),
+          label: totalShort(leadN),
           segments: [{ key: "unsplit", label: "Split not known", ms: bar.total_ms }],
           groups: [],
-          reasons: bar.reasons || [],
+          reasons: bar.reasons,
         };
       }
       const partial = !!bar.partial || base.shared;
@@ -231,9 +229,9 @@
       if (mode === "working") {
         const g = bar.groups[0];
         const workN = (task && task.working_ms) || (stack && stack.working_ms);
-        return { ...base, state: "ok", partial, total_ms: g.ms, words: totalWords(workN, open), view_words: totalWords(workN, open, unit), label: totalShort(workN, open), segments: g.segments, groups: [g], reasons };
+        return { ...base, state: "ok", partial, total_ms: g.ms, words: totalWords(workN, open), view_words: totalWords(workN, open, unit), label: totalShort(workN), segments: g.segments, groups: [g], reasons };
       }
-      return { ...base, state: "ok", partial, total_ms: bar.total_ms, words: totalWords(leadN, open), view_words: totalWords(leadN, open, unit), label: totalShort(leadN, open), segments: bar.segments, groups: bar.groups, reasons };
+      return { ...base, state: "ok", partial, total_ms: bar.total_ms, words: totalWords(leadN, open), view_words: totalWords(leadN, open, unit), label: totalShort(leadN), segments: bar.segments, groups: bar.groups, reasons };
     });
   }
 
@@ -653,14 +651,14 @@
       parts.push(` The rest, ${Q[waitDir] || ""}${hoursWords(waiting, QB[waitDir])}, was waiting, ${most ? "mostly" : "the largest part"} ${MOSTLY[top[0]] || MOSTLY.unknown} (${hoursWords(top[1])}).`);
     } else parts.push(" None of it was waiting.");
     const longest = split.slice().sort((a, b) => b.groups[1].ms - a.groups[1].ms)[0];
-    if (longest && longest.groups[1].ms > 0) parts.push(` The finished task that waited longest is “${longest.name}”: ${longest.groups[1].qualifier || ""}${hoursWords(longest.groups[1].ms, W.ROUND_OF[longest.groups[1].qualifier || ""] || false)} of waiting in a lead time of ${longest.words}.`);
+    if (longest.groups[1].ms > 0) parts.push(` The finished task that waited longest is “${longest.name}”: ${longest.groups[1].qualifier || ""}${hoursWords(longest.groups[1].ms, W.ROUND_OF[longest.groups[1].qualifier || ""] || false)} of waiting in a lead time of ${longest.words}.`);
     const unsplit = fin.filter((b) => !split.includes(b));
     if (unsplit.length) {
       const why = [...new Set(unsplit.flatMap((b) => b.reasons || []))].map(words).join("; ") || "it was not recorded";
       parts.push(` ${unsplit.length === 1 ? "One more finished task does" : `${unsplit.length} more finished tasks do`} not split, because ${why}; ${unsplit.length === 1 ? "its bar shows" : "their bars show"} the lead time alone.`);
     }
     parts.push(restText);
-    return { state: "ok", text: parts.join(""), facts: { tasks: split.length, lead_ms: lead, working_ms: work, waiting_ms: waiting, share, bound, top: top ? { key: top[0], ms: top[1] } : null, longest: longest ? longest.job : null } };
+    return { state: "ok", text: parts.join(""), facts: { tasks: split.length, lead_ms: lead, working_ms: work, waiting_ms: waiting, share, bound, top: top ? { key: top[0], ms: top[1] } : null, longest: longest.job } };
   }
 
   // The flow efficiency dot plot, in the same order as the stack-up: one
@@ -1194,7 +1192,7 @@
 
   function paretoModel(doc, mode, opts) {
     const o = opts || {};
-    const maxBars = Number.isInteger(o.maxBars) && o.maxBars > 1 ? o.maxBars : 10;
+    const maxBars = o.maxBars === Infinity || (Number.isInteger(o.maxBars) && o.maxBars > 1) ? o.maxBars : 10;
     if (!doc || typeof doc !== "object" || !Array.isArray(doc.causes)) return { state: "absent", bars: [] };
     const indexed = doc.causes.map((c, i) => ({ c, i })).filter(({ c }) => c && isCauseKey(c.cause) && typeof c.total_ms === "number" && Number.isFinite(c.total_ms) && c.total_ms > 0);
     const shown = indexed.filter(({ c }) => (mode === "working" ? !isWaiting(c.cause) : true));
@@ -1214,8 +1212,8 @@
     let run = 0;
     for (const b of bars) {
       run += b.ms;
-      b.share = total > 0 ? b.ms / total : 0;
-      b.cum = total > 0 ? run / total : 0;
+      b.share = b.ms / total;
+      b.cum = run / total;
     }
     if (bars.length) bars[bars.length - 1].cum = 1;
     return {
@@ -1409,9 +1407,9 @@
   // when the list was cut at its limit. Returns { ms, bound, source } or
   // null when nothing states it.
   function taskCauseMs(key, job, cause, ctx) {
-    const c = ctx || {};
-    const task = c.tasks ? c.tasks.get(job) : null;
-    const stack = c.stacks ? c.stacks.get(job) : null;
+    const c = ctx;
+    const task = c.tasks.get(job);
+    const stack = c.stacks.get(job);
     const top = task && task.top_causes && task.top_causes.state !== "unavailable" ? arr(task.top_causes.value) : [];
     const hit = top.find((x) => x && x.cause === key && typeof x.total_ms === "number");
     if (hit) return { ms: hit.total_ms, bound: null, source: "task" };

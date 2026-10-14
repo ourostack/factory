@@ -359,7 +359,6 @@
   }
   function statedWords(n) {
     const x = stated(n);
-    if (x.state === "unavailable") return null;
     return qualified(qualifierOf(x), x.value);
   }
 
@@ -808,10 +807,7 @@
         // With no fold, every burst is its own box; with a fold, bursts with
         // nothing but folded time between them share one.
         if (fold > 0 && !pending.length && last() && last().type === "box") last().bursts.push(s.b);
-        else if (fold > 0 && pending.length && last() && last().type === "box") {
-          last().folded.push(...pending);
-          last().bursts.push(s.b);
-        } else items.push({ type: "box", bursts: [s.b], folded: pending });
+        else items.push({ type: "box", bursts: [s.b], folded: pending });
         pending = [];
         continue;
       }
@@ -856,7 +852,7 @@
         causes,
         by,
         gap_range: [gaps[0].n, gaps[gaps.length - 1].n],
-        longest_ms: longest ? longest.end_ms - longest.start_ms : 0,
+        longest_ms: longest.end_ms - longest.start_ms,
       };
     }
     const bs = [...it.bursts].sort((a, b) => a.start_ms - b.start_ms);
@@ -919,6 +915,8 @@
   // short bursts and gaps under a stated threshold"). The fold never loses
   // time: working + inner waits + waits equals the lead window, which the
   // tests check. Returns { fold_ms, items, totals }.
+  // `opts.shortGapGrouping` fixes the threshold at fifteen minutes, so a
+  // responsive task journey changes layout without changing membership.
   //
   // `opts.jobStates` carries the job-level states the bursts' own counts
   // cannot know: { operator_turns, labels }, each a stated number or null.
@@ -931,7 +929,7 @@
     const bursts = listOf(map && map.bursts);
     const gaps = listOf(map && map.gaps);
     let chosen = null;
-    for (const fold of FOLD_STEPS) {
+    for (const fold of o.shortGapGrouping === true ? [15 * MINUTE] : FOLD_STEPS) {
       const items = buildItems(bursts, gaps, fold);
       chosen = { fold_ms: fold, items };
       if (items.filter((x) => x.type === "box").length <= maxBoxes) break;
@@ -965,12 +963,12 @@
     const js = o.jobStates || {};
     const cap = (x, env) => {
       if (!env || env.state === "measured") return x;
-      if (env.state === "unavailable") return { state: "unavailable", reasons: env.reasons || [] };
+      if (env.state === "unavailable") return { state: "unavailable", reasons: env.reasons };
       // The task-wide figure's direction carries over as Desk states it (null
       // is no direction); an absent bound stays absent, so the box reads as
       // the task-wide figure does (qualifierOf).
       const dir = Object.prototype.hasOwnProperty.call(env, "bound") ? { bound: env.bound, ...(env.bound_reason ? { bound_reason: env.bound_reason } : {}) } : {};
-      return x.state === "unavailable" ? x : { state: "partial", value: x.value, ...dir, reasons: [...new Set([...(x.reasons || []), ...(env.reasons || [])])] };
+      return x.state === "unavailable" ? x : { state: "partial", value: x.value, ...dir, reasons: [...new Set([...x.reasons, ...env.reasons])] };
     };
     for (const b of boxes) {
       b.operator_turns = cap(b.operator_turns, js.operator_turns && stated(js.operator_turns));
@@ -979,6 +977,7 @@
     }
     return {
       fold_ms: chosen ? chosen.fold_ms : 0,
+      short_gap_grouping: o.shortGapGrouping === true,
       items,
       session_count: sessionOrder.length,
       box_count: boxes.length,
@@ -1001,7 +1000,7 @@
     // and to screen readers, for a figure that is not measured.
     const why = (n) => {
       const x = n ? stated(n) : { state: "measured" };
-      return x.state === "measured" ? [] : Array.isArray(x.reasons) ? [...x.reasons] : [];
+      return x.state === "measured" ? [] : [...x.reasons];
     };
     const row = (key, label, n, none) => ({ key, label, text: statedText(n, null, none), reasons: why(n) });
     const prs = prsHere || box.prs;
@@ -1048,6 +1047,7 @@
   // The fold, in one sentence for the map's caption.
   function foldWords(model) {
     // The same words in every view, naming the view's own threshold (A1 M4).
+    if (model.short_gap_grouping) return "The map groups waits shorter than 15 minutes with adjacent work at every width. Each box states its recorded work and contained short pauses; layout changes do not change which intervals it holds.";
     if (!model.fold_ms) return "At this width the map folds no wait: every work burst has its own box and every wait its own triangle.";
     if (model.fold_ms === Infinity) return "At this width the map folds every wait into one box, so it stays legible; its data box says how many bursts it holds. A wider screen may show more boxes.";
     return `At this width the map folds waits shorter than ${durationWords(model.fold_ms)} into the box beside them, so it stays legible; each box says how many bursts it holds, and the ladder shows the folded waits beside its working time. A wider or narrower screen may fold a different threshold.`;
@@ -1183,7 +1183,7 @@
       unavailable: "Why the agent stopped is not measured for this task's waiting for the next prompt, so that part is not split.",
       ok: "Desk's split of the waiting for the next prompt by why the agent stopped does not match this bar's figure, so that part is not split.",
     };
-    if (nextSeg && !waitSegs.some((x) => x.why)) notes.push(WHY_NOTES[why.state] || WHY_NOTES.unavailable);
+    if (nextSeg && !waitSegs.some((x) => x.why)) notes.push(WHY_NOTES[why.state]);
     const share = (x) => ({ ...x, share: x.ms / lead });
     const groups = [
       { key: "working", label: "Working", ms: working, segments: workSegs.map(share) },
@@ -1519,14 +1519,14 @@
 
   // A labeled figure in words: "not labeled yet" when no label covers it,
   // "none" for a true zero.
-  function labeledWords(n, words, kind) {
+  function labeledWords(n, words) {
     const x = stated(n);
     if (x.state === "unavailable") {
       const why = x.reasons.map(words).join("; ");
       return !why || /not labeled/i.test(why) ? "not labeled yet" : `not labeled yet (${why})`;
     }
     if (x.value === 0) return "none";
-    return kind === "count" ? `${boundWords(x)}${x.value}` : statedWords(x);
+    return statedWords(x);
   }
 
   function isWaitStretch(s) {
@@ -1578,9 +1578,9 @@
     if (thing.kind === "box" || (thing.kind === "ladder" && it.type === "box" && !(thing.seg && thing.seg.folded))) {
       const fold = typeof c.fold_ms === "number" && c.fold_ms > 0 && c.fold_ms !== Infinity ? `the waits shorter than ${durationWords(c.fold_ms)} between them` : "the waits between them";
       const ws = stated(it.working_state || it.working_ms);
-      const workText = ws.state === "unavailable" ? `not recorded (${(ws.reasons || []).map(words).join("; ") || "no recorded working duration"}); the legacy layout uses burst spans`
+      const workText = ws.state === "unavailable" ? `not recorded (${ws.reasons.map(words).join("; ") || "no recorded working duration"}); the legacy layout uses burst spans`
         : ws.state === "measured" ? `${durationWords(ws.value)} (${share(ws.value)})`
-        : `${qualified(ws.bound === "upper" ? "at most " : ws.bound === null ? "" : "at least ", ws.value)} (partial${saysNoDirection(ws) ? `; ${noDirectionWords(ws, words)}` : ""}; ${(ws.reasons || []).map(words).join("; ") || "incomplete recorded work"})`;
+        : `${qualified(ws.bound === "upper" ? "at most " : ws.bound === null ? "" : "at least ", ws.value)} (partial${saysNoDirection(ws) ? `; ${noDirectionWords(ws, words)}` : ""}; ${ws.reasons.map(words).join("; ") || "incomplete recorded work"})`;
       const rows = [
         ["Which", `Work box ${it.box_no}${nOf}: ${range(it.burst_range, "burst", "bursts")}`],
         ["What it is", it.count === 1 ? "One work burst: a run of agent activity with no idle stretch of 15 minutes or more and no operator turn inside it" : `${it.count} work bursts, folded into one box with ${fold}`],
@@ -1901,7 +1901,7 @@
   // the task's waiting for the next prompt as the lede counts it (for the
   // "not known yet" sentence when Desk publishes no split).
   function whyLedeParts(split, nextMs, tok) {
-    const t = tok || ((key, text, extra) => ({ key, text, ...(extra || {}) }));
+    const t = tok || ((key, text, extra) => ({ key, text, ...extra }));
     const s = split || { state: "absent" };
     if (s.state === "absent") {
       if (!(nextMs > 0)) return [];
@@ -1940,7 +1940,7 @@
     });
     if (rest.length) {
       const ms = rest.reduce((a, x) => a + x.ms, 0);
-      out.push(`${s.template === "all" ? ", and " : ", "}${fig(ms, rest[0].n)} after ${rest.length} other kind${rest.length === 1 ? "" : "s"} of stop`);
+      out.push(`${s.template === "all" ? ", and " : ", "}${fig(ms, rest[0].n)} after ${rest.length} other kinds of stop`);
     }
     if (s.template === "partly") out.push(", and ", t("why", qualified(qualOf(s.not_known.n), s.not_known.ms), { why: "not_known" }), ` is not known (why: ${notKnownWords(s.not_known)})`);
     out.push(".");
@@ -2000,7 +2000,7 @@
     const stepOf = (at, ms) => {
       if (at.outside || !items[at.item]) return { step: null, step_frac: null };
       const sp = stepPlace(items[at.item], ms);
-      return sp ? { step: sp.step, step_frac: sp.frac } : { step: null, step_frac: null };
+      return { step: sp.step, step_frac: sp.frac };
     };
     const outsideMs = (ms, at) => (!at || !at.outside || !items.length ? 0 : at.outside === "before" ? items[0].start_ms - ms : ms - items[items.length - 1].end_ms);
     const prompts = turns
@@ -2066,7 +2066,8 @@
         } else if (kind === "opened" || pr.state === "merged") unplaced.push({ pr, k, what: kind, reasons: Array.isArray(s.reasons) ? s.reasons : [] });
       }
     });
-    marks.sort((a, b) => a.ms - b.ms || a.k - b.k || (a.kind === "opened" ? -1 : 1));
+    // Stable sorting preserves the constructor's opened-before-merged order for equal ms/k.
+    marks.sort((a, b) => a.ms - b.ms || a.k - b.k);
     // An open task's map ends at its last recorded work.
     const lw = mp.lead_window || {};
     const open = (Array.isArray(lw.reasons) && lw.reasons.includes("censored")) || (mp.finish_date && Array.isArray(mp.finish_date.reasons) && mp.finish_date.reasons.includes("open_job"));
@@ -2155,7 +2156,7 @@
   // groups that would then overlap merge again, until none does. Returns
   // [{ from, to, pos, marks }] in position order.
   function groupMarks(marks, w, badge) {
-    const bw = typeof badge === "function" ? badge : (n) => (n > 1 ? 16 + 7 * String(n).length : w);
+    const bw = typeof badge === "function" ? badge : (n) => 16 + 7 * String(n).length;
     let groups = [...marks].sort((a, b) => a.pos - b.pos).map((m) => ({ from: m.pos, to: m.pos, marks: [m] }));
     const extent = (g) => {
       const mid = (g.from + g.to) / 2;
@@ -2366,7 +2367,6 @@
   // The idle part of the wait before a prompt that counts as waiting.
   function countedWords(mark, leadMs) {
     const w = mark.wait;
-    if (!w || !isMs(w.next_prompt_ms)) return "not recorded: Desk does not publish the wait before this prompt yet";
     const share = isMs(leadMs) && leadMs > 0 ? ` (${pctWords(w.next_prompt_ms / leadMs)} of the lead time)` : "";
     return `${durationWords(w.next_prompt_ms)}${share}`;
   }
@@ -2940,7 +2940,7 @@
     const { value_ms, ...anchor } = a;
     // The anchor's epoch value, for the build's own use only (each prompt's
     // UTC day); slimMap never writes it. Only a measured anchor gives days.
-    const origin = a.state === "measured" && Number.isFinite(value_ms) ? { value_ms, uncertainty_ms: Number.isFinite(a.uncertainty_ms) ? a.uncertainty_ms : 0 } : null;
+    const origin = a.state === "measured" && Number.isFinite(value_ms) ? { value_ms, uncertainty_ms: a.uncertainty_ms } : null;
     return { anchor, prs: placePrs(prs, gh, a, opts), origin };
   }
 

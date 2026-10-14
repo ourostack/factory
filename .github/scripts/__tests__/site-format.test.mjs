@@ -202,7 +202,12 @@ test("the purpose and limit statements are on the page and in the README", () =>
 test("the health panel contains its own failures and links go through the guard", () => {
   const app = read("site/src/app.js")
   assert.match(app, /function renderHealth[\s\S]*?try \{[\s\S]*?\} catch/)
-  for (const line of app.split("\n").filter((l) => /\.href = /.test(l))) assert.match(line, /= safe;|github\.com\/ourostack\/factory\/commit\//)
+  const localAssignment = 'link.href = opts && opts.plain ? value : F.contextualRoute(value, window.location.hash);'
+  assert.match(app, /function setLocalHref[\s\S]*?value\.startsWith\("#\/"\) \? F\.parseRoute\(value\)[\s\S]*?\["missing", "skip", "redirect"\]\.includes\(route\.view\)\) return;/)
+  for (const line of app.split("\n").filter((l) => /\.href = /.test(l))) {
+    if (line.trim() === localAssignment) continue
+    assert.match(line, /= safe;|github\.com\/ourostack\/factory\/commit\//)
+  }
 })
 
 // Every reason that can reach a page has plain text (Desk contract section 3).

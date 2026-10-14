@@ -204,12 +204,18 @@ function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, in
   let head, sourceHead
   if (introducing) {
     // CI runs tests from a merge RESULT checkout. Its HEAD is not a PR head.
-    // Keep the exact current candidate tree (fetched by clone as Git objects),
-    // but give this synthetic introducing PR only the exact old base parent.
+    // Keep current code and intake bytes, except triage: this historical
+    // maintenance introduction predates triage authority. Its triage subtree
+    // must match the old base, not silently introduce modern reviewed intake.
     // Never weaken the released validator's merge-bearing-head refusal.
     sourceHead = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    const tree = git("rev-parse", `${sourceHead}^{tree}`)
-    head = git("commit-tree", tree, "-p", base, "-m", "synthetic introducing PR with current source tree")
+    const entries = git("ls-tree", sourceHead).split("\n").filter((entry) => !entry.endsWith("\ttriage"))
+    const historicalTriage = git("ls-tree", base, "--", "triage")
+    if (historicalTriage) entries.push(historicalTriage)
+    const tree = execFileSync("git", ["mktree"], {
+      cwd: dir, input: entries.join("\n") + "\n", encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+    }).trim()
+    head = git("commit-tree", tree, "-p", base, "-m", "synthetic historical maintenance introduction")
     assert.equal(git("rev-parse", `${head}^{tree}`), tree)
     assert.equal(git("rev-list", "--parents", "-n", "1", head), `${head} ${base}`)
     assert.equal(git("rev-list", "--merges", `${base}..${head}`), "")
@@ -308,6 +314,9 @@ test("S2-1: real introducing maintenance head validates with exact 050c278a base
   const r = authorityWorkflow({}, { actualBase: true, introducing: true })
   try {
     assert.equal(r.base, "050c278a8119b6d7ebb681f4f0ab6b57ea800dd2")
+    assert.equal(r.git("ls-tree", r.head, "--", "triage"), r.git("ls-tree", r.base, "--", "triage"))
+    const nonTriage = (ref) => r.git("ls-tree", ref).split("\n").filter((entry) => !entry.endsWith("\ttriage"))
+    assert.deepEqual(nonTriage(r.head), nonTriage(r.sourceHead))
     for (const p of [".github/scripts/check-capture.sh", ".github/scripts/check-corrections.mjs", ".github/scripts/check-intake-plugins.sh"]) {
       assert.deepEqual(readFileSync(join(r.dir, p)), execFileSync("git", ["-C", ROOT, "cat-file", "blob", `${r.base}:${p}`]))
     }
@@ -327,7 +336,7 @@ test("S2-1: real introducing maintenance head validates with exact 050c278a base
     assert.equal(r.run(workflowRun(text, "Re-read the actual actor and head after validation"), true, {
       ACTOR: outputs.actor, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
     }).status, 0)
-    t.diagnostic(`introducing source=${r.sourceHead} fixtureHead=${r.head} base=${r.base}; exact source tree, single base parent; old-helper bytes unchanged; maintenance passed`)
+    t.diagnostic(`introducing source=${r.sourceHead} fixtureHead=${r.head} base=${r.base}; non-triage source trees identical, historical triage, single base parent; old-helper bytes unchanged; maintenance passed`)
     assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), false)
     assert.equal(existsSync(join(r.dir, ".github/scripts/check-triage.sh")), false)
     noActions(r)
@@ -444,7 +453,7 @@ test("S2-1: installed missing/crashing helpers and helper deletion history never
   }
 })
 
-test("remote CI: introducing fixture works from scrubbed merged-result checkout instead of treating its merge as PR head", (t) => {
+test("remote CI: introducing fixture isolates modern triage from scrubbed merged-result checkout", (t) => {
   if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
   const home = realpathSync(mkdtempSync(join(tmpdir(), "triage-ci-merged-")))
   const repo = join(home, "repo")
@@ -455,9 +464,14 @@ test("remote CI: introducing fixture works from scrubbed merged-result checkout 
     const source = git("rev-parse", "HEAD")
     git("config", "user.name", "fixture"); git("config", "user.email", "fixture@example.invalid")
     copyFileSync(new URL(import.meta.url), join(repo, ".github/scripts/__tests__/validate-workflow.test.mjs"))
-    git("add", "--", ".github/scripts/__tests__/validate-workflow.test.mjs")
+    const modernTriage = "triage/fedcba9876543210.json"
+    const fixture = JSON.parse(readFileSync(join(ROOT, ".github/scripts/__tests__/fixtures/v12-triage.json"), "utf8"))
+    mkdirSync(join(repo, "triage"), { recursive: true })
+    writeFileSync(join(repo, modernTriage), JSON.stringify(fixture.public) + "\n")
+    git("add", "--", ".github/scripts/__tests__/validate-workflow.test.mjs", modernTriage)
     git("commit", "-q", "--allow-empty", "-m", "candidate test bytes")
     const candidate = git("rev-parse", "HEAD")
+    const triageTree = git("rev-parse", `${candidate}:triage`)
     git("checkout", "-q", "--detach", base)
     git("merge", "--quiet", "--no-ff", "--no-edit", candidate)
     const merged = git("rev-parse", "HEAD")
@@ -470,6 +484,8 @@ test("remote CI: introducing fixture works from scrubbed merged-result checkout 
     })
     t.diagnostic(`CI-shaped source=${source} candidate=${candidate} merged=${merged}; two-parent checkout; token-free child`)
     assert.equal(result.status, 0, result.stdout + result.stderr)
+    assert.equal(git("rev-parse", `${merged}:triage`), triageTree)
+    assert.equal(git("diff", "--name-only", candidate, merged, "--", "facts", "triage", "corrections", "capture"), "")
   } finally { rmSync(home, { recursive: true, force: true }) }
 })
 
