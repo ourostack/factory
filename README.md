@@ -250,6 +250,43 @@ Findings lead with an observation and its limits, then concrete stretches and af
 
 ## Rendered-browser gate
 
+For the three reproduced live-data defects, first run the focused,
+removal-sensitive browser regression from the candidate checkout:
+
+```sh
+node .github/scripts/__tests__/live-browser-defects.mjs "$EVIDENCE_DIR/dist" "$FACTORY_PLAYWRIGHT_MODULE" "$EVIDENCE_DIR/focused"
+```
+
+It reads the published task/session measurements unchanged, checks the
+task's column-fit boundaries in both themes and text sizes, verifies the
+unlabeled session's recorded-activity equivalent and reconciles the open
+task's working bound. Removing each repair from the served source must
+reproduce its specific failure. Activity intervals are individual,
+potentially overlapping records, not an additive working-time total;
+missing evaluation labels never mean missing activity. “So far” describes
+the observation horizon and never replaces a source lower or upper bound.
+
+The additional real-DOM event cases exercise navigation, evidence
+selection, source absence, recorded bounds, health presentation and
+clipboard failure through the actual controls:
+
+```sh
+node .github/scripts/__tests__/browser-coverage-events.mjs "$EVIDENCE_DIR/dist" "$FACTORY_PLAYWRIGHT_MODULE" "$EVIDENCE_DIR/events"
+```
+
+Metadata/availability variants in this runner are explicit synthetic
+fixtures, not new live measurements. Instrumented runs are coverage
+measurements, never performance qualification or a substitute for the
+uninstrumented full gate below.
+Public DOM and producer-interface fault cases retain the real routes and
+controls. Synthetic public-library response changes record their original
+and served SHA-256 fingerprints and never claim an observed deployed
+version. They do not export or directly invoke private application
+renderers, alter counters, or exclude source from measurement.
+The numeric-envelope cases preserve stated amounts when elapsed time is
+zero, but require work and wait percentages to say that their share is
+unknown rather than divide by zero.
+
 `site/scripts/verify-v12-browser.mjs` checks one exact static build of the site (the Pages artifact) in a real browser. Run it against a build of the commit you are releasing, with a build of the commit it replaces (usually `main`) as the baseline and a Playwright module that is already installed on the machine:
 
 ```sh

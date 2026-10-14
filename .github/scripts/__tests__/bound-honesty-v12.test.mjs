@@ -168,7 +168,8 @@ test("the task page's lead time equals Compare's: a lower bound rounds down on b
   const orow = { ...row, status: { state: "measured", value: "processing", reasons: [] }, lead_time_ms: open }
   const [ob] = S.stackBars([{ ...job, status: "processing" }], [orow], [orow], { mode: "all", segments: F.SEGMENTS })
   const otok = W.lede(orow, F.reasonText).parts.find((x) => x && x.key === "lead")
-  assert.equal(ob.words, `${otok.text} so far`)
+  assert.equal(otok.text, "7.1 days")
+  assert.equal(ob.words, "at least 7.1 days so far")
   const app = read("site/src/app.js")
   assert.match(app, /const leadText = W\.qualified\(leadQ, bar\.total_ms\);/)
 })

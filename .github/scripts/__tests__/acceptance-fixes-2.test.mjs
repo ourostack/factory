@@ -52,7 +52,7 @@ test("#/ lands on the latest-finished task that teaches and has waste labels", (
   assert.equal(F.landingChoice([{ ...job("x", 1, "2026-10-01", 3), waste: { sessions_labeled: m(2) } }]).level, "labeled")
 })
 
-test("#/ drops the label condition when no labeled task teaches, then falls back, and says which", () => {
+test("the legacy task recommendation drops the label condition, without choosing a task for the overview route", () => {
   const unl = F.landingChoice([job("old", 1, "2026-09-29", 54, { labeled: true, prompts: m(0) }), job("unl", 2, "2026-10-07", 7)])
   assert.equal(unl.job.id, "unl")
   assert.equal(unl.level, "unlabeled")
@@ -61,10 +61,11 @@ test("#/ drops the label condition when no labeled task teaches, then falls back
   assert.equal(fb.job.id, "a")
   assert.equal(fb.level, "fallback")
   assert.match(fb.note, /^No finished task has all of a lead time of at least an hour, at least 5 minutes of known working time, a work burst on its map and a recorded operator prompt, so this page opens on the latest-finished task whose lead time is at least an hour instead\. The 1 finished task that comes after it in finish order is skipped \(a task can miss several\): 1 with a lead time under an hour or not known\.$/)
-  // The page shows the note on #/ only, and llms.txt and About state the rule.
+  // Keep the recommendation's public contract, not obsolete router wiring.
   const app = read("site/src/app.js")
-  assert.match(app, /F\.landingChoice\(data\.jobs\)/)
-  assert.match(app, /landing\.note/)
+  assert.equal(F.parseRoute("#/").view, "overview")
+  assert.equal(F.parseRoute("#/task").view, "missing")
+  assert.doesNotMatch(app, /F\.landingChoice\(data\.jobs\)/)
   assert.match(read("site/src/llms-template.txt"), /and `waste\.sessions_labeled` has a value of 1 or more \(the task has evaluator waste labels\)\. Open the one with the latest `finish_date\.value`\./)
   assert.match(read("site/src/llms-template.txt"), /If no task qualifies, the label condition is dropped; if still none qualifies,/)
   assert.match(read("site/src/index.html"), /"Follow a task" opens on the latest-finished task that has something to teach and waste labels/)
@@ -177,9 +178,12 @@ test("M-n6: Compare's lede marks its hours and gives the share no direction when
 
 // ------------------------------------------------------------ M-n1 on the page
 
-test("M-n1: the landing note is shown on #/ with why newer tasks were skipped", () => {
+test("the explicit task route does not reuse a legacy automatic-landing explanation", () => {
   const app = read("site/src/app.js")
-  assert.match(app, /note\.textContent = !r\.job && landing\.note \? landing\.note : ""/)
+  assert.equal(F.parseRoute("#/task/recorded-task").job, "recorded-task")
+  assert.match(app, /const id = r\.job;/)
+  assert.match(app, /note\.textContent = "";/)
+  assert.doesNotMatch(app, /landing\.note/)
 })
 
 // ================================================================ Fix round 1

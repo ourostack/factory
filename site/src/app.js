@@ -27,11 +27,9 @@
   let focusAfterRender = null;
   let currentHealth = null;
   function setLocalHref(link, value, opts) {
-    const route = typeof value === "string" && value.startsWith("#/") ? F.parseRoute(value, () => null) : { view: "missing" };
+    const route = typeof value === "string" && value.startsWith("#/") ? F.parseRoute(value) : { view: "missing" };
     if (["missing", "skip", "redirect"].includes(route.view)) return;
-    const safe = opts && opts.plain ? (F.localDestination(value.split("?")[0]) ? value : null) : F.contextualRoute(value, window.location.hash);
-    if (!safe) return;
-    link.href = safe;
+    link.href = opts && opts.plain ? value : F.contextualRoute(value, window.location.hash);
   }
   function saveDisplay(patch) {
     const deviceZone = viewerZone;
@@ -164,7 +162,7 @@
     const tasks = await walkFile("rollups/tasks.json");
     if (context.status) {
       const note = el("p", "task-filter-note");
-      note.append(`Showing ${jobs.length} of ${data.jobs.length} tasks: ${LIFECYCLE_FILTER_WORD[context.status] || context.status}. `);
+      note.append(`Showing ${jobs.length} of ${data.jobs.length} tasks: ${LIFECYCLE_FILTER_WORD[context.status]}. `);
       const all = el("a", null, "Show all tasks"); setLocalHref(all, "#/tasks", { plain: true }); note.appendChild(all);
       node.appendChild(note);
     }
@@ -213,18 +211,17 @@
     if (replace === true) {
       // Show is a selection action, not a navigation/reload of this task.
       history.replaceState(null, "", next);
-      renderNavigationContext(F.parseRoute(next, () => null));
+      renderNavigationContext(F.parseRoute(next));
     } else window.location.hash = next;
   }
-  function rememberSelection(kind, from, to = from) {
-    if (!Number.isInteger(from) || from < 1) return;
+  function rememberSelection(kind, from, to) {
     const [path, query = ""] = window.location.hash.split("?");
     if (!F.localDestination(path)) return;
     const context = F.routeContext(query);
     context.selection = `${kind}:${from}${to !== from ? "-" + to : ""}`;
     const next = F.routeWithContext(path, context);
     history.replaceState(null, "", next);
-    renderNavigationContext(F.parseRoute(next, () => null));
+    renderNavigationContext(F.parseRoute(next));
   }
 
   function num(number, kind, opts) {
@@ -233,11 +230,10 @@
 
   // A link built from data: only a GitHub pull request, issue or run URL
   // becomes a link; anything else is shown as plain text.
-  function safeLink(text, url, className) {
+  function safeLink(text, url) {
     const safe = F.safeGithubUrl(url);
-    if (!safe) return el("span", className, text);
+    if (!safe) return el("span", null, text);
     const a = document.createElement("a");
-    if (className) a.className = className;
     a.href = safe;
     a.target = "_blank";
     a.rel = "noopener";
@@ -389,7 +385,7 @@
       const add = (k, v) => {
         facts.appendChild(el("dt", null, k));
         const dd = el("dd");
-        dd.appendChild(typeof v === "string" ? document.createTextNode(v) : v);
+        dd.appendChild(v);
         facts.appendChild(dd);
       };
       add("Sessions", num(h.sessions, "count"));
@@ -425,14 +421,11 @@
     const raw = (n) => (n && n.state !== "unavailable" ? n.value : null);
     const values = rows.flatMap((r) => [raw(r.number), raw(r.secondary)].filter((v) => typeof v === "number"));
     const scale = F.barScale(values, { kind: opts.kind, scale: opts.scale });
-    if (opts.title) {
-      const h = el(opts.titleTag || "h3", "bars-title", opts.title);
-      if (rows.length) h.appendChild(el("span", "bars-scale", ` · ${scale.label}${opts.unit ? ` ${opts.unit}` : ""}`));
-      container.appendChild(h);
-    }
-    if (opts.caption) container.appendChild(el("p", "chart-caption", opts.caption));
+    const h = el(opts.titleTag || "h3", "bars-title", opts.title);
+    if (rows.length) h.appendChild(el("span", "bars-scale", ` · ${scale.label}${opts.unit ? ` ${opts.unit}` : ""}`));
+    container.appendChild(h);
     if (!rows.length) {
-      container.appendChild(el("p", "chart-empty", opts.emptyText || "No data yet."));
+      container.appendChild(el("p", "chart-empty", opts.emptyText));
       return;
     }
     const wrap = el("div", "bars");
@@ -560,7 +553,7 @@
 
     items.forEach((item, idx) => {
       const x = padL + idx * step + 2;
-      const h = maxCount > 0 ? (item.count / maxCount) * innerH : 0;
+      const h = (item.count / maxCount) * innerH;
       const y = padT + innerH - h;
       const rect = document.createElementNS(svgNS, "rect");
       rect.setAttribute("x", String(x));
@@ -669,7 +662,7 @@
         const isRollup = v && v.kind === "rollup";
         out.appendChild(num(v, (kinds && kinds[m[1]]) || "count", { flag: false, nofn: isRollup && !shownNofn }));
         if (isRollup) shownNofn = true;
-      } else out.appendChild(num(v, (kinds && kinds[m[1]]) || "count"));
+      } else out.appendChild(num(v, "count"));
     }
     return out;
   }
@@ -1134,7 +1127,7 @@
         if (t.term) {
           const a = el("a", "status-term", t.text);
           const safe = F.glossaryRoute(t.term);
-          if (safe) a.href = safe;
+          a.href = safe;
           line.appendChild(a);
         } else line.appendChild(document.createTextNode(t.text));
       });
@@ -1156,7 +1149,7 @@
         if (a.owner) {
           body.appendChild(document.createTextNode("tracked in "));
           body.appendChild(safeLink(`issue ${a.owner.ref}`, a.owner.url));
-        } else body.appendChild(el("span", a.ownerText === "no one is on this" ? "status-owner" : "status-owner status-owner-unchecked", a.ownerText || "no one is on this"));
+        } else body.appendChild(el("span", a.ownerText === "no one is on this" ? "status-owner" : "status-owner status-owner-unchecked", a.ownerText));
       });
       body.appendChild(document.createTextNode(". "));
     } else if (s.state === "normal") {
@@ -1166,7 +1159,7 @@
     }
     const more = document.createElement("a");
     const safe = F.safeRoute("store");
-    if (safe) more.href = safe;
+    more.href = safe;
     more.textContent = "The store's own health, in full";
     body.appendChild(more);
     det.appendChild(body);
@@ -1226,7 +1219,7 @@
     } else {
       const fix = document.createElement("a");
       const safe = F.safeRoute("causes");
-      if (safe) fix.href = safe;
+      fix.href = safe;
       fix.textContent = "What unblocks it";
       headlineTile(row, "Operator attention per accepted outcome", el("span", "num num-unavailable", "no data"), [
         note("stat-note", `Not computed yet: ${F.describe(h, "duration").reason}. `, fix),
@@ -1281,13 +1274,6 @@
   const SCOPE_OF = { headlines: "headlines", tool_calls: "tool_kinds", tool_failures: "tool_kinds", models: "models", subagents: "subagents", harnesses: "harnesses" };
 
   const STATE_WORD = { measured: "measured", partial: "partial", unavailable: "no data" };
-  const JOB_ID = /^[0-9A-Za-z_-]{1,64}$/;
-
-  function idFromHash(prefix) {
-    const m = new RegExp(`^#${prefix}-(.+)$`).exec(window.location.hash || "");
-    return m && JOB_ID.test(m[1]) ? m[1] : null;
-  }
-
   function confidenceWords(r) {
     const c = r.confidence || {};
     if (!c.high_ms || c.high_ms.state === "unavailable") return "confidence not recorded";
@@ -1345,7 +1331,7 @@
   // The task's name, key, place in finish order and status: the head of step 1.
   function renderTaskHead(container, jobs, id) {
     container.innerHTML = "";
-    const j = id ? jobs.find((x) => x.id === id) : null;
+    const j = jobs.find((x) => x.id === id);
     if (!j) {
       container.appendChild(el("h1", "view-title", "Task not found"));
       container.appendChild(el("p", "lede", "No task in this build has that key. It may have been re-derived or withdrawn. Pick another task above, or see every task under Compare tasks."));
@@ -1434,7 +1420,7 @@
 
   function renderJobDetail(container, jobs, id, sessions) {
     container.innerHTML = "";
-    const j = id ? jobs.find((x) => x.id === id) : null;
+    const j = jobs.find((x) => x.id === id);
     if (!j) return;
     // Pull requests.
     const prs = el("section", "block");
@@ -1519,12 +1505,12 @@
     } else {
       const a = document.createElement("a");
       const safe = F.safeRoute("compare");
-      if (safe) a.href = safe;
+      a.href = safe;
       a.textContent = "\u2190 Every task";
       back.appendChild(a);
     }
     container.appendChild(back);
-    const s = id ? (sessions || []).find((x) => x.session_id === id) : null;
+    const s = (sessions || []).find((x) => x.session_id === id);
     if (!s) {
       container.appendChild(el("h1", "view-title", "Session not found"));
       container.appendChild(el("p", "lede", "This build has no published facts for that session."));
@@ -1604,7 +1590,7 @@
 
   function svg(tag, attrs) {
     const e = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v));
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
     return e;
   }
 
@@ -1669,7 +1655,7 @@
     const plotW = Number(plot.getAttribute("width"));
     const H = plot.getAttribute("height");
     const children = [...plot.childNodes];
-    const label = plot.getAttribute("aria-label") || "";
+    const label = plot.getAttribute("aria-label");
     const built = rows.map((cols, r) => {
       const start = r === 0 ? 0 : colX(cols[0]);
       const end = r === rows.length - 1 ? plotW : colX(cols[cols.length - 1] + 1);
@@ -1678,13 +1664,13 @@
       part.setAttribute("width", end - start);
       part.setAttribute("viewBox", `${start} 0 ${end - start} ${H}`);
       if (r > 0) part.setAttribute("aria-label", `${label} Continued, row ${r + 1} of ${rows.length}.`);
-      else if (label) part.setAttribute("aria-label", `${label} Drawn in ${rows.length} rows.`);
+      else part.setAttribute("aria-label", `${label} Drawn in ${rows.length} rows.`);
       for (const c of children) {
-        const col = c.getAttribute && c.getAttribute("data-col");
-        if (col === null || col === undefined) {
+        const col = c.getAttribute("data-col");
+        if (col === null) {
           // A repeated decoration carries no id, so no id appears twice.
           const copy = c.cloneNode(true);
-          if (copy.nodeType === 1) for (const n of [copy, ...copy.querySelectorAll("[id]")]) n.removeAttribute("id");
+          for (const n of [copy, ...copy.querySelectorAll("[id]")]) n.removeAttribute("id");
           part.appendChild(copy);
         }
         else if (keep.has(col)) part.appendChild(c);
@@ -1711,8 +1697,8 @@
   // measured work" (format.js SEGMENTS).
   function segmentFill(key, css) {
     const seg = SEGMENT_BY_KEY.get(key);
-    if (!seg) return css ? "var(--c-waste-unknown)" : "var(--c-waste-unknown)";
-    if (seg.fill === "hatch") return css ? `var(--hatch-${key === "no_session" ? "no-session" : "agents-working"})` : `url(#hatch-${key === "no_session" ? "no-session" : "agents-working"})`;
+    if (!seg) return "var(--c-waste-unknown)";
+    if (seg.fill === "hatch") return css ? "var(--hatch-agents-working)" : `url(#hatch-${key === "no_session" ? "no-session" : "agents-working"})`;
     if (seg.fill === "outline") return "transparent";
     return `var(${seg.token})`;
   }
@@ -1795,12 +1781,12 @@
 
   function openDrawer(opener, content, extra) {
     if (!drawerEl) return;
-    const x = extra || {};
+    const x = extra;
     if (opener) drawerOpener = opener;
     document.getElementById("drawer-title").textContent = content.title;
     drawerBody.innerHTML = "";
     // Which task this is, and when it finished (UTC), under the title.
-    if (x.job) drawerBody.appendChild(el("p", "drawer-task", `${jobLabel(x.job)} · ${finishSentence(x.job, "short")}`));
+    drawerBody.appendChild(el("p", "drawer-task", `${jobLabel(x.job)} · ${finishSentence(x.job, "short")}`));
     const readable = W.readableDrawer(content);
     const what = el("p", "drawer-what");
     // A wait wears its cause's own swatch, as on the bar, the legend and Rank causes.
@@ -1825,7 +1811,7 @@
       }
       technical.appendChild(facts); drawerBody.appendChild(technical);
     }
-    if (content.evidence && content.evidence.length) {
+    if (content.evidence.length) {
       const evidence = el("details", "drawer-evidence");
       evidence.appendChild(el("summary", null, `Evidence intervals (${content.evidence.length})`));
       const table = el("table", "data-table drawer-table");
@@ -1841,8 +1827,6 @@
       wrap.appendChild(table);
       evidence.appendChild(wrap); drawerBody.appendChild(evidence);
       if (content.evidence.length > 60) evidence.appendChild(el("p", "chart-caption", `The first 60 of ${content.evidence.length} are listed; the data file holds every one.`));
-    } else if (content.evidence) {
-      // Nothing to list: say so rather than leave a gap.
     }
     if (typeof x.more === "function") {
       const more = el("div", "drawer-more");
@@ -1857,8 +1841,7 @@
         else {
           const a = el("a", null, l.text);
           // Only an in-page route built by F.safeRoute reaches here.
-          const safe = typeof l.href === "string" && /^#\/[0-9A-Za-z_\/-]+$/.test(l.href) ? l.href : null;
-          if (safe) setLocalHref(a, safe);
+          setLocalHref(a, l.href);
           a.addEventListener("click", () => drawerEl.close());
           li.appendChild(a);
         }
@@ -1959,7 +1942,7 @@
       return W.statedText(n, "duration");
     };
     const draw = () => {
-      const rows = S.sortPicker(W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value), (id) => F.finishDay(jobById.has(id) ? jobById.get(id).finish_date : null), sortDir);
+      const rows = S.sortPicker(W.pickerRows(jobs, taskRows || [], (j) => jobLabel(j), input.value), (id) => F.finishDay(jobById.get(id).finish_date), sortDir);
       list.innerHTML = "";
       const table = el("table", "data-table picker-table");
       tableHead(table, TASK_COLUMNS);
@@ -1998,8 +1981,8 @@
     if (o.skip === false) { container.appendChild(wrap); list.scrollTop = 0; return; }
     // A link before the list, so the keyboard can pass the picker's rows.
     const skip = el("a", "skip-map", "Skip to the map");
-    const safe = F.safeRoute("task", String(current || ""));
-    if (safe) skip.href = safe;
+    const safe = F.safeRoute("task", current);
+    skip.href = safe;
     skip.addEventListener("click", (evt) => {
       evt.preventDefault();
       const target = document.getElementById("vsm-title");
@@ -2031,7 +2014,7 @@
         const b = el("strong", "lede-figure", p.text);
         // Punctuation right after a number stays on its line.
         const next = parts[k + 1];
-        const m = typeof next === "string" ? /^[.,;:]/.exec(next) : null;
+        const m = /^[.,;:]/.exec(next);
         if (m) {
           const keep = el("span", "nowrap");
           keep.append(b, document.createTextNode(m[0]));
@@ -2047,14 +2030,14 @@
 
   // What each lede number lights up on the map (walk.js highlightSelector):
   // a cause lights only the waits that waited on it.
-  function highlight(root, key, item, cause, seg, why) {
-    const tag = `${key}|${item === undefined ? "" : item}|${cause || ""}|${seg || ""}|${why || ""}`;
+  function highlight(root, key, cause, seg, why) {
+    const tag = `${key}||${cause || ""}|${seg || ""}|${why || ""}`;
     const on = root.dataset.hl === tag;
     root.dataset.hl = on ? "" : tag;
     for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
     if (on) return false;
-    const pick = W.highlightSelector(key, { item, cause, seg, why });
-    if (pick) for (const n of root.querySelectorAll(pick)) n.classList.add("is-hl");
+    const pick = W.highlightSelector(key, { cause, seg, why });
+    for (const n of root.querySelectorAll(pick)) n.classList.add("is-hl");
     return true;
   }
 
@@ -2066,7 +2049,7 @@
       return null;
     }
     const width = container.clientWidth || 1000;
-    const phone = width < 640;
+    let phone = width < 640;
     // As many boxes as fit at a readable width; the rest of the work is folded.
     const maxBoxes = phone ? 6 : Math.max(2, Math.floor((width - 190 + 84) / 212));
     // Job-level states the bursts' own counts cannot know: operator turns
@@ -2131,7 +2114,7 @@
       if (it && it.type === "box") rememberSelection("bursts", it.burst_range[0], it.burst_range[1]);
       else if (it && it.type === "wait") rememberSelection("gaps", it.gap_range[0], it.gap_range[1]);
       const content = W.drawer(thing, ctxDrawer);
-      const route = F.safeRoute("task", j.id) || "#/";
+      const route = F.safeRoute("task", j.id);
       openDrawer(opener, content, {
         job: j,
         links: linksFor(it),
@@ -2151,6 +2134,13 @@
     const cols = model.items.map((it) => (it.type === "box" ? "minmax(124px, 1.5fr)" : "minmax(84px, 1fr)"));
     if (off) cols.unshift("minmax(104px, 0.8fr)");
     if (afterCol) cols.push("minmax(104px, 0.8fr)");
+    // Margins for out-of-window marks also consume columns; retain the
+    // same items, but use rows when their minimum widths cannot fit.
+    const minimumWidth = 178 + model.items.reduce((n, it) => n + (it.type === "box" ? 124 : 84), 0) + (off + afterCol) * 104;
+    if (!phone && minimumWidth > width) {
+      phone = true;
+      root.classList.replace("vsm-wide", "vsm-phone");
+    }
     if (!phone) root.style.gridTemplateColumns = `${cols.join(" ")} minmax(178px, 1.25fr)`;
     const place = (node, col, row, span) => {
       if (phone) return node;
@@ -2208,7 +2198,7 @@
       for (; segIndex < segs.length && segs[segIndex].item === i; segIndex++) {
         const sg = segs[segIndex];
         const sgWhy = sg.level === "high" ? (sg.folded ? it.inner_why : it.why) : null;
-        const sgWhys = sg.level === "high" ? (sg.folded ? it.inner_whys : it.whys) || [] : [];
+        const sgWhys = sg.level === "high" ? (sg.folded ? it.inner_whys : it.whys) : [];
         const b = el("button", `lad lad-${sg.level}${sg.folded ? " lad-folded" : ""}${prevLevel && prevLevel !== sg.level ? " lad-turn" : ""}${(sg.causes || []).map((k) => ` has-${k}`).join("")}${sgWhy ? ` why-${sgWhy}` : ""}${sgWhys.map((k) => ` has-why-${k}`).join("")}`);
         b.type = "button";
         b.dataset.item = String(i);
@@ -2270,7 +2260,7 @@
         });
         data.appendChild(more);
       } else {
-        main = el("button", `vsm-wait cause-${it.waited_on}${it.causes.map((k) => ` has-${k}`).join("")}${it.why ? ` why-${it.why}` : ""}${(it.whys || []).map((k) => ` has-why-${k}`).join("")}${longestItem === it ? " is-longest" : ""}`);
+        main = el("button", `vsm-wait cause-${it.waited_on}${it.causes.map((k) => ` has-${k}`).join("")}${it.why ? ` why-${it.why}` : ""}${it.whys.map((k) => ` has-why-${k}`).join("")}${longestItem === it ? " is-longest" : ""}`);
         main.type = "button";
         main.dataset.item = String(i);
         const tri = svg("svg", { viewBox: "0 0 40 34", width: 40, height: 34, "aria-hidden": "true", class: "vsm-tri" });
@@ -2309,7 +2299,7 @@
       const v = el("span", "sum-value-text");
       v.appendChild(node);
       d.appendChild(v);
-      if (note) d.appendChild(el("span", "sum-note", note));
+      d.appendChild(el("span", "sum-note", note));
       sum.appendChild(d);
     };
     // The same words as the lede, so the two never disagree.
@@ -2439,7 +2429,6 @@
 
     // A deep link (?bursts=4-6, ?gaps=3, ?prompt=2, ?pr=1) opens the item that holds it.
     const select = (sel) => {
-      if (!sel) return false;
       if (sel.kind === "prompt" || sel.kind === "pr") {
         const mark = sel.kind === "prompt" ? clock.prompts[sel.from - 1] : null;
         const pr = sel.kind === "pr" ? (map.prs || [])[sel.from - 1] : null;
@@ -2456,7 +2445,6 @@
         const seg = segs.find((x) => x.item === at && x.folded);
         const rung = root.querySelector(`.lad-folded[data-item="${at}"]`);
         const box = root.querySelector(`.vsm-box[data-item="${at}"]`);
-        for (const n of root.querySelectorAll(".is-hl")) n.classList.remove("is-hl");
         root.dataset.hl = `select|${at}`;
         for (const n of [rung, box]) if (n) n.classList.add("is-hl");
         const target = rung || box;
@@ -2474,7 +2462,7 @@
       root,
       model,
       select,
-      highlight: (tok) => highlight(root, tok.key, tok.key === "longest" && longestItem ? longestItem.index : undefined, tok.cause, tok.seg, tok.why),
+      highlight: (tok) => highlight(root, tok.key, tok.cause, tok.seg, tok.why),
     };
   }
 
@@ -2490,8 +2478,7 @@
       g.appendChild(svg("rect", { x: 5, y: 3, width: 2, height: 9, rx: 1 }));
       g.appendChild(svg("circle", { cx: 6, cy: 3, r: 2.6 }));
     } else if (kind === "merged") g.appendChild(svg("path", { d: "M6 0.8 L11.2 6 L6 11.2 L0.8 6 Z" }));
-    else if (kind === "opened" || kind === "pr") g.appendChild(svg("path", { d: "M6 1 L11.4 11 L0.6 11 Z" }));
-    else g.appendChild(svg("circle", { cx: 6, cy: 6, r: 5 }));
+    else g.appendChild(svg("path", { d: "M6 1 L11.4 11 L0.6 11 Z" }));
     return g;
   }
 
@@ -2532,7 +2519,7 @@
     } else if (W.validPr(thing.pr.repo, thing.pr.number)) {
       links.push({ text: `Pull request ${thing.pr.repo}#${thing.pr.number} on GitHub`, href: `https://github.com/${thing.pr.repo}/pull/${thing.pr.number}`, external: true });
     }
-    const route = F.safeRoute("task", j.id) || "#/";
+    const route = F.safeRoute("task", j.id);
     openDrawer(opener, content, { job: j, links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: mapPath(j.id) } });
   }
 
@@ -2612,7 +2599,7 @@
         const name = b.classList.contains("lad-folded") ? "fold" : b.classList.contains("lad-low") ? "work" : "wait";
         geo[name] = range;
       });
-      sizes[i] = Object.keys(geo).length ? geo : phone ? st.clientHeight : st.clientWidth;
+      sizes[i] = geo;
     }
     // A count badge's width grows with the reader's text size.
     const k = chartTextScale(root);
@@ -2621,8 +2608,7 @@
       const buttons = [];
       for (const g of groups) {
         const st = strips.find((x) => Number(x.dataset.item) === g.item);
-        const ln = st && st.querySelector(`.mark-lane-${lane}`);
-        if (!ln) continue;
+        const ln = st.querySelector(`.mark-lane-${lane}`);
         const first = g.marks[0];
         const partial = g.marks.some((x) => x.state === "partial");
         // A merged group's span, so the badge never hides where its marks lie.
@@ -2652,7 +2638,7 @@
         // whose time excludes its marks).
         const half = (phone ? b.offsetHeight : b.offsetWidth) / 2;
         const geo = sizes[g.item];
-        const range = geo && typeof geo === "object" && geo[g.step] ? geo[g.step] : [0, typeof geo === "number" ? geo : 0];
+        const range = geo[g.step];
         if (g.count > 1) b.style.setProperty(phone ? "top" : "left", `${range[1] - range[0] > 2 * half ? Math.min(Math.max(g.pos, range[0] + half), range[1] - half) : (range[0] + range[1]) / 2}px`);
         buttons.push(b);
       }
@@ -2807,7 +2793,7 @@
     const placed = prs.filter((p) => typeof p.opened_at_ms === "number").length;
     // When every time not placed has the same reason, it is said once.
     const missing = prs.flatMap((p) => [typeof p.opened_at_ms === "number" ? null : p.opened_state, p.state === "merged" && typeof p.merged_at_ms !== "number" ? p.merged_state : null]).filter(Boolean);
-    const keys = new Set(missing.map((st) => ((st && st.reasons) || []).slice().sort().join(",")));
+    const keys = new Set(missing.map((st) => (st.reasons || []).slice().sort().join(",")));
     const shared = missing.length > 1 && keys.size === 1 ? [...keys][0].split(",").filter(Boolean) : null;
     const why = (st) => (shared ? "" : ` (${((st && st.reasons) || []).map(F.reasonText).join("; ") || "no reason recorded"})`);
     const stateWord = (pr) => (pr.state === "merged" ? "merged" : pr.state === "open" ? "open" : pr.state === "closed" ? "closed without merging" : "state not read");
@@ -2910,10 +2896,10 @@
 
   // One stretch's evidence; `k` is its index in the session's stretches.
   function openStretch(opener, j, detail, k, lanesOf, ctxDrawer) {
-    const stretches = detail.stretches || [];
+    const stretches = detail.stretches;
     const thing = { kind: "stretch", stretch: stretches[k], index: k, total: stretches.length, session: detail.session, intervals: detail.intervals || [], lanes: lanesOf };
     const content = W.drawer(thing, ctxDrawer);
-    const route = F.safeRoute("task", j.id, "session", detail.session) || F.safeRoute("task", j.id) || "#/";
+    const route = F.safeRoute("task", j.id, "session", detail.session) || F.safeRoute("task", j.id);
     const links = [{ text: `Open session ${String(detail.session).slice(0, 8)} to scale`, href: route }];
     if (detail.labels_from_shared_session) content.rows.push(["Labels", "These labels come from a session this task shared with other tasks"]);
     openDrawer(opener, content, { job: j, links, prompt: { ...W.promptItem(thing, ctxDrawer), taskName: W.promptName(F.taskName(localNames, j)), route, dataPath: `jobs/${j.id}/${detail.session}.json` } });
@@ -2938,7 +2924,7 @@
     const leadText = W.qualified(leadQ, bar.total_ms);
     if (bar.state === "lead_only") {
       // What is known (the lead time) is drawn; what is not (its split) is said.
-      const why = (bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded";
+      const why = bar.reasons.map(F.reasonText).join("; ") || "it was not recorded";
       container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar: ${leadText}. How it splits into working and waiting is not known, because ${why}.`));
       const track = el("div", "tw-bar");
       track.setAttribute("role", "img");
@@ -2951,7 +2937,7 @@
       return;
     }
     if (bar.state !== "ok") {
-      container.appendChild(el("p", "chart-empty", `Not measured for this task, because ${(bar.reasons || []).map(F.reasonText).join("; ") || "it was not recorded"}. No bar is drawn rather than an empty one.`));
+      container.appendChild(el("p", "chart-empty", `Not measured for this task, because ${bar.reasons.map(F.reasonText).join("; ") || "it was not recorded"}. No bar is drawn rather than an empty one.`));
       return;
     }
     container.appendChild(el("p", "chart-caption tw-title", `The whole lead time as one bar, linear from zero: scale 0 to ${leadText}. Working time comes first, split by the evaluator's labels; then waiting, idle time, split by what it waited on.`));
@@ -2959,19 +2945,20 @@
     // evidence on the map: a working part lights the boxes that hold it, a
     // waiting cause its triangles and ladder steps.
     const press = (s, btn) => {
-      if (typeof light === "function") light(s.cause ? { key: "wait_cause", cause: s.cause, why: s.why } : { key: "class", seg: s.key }, btn);
+      light(s.cause ? { key: "wait_cause", cause: s.cause, why: s.why } : { key: "class", seg: s.key }, btn);
     };
     // A class's figure says "at least" while some of the waiting is not classified.
     const segLabel = (s) => (s.why === "not_known" && s.reasons && s.reasons.length ? `${s.label} (${s.reasons.map(W.whyReasonWords).join("; ")})` : s.label);
     // A class of the next-prompt split states its floor and its ceiling.
     const segMs = (s) => (s.why && typeof s.ceiling_ms === "number" ? W.boundedWords(s.ms, s.ceiling_ms, W.durationWords) : W.qualified(s.why ? W.qualOf(s) : s.q || "", s.ms));
-    const partWords = (s) => `${segLabel(s)}: ${segMs(s)}, ${W.pctWords(s.share)} of the lead time`;
+    const shareWords = (ms) => bar.total_ms > 0 ? `${W.pctWords(ms / bar.total_ms)} of the lead time` : "share of lead time not known";
+    const partWords = (s) => `${segLabel(s)}: ${segMs(s)}, ${shareWords(s.ms)}`;
     const track = el("div", "tw-bar");
     track.setAttribute("role", "group");
     track.setAttribute("aria-label", `Lead time ${leadText}: ${bar.groups.map((g) => `${g.label.toLowerCase()} ${W.qualified(g.qualifier || "", g.ms)}`).join("; ")}. Each part lights its evidence on the map.`);
     for (const g of bar.groups) {
       const gd = el("div", `tw-group tw-group-${g.key}`);
-      gd.style.width = `${Math.max(0, (g.ms / bar.total_ms) * 100)}%`;
+      gd.style.width = bar.total_ms > 0 ? `${Math.max(0, (g.ms / bar.total_ms) * 100)}%` : "0%";
       for (const s of g.segments) {
         const d = el("button", `tw-seg tw-part tw-${s.key}`);
         d.type = "button";
@@ -2995,7 +2982,7 @@
     for (const g of bar.groups) {
       const head = el("p", "tw-group-head");
       head.appendChild(el("strong", null, g.label));
-      head.appendChild(document.createTextNode(` ${W.qualified(g.qualifier || "", g.ms)} · ${W.pctWords(g.ms / bar.total_ms)} of the lead time${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
+      head.appendChild(document.createTextNode(` ${W.qualified(g.qualifier || "", g.ms)} · ${shareWords(g.ms)}${g.key === "waiting" ? ": idle time, by what it waited on" : ": by the evaluator's labels"}`));
       container.appendChild(head);
       const ul = el("ul", "tw-legend tw-legend-buttons");
       for (const s of g.segments) {
@@ -3005,7 +2992,7 @@
         b.setAttribute("aria-pressed", "false");
         b.appendChild(s.why ? whySwatch(s.why) : s.cause ? waitSwatch(s.cause) : swatch(s.key === "working_unsplit" ? "not_labeled" : s.key));
         b.appendChild(el("span", "tw-name", segLabel(s)));
-        b.appendChild(el("span", "tw-ms", `${segMs(s)} · ${W.pctWords(s.share)} of the lead time`));
+        b.appendChild(el("span", "tw-ms", `${segMs(s)} · ${shareWords(s.ms)}`));
         b.setAttribute("aria-label", `${partWords(s)}. Lights it on the map.`);
         b.addEventListener("click", () => press(s, b));
         li.appendChild(b);
@@ -3534,7 +3521,6 @@
         const w = Math.max(1, x(st.end_ms) - xa);
         const fill = st.class === "muda" && st.waste === "waiting" ? "url(#hatch-labeled-wait)" : segmentFill(seg, false);
         for (const wk of new Set(W.stretchWorkers(st, intervals).map(laneOf))) {
-          if (!laneY.has(wk)) continue;
           s.appendChild(svg("rect", { x: xa, y: laneY.get(wk) + 2, width: w, height: LANE_H - 4, fill, class: "lane-band" }));
         }
       }
@@ -3542,7 +3528,7 @@
       const actY = (wk) => laneY.get(wk) + LANE_H / 2 - 4;
       if (!expanded && subs.length) {
         for (const c of W.density(intervals, subs.map((l) => l.worker), t0, msPerPx, width)) {
-          s.appendChild(svg("rect", { x: c.x, y: actY("subs"), width: c.w || 1, height: 8, class: "lane-act", "fill-opacity": Math.min(1, 0.25 + 0.15 * c.n) }));
+          s.appendChild(svg("rect", { x: c.x, y: actY("subs"), width: c.w, height: 8, class: "lane-act", "fill-opacity": Math.min(1, 0.25 + 0.15 * c.n) }));
         }
       }
       for (const l of expanded ? allLanes : [allLanes[0]]) {
@@ -3582,7 +3568,7 @@
         }
         const go = () => {
           current = k;
-          for (const m of marks) if (m) m.setAttribute("tabindex", "-1");
+          for (const m of marks) m.setAttribute("tabindex", "-1");
           g.setAttribute("tabindex", "0");
           openStretch(g, j, detail, k, allLanes, ctxDrawer);
         };
@@ -3640,7 +3626,7 @@
       focusStretch = (k) => {
         const m = marks[k];
         if (!m) return;
-        for (const q of marks) if (q) q.setAttribute("tabindex", "-1");
+        for (const q of marks) q.setAttribute("tabindex", "-1");
         m.setAttribute("tabindex", "0");
         current = k;
         // Keep the focused stretch in view inside the scrolling frame.
@@ -3649,7 +3635,7 @@
         m.focus({ preventScroll: true });
       };
     };
-    let focusStretch = () => {};
+    let focusStretch;
 
     const zoomTo = (z) => {
       const center = (frame.scrollLeft + frame.clientWidth / 2) / Math.max(1, frame.scrollWidth);
@@ -3664,7 +3650,7 @@
       const frameW = Math.max(200, frame.clientWidth - LABELS_W);
       const steps = W.zoomSteps(span, frameW, 32768);
       const want = span / (taskPart[1] - taskPart[0]);
-      zoom = steps.filter((z) => z <= want).pop() || 1;
+      zoom = steps.filter((z) => z <= want).pop();
       draw();
       frame.scrollLeft = Math.max(0, ((taskPart[0] - t0) / span) * frameW * zoom - 8);
     };
@@ -3733,7 +3719,30 @@
     container.appendChild(legend);
     container.appendChild(el("p", "chart-caption", "Labels carry no lane: the evaluator labels a stretch of the session, and the band is drawn on each lane its evidence names. The Labels row shows every stretch once; select one for its evidence."));
 
-    // Text equivalent: every stretch as a table.
+    // Activity exists even before evaluation labels. These are individual
+    // source intervals, not additive working time (they can overlap).
+    if (intervals.length) {
+      const activity = el("details", "more-details");
+      activity.appendChild(el("summary", null, `The ${intervals.length} recorded activity intervals as a table`));
+      activity.appendChild(el("p", "chart-caption", "Individual recorded intervals can overlap; their lengths are not a working-time total. Human waits and evidence-only intervals are not drawn as agent activity."));
+      const table = el("table", "data-table lane-activity-table");
+      tableHead(table, [["Agent", ""], ["Recorded event", ""], ["On the task clock", ""], ["Length", "num"], ["Outcome", ""]]);
+      const body = document.createElement("tbody");
+      for (const interval of intervals) {
+        const lane = allLanes.find((l) => l.worker === interval.worker);
+        const tr = document.createElement("tr");
+        const event = `${interval.kind}${interval.tool ? `: ${interval.tool}` : ""}${interval.evidence_only ? " (evidence only)" : ""}`;
+        for (const [text, cls] of [[lane ? lane.label : "Agent not recorded", ""], [event, ""], [W.clockWords(interval.start_ms, interval.end_ms, origin), ""], [W.durationShort(Math.max(0, interval.end_ms - interval.start_ms)), "num"], [interval.outcome || "Not recorded", ""]]) tr.appendChild(el("td", cls, text));
+        body.appendChild(tr);
+      }
+      table.appendChild(body);
+      const wrap = el("div", "table-wrap");
+      wrap.appendChild(table);
+      activity.appendChild(wrap);
+      container.appendChild(activity);
+    }
+
+    // Text equivalent: every evaluator stretch as a separate table.
     const det = el("details", "more-details");
     det.appendChild(el("summary", null, `The ${stretches.length} labeled stretches as a table`));
     const table = el("table", "data-table vsm-table");
@@ -3811,7 +3820,7 @@
   }
   // A cause link: only a key steps.js accepts becomes a route.
   function causeLink(key, text) {
-    const a = el("a", "cause-link", text || W.causeWords(key));
+    const a = el("a", "cause-link", text);
     const safe = S.isCauseKey(key) ? S.causeRoute(key) : null;
     if (safe) setLocalHref(a, safe);
     return a;
@@ -3828,7 +3837,7 @@
         // The mode goes in the URL, so a link or a reload opens this view.
         try {
           history.replaceState(null, "", which === "compare" ? F.compareHash({ mode: modes.compare, ...overTimeView, context: F.navigationContext(location.hash) }) : F.routeWithContext(`#/${which}`, { ...F.navigationContext(location.hash), mode: modes[which] }));
-          renderNavigationContext(F.parseRoute(location.hash, () => null));
+          renderNavigationContext(F.parseRoute(location.hash));
         } catch (err) {
           /* a sandboxed frame may refuse; the mode still applies */
         }
@@ -3893,12 +3902,8 @@
   const SB = { axisW: 46, top: 40, labelH: 118 };
   const UNIT_TITLE = Object.freeze({ days: "Days", hours: "Hours", minutes: "Minutes" });
 
-  function drawStackup(container, bars, mode, marked) {
+  function drawStackup(container, bars, mode) {
     container.innerHTML = "";
-    if (!bars.length) {
-      emptyState(container, "No task is published yet, so there is nothing to compare.");
-      return;
-    }
     const phone = container.clientWidth < 600;
     let H = phone ? 220 : 280;
     // Text-sized room grows with the reader's text size.
@@ -3948,7 +3953,7 @@
     // The two groups, named above the bars.
     const firstOpen = bars.findIndex((b) => b.group === "open");
     // A group's name sits in its first column's row; the long form only where it fits that row.
-    const rowRoom = (i) => { const r = rowsOf[rowOf(i)] || []; return (r[r.length - 1] - i + 1) * colW; };
+    const rowRoom = (i) => { const r = rowsOf[rowOf(i)]; return (r[r.length - 1] - i + 1) * colW; };
     const groupLabel = (i, x, long, short) => {
       const t = svg("text", { x, y: 14 * k, class: "sb-group", "data-col": i, "data-long": long.replace(/ →$/, "") });
       t.textContent = !phone && long.length * 7 * k < rowRoom(i) ? long : short;
@@ -4013,12 +4018,12 @@
         a.appendChild(day);
       }
       const tipRows = [];
-      if (b.state === "no_data") tipRows.push({ label: "Not measured", value: (b.reasons || []).map(F.reasonText).join("; ") || "not recorded" });
+      if (b.state === "no_data") tipRows.push({ label: "Not measured", value: b.reasons.map(F.reasonText).join("; ") || "not recorded" });
       else {
         tipRows.push({ label: mode === "working" ? "Agent working time" : mode === "production" ? "Production time" : mode === "request" ? "Request to delivery" : "Lead time", value: b.words });
         if (mode === "production" || mode === "request") for (const sg of b.segments) tipRows.push({ label: sg.label, value: sg.words || W.durationWords(sg.ms) });
         for (const g of b.groups) tipRows.push({ label: g.label, value: share ? `${S.shortPct(g.share_of_lead, g.share_bound)} of the lead time` : groupWords(g) });
-        if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${(b.reasons || []).map(F.reasonText).join("; ") || "not recorded"}` });
+        if (b.state === "unsplit") tipRows.push({ label: "Split", value: `not known: ${b.reasons.map(F.reasonText).join("; ") || "not recorded"}` });
       }
       if (b.finish && b.finish.kind !== "open") tipRows.push({ label: "Finished (UTC)", value: b.finish.words });
       if (b.open) tipRows.push({ label: "State", value: "still open, figures so far" });
@@ -4026,21 +4031,6 @@
       markTip(a, b.name, tipRows);
       plot.appendChild(a);
     });
-    // A direct label on the finished task with the most waste, so the chart
-    // itself names it: above its value, with a short leader down to the bar.
-    if (marked && bars[marked.index] && bars[marked.index].job === marked.job) {
-      const b = bars[marked.index];
-      const cx = marked.index * colW + 8 + barW / 2;
-      const valueTop = Math.min(y(b.total_ms), T + H) - 4 - (b.label.length + (b.shared ? 1 : 0)) * 6.4 * k - 4;
-      const ty = 30 * k;
-      // Anchored toward the side of its row with room for the words.
-      const own = rowsOf[rowOf(marked.index)] || [marked.index];
-      const right = rowRoom(marked.index) < (marked.index - own[0] + 1) * colW;
-      const t = svg("text", { x: right ? cx + 4 : cx - 4, y: ty, class: "sb-callout", "text-anchor": right ? "end" : "start", "data-col": marked.index });
-      t.textContent = marked.label;
-      plot.appendChild(t);
-      if (valueTop > ty + 6) plot.appendChild(svg("line", { x1: cx, x2: cx, y1: ty + 4, y2: valueTop, class: "sb-callout-line", "data-col": marked.index }));
-    }
     frame.appendChild(plot);
     row.appendChild(frame);
     container.appendChild(row);
@@ -4065,7 +4055,7 @@
       legend.appendChild(g);
     };
     if (mode === "production" || mode === "request") {
-      const sw = (cls, color) => { const x = el("span", `swatch${cls}`); x.setAttribute("aria-hidden", "true"); if (color) x.style.setProperty("--sw", color); return x; };
+      const sw = (cls, color) => { const x = el("span", `swatch${cls}`); x.setAttribute("aria-hidden", "true"); x.style.setProperty("--sw", color); return x; };
       group(mode === "production" ? "Production time, from the base up" : "Request to delivery", mode === "production"
         ? [...(present.has("prod_active") ? [[sw("", "var(--c-agents-working)"), "Recorded working inside production"]] : []), ...(present.has("prod_remainder") ? [[waitSwatch("unknown"), "Production not recorded as active (not proof of idle time or waste)"]] : [])]
         : [[sw("", "var(--c-accent)"), "Request to delivery"]]);
@@ -4106,7 +4096,7 @@
     const acceptance = S.acceptanceFigure(j, F.reasonText);
     const dl = el("dl", "task-summary-figures clock-figures");
     for (const f of [...figures, { label: acceptance.label, text: acceptance.text, why: acceptance.why, meaning: "", state: acceptance.text === "Not available" ? "unavailable" : "measured" }]) {
-      const cell = el("div", `clock-figure is-${f.state || "measured"}`);
+      const cell = el("div", `clock-figure is-${f.state}`);
       cell.append(el("dt", null, f.label), el("dd", null, f.text));
       if (f.meaning) cell.appendChild(el("p", "chart-caption", f.meaning));
       if (f.why) {
@@ -4118,11 +4108,11 @@
     }
     box.appendChild(dl);
     const relation = S.productionRelation(clocks, row ? row.lead_time_ms : j.lead_time_ms);
-    if (relation) box.appendChild(el("p", "clock-relation", relation));
+    box.appendChild(el("p", "clock-relation", relation));
     const journey = S.productionJourney(clocks, F.reasonText);
     const jt = el("h4", "task-clocks-sub", "Production periods on this task's journey");
     box.appendChild(jt);
-    if (!journey || !journey.items.length) box.appendChild(el("p", null, journey ? journey.words : "Production periods are not published for this task."));
+    if (!journey.items.length) box.appendChild(el("p", null, journey.words));
     else {
       const ol = el("ol", "production-journey");
       for (const it of journey.items) {
@@ -4141,7 +4131,7 @@
   // The fill of one part of a week's bar, as on the stack-up.
   function partFill(s) {
     if (s.key === "unsplit") return "url(#hatch-unsplit)";
-    if (s.cause) return s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${W.WAIT_KEYS.includes(s.cause) ? s.cause : "unknown"})`;
+    if (s.cause) return s.cause === "unknown" ? "url(#hatch-waiting)" : `var(--c-wait-${s.cause})`;
     return segmentFill(s.key, false);
   }
   // A cause's color in the cause × week table.
@@ -4156,7 +4146,6 @@
     if (!bracket) return;
     const mid = x0 + w / 2;
     const half = Math.min(10, w / 2 - 2);
-    if (half < 3) return;
     if (bracket === "left" || bracket === "both") parent.appendChild(svg("path", { d: `M${mid} ${y} H${mid - half} m3 -3 l-3 3 l3 3`, class: "ot-bracket" }));
     if (bracket === "right" || bracket === "both") parent.appendChild(svg("path", { d: `M${mid} ${y} H${mid + half} m-3 -3 l3 3 l-3 3`, class: "ot-bracket" }));
   }
@@ -4305,7 +4294,7 @@
       th.scope = "row";
       const name = el("span", "ot-cause-name");
       name.appendChild(causeSwatch(r.key));
-      name.appendChild(r.href ? causeLink(r.key, r.label) : document.createTextNode(r.label));
+      name.appendChild(causeLink(r.key, r.label));
       th.appendChild(name);
       tr.appendChild(th);
       const fill = causeFillCss(r);
@@ -4520,7 +4509,7 @@
   function clockTable(bars, mode, jobs) {
     const wrap = el("div", "clock-table");
     const sum = S.exposureWords(bars);
-    if (sum) wrap.appendChild(el("p", "chart-caption clock-exposure", sum));
+    wrap.appendChild(el("p", "chart-caption clock-exposure", sum));
     const byId = new Map(jobs.map((j) => [j.id, j]));
     const cols = mode === "request"
       ? [["request_to_delivery_ms", "Request to delivery"], ["queue_ms", "Queued before production"]]
@@ -4533,7 +4522,7 @@
     const tbody = document.createElement("tbody");
     for (const b of bars) {
       const j = byId.get(b.job);
-      const clocks = j && j.clocks && typeof j.clocks === "object" ? j.clocks : null;
+      const clocks = j.clocks && typeof j.clocks === "object" ? j.clocks : null;
       const figures = new Map((S.clockFigures(clocks, F.reasonText) || []).map((f) => [f.key, f]));
       const tr = document.createElement("tr");
       const name = el("td"); name.appendChild(jobLink(b.job, b.name)); tr.appendChild(name);
@@ -4545,7 +4534,7 @@
       }
       if (mode !== "request") {
         tr.appendChild(el("td", "num", (clocks && S.clockShareWords(clocks.active_in_production_ms, clocks.production_ms)) || "Not available"));
-        tr.appendChild(el("td", null, j ? S.acceptanceFigure(j, F.reasonText).text : "Not available"));
+        tr.appendChild(el("td", null, S.acceptanceFigure(j, F.reasonText).text));
       }
       tbody.appendChild(tr);
     }
@@ -4605,7 +4594,7 @@
       name.appendChild(jobLink(b.job, b.name));
       tr.appendChild(name);
       tr.appendChild(el("td", null, b.group === "finished" ? `${F.ordinal(b.pos)} to finish${b.unlabeled ? ", not labeled yet" : ""}` : b.open ? "open" : b.status || "no data"));
-      tr.appendChild(el("td", null, b.finish ? (b.finish.kind === "open" ? "open" : b.finish.words) : "—"));
+      tr.appendChild(el("td", null, b.finish.kind === "open" ? "open" : b.finish.words));
       tr.appendChild(el("td", "num", b.state === "no_data" ? "no data" : b.words));
       const g = (k) => b.groups.find((x) => x.key === k);
       tr.appendChild(el("td", "num", g("working") ? groupWords(g("working")) : "not known"));
@@ -4613,7 +4602,7 @@
       const w = g("waiting") ? g("waiting").segments.slice().sort((p, q) => q.ms - p.ms)[0] : null;
       tr.appendChild(el("td", null, w ? `${w.label}, ${W.durationWords(w.ms)}` : "—"));
       const notes = [];
-      if (b.state === "unsplit" || b.state === "no_data") notes.push((b.reasons || []).map(F.reasonText).join("; ") || "not recorded");
+      if (b.state === "unsplit" || b.state === "no_data") notes.push(b.reasons.map(F.reasonText).join("; ") || "not recorded");
       if (b.shared) notes.push("labels from a shared session");
       tr.appendChild(el("td", "sb-note", notes.join("; ") || "—"));
       tb.appendChild(tr);
@@ -4644,7 +4633,7 @@
         location.hash = hash; // a sandboxed frame may refuse pushState
         return;
       }
-      renderNavigationContext(F.parseRoute(location.hash, () => null));
+      renderNavigationContext(F.parseRoute(location.hash));
       renderCompare(data).catch((err) => emptyState(document.getElementById("stackup"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
     };
     const change = (key, value, source) => {
@@ -4745,7 +4734,7 @@
       if (!selectedJobs.length) conclusion.textContent = "No recorded task matches these filters. Clear filters or choose a different recorded population.";
       else if (!candidate) conclusion.textContent = "The selected tasks have no comparable recorded window yet. Inspect their evidence before choosing an improvement.";
       else {
-        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.view_words || candidate.words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
+        conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.view_words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
       }
     };
     const drawTable = (bars) => safely("stackup-table", () => (bars.length ? drawStackTable(document.getElementById("stackup-table"), bars) : emptyState(document.getElementById("stackup-table"), "No selected task comparison is available.")));
@@ -4789,8 +4778,8 @@
         else if (view && !bars.length) emptyState(document.getElementById("stackup"), "No task's working time is labeled yet, so there is nothing to compare in agent working time.");
         else {
           const node = document.getElementById("stackup");
-          if (clockMode) drawStackup(node, bars, mode, null);
-          else drawStackup(node, S.emphasizeCategories(bars, current.category), mode, null);
+          if (clockMode) drawStackup(node, bars, mode);
+          else drawStackup(node, S.emphasizeCategories(bars, current.category), mode);
           if (clockMode) node.appendChild(clockTable(bars, mode, selectedJobs));
           if (!clockMode && current.category && !S.supportedEmphasis(bars, current.category)) {
             const note = el("p", "chart-caption compare-emphasis-note");
@@ -4859,7 +4848,7 @@
         const dated = S.eachTaskBars(base);
         const bars = mode === "share" ? S.shareBars(dated, taskRows) : dated;
         if (!bars.length) return emptyState(box, "No finished task with a finish day has a bar in this mode yet.");
-        drawStackup(box, bars, mode, null);
+        drawStackup(box, bars, mode);
       });
       const table = ot.state === "ok" ? S.causeTable(ot, mode) : null;
       document.getElementById("cause-weeks-caption").textContent = table ? `Rows are causes, largest over these weeks first; columns are finish weeks, newest on the right. Each cell is ${mode === "share" ? "the cause's share of that week's lead time" : mode === "working" ? "the cause's hours of agent working time that week (waits left out)" : "the cause's hours that week"}; ${table.scale.words}. ≥ means at least, ≤ at most, ~ direction not known; hatched bars are partial. An arrow beside a week's task count means its days are bounds (← some may have finished earlier).` : "";
@@ -5143,7 +5132,7 @@
     if (all.state !== "absent" && all.basis === "job_hours") {
       const g = el("a", null, "What job-hours means");
       const safe = F.glossaryRoute("job-hours");
-      if (safe) g.href = safe;
+      g.href = safe;
       noteEl.append(" ", g);
     }
     if (all.state === "absent") document.getElementById("causes-unlabeled").hidden = true;
@@ -5253,7 +5242,7 @@
     // with its time and page, or why it is not split.
     if (key === "waiting:next_prompt") {
       const row = doc.causes.find((x) => x && x.cause === key);
-      const split = row ? S.whyChildren(row, true) : { why_split: "absent", children: [] };
+      const split = S.whyChildren(row, true);
       const p = el("p", "chart-caption");
       if (split.why_split === "on" && split.children.length) {
         p.appendChild(document.createTextNode("By why the agent stopped: "));
@@ -5293,7 +5282,7 @@
       taken.appendChild(document.createTextNode(". "));
       const act = el("a", null, "See it on Act");
       const safe = F.safeRoute("act");
-      if (safe) setLocalHref(act, safe);
+      setLocalHref(act, safe);
       taken.appendChild(act);
       a3.appendChild(taken);
       a3.appendChild(el("p", "chart-caption", "An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. One already exists for this cause, so this prompt asks the agent to help check it or extend it rather than start another."));
@@ -5794,16 +5783,11 @@
     if (r.view === "help") renderGuide(document.getElementById("help-stops"), data);
     if (drawerEl && drawerEl.open) drawerEl.close();
     if (r.view === "task") {
-      // #/ opens on a task with something to teach and waste labels; the
-      // page says which rule chose it.
-      const landing = F.landingChoice(data.jobs);
-      const id = r.job || (landing.job ? landing.job.id : null);
+      const id = r.job;
       const note = document.getElementById("landing-note");
       if (note) {
-        // On #/ only: the rule that chose the task, and why the finished
-        // tasks listed above it were skipped (A1 pass 2 M-n1).
-        note.textContent = !r.job && landing.note ? landing.note : "";
-        note.hidden = !(!r.job && landing.note);
+        note.textContent = "";
+        note.hidden = true;
       }
       renderTaskWalk(data, id, r.select).catch((err) => emptyState(document.getElementById("vsm"), `This part could not be drawn (${err && err.message ? err.message : "an error"}).`));
       const j = data.jobs.find((x) => x.id === id);
@@ -6256,7 +6240,7 @@
       const empty = { jobs: [], sessions: [], improvements: null };
       currentData = empty;
       const failedRoute = () => {
-        const r = F.parseRoute(window.location.hash, () => null);
+        const r = F.parseRoute(window.location.hash);
         const view = ["why", "about", "help", "missing"].includes(r.view) ? r.view : VIEWS.includes(r.view) ? r.view : "missing";
         for (const v of VIEWS) document.getElementById(`view-${v}`).hidden = v !== view;
         document.body.dataset.view = view;

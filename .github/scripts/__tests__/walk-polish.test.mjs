@@ -137,8 +137,9 @@ test("every share in the lede and the bar names its base, and mostly unlabeled w
   assert.equal(W.unlabeledMs(bar), 3 * H)
   assert.equal(W.unlabeledMs({ state: "lead_only" }), null)
   const app = read("site/src/app.js")
-  assert.match(app, /of the lead time\$\{g\.key === "waiting"/, "the bar's group heads say what the share is of")
-  assert.match(app, /\$\{W\.pctWords\(s\.share\)\} of the lead time`/, "and so do its legend rows")
+  assert.match(app, /const shareWords = \(ms\) => bar\.total_ms > 0 \? `\$\{W\.pctWords\(ms \/ bar\.total_ms\)\} of the lead time` : "share of lead time not known";/)
+  assert.match(app, /\$\{shareWords\(g\.ms\)\}\$\{g\.key === "waiting"/, "group heads name the base or explicitly say it is unknown")
+  assert.match(app, /\$\{shareWords\(s\.ms\)\}/, "legend rows use the same guarded share wording")
 })
 
 // ---------------------------------------- the task bar opens evidence (I-6)
