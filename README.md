@@ -250,7 +250,7 @@ Findings lead with an observation and its limits, then concrete stretches and af
 
 ## Rendered-browser gate
 
-For the three reproduced live-data defects, first run the focused,
+For the reproduced live-data defects and fixed task-journey grouping, run the focused,
 removal-sensitive browser regression from the candidate checkout:
 
 ```sh
@@ -265,6 +265,20 @@ reproduce its specific failure. Activity intervals are individual,
 potentially overlapping records, not an additive working-time total;
 missing evaluation labels never mean missing activity. “So far” describes
 the observation horizon and never replaces a source lower or upper bound.
+
+Task-journey membership uses a fixed fifteen-minute short-gap threshold.
+Rows and columns may respond to width, but do not change the intervals,
+durations or evidence selection held by an item. The focused regression
+opens every item of an actual task at 320, 390, 768, 1028, 1280 and 1440
+pixels, compares its drawer and selection, and retains the material
+4.6-hour interruption. Its source-removal control must expose larger-gap
+folding again. The public model's explicit `shortGapGrouping` mode selects
+this threshold; its older box-budget API remains available for legacy
+callers and is not used to choose task-page membership.
+The actual-data phone checks also keep long pull-request identifiers fully
+readable and actionable at doubled text size, including when their times
+are unavailable. The native neighbour-mark negative control follows the
+ladder's drawn axis, so retained groups in rows remain overlap-sensitive.
 
 The additional real-DOM event cases exercise navigation, evidence
 selection, source absence, recorded bounds, health presentation and

@@ -1,5 +1,5 @@
-// 11U uses existing public clocks only. New episode/grouping/union accounting
-// belongs to 11F; these tests pin the reader-facing summary and evidence.
+// Existing public-clock summary/evidence and 11F's fixed short-gap grouping.
+// Lifecycle and union accounting have separate producer tests.
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { test } from "node:test"
@@ -13,6 +13,43 @@ const row = {
   working_ms: measured(120000), value_in_working_ms: unavailable,
   flow_efficiency: measured(.2), longest_gap: unavailable,
 }
+
+test("short_gap_grouping_keeps_fifteen_minute_membership_independent_of_box_budget", () => {
+  const burst = (start_ms, end_ms) => ({ start_ms, end_ms, working_ms: end_ms - start_ms, sessions: [] })
+  const map = {
+    bursts: [burst(0, 60000), burst(959999, 1019999), burst(1919999, 1979999)],
+    gaps: [
+      { start_ms: 60000, end_ms: 959999, waited_on: "next_prompt" },
+      { start_ms: 1019999, end_ms: 1919999, waited_on: "next_prompt" },
+    ],
+  }
+  for (const maxBoxes of [1, 2, 6, 7, Infinity]) {
+    const model = W.mapModel(map, { shortGapGrouping: true, maxBoxes })
+    assert.equal(model.fold_ms, 900000)
+    assert.deepEqual(model.items.map((item) => item.type), ["box", "wait", "box"])
+    assert.deepEqual(model.items.filter((item) => item.type === "box").map((item) => item.burst_range), [[1, 2], [3, 3]])
+    assert.deepEqual(model.items[0].folded.map((gap) => gap.n), [1])
+    assert.deepEqual(model.items[1].gap_range, [2, 2])
+    assert.deepEqual(model.totals, {
+      working_ms: 180000, inner_wait_ms: 899999, waiting_ms: 900000,
+      lead_ms: 1979999, bursts: 3, gaps: 2,
+    })
+    assert.match(W.foldWords(model), /15 minutes/)
+    assert.doesNotMatch(W.foldWords(model), /At this width|different threshold/)
+    const drawer = W.readableDrawer(W.drawer({ kind: "box", item: model.items[0] }, { model, lead_ms: 1979999, origin_ms: 0 }))
+    assert.match(drawer.facts.find((fact) => fact[0] === "Contains short pauses")[1], /15 minutes/)
+  }
+})
+
+test("short_gap_grouping_keeps_empty_and_wait_only_maps_honest", () => {
+  const empty = W.mapModel(null, { shortGapGrouping: true })
+  assert.equal(empty.fold_ms, 900000)
+  assert.deepEqual(empty.items, [])
+  const waitOnly = W.mapModel({ gaps: [{ start_ms: 0, end_ms: 1, waited_on: "unknown" }] }, { shortGapGrouping: true })
+  assert.deepEqual(waitOnly.items.map((item) => item.type), ["wait"])
+  assert.equal(waitOnly.totals.working_ms, 0)
+  assert.equal(waitOnly.totals.waiting_ms, 1)
+})
 
 test("concise_summary_preserves_existing_bounds_without_new_clocks", () => {
   const summary = W.taskSummary(row, F.reasonText, { idle: { state: "measured", value: 480000, by: [] } })

@@ -75,11 +75,102 @@ try {
   } })
   recordProcesses()
   if (process.env.FACTORY_BROWSER_SETUP_FAILURE === "after_launch") throw new Error("Injected setup exception after browser launch")
+  const groupingContext = await browser.newContext({ viewport: { width: 320, height: 900 } })
+  const groupingPage = await groupingContext.newPage()
+  const grouping = []
+  try {
+    for (const width of [320, 390, 768, 1028, 1280, 1440]) {
+      await groupingPage.setViewportSize({ width, height: 900 })
+      await groupingPage.goto(`${base}?grouping-width=${width}#/task/${task}`)
+      await groupingPage.waitForSelector("#vsm .vsm-box, #vsm .vsm-wait")
+      await groupingPage.waitForFunction(() => ![...document.querySelectorAll(".loading")].some((e) => e.getBoundingClientRect().height > 0))
+      const items = []
+      const count = await groupingPage.locator("#vsm .vsm-box, #vsm .vsm-wait").count()
+      for (let index = 0; index < count; index++) {
+        const item = groupingPage.locator("#vsm .vsm-box, #vsm .vsm-wait").nth(index)
+        const label = await item.getAttribute("aria-label")
+        await item.click()
+        await groupingPage.waitForSelector("#evidence-drawer[open]")
+        items.push({
+          label, selection: await groupingPage.evaluate(() => location.hash),
+          evidence: await groupingPage.locator("#drawer-body").textContent(),
+        })
+        await groupingPage.evaluate(() => {
+          window.fixtureGroupingClosed = false
+          document.getElementById("evidence-drawer").addEventListener("close", () => { window.fixtureGroupingClosed = true }, { once: true })
+        })
+        await groupingPage.locator("#drawer-close").click()
+        await groupingPage.waitForFunction(() => window.fixtureGroupingClosed === true)
+      }
+      grouping.push({ width, items })
+    }
+    const caption = await groupingPage.locator(".vsm-block > .chart-caption").first().textContent()
+    check("actual_task_group_membership_durations_drawers_and_selection_are_viewport_independent", () => {
+      for (const snapshot of grouping) assert.deepEqual(snapshot.items, grouping[0].items, `actual task at ${snapshot.width}px`)
+      assert.ok(grouping[0].items.some((item) => /Wait of 4\.6 hours/.test(item.label)), "the material interruption remains a separate wait")
+      assert.match(caption, /15-minute/)
+    })
+  } finally {
+    await save("actual-task-grouping.json", JSON.stringify(grouping, null, 2))
+    await groupingContext.close()
+  }
+  for (const theme of ["light", "dark"]) {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 900 }, colorScheme: theme })
+    await ctx.addInitScript(textScaleInit, 2)
+    const p = await ctx.newPage()
+    try {
+      for (const width of [345, 320]) {
+        await p.setViewportSize({ width, height: 900 })
+        await loaded(p, "#/task/b93b442957bae64932a7666a4f9f3bf8", "#vsm button")
+        const layout = assessLayout(await p.evaluate(measureLayout, { refresh: true }))
+        const controls = await p.locator("#vsm .link-button").evaluateAll((buttons) => buttons.map((button) => ({
+          text: button.textContent, html: button.outerHTML, rect: button.getBoundingClientRect().toJSON(),
+          ancestors: [button.parentElement, button.parentElement.parentElement].map((element) => ({
+            html: element.outerHTML.slice(0, 900), rect: element.getBoundingClientRect().toJSON(),
+            display: getComputedStyle(element).display, whiteSpace: getComputedStyle(element).whiteSpace,
+          })),
+        })))
+        results.push({ name: `long_actual_task_phone_diagnostic_${theme}_${width}`, layout, controls })
+        check(`long_actual_task_text2x_controls_fit_${theme}_${width}`, () => assert.deepEqual(layout, []))
+      }
+    } finally { await ctx.close() }
+  }
+  const neighbourMap = JSON.parse(await readFile(new URL("./fixtures/v12-ladder-neighbours-map.json", import.meta.url), "utf8"))
+  neighbourMap.job = task
+  for (const width of [390, 1280]) {
+    const ctx = await browser.newContext({ viewport: { width, height: 900 } })
+    await ctx.route(`**/map/${task}.json`, (route) => route.fulfill({ json: neighbourMap }))
+    const p = await ctx.newPage()
+    try {
+      await loaded(p, `#/task/${task}`, "#vsm .mark-lane-prompt .lad-mark")
+      const original = await p.evaluate(() => {
+        const marks = [...document.querySelectorAll("#vsm .mark-lane-prompt .lad-mark")]
+        const [first, second] = marks.map((mark, index) => [marks[index - 1], mark]).find(([a, b]) => a && Number(b.dataset.item) === Number(a.dataset.item) + 1)
+        second.dataset.fixtureNeighbour = "1"
+        const original = { vertical: !!second.closest(".vsm-phone"), css: second.style.cssText, top: second.style.top, left: second.style.left }
+        second.style.left = `${parseFloat(second.style.left) - (second.getBoundingClientRect().left - first.getBoundingClientRect().left)}px`
+        return original
+      })
+      const oldHits = assessLayout(await p.evaluate(measureLayout, { refresh: true })).filter((hit) => hit.code === "overlapping_controls")
+      await p.evaluate((original) => {
+        const marks = [...document.querySelectorAll("#vsm .mark-lane-prompt .lad-mark")]
+        const second = document.querySelector('[data-fixture-neighbour="1"]')
+        const first = marks[marks.indexOf(second) - 1]
+        second.style.cssText = original.css
+        const axis = original.vertical ? "top" : "left"
+        second.dataset.gatePlanted = "1"
+        second.style[axis] = `${parseFloat(second.style[axis]) - (second.getBoundingClientRect()[axis] - first.getBoundingClientRect()[axis])}px`
+      }, original)
+      const hits = assessLayout(await p.evaluate(measureLayout, { refresh: true })).filter((hit) => hit.code === "overlapping_controls" && hit.planted)
+      results.push({ name: `neighbour_ladder_axis_diagnostic_${width}`, original, oldHits, hits })
+      check(`neighbour_ladder_overlap_control_remains_sensitive_${width}`, () => assert.ok(hits.length))
+    } finally { await ctx.close() }
+  }
   for (const theme of ["light", "dark"]) for (const scale of [1, 2]) {
     const context = await browser.newContext({ viewport: { width: 1028, height: 900 }, colorScheme: theme })
     await context.addInitScript(textScaleInit, scale)
     const page = await context.newPage()
-    for (const width of [1028, 1027, 822, 781]) {
+    for (const width of [1028, 1027, 822, 781, 345, 320]) {
       await page.setViewportSize({ width, height: 900 })
       await loaded(page, `#/task/${task}`, "#vsm button")
       const layout = assessLayout(await page.evaluate(measureLayout, { refresh: true }))
@@ -135,6 +226,13 @@ try {
   const app = await readFile(join(site, "app.js"), "utf8")
   const steps = await readFile(join(site, "steps.js"), "utf8")
   const mutations = [
+    { name: "removing_PR_token_wrapping_recreates_phone_text2x_overflow", file: "app.js", source: app.replace('      b.style.maxWidth = "100%";\n      b.style.overflowWrap = "anywhere";\n', ""), hash: "#/task/b93b442957bae64932a7666a4f9f3bf8", selector: "#vsm button", width: 320, scale: 2,
+      verify: async (p) => assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((hit) => hit.code === "offscreen_control")) },
+    { name: "removing_fixed_short_gap_grouping_folds_material_interruptions", file: "app.js", source: app.replace("shortGapGrouping: true", "shortGapGrouping: false"), hash: `#/task/${task}`, selector: "#vsm button", width: 768,
+      verify: async (p) => {
+        assert.ok(await p.locator("#vsm .vsm-box, #vsm .vsm-wait").count() < grouping[0].items.length)
+        assert.match(await p.locator("#vsm").textContent(), /waits shorter than 4 hours/)
+      } },
     { name: "removing_column_fit_recreates_overflow", file: "app.js", source: app.replace("if (!phone && minimumWidth > width)", "if (false)"), hash: `#/task/${task}`, selector: "#vsm button", width: 1028,
       verify: async (p) => assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((x) => x.code === "document_overflow")) },
     { name: "removing_activity_equivalent_recreates_missing_chart", file: "app.js", source: app.replace("if (intervals.length) {", "if (false) {"), hash: `#/task/${task}/session/${session}`, selector: "#swimlane svg", width: 1280,
@@ -144,6 +242,7 @@ try {
   ]
   for (const mutant of mutations) {
     const ctx = await browser.newContext({ viewport: { width: mutant.width, height: 900 } })
+    if (mutant.scale) await ctx.addInitScript(textScaleInit, mutant.scale)
     await ctx.route(`**/${mutant.file}`, (route) => route.fulfill({ contentType: "text/javascript", body: mutant.source }))
     const p = await ctx.newPage()
     try {

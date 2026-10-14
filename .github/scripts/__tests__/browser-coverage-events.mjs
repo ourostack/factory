@@ -1483,7 +1483,7 @@ try {
     assert.equal(await page.locator("#help-stops li").count(), 3)
   })
   await scenario("a_selected_real_summary_survives_a_large_responsive_map_redraw", async (page) => {
-    await load(page, "#/task/1f0ae588c4005f5834263305eff79640", "#vsm .vsm-wide")
+    await load(page, "#/task/1f0ae588c4005f5834263305eff79640", "#vsm .vsm")
     const control = page.locator(".journey-show").first()
     await control.click()
     assert.equal(await control.getAttribute("aria-pressed"), "true")
@@ -3271,12 +3271,12 @@ try {
   await scenario("remaining_e_an_enlarged_count_badge_stays_centered_over_its_short_step", async (page, context) => {
     await context.addInitScript(() => document.addEventListener("DOMContentLoaded", () => {
       const style = document.createElement("style")
-      style.textContent = ".lad-mark-multi { min-width: 1000px !important; }"
+      style.textContent = ".lad-mark-multi { min-width: 1000px !important; min-height: 1000px !important; }"
       document.head.appendChild(style)
     }))
     await load(page, `#/task/${task.id}`, "#vsm .lad-mark-multi")
     assert.ok(await page.locator("#vsm .lad-mark-multi").count())
-    await openEvidence(page, "#vsm .lad-mark-multi", 1)
+    await openEvidence(page, "#vsm .lad-mark-multi", 1, true)
     assert.doesNotMatch(await page.locator("#vsm").textContent(), /NaN|Infinity/)
   })
   await scenario("remaining_e_a_first_prompt_without_any_published_why_omits_the_why_column", async (page, context) => {
@@ -3904,7 +3904,7 @@ try {
     map.bursts = map.bursts.slice(0, 2)
     const start = map.bursts[0].start_ms
     for (const [index, burst] of map.bursts.entries()) {
-      burst.start_ms = start + index * 360000
+      burst.start_ms = start + index * 960000
       burst.end_ms = burst.start_ms + 60000
       burst.working_ms = measured(60000)
       burst.idle_ms = measured(0)
@@ -3915,7 +3915,7 @@ try {
     }
     const gap = structuredClone(map.gaps[0])
     Object.assign(gap, { start_ms: map.bursts[0].end_ms, end_ms: map.bursts[1].start_ms, n: 1, waited_on: "next_prompt",
-      idle_by_waited_on_ms: { next_prompt: measured(300000) }, idle_by_why_ms: { approval: measured(150000), decision: measured(150000) } })
+      idle_by_waited_on_ms: { next_prompt: measured(900000) }, idle_by_why_ms: { approval: measured(450000), decision: measured(450000) } })
     map.gaps = [gap]
     map.bursts_state = map.bursts_labels = measured(2)
     map.lead_window = { state: "measured", start_ms: start, end_ms: map.bursts[1].end_ms, reasons: [] }
@@ -4075,6 +4075,57 @@ try {
       assert.doesNotMatch(page.url(), /selection=gap/)
       await closeDrawer(page)
     }
+  })
+  await scenario("S1_taller_reader_data_rows_do_not_need_extra_summary_padding", async (page, context) => {
+    const map = structuredClone(maps.get(task.id))
+    map.bursts = map.bursts.slice(0, 1)
+    map.gaps = []
+    map.human_turns = []
+    map.prs = []
+    await fixtureJson(context, `map/${task.id}.json`, map)
+    await context.addInitScript(() => document.addEventListener("DOMContentLoaded", () => {
+      const style = document.createElement("style")
+      style.textContent = ".vsm-data { min-height: 1000px !important; }"
+      document.head.appendChild(style)
+    }))
+    await load(page, `#/task/${task.id}`, "#vsm .vsm-wide")
+    assert.equal(await page.locator("#vsm .vsm-wide").evaluate((root) => root.style.paddingBottom), "")
+  })
+  await scenario("S1_grouped_prompt_lists_keep_mid_turn_and_first_prompt_interpretations", async (page, context) => {
+    const map = structuredClone(maps.get(task.id))
+    map.bursts = map.bursts.slice(0, 1)
+    map.gaps = []
+    map.prs = []
+    map.human_turns = map.human_turns.slice(0, 2).map((turn, index) => ({
+      ...turn, at_ms: map.bursts[0].start_ms + 1000 + index, basis: index ? "first" : "mid_turn",
+    }))
+    await fixtureJson(context, `map/${task.id}.json`, map)
+    await load(page, `#/task/${task.id}`, "#vsm .vsm-op")
+    await page.locator("#vsm .vsm-op").first().click()
+    await page.waitForSelector("#evidence-drawer[open]")
+    assert.match(await page.locator("#drawer-body").textContent(), /while the agent was still working/)
+    assert.match(await page.locator("#drawer-body").textContent(), /session's first prompt/)
+    await closeDrawer(page)
+  })
+  await scenario("S1_synthetic_public_display_producer_can_omit_optional_triage_figures", async (page, context) => {
+    const before = await readFile(join(site, "steps.js"), "utf8")
+    const served = before
+      .replace("function triageCoverageWords(queue) {", "function triageCoverageWords(queue) { return [];")
+      .replace("function triageRunnerWords(queue) {", "function triageRunnerWords(queue) { return null;")
+    assert.notEqual(served, before)
+    const receipt = join(out, "optional-triage-display-public-producer-response.json")
+    await writeFile(receipt, JSON.stringify({
+      boundary: "synthetic public display producer omits optional coverage/runner sentences",
+      before_sha256: createHash("sha256").update(before).digest("hex"),
+      served_sha256: createHash("sha256").update(served).digest("hex"),
+      actual_deployment_claim: false,
+    }, null, 2))
+    console.log("CREATED", receipt)
+    await context.route("**/steps.js", (route) => route.fulfill({ contentType: "text/javascript", body: served }))
+    await load(page, "#/improvements", "#triage-brief .improvement-row")
+    assert.equal(await page.locator("#triage-brief .triage-coverage").count(), 0)
+    assert.ok(await page.locator("#triage-brief .improvement-row").count())
+    assert.doesNotMatch(await page.locator("#triage-brief").textContent(), /all.clear|NaN|Infinity/i)
   })
 } catch (error) { results.push({ name: "harness_exception", passed: false, error: error.stack }) }
 finally {

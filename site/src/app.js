@@ -2050,12 +2050,12 @@
     }
     const width = container.clientWidth || 1000;
     let phone = width < 640;
-    // As many boxes as fit at a readable width; the rest of the work is folded.
-    const maxBoxes = phone ? 6 : Math.max(2, Math.floor((width - 190 + 84) / 212));
+    // Evidence membership uses the fixed short-gap threshold; only its
+    // rows or columns respond to the space available below.
     // Job-level states the bursts' own counts cannot know: operator turns
     // not recorded, and a task not labeled, read "not recorded" and "not
     // labeled yet" in every box, never 0.
-    const model = W.mapModel(map, { maxBoxes, jobStates: { operator_turns: j.human_turns || null, labels: row ? row.value_in_working_ms : null } });
+    const model = W.mapModel(map, { shortGapGrouping: true, jobStates: { operator_turns: j.human_turns || null, labels: row ? row.value_in_working_ms : null } });
     // The prompts and pull requests are still listed when no map is drawn.
     const clockOnly = (origin0) => {
       const lw0 = map.lead_window || {};
@@ -2800,6 +2800,8 @@
     const link = (pr, k) => {
       const b = el("button", "link-button", `${pr.repo}#${pr.number}`);
       b.type = "button";
+      b.style.maxWidth = "100%";
+      b.style.overflowWrap = "anywhere";
       b.addEventListener("click", () => openMark(b, { kind: "pr", pr, k }));
       return b;
     };
@@ -3158,14 +3160,13 @@
       // The operator's own time on this task (A1 I2).
       ledeEl.appendChild(el("span", "lede-operator", ` ${W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore).text}`));
       const caption = document.querySelector(".vsm-block > .chart-caption");
-      if (caption) caption.textContent = "Detailed recorded timeline (legacy map): boxes show recorded activity; pauses, operator prompts and pull requests have distinct shapes and text labels. This map is not to scale and its folding can change with available width. Open an item for evidence; use its separate session link for a time-scaled timeline. Production periods and the time between deliveries are listed under Production clocks above.";
+      if (caption) caption.textContent = "Detailed recorded timeline: boxes show recorded activity; pauses, operator prompts and pull requests have distinct shapes and text labels. This map is not to scale. Grouping uses the same 15-minute short-gap threshold at every width; only the layout changes. Open an item for evidence; use its separate session link for a time-scaled timeline. Production periods and the time between deliveries are listed under Production clocks above.";
     });
     safely("time-went", () => {
       renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle, light });
       tokens.push(...twEl.querySelectorAll(".tw-part"));
     });
-    // Redraw the map when the width crosses between phone and wide or
-    // changes how many boxes fit.
+    // Redraw the layout when its width changes; evidence groups stay fixed.
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
