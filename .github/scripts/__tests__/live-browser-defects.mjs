@@ -119,6 +119,58 @@ try {
       })
     } finally { await context.close() }
   }
+  for (const mode of ["drawer", "focused", "outside", "missing"]) {
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_effective_pixel_resize_preserves_${mode}_focus`, async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const control = page.locator('#vsm .vsm-box[data-item="0"]')
+        const label = await control.getAttribute("aria-label")
+        await control.evaluate((node) => { node.dataset.fixtureOldOpener = "true" })
+        await control.focus()
+        if (mode === "missing") await control.evaluate((node) => node.setAttribute("aria-label", "Unavailable previous evidence control"))
+        if (mode === "outside") await page.locator("nav a").first().focus()
+        if (mode === "drawer") {
+          await page.keyboard.press("Enter")
+          await page.waitForSelector("#evidence-drawer[open]")
+        }
+        const before = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, url: location.hash,
+          drawer: document.getElementById("drawer-body").textContent,
+          active: document.activeElement.outerHTML,
+        }))
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        const changed = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, url: location.hash,
+          old: !!document.querySelector("[data-fixture-old-opener]"),
+          drawer: document.getElementById("drawer-body").textContent,
+          open: document.getElementById("evidence-drawer").open,
+        }))
+        assert.equal(before.width - changed.width, 1, "this input must change the real map width, not a capped viewport")
+        assert.equal(changed.old, false, "the resize must actually reconstruct the map")
+        assert.equal(changed.url, before.url, "logical selection must not change during resize")
+        if (mode === "drawer") {
+          assert.equal(changed.open, true, "resize must not close or reopen the modal")
+          assert.equal(changed.drawer, before.drawer, "drawer evidence must not change")
+          await page.keyboard.press("Escape")
+          await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+          await page.waitForFunction(() => document.activeElement.matches('#vsm .vsm-box[data-item="0"]'))
+        }
+        const after = await page.evaluate(() => ({
+          active: document.activeElement.outerHTML, label: document.activeElement.getAttribute("aria-label"),
+          item: document.activeElement.getAttribute("data-item"), body: document.activeElement === document.body,
+        }))
+        if (mode === "drawer" || mode === "focused") {
+          assert.equal(after.item, "0")
+          assert.equal(after.label, label, "focus must return to the equivalent actual evidence, not a substitute")
+        } else if (mode === "outside") assert.equal(after.active, before.active, "map refresh must not steal outside focus")
+        else assert.equal(after.body, true, "an unavailable equivalent must not focus another evidence item")
+        return { mode, before, changed, after }
+      })
+    } finally { await context.close() }
+  }
   const nativeSource = await readFile(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
   const drawerStart = nativeSource.indexOf('const drawerCheck = async (page, key = "Enter", nth = 0) => {')
   const drawerEnd = nativeSource.indexOf("\n    {\n      const { context, page } = await newPage({ width: 1280 })", drawerStart)
@@ -362,6 +414,30 @@ try {
       results.push({ name: mutant.name, passed: true })
     } catch (e) { results.push({ name: mutant.name, passed: false, error: e.message }) }
     await ctx.close()
+  }
+  {
+    const removed = app
+      .replace("if (openerKey) drawerOpener = replacement(openerKey);", "if (openerKey) drawerOpener = null;")
+      .replace("if (focused) focused.focus({ preventScroll: true });", "void focused;")
+    assert.notEqual(removed, app, "focus removal must change the candidate source")
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    await context.route("**/app.js", (route) => route.fulfill({ contentType: "text/javascript", body: removed }))
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_map_focus_rebinding_recreates_effective_pixel_escape_focus_loss", async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const beforeWidth = await page.locator("#vsm").evaluate((node) => node.clientWidth)
+        await page.locator('#vsm .vsm-box[data-item="0"]').focus()
+        await page.keyboard.press("Enter")
+        await page.waitForSelector("#evidence-drawer[open]")
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        assert.equal(beforeWidth - await page.locator("#vsm").evaluate((node) => node.clientWidth), 1)
+        await page.keyboard.press("Escape")
+        await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+      })
+    } finally { await context.close() }
   }
   {
     const expression = nativeSource.slice(drawerStart, drawerEnd).trim().replace("const drawerCheck = ", "")

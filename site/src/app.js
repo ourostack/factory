@@ -3169,8 +3169,21 @@
     // Redraw the layout when its width changes; evidence groups stay fixed.
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
+      const controlKey = (node) => JSON.stringify([node.tagName, node.getAttribute("aria-label"), node.getAttribute("data-item"), node.getAttribute("data-step"), node.getAttribute("href"), node.textContent]);
+      const remember = (node) => node && vsmEl.contains(node) ? controlKey(node) : null;
+      const focusedKey = remember(document.activeElement);
+      const openerKey = remember(drawerOpener);
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
       if (drawn && selectedSummary) drawn.highlight(selectedSummary);
+      // Rebind only an unambiguous logical control; the old DOM node is gone.
+      const replacement = (key) => {
+        if (!key) return null;
+        const matches = [...vsmEl.querySelectorAll("button, a[href], summary")].filter((node) => controlKey(node) === key);
+        return matches.length === 1 ? matches[0] : null;
+      };
+      if (openerKey) drawerOpener = replacement(openerKey);
+      const focused = replacement(focusedKey);
+      if (focused) focused.focus({ preventScroll: true });
     });
     if (select) safely("vsm", () => {
       if (!drawn || !drawn.select(select)) {
