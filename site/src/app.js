@@ -3174,6 +3174,9 @@
       const remember = (node) => node && vsmEl.contains(node) ? controlKey(node) : null;
       const focusedKey = remember(document.activeElement);
       const openerKey = remember(drawerOpener);
+      const figureBox = document.activeElement.matches(".vsm-phone .vsm-data-toggle") &&
+        [...vsmEl.querySelectorAll(".vsm-box")].find((box) => box.dataset.item === document.activeElement.dataset.item && box.parentElement.contains(document.activeElement));
+      const figureBoxKey = figureBox ? controlKey(figureBox) : null;
       const disclosures = [...vsmEl.querySelectorAll("details > summary")].map((summary) => ({ key: controlKey(summary), open: summary.parentElement.open }));
       const figures = [...vsmEl.querySelectorAll(".vsm-data-toggle")].map((toggle) => ({ key: controlKey(toggle), open: toggle.getAttribute("aria-expanded") === "true" }));
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
@@ -3194,7 +3197,15 @@
         if (toggle && (toggle.getAttribute("aria-expanded") === "true") !== state.open) toggle.click();
       }
       if (openerKey) drawerOpener = replacement(openerKey);
-      const focused = replacement(focusedKey);
+      let focused = replacement(focusedKey);
+      // Wide maps show every figure and intentionally retire this toggle.
+      if (focused && figureBoxKey && focused.matches(".vsm-wide .vsm-data-toggle")) {
+        const continuation = replacement(figureBoxKey);
+        if (continuation && getComputedStyle(continuation).display !== "none" && getComputedStyle(continuation).visibility !== "hidden") {
+          focused = continuation;
+          focused.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      }
       if (focused) focused.focus({ preventScroll: true });
     });
     if (select) safely("vsm", () => {

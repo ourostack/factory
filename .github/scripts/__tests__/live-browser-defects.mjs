@@ -238,6 +238,67 @@ try {
       })
     } finally { await context.close() }
   }
+  for (const [job, mode] of [
+    ["45d37f1db9a5490812f16952142e2b78", "normal"],
+    ["346c8d506104085baf14c1d62e53f418", "normal"],
+    ["45d37f1db9a5490812f16952142e2b78", "corrupt-primary"],
+    ["45d37f1db9a5490812f16952142e2b78", "hidden-primary"],
+    ["45d37f1db9a5490812f16952142e2b78", "invisible-primary"],
+  ]) {
+    const context = await browser.newContext({ viewport: { width: 679, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_retired_figure_toggle_keeps_item_context_${job}_${mode}`, async () => {
+        await loaded(page, `#/task/${job}`, "#vsm .vsm-box")
+        const toggle = page.locator("#vsm .vsm-data-toggle").last()
+        const item = await toggle.getAttribute("data-item")
+        await toggle.focus()
+        await page.keyboard.press("Enter")
+        assert.equal(await toggle.textContent(), "Fewer figures")
+        await toggle.evaluate((node) => { window.fixtureRetiredFigure = node })
+        if (mode === "corrupt-primary") await page.locator(`#vsm .vsm-box[data-item="${item}"]`).evaluate((node) => node.setAttribute("aria-label", "Unavailable previous primary control"))
+        if (mode === "hidden-primary" || mode === "invisible-primary") await page.addStyleTag({
+          content: `#vsm .vsm-wide .vsm-box[data-item="${item}"] { ${mode === "hidden-primary" ? "display:none" : "visibility:hidden"} !important; }`,
+        })
+        const before = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, hash: location.hash,
+          preferences: [...document.querySelectorAll("#vsm .vsm-data-toggle")].map((n) => n.getAttribute("aria-expanded")),
+        }))
+        await page.setViewportSize({ width: 680, height: 900 })
+        await page.waitForTimeout(350)
+        const after = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, hash: location.hash,
+          preferences: [...document.querySelectorAll("#vsm .vsm-data-toggle")].map((n) => n.getAttribute("aria-expanded")),
+          oldConnected: window.fixtureRetiredFigure.isConnected,
+          wide: !!document.querySelector("#vsm .vsm-wide"),
+          body: document.activeElement === document.body, active: document.activeElement.outerHTML,
+          item: document.activeElement.getAttribute("data-item"),
+          primary: document.activeElement.matches("#vsm .vsm-box"),
+          modal: document.getElementById("evidence-drawer").open,
+        }))
+        await save(`retired-figure-${job}-${mode}.json`, JSON.stringify({ before, after }, null, 2))
+        assert.equal(after.width - before.width, 1, "actual map639→640 must reconstruct phone→wide")
+        assert.equal(after.oldConnected, false)
+        assert.equal(after.wide, true)
+        assert.equal(after.hash, before.hash, "continuation must not select or navigate")
+        assert.equal(after.modal, false, "continuation must not activate evidence")
+        assert.deepEqual(after.preferences, before.preferences)
+        if (mode === "normal") {
+          assert.equal(after.primary, true)
+          assert.equal(after.item, item, "continue at the same known item, not another work box")
+          const primary = page.locator(`#vsm .vsm-box[data-item="${item}"]`)
+          assert.equal(await primary.isVisible(), true)
+          const rect = await primary.boundingBox()
+          assert.ok(rect.y < 900 && rect.y + rect.height > 0 && rect.x < 680 && rect.x + rect.width > 0)
+          await page.keyboard.press("Tab")
+          assert.equal(await page.evaluate(() => document.activeElement.closest("[data-item]")?.getAttribute("data-item")), item, "Tab must continue in this item's ladder, not restart at work box1")
+          assert.equal(await page.evaluate(() => location.hash), before.hash)
+          assert.equal(await page.locator("#evidence-drawer[open]").count(), 0)
+        } else assert.equal(after.body, true, "declared missing/hidden/corrupt DOM faults must not focus another item")
+        return { job, mode, item, before, after }
+      })
+    } finally { await context.close() }
+  }
   const nativeSource = await readFile(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
   const drawerStart = nativeSource.indexOf('const drawerCheck = async (page, key = "Enter", nth = 0) => {')
   const drawerEnd = nativeSource.indexOf("\n    {\n      const { context, page } = await newPage({ width: 1280 })", drawerStart)
@@ -531,6 +592,28 @@ try {
         await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
         await page.waitForTimeout(100)
         assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+      })
+    } finally { await context.close() }
+  }
+  {
+    const removed = app.replace("focused = continuation;", "void continuation;")
+    assert.notEqual(removed, app, "retired-control continuation removal must change the candidate")
+    const context = await browser.newContext({ viewport: { width: 679, height: 900 } })
+    await context.route("**/app.js", (route) => route.fulfill({ contentType: "text/javascript", body: removed }))
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_retired_figure_continuation_recreates_same_actual_item_focus_loss", async () => {
+        await loaded(page, "#/task/45d37f1db9a5490812f16952142e2b78", "#vsm .vsm-box")
+        await page.locator('#vsm .vsm-data-toggle[data-item="2"]').focus()
+        await page.keyboard.press("Enter")
+        const before = await page.locator("#vsm").evaluate((n) => n.clientWidth)
+        const hash = await page.evaluate(() => location.hash)
+        await page.setViewportSize({ width: 680, height: 900 })
+        await page.waitForTimeout(350)
+        assert.equal(await page.locator("#vsm").evaluate((n) => n.clientWidth) - before, 1)
+        assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+        assert.equal(await page.evaluate(() => location.hash), hash)
+        assert.equal(await page.locator("#evidence-drawer[open]").count(), 0)
       })
     } finally { await context.close() }
   }
