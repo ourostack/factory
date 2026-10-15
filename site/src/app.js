@@ -3211,7 +3211,7 @@
     resizeTimer = setTimeout(() => {
       const vsmEl = document.getElementById("vsm");
       if (!lastMapRender || !vsmEl || document.getElementById("view-task").hidden) return;
-      if (Math.abs(vsmEl.clientWidth - lastMapWidth) < 40) return;
+      if (Math.abs(vsmEl.clientWidth - lastMapWidth) < 1) return;
       lastMapWidth = vsmEl.clientWidth;
       lastMapRender();
     }, 150);

@@ -1076,7 +1076,7 @@ export async function main(argv = process.argv.slice(2)) {
     // are tried on the same value-stream box.
     const drawerCheck = async (page, key = "Enter", nth = 0) => {
       await open(page, ROUTES.find((r) => r.name === "task"))
-      const item = page.locator('#vsm [aria-label$="Opens the evidence."]').nth(nth)
+      const item = page.locator('#vsm .vsm-box[aria-label$="Opens the evidence."], #vsm .vsm-wait[aria-label$="Opens the evidence."]').nth(nth)
       if (!(await item.count())) throw new Error("no in-place evidence item on the task page")
       await item.evaluate((a) => { a.dataset.gateOpener = "1" })
       await item.focus()
@@ -1889,12 +1889,26 @@ export async function main(argv = process.argv.slice(2)) {
       const ids = targets.data.jobs.map((j) => j.id).filter((id) => typeof id === "string" && /^[0-9a-f]{32}$/.test(id))
       if (!ids.length) throw new Error("no task is published")
       const found = []
+      const readDestination = async (page, detail) => {
+        let phase = "load"
+        const progress = (state) => console.log(JSON.stringify({ gate_progress: { check: "every_task_page_and_one_session_each_layout_is_clean", ...detail, phase, state } }))
+        progress("start")
+        try {
+          await load(page, detail.url)
+          phase = "settle"
+          progress("start")
+          await settle(page, detail.view)
+          progress("complete")
+        } catch (error) {
+          progress("failed")
+          throw new Error(`${detail.view} ${detail.job}${detail.session ? `/${detail.session}` : ""} at ${detail.width} px during ${phase}: ${detail.url} (observed ${page.url()}): ${error.message}`, { cause: error })
+        }
+      }
       for (const width of EVERY_TASK_WIDTHS) {
         const { context, page, errors } = await newPage({ width })
         try {
           for (const id of ids) {
-            await load(page, url + `#/task/${id}`)
-            await settle(page, "task")
+            await readDestination(page, { view: "task", job: id, session: null, width, url: url + `#/task/${id}` })
             for (const p of await layout(page)) found.push(`${id.slice(0, 8)} at ${width} px: ${p.code} ${p.detail || ""}`)
           }
           for (const e of errors) found.push(`${width} px: page error ${e}`)
@@ -1911,8 +1925,7 @@ export async function main(argv = process.argv.slice(2)) {
         const { context, page, errors } = await newPage({ width })
         try {
           for (const [id, session] of firstSession) {
-            await load(page, url + `#/task/${id}/session/${session}`)
-            await settle(page, "session")
+            await readDestination(page, { view: "session", job: id, session, width, url: url + `#/task/${id}/session/${session}` })
             for (const p of await layout(page)) found.push(`session ${session.slice(0, 8)} of ${id.slice(0, 8)} at ${width} px: ${p.code} ${p.detail || ""}`)
           }
           for (const e of errors) found.push(`${width} px: page error ${e}`)
@@ -2218,7 +2231,10 @@ export async function main(argv = process.argv.slice(2)) {
           // alteration is replayed and the route is judged on its times.
           const slowed = { ...sink[0], altered: false }
           settleBudget([...SETTLE_TIMES, slowed], SETTLE_BUDGET_MS, new Map([...RETIMES, [settleKey(slowed), await retime(slowed, 10000)]]))
-        }, /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\) at 1280 px: 1\d\.\d s, re-timed 1\d\.\d s \(main \d+\.\d s\)/)
+        }, {
+          test: (message) => /^1 of \d+ over 5 s: cause \(#\/causes\/[^)]*\) at 1280 px: [1-9]\d+\.\d s, re-timed [1-9]\d+\.\d s \(main \d+\.\d s\)$/.test(message)
+            && message.includes(` over 5 s: cause (${routeHash(ROUTES.find((route) => route.name === "cause"), targets)}) at 1280 px: `),
+        })
         await expectFailure("slowdown_3x_over_budget", async () => {
           // Main is held back 2.5 s; this build three times main's time.
           // Re-timed back to back it is still over the budget, and main is

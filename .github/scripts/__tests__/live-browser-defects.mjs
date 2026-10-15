@@ -6,7 +6,8 @@ import { readFile, mkdir, writeFile } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { execFileSync } from "node:child_process"
-import { assessLayout, measureLayout, checkChartEquivalents, CHART_EQUIVALENTS, compareFigures, assessTaskForms, textScaleInit, parseArgs } from "../../../site/scripts/verify-v12-browser.mjs"
+import { runInNewContext } from "node:vm"
+import { assessLayout, measureLayout, checkChartEquivalents, CHART_EQUIVALENTS, compareFigures, assessTaskForms, textScaleInit, parseArgs, ROUTES } from "../../../site/scripts/verify-v12-browser.mjs"
 
 const [siteArg, moduleArg, outArg] = process.argv.slice(2)
 assert.ok(siteArg && moduleArg && outArg, "dist, existing Playwright ESM and protected output are required")
@@ -75,6 +76,107 @@ try {
   } })
   recordProcesses()
   if (process.env.FACTORY_BROWSER_SETUP_FAILURE === "after_launch") throw new Error("Injected setup exception after browser launch")
+  const denseTask = "eaa7a23cb71326d0aa5e8d2fb3b350c8"
+  const denseHash = `#/task/${denseTask}`
+  const denseResults = []
+  const actualCheck = async (name, fn) => {
+    try { const details = await fn(); results.push({ name, passed: true }); denseResults.push({ name, details }) }
+    catch (error) { results.push({ name, passed: false, error: error.message }); denseResults.push({ name, error: error.message }) }
+  }
+  for (const [width, scale] of [[722, 2], [736, 2], [768, 2], [1060, 1]]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 } })
+    await context.addInitScript(textScaleInit, scale)
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_fresh_${width}_text${scale}x`, async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        await page.locator("#vsm .vsm").evaluate((n) => n.scrollIntoView({ block: "start" }))
+        await page.screenshot({ path: join(out, `dense-visible-${width}-text${scale}x.png`) })
+        const problems = assessLayout(await page.evaluate(measureLayout, { refresh: true }))
+        assert.deepEqual(problems, [])
+        return { width, scale, items: await page.locator("#vsm .vsm-box, #vsm .vsm-wait").count() }
+      })
+    } finally { await context.close() }
+  }
+  for (const [from, to, scale] of [[1099, 1060, 1], [768, 722, 2]]) {
+    const context = await browser.newContext({ viewport: { width: from, height: 900 } })
+    await context.addInitScript(textScaleInit, scale)
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_pixel_resize_${from}_${to}_text${scale}x`, async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const failures = []
+        const labels = await page.locator("#vsm .vsm-box, #vsm .vsm-wait").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")))
+        for (let width = from; width >= to; width--) {
+          await page.setViewportSize({ width, height: 900 })
+          await page.waitForTimeout(300)
+          const problems = assessLayout(await page.evaluate(measureLayout, { refresh: true }))
+          if (problems.length) failures.push({ width, problems })
+          assert.deepEqual(await page.locator("#vsm .vsm-box, #vsm .vsm-wait").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label"))), labels)
+        }
+        assert.deepEqual(failures, [])
+        return { from, to, scale, labels }
+      })
+    } finally { await context.close() }
+  }
+  const nativeSource = await readFile(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
+  const drawerStart = nativeSource.indexOf('const drawerCheck = async (page, key = "Enter", nth = 0) => {')
+  const drawerEnd = nativeSource.indexOf("\n    {\n      const { context, page } = await newPage({ width: 1280 })", drawerStart)
+  assert.ok(drawerStart >= 0 && drawerEnd > drawerStart)
+  const nativeDrawerCheck = runInNewContext(`(${nativeSource.slice(drawerStart, drawerEnd).trim().replace("const drawerCheck = ", "")})`, {
+    ROUTES,
+    open: async (page) => { await page.goto("about:blank"); await loaded(page, denseHash, "#vsm .vsm-box") },
+  })
+  for (const key of ["Enter", "Space"]) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_native_keyboard_${key}`, async () => {
+        await nativeDrawerCheck(page, key)
+        return { key, url: page.url(), active: await page.evaluate(() => document.activeElement.outerHTML) }
+      })
+    } finally { await context.close() }
+  }
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck("actual_dense_task_unknown_prompt_does_not_invent_burst_selection", async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const prompt = page.locator('#vsm .vsm-op.why-not_known[aria-label$="Opens the evidence."]').first()
+        assert.ok(await prompt.count(), "actual unknown-reason prompt must remain available")
+        await prompt.focus()
+        await page.keyboard.press("Enter")
+        await page.waitForSelector("#evidence-drawer[open]")
+        assert.equal(new URL(page.url()).hash.includes("selection="), false)
+        assert.match(await page.locator("#drawer-body").textContent(), /Operator prompt/)
+        await page.keyboard.press("Escape")
+        await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        return { prompt: await prompt.getAttribute("aria-label") }
+      })
+      await actualCheck("actual_dense_task_unavailable_selection_preserves_unknown_figures_and_no_substitute", async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        let last = 0
+        const count = await page.locator("#vsm .vsm-box").count()
+        for (let index = 0; index < count; index++) {
+          await page.locator("#vsm .vsm-box").nth(index).click()
+          await page.waitForSelector("#evidence-drawer[open]")
+          const selection = new URLSearchParams(page.url().split("?")[1]).get("selection")
+          last = Math.max(last, ...selection.slice("bursts:".length).split("-").map(Number))
+          assert.match(await page.locator("#drawer-body").textContent(), /not labeled/)
+          await page.keyboard.press("Escape")
+          await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        }
+        assert.ok(last > 0)
+        await page.goto("about:blank")
+        await loaded(page, denseHash + `?selection=${encodeURIComponent(`bursts:${last + 1}`)}`, ".selection-unavailable")
+        assert.match(await page.locator(".selection-unavailable").textContent(), /No substitute item was selected/)
+        assert.equal(await page.locator("#evidence-drawer[open]").count(), 0)
+        return { requested_unavailable_burst: last + 1 }
+      })
+    } finally { await context.close() }
+  }
+  await save("actual-dense-contract.json", JSON.stringify(denseResults, null, 2))
   const groupingContext = await browser.newContext({ viewport: { width: 320, height: 900 } })
   const groupingPage = await groupingContext.newPage()
   const grouping = []
@@ -225,7 +327,15 @@ try {
   // repository or retained artifact, and must reproduce its own defect.
   const app = await readFile(join(site, "app.js"), "utf8")
   const steps = await readFile(join(site, "steps.js"), "utf8")
+  const css = await readFile(join(site, "styles.css"), "utf8")
   const mutations = [
+    { name: "removing_pixel_resize_refresh_recreates_dense_mark_collision", file: "app.js", source: app.replace("Math.abs(vsmEl.clientWidth - lastMapWidth) < 1", "Math.abs(vsmEl.clientWidth - lastMapWidth) < 40"), hash: denseHash, selector: "#vsm .vsm-box", width: 1099,
+      verify: async (p) => {
+        for (let width = 1099; width >= 1060; width--) { await p.setViewportSize({ width, height: 900 }); await p.waitForTimeout(300) }
+        assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((x) => x.code === "overlapping_controls" && x.detail.includes("lad-mark")))
+      } },
+    { name: "removing_prompt_marker_wrapping_recreates_dense_text2x_collision", file: "styles.css", source: css.replace("min-width: 0; max-width: 100%; background: none;", "background: none;").replace(".vsm-op-text { min-width: 0; overflow-wrap: anywhere; }\n", ""), hash: denseHash, selector: "#vsm .vsm-box", width: 768, scale: 2,
+      verify: async (p) => assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((x) => x.code === "overlapping_controls" && x.detail.includes("vsm-op"))) },
     { name: "removing_PR_token_wrapping_recreates_phone_text2x_overflow", file: "app.js", source: app.replace('      b.style.maxWidth = "100%";\n      b.style.overflowWrap = "anywhere";\n', ""), hash: "#/task/b93b442957bae64932a7666a4f9f3bf8", selector: "#vsm button", width: 320, scale: 2,
       verify: async (p) => assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((hit) => hit.code === "offscreen_control")) },
     { name: "removing_fixed_short_gap_grouping_folds_material_interruptions", file: "app.js", source: app.replace("shortGapGrouping: true", "shortGapGrouping: false"), hash: `#/task/${task}`, selector: "#vsm button", width: 768,
@@ -243,15 +353,31 @@ try {
   for (const mutant of mutations) {
     const ctx = await browser.newContext({ viewport: { width: mutant.width, height: 900 } })
     if (mutant.scale) await ctx.addInitScript(textScaleInit, mutant.scale)
-    await ctx.route(`**/${mutant.file}`, (route) => route.fulfill({ contentType: "text/javascript", body: mutant.source }))
+    await ctx.route(`**/${mutant.file}`, (route) => route.fulfill({ contentType: mutant.file.endsWith(".css") ? "text/css" : "text/javascript", body: mutant.source }))
     const p = await ctx.newPage()
     try {
-      assert.notEqual(mutant.source, mutant.file === "app.js" ? app : steps, "the source mutation must actually remove the fix")
+      assert.notEqual(mutant.source, mutant.file === "app.js" ? app : mutant.file === "styles.css" ? css : steps, "the source mutation must actually remove the fix")
       await loaded(p, mutant.hash, mutant.selector)
       await mutant.verify(p)
       results.push({ name: mutant.name, passed: true })
     } catch (e) { results.push({ name: mutant.name, passed: false, error: e.message }) }
     await ctx.close()
+  }
+  {
+    const expression = nativeSource.slice(drawerStart, drawerEnd).trim().replace("const drawerCheck = ", "")
+    const reverted = expression.replace('#vsm .vsm-box[aria-label$="Opens the evidence."], #vsm .vsm-wait[aria-label$="Opens the evidence."]', '#vsm [aria-label$="Opens the evidence."]')
+    assert.notEqual(reverted, expression, "the keyboard eligibility removal must change the native check")
+    const checkWithoutEligibility = runInNewContext(`(${reverted})`, {
+      ROUTES,
+      open: async (page) => { await page.goto("about:blank"); await loaded(page, denseHash, "#vsm .vsm-box") },
+    })
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_keyboard_target_eligibility_recreates_wrong_selection_premise", async () => {
+        await assert.rejects(checkWithoutEligibility(page, "Enter"), /Enter did not select the evidence/)
+      })
+    } finally { await context.close() }
   }
 } catch (error) {
   results.push({ name: "harness_exception", passed: false, error: error.message })

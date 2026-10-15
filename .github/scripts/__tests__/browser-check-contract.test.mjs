@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runInNewContext } from "node:vm"
 import { test } from "node:test"
 
 // The rendered-browser gate (site/scripts/verify-v12-browser.mjs) runs with a
@@ -13,6 +14,101 @@ import { test } from "node:test"
 const SCRIPT = fileURLToPath(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url))
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url))
 const G = await import(SCRIPT)
+
+function slowDataMatcher(cause = "waiting:other_task") {
+  const source = readFileSync(SCRIPT, "utf8")
+  const start = source.indexOf('await expectFailure("slow_data_file"')
+  const end = source.indexOf('await expectFailure("slowdown_3x_over_budget"', start)
+  assert.ok(start >= 0 && end > start)
+  const control = source.slice(start, end).trim()
+  const expression = control.slice(control.lastIndexOf("}, ") + 3, -1)
+  return runInNewContext(`(${expression})`, { ROUTES: G.ROUTES, routeHash: G.routeHash, targets: { cause } })
+}
+
+function slowDataError(initial, retimed, where = "#/causes/waiting%3Aother_task") {
+  const slow = { view: "cause", where, width: 1280, height: 900, scale: 1, theme: "light", after: "navigation", ms: initial }
+  const times = [...Array.from({ length: 534 }, () => ({ ...slow, ms: 100 })), slow]
+  try {
+    G.settleBudget(times, 5000, new Map([[G.settleKey(slow), { ms: retimed, main_ms: 600 }]]))
+  } catch (error) {
+    return error.message
+  }
+  assert.fail("the real settle-budget check must reject the slow file")
+}
+
+test("injected_slow_file_control_recognizes_ten_seconds_or_longer_without_an_arbitrary_upper_bound", () => {
+  const matcher = slowDataMatcher()
+  assert.equal(slowDataError(59800, 10400), "1 of 535 over 5 s: cause (#/causes/waiting%3Aother_task) at 1280 px: 59.8 s, re-timed 10.4 s (main 0.6 s)")
+  for (const [initial, retimed] of [[10000, 10000], [19900, 19900], [59800, 10400], [100100, 59800]]) {
+    assert.equal(matcher.test(slowDataError(initial, retimed)), true, `${initial}/${retimed}`)
+  }
+})
+
+test("injected_slow_file_control_rejects_short_wrong_route_wrong_reason_and_multiple_failures", () => {
+  const matcher = slowDataMatcher()
+  const genuine = slowDataError(10000, 10000)
+  const wrong = [
+    slowDataError(9900, 10000), slowDataError(10000, 9900),
+    slowDataError(10000, 10000, "#/causes/waiting%3Aapi_retry"),
+    genuine.replace("cause (", "task ("),
+    genuine.replace("over 5 s:", "over 6 s:"),
+    genuine.replace("at 1280 px:", "at 390 px:"),
+    genuine.replace("1 of 535", "2 of 535"),
+    genuine + "; cause (#/causes/waiting%3Aapi_retry) at 1280 px: 10.0 s",
+    "page.waitForFunction: Timeout 20000ms exceeded.",
+  ]
+  for (const message of wrong) assert.equal(matcher.test(message), false, message)
+  assert.equal(slowDataMatcher("waiting:api_retry").test(slowDataError(10000, 10000, "#/causes/waiting%3Aapi_retry")), true)
+})
+
+function destinationDiagnostic(load, settle, progress) {
+  const source = readFileSync(SCRIPT, "utf8")
+  const start = source.indexOf("const readDestination = async (page, detail) => {")
+  const end = source.indexOf("\n      for (const width of EVERY_TASK_WIDTHS)", start)
+  assert.ok(start >= 0 && end > start, "the real all-task destination boundary must emit context")
+  const expression = source.slice(start, end).trim().replace("const readDestination = ", "")
+  return runInNewContext(`(${expression})`, { load, settle, console: { log: (line) => progress.push(JSON.parse(line).gate_progress) } })
+}
+
+test("all_task_diagnostics_preserve_load_then_default_settle_and_report_destination_completion", async () => {
+  const calls = [], progress = []
+  const page = { url: () => "http://127.0.0.1:9000/#/task/123" }
+  const read = destinationDiagnostic(async (...args) => calls.push(["load", ...args]), async (...args) => calls.push(["settle", ...args]), progress)
+  const detail = { view: "task", job: "123", session: null, width: 390, url: page.url() }
+  await read(page, detail)
+  assert.deepEqual(calls, [["load", page, detail.url], ["settle", page, "task"]])
+  assert.deepEqual(progress.map((p) => [p.phase, p.state]), [["load", "start"], ["settle", "start"], ["settle", "complete"]])
+  assert.ok(progress.every((p) => p.job === "123" && p.width === 390 && p.url === detail.url))
+})
+
+test("all_task_load_failure_rethrows_original_error_with_exact_requested_and_observed_destination", async () => {
+  const progress = [], error = new Error("page.goto failed"), page = { url: () => "about:blank" }
+  const read = destinationDiagnostic(async () => { throw error }, async () => assert.fail("settle cannot follow failed load"), progress)
+  await assert.rejects(read(page, { view: "session", job: "job", session: "session", width: 768, url: "http://127.0.0.1:9000/#/task/job/session/session" }), (result) => {
+    assert.equal(result.cause, error)
+    assert.match(result.message, /session job\/session at 768 px during load/)
+    assert.match(result.message, /http:\/\/127\.0\.0\.1:9000\/#\/task\/job\/session\/session/)
+    assert.match(result.message, /observed about:blank/)
+    return true
+  })
+  assert.equal(progress.at(-1).state, "failed")
+  assert.equal(progress.at(-1).phase, "load")
+})
+
+test("all_task_twenty_second_view_timeout_retains_settle_phase_width_URL_and_original_cause", async () => {
+  const progress = [], error = new Error("page.waitForFunction: Timeout 20000ms exceeded.")
+  const page = { url: () => "http://127.0.0.1:9000/#/task/job" }
+  const read = destinationDiagnostic(async () => {}, async () => { throw error }, progress)
+  await assert.rejects(read(page, { view: "task", job: "job", session: null, width: 1280, url: page.url() }), (result) => {
+    assert.equal(result.cause, error)
+    assert.match(result.message, /task job at 1280 px during settle/)
+    assert.match(result.message, /Timeout 20000ms exceeded/)
+    assert.match(result.message, /http:\/\/127\.0\.0\.1:9000\/#\/task\/job/)
+    return true
+  })
+  assert.equal(progress.at(-1).phase, "settle")
+  assert.equal(progress.at(-1).state, "failed")
+})
 
 test("the gate enumerates every CSS width from 320 to 1440, both themes and text scales 1 and 2", () => {
   assert.equal(G.WIDTHS.length, 1121)

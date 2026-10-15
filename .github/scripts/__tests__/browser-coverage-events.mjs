@@ -1218,9 +1218,10 @@ try {
   await scenario("failed_platform_clock_keeps_health_unknown_and_navigation_available", async (page, context) => {
     await context.addInitScript(() => {
       const native = Date.now.bind(Date)
-      let failures = 2
       Date.now = () => {
-        if (failures-- > 0) throw new Error("Synthetic platform-clock failure")
+        const status = document.getElementById("status-line")
+        const panel = document.getElementById("health-panel")
+        if ((status && !status.childElementCount) || (panel && !panel.childElementCount)) throw new Error("Synthetic unavailable clock during health rendering")
         return native()
       }
     })
@@ -2146,10 +2147,7 @@ try {
   })
   for (const href of ["#/tasks", "#/causes", "#/tasks?status=awaiting_signoff", "#/improvements"]) await scenario(`valid_briefing_projection_destination_without_a_number_${href}`, async (page, context) => {
     const d = structuredClone(data)
-    const row = [...d.overview.attention, ...d.overview.investigation].find((r) => r.ownership === "not_published" && !r.triage)
-    assert.ok(row)
-    row.href = href
-    delete row.number
+    const row = { id: "coverage:projection", family: "production", title: "Synthetic inspection destination", impact: "The fixture has no published affected count.", ownership: "not_published", next_action: "Inspect the declared local destination.", href }
     d.overview.attention = []
     d.overview.agents = []
     d.overview.investigation = [row]
@@ -3712,6 +3710,13 @@ try {
     await page.waitForSelector("#stackup svg")
   })
   await scenario("remaining_h_missing_optional_improvement_nodes_and_alarm_focus_use_the_view_heading", async (page, context) => {
+    const d = structuredClone(data)
+    d.loop_health.alarms = [{ code: "steps_stale" }]
+    d.loop_health.verdict = { status: "cannot_tell", missing: [], quiet: measured(0), stale: measured(1) }
+    d.overview = B.buildBriefing({ data: d, improvements: d.improvements, now: 1000, validateQueue: validateImprovementQueue })
+    assert.equal(B.validateBriefing(d.overview).ok, true)
+    assert.ok(d.overview.attention.some((row) => row.id.startsWith("alarm:") && row.family === "improvement_system"))
+    await fixtureJson(context, "data.json", d)
     const html = await readFile(join(site, "index.html"), "utf8")
     const ids = ["improvement-status", "overview-triage-note", "improvement-triage-note", "improvement-alarms"]
     for (const id of ids) assert.ok(html.includes(`id="${id}"`))
@@ -3723,7 +3728,35 @@ try {
     await alarm.click()
     await page.waitForFunction(() => document.body.dataset.view === "act")
     assert.equal(await page.locator("#view-act h1").evaluate((node) => node === document.activeElement), true)
-    await page.waitForSelector("#problems .act-summary")
+    await page.waitForSelector("#problems .act-summary, #problems .chart-empty:not(.is-loading)")
+  })
+  await scenario("height_only_task_resize_keeps_evidence_membership_and_current_selection", async (page) => {
+    await load(page, `#/task/${task.id}`, "#vsm .vsm-box")
+    const labels = await page.locator("#vsm .vsm-box, #vsm .vsm-wait").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")))
+    await page.locator("#vsm .vsm-box").first().click()
+    await page.waitForSelector("#evidence-drawer[open]")
+    const selection = page.url()
+    await page.setViewportSize({ width: 1280, height: 901 })
+    await page.waitForTimeout(300)
+    assert.equal(page.url(), selection)
+    assert.deepEqual(await page.locator("#vsm .vsm-box, #vsm .vsm-wait").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label"))), labels)
+    await closeDrawer(page)
+  })
+  await scenario("overview_alarm_focus_targets_the_present_section_then_clears_on_real_navigation", async (page, context) => {
+    const d = structuredClone(data)
+    d.loop_health.alarms = [{ code: "steps_stale" }]
+    d.loop_health.verdict = { status: "cannot_tell", missing: [], quiet: measured(0), stale: measured(1) }
+    d.overview = B.buildBriefing({ data: d, improvements: d.improvements, now: 1000, validateQueue: validateImprovementQueue })
+    assert.equal(B.validateBriefing(d.overview).ok, true)
+    await fixtureJson(context, "data.json", d)
+    await load(page, "#/", "#overview-state")
+    const alarm = page.getByRole("link", { name: "Open this alarm on Improvements", exact: true }).first()
+    assert.ok(await alarm.count())
+    await alarm.click()
+    await page.waitForFunction(() => document.body.dataset.view === "act" && document.activeElement.id === "improvement-alarms")
+    await page.getByRole("link", { name: "Help", exact: true }).click()
+    await page.waitForFunction(() => document.body.dataset.view === "help" && document.activeElement === document.querySelector("#view-help h1"))
+    assert.ok((await page.locator("#help-stops").innerText()).trim())
   })
   await scenario("remaining_h_unavailable_store_data_and_a_skip_route_fail_closed_as_a_missing_view", async (page, context) => {
     await context.route("**/data.json", (route) => route.fulfill({ status: 503, body: "Synthetic unavailable store" }))
