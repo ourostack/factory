@@ -2252,6 +2252,7 @@
         data.appendChild(dl);
         const more = el("button", "vsm-data-toggle", "All figures");
         more.type = "button";
+        more.dataset.item = String(i);
         more.setAttribute("aria-expanded", "false");
         more.addEventListener("click", () => {
           const openNow = data.classList.toggle("is-open");
@@ -3169,8 +3170,43 @@
     // Redraw the layout when its width changes; evidence groups stay fixed.
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
+      const controlKey = (node) => JSON.stringify([node.tagName, node.getAttribute("aria-label"), node.getAttribute("data-item"), node.getAttribute("data-step"), node.getAttribute("href"), node.matches(".vsm-data-toggle") ? "figures" : node.textContent]);
+      const remember = (node) => node && vsmEl.contains(node) ? controlKey(node) : null;
+      const focusedKey = remember(document.activeElement);
+      const openerKey = remember(drawerOpener);
+      const figureBox = document.activeElement.matches(".vsm-phone .vsm-data-toggle") &&
+        [...vsmEl.querySelectorAll(".vsm-box")].find((box) => box.dataset.item === document.activeElement.dataset.item && box.parentElement.contains(document.activeElement));
+      const figureBoxKey = figureBox ? controlKey(figureBox) : null;
+      const disclosures = [...vsmEl.querySelectorAll("details > summary")].map((summary) => ({ key: controlKey(summary), open: summary.parentElement.open }));
+      const figures = [...vsmEl.querySelectorAll(".vsm-data-toggle")].map((toggle) => ({ key: controlKey(toggle), open: toggle.getAttribute("aria-expanded") === "true" }));
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
       if (drawn && selectedSummary) drawn.highlight(selectedSummary);
+      // Rebind only an unambiguous logical control; the old DOM node is gone.
+      const replacement = (key) => {
+        if (!key) return null;
+        const matches = [...vsmEl.querySelectorAll("button, a[href], summary")].filter((node) => controlKey(node) === key);
+        return matches.length === 1 ? matches[0] : null;
+      };
+      // Reachability is part of restoration, before either focus or Escape.
+      for (const state of disclosures) {
+        const summary = replacement(state.key);
+        if (summary) summary.parentElement.open = state.open;
+      }
+      for (const state of figures) {
+        const toggle = replacement(state.key);
+        if (toggle && (toggle.getAttribute("aria-expanded") === "true") !== state.open) toggle.click();
+      }
+      if (openerKey) drawerOpener = replacement(openerKey);
+      let focused = replacement(focusedKey);
+      // Wide maps show every figure and intentionally retire this toggle.
+      if (focused && figureBoxKey && focused.matches(".vsm-wide .vsm-data-toggle")) {
+        const continuation = replacement(figureBoxKey);
+        if (continuation && getComputedStyle(continuation).display !== "none" && getComputedStyle(continuation).visibility !== "hidden") {
+          focused = continuation;
+          focused.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      }
+      if (focused) focused.focus({ preventScroll: true });
     });
     if (select) safely("vsm", () => {
       if (!drawn || !drawn.select(select)) {
@@ -3211,7 +3247,7 @@
     resizeTimer = setTimeout(() => {
       const vsmEl = document.getElementById("vsm");
       if (!lastMapRender || !vsmEl || document.getElementById("view-task").hidden) return;
-      if (Math.abs(vsmEl.clientWidth - lastMapWidth) < 40) return;
+      if (Math.abs(vsmEl.clientWidth - lastMapWidth) < 1) return;
       lastMapWidth = vsmEl.clientWidth;
       lastMapRender();
     }, 150);

@@ -6,7 +6,8 @@ import { readFile, mkdir, writeFile } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { execFileSync } from "node:child_process"
-import { assessLayout, measureLayout, checkChartEquivalents, CHART_EQUIVALENTS, compareFigures, assessTaskForms, textScaleInit, parseArgs } from "../../../site/scripts/verify-v12-browser.mjs"
+import { runInNewContext } from "node:vm"
+import { assessLayout, measureLayout, checkChartEquivalents, CHART_EQUIVALENTS, compareFigures, assessTaskForms, textScaleInit, parseArgs, ROUTES } from "../../../site/scripts/verify-v12-browser.mjs"
 
 const [siteArg, moduleArg, outArg] = process.argv.slice(2)
 assert.ok(siteArg && moduleArg && outArg, "dist, existing Playwright ESM and protected output are required")
@@ -75,6 +76,287 @@ try {
   } })
   recordProcesses()
   if (process.env.FACTORY_BROWSER_SETUP_FAILURE === "after_launch") throw new Error("Injected setup exception after browser launch")
+  const denseTask = "eaa7a23cb71326d0aa5e8d2fb3b350c8"
+  const denseHash = `#/task/${denseTask}`
+  const denseResults = []
+  const actualCheck = async (name, fn) => {
+    try { const details = await fn(); results.push({ name, passed: true }); denseResults.push({ name, details }) }
+    catch (error) { results.push({ name, passed: false, error: error.message }); denseResults.push({ name, error: error.message }) }
+  }
+  for (const [width, scale] of [[722, 2], [736, 2], [768, 2], [1060, 1]]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 } })
+    await context.addInitScript(textScaleInit, scale)
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_fresh_${width}_text${scale}x`, async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        await page.locator("#vsm .vsm").evaluate((n) => n.scrollIntoView({ block: "start" }))
+        await page.screenshot({ path: join(out, `dense-visible-${width}-text${scale}x.png`) })
+        const problems = assessLayout(await page.evaluate(measureLayout, { refresh: true }))
+        assert.deepEqual(problems, [])
+        return { width, scale, items: await page.locator("#vsm .vsm-box, #vsm .vsm-wait").count() }
+      })
+    } finally { await context.close() }
+  }
+  for (const [from, to, scale] of [[1099, 1060, 1], [768, 722, 2]]) {
+    const context = await browser.newContext({ viewport: { width: from, height: 900 } })
+    await context.addInitScript(textScaleInit, scale)
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_pixel_resize_${from}_${to}_text${scale}x`, async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const failures = []
+        const labels = await page.locator("#vsm .vsm-box, #vsm .vsm-wait").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")))
+        for (let width = from; width >= to; width--) {
+          await page.setViewportSize({ width, height: 900 })
+          await page.waitForTimeout(300)
+          const problems = assessLayout(await page.evaluate(measureLayout, { refresh: true }))
+          if (problems.length) failures.push({ width, problems })
+          assert.deepEqual(await page.locator("#vsm .vsm-box, #vsm .vsm-wait").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label"))), labels)
+        }
+        assert.deepEqual(failures, [])
+        return { from, to, scale, labels }
+      })
+    } finally { await context.close() }
+  }
+  for (const mode of ["drawer", "focused", "outside", "missing"]) {
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_effective_pixel_resize_preserves_${mode}_focus`, async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const control = page.locator('#vsm .vsm-box[data-item="0"]')
+        const label = await control.getAttribute("aria-label")
+        await control.evaluate((node) => { node.dataset.fixtureOldOpener = "true" })
+        await control.focus()
+        if (mode === "missing") await control.evaluate((node) => {
+          node.setAttribute("aria-label", "Unavailable previous evidence control")
+          const summary = document.querySelector("#vsm details.handoffs > summary")
+          if (summary) { summary.textContent = "Unavailable previous disclosure"; summary.parentElement.open = true }
+          const toggle = document.querySelector("#vsm .vsm-data-toggle")
+          if (toggle) toggle.setAttribute("data-item", "unavailable-previous-figure")
+        })
+        if (mode === "outside") await page.locator("nav a").first().focus()
+        if (mode === "drawer") {
+          await page.keyboard.press("Enter")
+          await page.waitForSelector("#evidence-drawer[open]")
+        }
+        const before = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, url: location.hash,
+          drawer: document.getElementById("drawer-body").textContent,
+          active: document.activeElement.outerHTML,
+        }))
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        const changed = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, url: location.hash,
+          old: !!document.querySelector("[data-fixture-old-opener]"),
+          drawer: document.getElementById("drawer-body").textContent,
+          open: document.getElementById("evidence-drawer").open,
+        }))
+        assert.equal(before.width - changed.width, 1, "this input must change the real map width, not a capped viewport")
+        assert.equal(changed.old, false, "the resize must actually reconstruct the map")
+        assert.equal(changed.url, before.url, "logical selection must not change during resize")
+        if (mode === "drawer") {
+          assert.equal(changed.open, true, "resize must not close or reopen the modal")
+          assert.equal(changed.drawer, before.drawer, "drawer evidence must not change")
+          await page.keyboard.press("Escape")
+          await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+          await page.waitForFunction(() => document.activeElement.matches('#vsm .vsm-box[data-item="0"]'))
+        }
+        const after = await page.evaluate(() => ({
+          active: document.activeElement.outerHTML, label: document.activeElement.getAttribute("aria-label"),
+          item: document.activeElement.getAttribute("data-item"), body: document.activeElement === document.body,
+        }))
+        if (mode === "drawer" || mode === "focused") {
+          assert.equal(after.item, "0")
+          assert.equal(after.label, label, "focus must return to the equivalent actual evidence, not a substitute")
+        } else if (mode === "outside") assert.equal(after.active, before.active, "map refresh must not steal outside focus")
+        else assert.equal(after.body, true, "an unavailable equivalent must not focus another evidence item")
+        return { mode, before, changed, after }
+      })
+    } finally { await context.close() }
+  }
+  for (const mode of ["drawer", "focused", "closed", "figures"]) {
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_recorded_disclosures_survive_effective_pixel_resize_${mode}`, async () => {
+        await loaded(page, `#/task/${task}`, "#vsm .vsm-box")
+        const handoffs = page.locator("#vsm details.handoffs")
+        const summary = handoffs.locator(":scope > summary")
+        assert.equal((await summary.textContent()).trim(), "The 212 prompts as a table")
+        const prompt = handoffs.getByRole("button", { name: "Prompt 1", exact: true })
+        if (mode === "drawer" || mode === "focused") {
+          await summary.focus()
+          await page.keyboard.press("Enter")
+          await prompt.focus()
+          if (mode === "drawer") {
+            await page.keyboard.press("Enter")
+            await page.waitForSelector("#evidence-drawer[open]")
+          }
+        } else if (mode === "closed") {
+          await page.getByText("The map as a table", { exact: true }).focus()
+          await page.keyboard.press("Enter")
+          await summary.focus()
+        } else {
+          await page.locator("#vsm .vsm-data-toggle").first().focus()
+          await page.keyboard.press("Enter")
+        }
+        const snapshot = () => page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth,
+          disclosures: [...document.querySelectorAll("#vsm details > summary")].map((n) => ({ label: n.textContent, open: n.parentElement.open })),
+          figures: [...document.querySelectorAll("#vsm .vsm-data-toggle")].map((n) => ({ label: n.textContent, expanded: n.getAttribute("aria-expanded") })),
+          active: document.activeElement.outerHTML, hash: location.hash,
+          drawer: document.getElementById("drawer-body").textContent,
+          modal: document.getElementById("evidence-drawer").open,
+        }))
+        const before = await snapshot()
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        const changed = await snapshot()
+        if (mode === "drawer") {
+          await page.keyboard.press("Escape")
+          await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+          await page.waitForTimeout(100)
+        }
+        const after = await snapshot()
+        await save(`disclosure-focus-${mode}.json`, JSON.stringify({ before, changed, after }, null, 2))
+        assert.equal(before.width - changed.width, 1, "the actual map must change1021→1020, not a capped-width proxy")
+        assert.deepEqual(changed.disclosures, before.disclosures, "preserve each native disclosure's own open or closed state")
+        assert.deepEqual(changed.figures, before.figures, "preserve per-item figure disclosure states")
+        assert.equal(changed.hash, before.hash)
+        if (mode === "drawer") {
+          assert.equal(changed.modal, true)
+          assert.equal(changed.active, before.active, "reconstruction must not steal modal focus")
+          assert.equal(changed.drawer, before.drawer)
+        }
+        if (mode === "drawer" || mode === "focused") {
+          assert.equal(await prompt.evaluate((node) => document.activeElement === node), true, "return to the same real reachable Prompt1")
+        } else assert.equal(after.active, before.active, "the focused disclosure's logical control must remain reachable")
+        return { before, changed, after }
+      })
+    } finally { await context.close() }
+  }
+  for (const [job, mode] of [
+    ["45d37f1db9a5490812f16952142e2b78", "normal"],
+    ["346c8d506104085baf14c1d62e53f418", "normal"],
+    ["45d37f1db9a5490812f16952142e2b78", "corrupt-primary"],
+    ["45d37f1db9a5490812f16952142e2b78", "hidden-primary"],
+    ["45d37f1db9a5490812f16952142e2b78", "invisible-primary"],
+  ]) {
+    const context = await browser.newContext({ viewport: { width: 679, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_retired_figure_toggle_keeps_item_context_${job}_${mode}`, async () => {
+        await loaded(page, `#/task/${job}`, "#vsm .vsm-box")
+        const toggle = page.locator("#vsm .vsm-data-toggle").last()
+        const item = await toggle.getAttribute("data-item")
+        await toggle.focus()
+        await page.keyboard.press("Enter")
+        assert.equal(await toggle.textContent(), "Fewer figures")
+        await toggle.evaluate((node) => { window.fixtureRetiredFigure = node })
+        if (mode === "corrupt-primary") await page.locator(`#vsm .vsm-box[data-item="${item}"]`).evaluate((node) => node.setAttribute("aria-label", "Unavailable previous primary control"))
+        if (mode === "hidden-primary" || mode === "invisible-primary") await page.addStyleTag({
+          content: `#vsm .vsm-wide .vsm-box[data-item="${item}"] { ${mode === "hidden-primary" ? "display:none" : "visibility:hidden"} !important; }`,
+        })
+        const before = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, hash: location.hash,
+          preferences: [...document.querySelectorAll("#vsm .vsm-data-toggle")].map((n) => n.getAttribute("aria-expanded")),
+        }))
+        await page.setViewportSize({ width: 680, height: 900 })
+        await page.waitForTimeout(350)
+        const after = await page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth, hash: location.hash,
+          preferences: [...document.querySelectorAll("#vsm .vsm-data-toggle")].map((n) => n.getAttribute("aria-expanded")),
+          oldConnected: window.fixtureRetiredFigure.isConnected,
+          wide: !!document.querySelector("#vsm .vsm-wide"),
+          body: document.activeElement === document.body, active: document.activeElement.outerHTML,
+          item: document.activeElement.getAttribute("data-item"),
+          primary: document.activeElement.matches("#vsm .vsm-box"),
+          modal: document.getElementById("evidence-drawer").open,
+        }))
+        await save(`retired-figure-${job}-${mode}.json`, JSON.stringify({ before, after }, null, 2))
+        assert.equal(after.width - before.width, 1, "actual map639→640 must reconstruct phone→wide")
+        assert.equal(after.oldConnected, false)
+        assert.equal(after.wide, true)
+        assert.equal(after.hash, before.hash, "continuation must not select or navigate")
+        assert.equal(after.modal, false, "continuation must not activate evidence")
+        assert.deepEqual(after.preferences, before.preferences)
+        if (mode === "normal") {
+          assert.equal(after.primary, true)
+          assert.equal(after.item, item, "continue at the same known item, not another work box")
+          const primary = page.locator(`#vsm .vsm-box[data-item="${item}"]`)
+          assert.equal(await primary.isVisible(), true)
+          const rect = await primary.boundingBox()
+          assert.ok(rect.y < 900 && rect.y + rect.height > 0 && rect.x < 680 && rect.x + rect.width > 0)
+          await page.keyboard.press("Tab")
+          assert.equal(await page.evaluate(() => document.activeElement.closest("[data-item]")?.getAttribute("data-item")), item, "Tab must continue in this item's ladder, not restart at work box1")
+          assert.equal(await page.evaluate(() => location.hash), before.hash)
+          assert.equal(await page.locator("#evidence-drawer[open]").count(), 0)
+        } else assert.equal(after.body, true, "declared missing/hidden/corrupt DOM faults must not focus another item")
+        return { job, mode, item, before, after }
+      })
+    } finally { await context.close() }
+  }
+  const nativeSource = await readFile(new URL("../../../site/scripts/verify-v12-browser.mjs", import.meta.url), "utf8")
+  const drawerStart = nativeSource.indexOf('const drawerCheck = async (page, key = "Enter", nth = 0) => {')
+  const drawerEnd = nativeSource.indexOf("\n    {\n      const { context, page } = await newPage({ width: 1280 })", drawerStart)
+  assert.ok(drawerStart >= 0 && drawerEnd > drawerStart)
+  const nativeDrawerCheck = runInNewContext(`(${nativeSource.slice(drawerStart, drawerEnd).trim().replace("const drawerCheck = ", "")})`, {
+    ROUTES,
+    open: async (page) => { await page.goto("about:blank"); await loaded(page, denseHash, "#vsm .vsm-box") },
+  })
+  for (const key of ["Enter", "Space"]) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_dense_task_native_keyboard_${key}`, async () => {
+        await nativeDrawerCheck(page, key)
+        return { key, url: page.url(), active: await page.evaluate(() => document.activeElement.outerHTML) }
+      })
+    } finally { await context.close() }
+  }
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck("actual_dense_task_unknown_prompt_does_not_invent_burst_selection", async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const prompt = page.locator('#vsm .vsm-op.why-not_known[aria-label$="Opens the evidence."]').first()
+        assert.ok(await prompt.count(), "actual unknown-reason prompt must remain available")
+        await prompt.focus()
+        await page.keyboard.press("Enter")
+        await page.waitForSelector("#evidence-drawer[open]")
+        assert.equal(new URL(page.url()).hash.includes("selection="), false)
+        assert.match(await page.locator("#drawer-body").textContent(), /Operator prompt/)
+        await page.keyboard.press("Escape")
+        await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        return { prompt: await prompt.getAttribute("aria-label") }
+      })
+      await actualCheck("actual_dense_task_unavailable_selection_preserves_unknown_figures_and_no_substitute", async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        let last = 0
+        const count = await page.locator("#vsm .vsm-box").count()
+        for (let index = 0; index < count; index++) {
+          await page.locator("#vsm .vsm-box").nth(index).click()
+          await page.waitForSelector("#evidence-drawer[open]")
+          const selection = new URLSearchParams(page.url().split("?")[1]).get("selection")
+          last = Math.max(last, ...selection.slice("bursts:".length).split("-").map(Number))
+          assert.match(await page.locator("#drawer-body").textContent(), /not labeled/)
+          await page.keyboard.press("Escape")
+          await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        }
+        assert.ok(last > 0)
+        await page.goto("about:blank")
+        await loaded(page, denseHash + `?selection=${encodeURIComponent(`bursts:${last + 1}`)}`, ".selection-unavailable")
+        assert.match(await page.locator(".selection-unavailable").textContent(), /No substitute item was selected/)
+        assert.equal(await page.locator("#evidence-drawer[open]").count(), 0)
+        return { requested_unavailable_burst: last + 1 }
+      })
+    } finally { await context.close() }
+  }
+  await save("actual-dense-contract.json", JSON.stringify(denseResults, null, 2))
   const groupingContext = await browser.newContext({ viewport: { width: 320, height: 900 } })
   const groupingPage = await groupingContext.newPage()
   const grouping = []
@@ -225,7 +507,15 @@ try {
   // repository or retained artifact, and must reproduce its own defect.
   const app = await readFile(join(site, "app.js"), "utf8")
   const steps = await readFile(join(site, "steps.js"), "utf8")
+  const css = await readFile(join(site, "styles.css"), "utf8")
   const mutations = [
+    { name: "removing_pixel_resize_refresh_recreates_dense_mark_collision", file: "app.js", source: app.replace("Math.abs(vsmEl.clientWidth - lastMapWidth) < 1", "Math.abs(vsmEl.clientWidth - lastMapWidth) < 40"), hash: denseHash, selector: "#vsm .vsm-box", width: 1099,
+      verify: async (p) => {
+        for (let width = 1099; width >= 1060; width--) { await p.setViewportSize({ width, height: 900 }); await p.waitForTimeout(300) }
+        assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((x) => x.code === "overlapping_controls" && x.detail.includes("lad-mark")))
+      } },
+    { name: "removing_prompt_marker_wrapping_recreates_dense_text2x_collision", file: "styles.css", source: css.replace("min-width: 0; max-width: 100%; background: none;", "background: none;").replace(".vsm-op-text { min-width: 0; overflow-wrap: anywhere; }\n", ""), hash: denseHash, selector: "#vsm .vsm-box", width: 768, scale: 2,
+      verify: async (p) => assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((x) => x.code === "overlapping_controls" && x.detail.includes("vsm-op"))) },
     { name: "removing_PR_token_wrapping_recreates_phone_text2x_overflow", file: "app.js", source: app.replace('      b.style.maxWidth = "100%";\n      b.style.overflowWrap = "anywhere";\n', ""), hash: "#/task/b93b442957bae64932a7666a4f9f3bf8", selector: "#vsm button", width: 320, scale: 2,
       verify: async (p) => assert.ok(assessLayout(await p.evaluate(measureLayout, { refresh: true })).some((hit) => hit.code === "offscreen_control")) },
     { name: "removing_fixed_short_gap_grouping_folds_material_interruptions", file: "app.js", source: app.replace("shortGapGrouping: true", "shortGapGrouping: false"), hash: `#/task/${task}`, selector: "#vsm button", width: 768,
@@ -243,15 +533,105 @@ try {
   for (const mutant of mutations) {
     const ctx = await browser.newContext({ viewport: { width: mutant.width, height: 900 } })
     if (mutant.scale) await ctx.addInitScript(textScaleInit, mutant.scale)
-    await ctx.route(`**/${mutant.file}`, (route) => route.fulfill({ contentType: "text/javascript", body: mutant.source }))
+    await ctx.route(`**/${mutant.file}`, (route) => route.fulfill({ contentType: mutant.file.endsWith(".css") ? "text/css" : "text/javascript", body: mutant.source }))
     const p = await ctx.newPage()
     try {
-      assert.notEqual(mutant.source, mutant.file === "app.js" ? app : steps, "the source mutation must actually remove the fix")
+      assert.notEqual(mutant.source, mutant.file === "app.js" ? app : mutant.file === "styles.css" ? css : steps, "the source mutation must actually remove the fix")
       await loaded(p, mutant.hash, mutant.selector)
       await mutant.verify(p)
       results.push({ name: mutant.name, passed: true })
     } catch (e) { results.push({ name: mutant.name, passed: false, error: e.message }) }
     await ctx.close()
+  }
+  {
+    const removed = app
+      .replace("if (openerKey) drawerOpener = replacement(openerKey);", "if (openerKey) drawerOpener = null;")
+      .replace("if (focused) focused.focus({ preventScroll: true });", "void focused;")
+    assert.notEqual(removed, app, "focus removal must change the candidate source")
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    await context.route("**/app.js", (route) => route.fulfill({ contentType: "text/javascript", body: removed }))
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_map_focus_rebinding_recreates_effective_pixel_escape_focus_loss", async () => {
+        await loaded(page, denseHash, "#vsm .vsm-box")
+        const beforeWidth = await page.locator("#vsm").evaluate((node) => node.clientWidth)
+        await page.locator('#vsm .vsm-box[data-item="0"]').focus()
+        await page.keyboard.press("Enter")
+        await page.waitForSelector("#evidence-drawer[open]")
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        assert.equal(beforeWidth - await page.locator("#vsm").evaluate((node) => node.clientWidth), 1)
+        await page.keyboard.press("Escape")
+        await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+      })
+    } finally { await context.close() }
+  }
+  {
+    const removed = app.replace("if (summary) summary.parentElement.open = state.open;", "void summary;")
+    assert.notEqual(removed, app, "native disclosure-state removal must change the candidate")
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    await context.route("**/app.js", (route) => route.fulfill({ contentType: "text/javascript", body: removed }))
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_disclosure_state_restoration_recreates_real_prompt_escape_focus_loss", async () => {
+        await loaded(page, `#/task/${task}`, "#vsm .vsm-box")
+        const beforeWidth = await page.locator("#vsm").evaluate((node) => node.clientWidth)
+        const summary = page.locator("#vsm details.handoffs > summary")
+        await summary.focus()
+        await page.keyboard.press("Enter")
+        await page.locator("#vsm details.handoffs").getByRole("button", { name: "Prompt 1", exact: true }).focus()
+        await page.keyboard.press("Enter")
+        await page.waitForSelector("#evidence-drawer[open]")
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        assert.equal(beforeWidth - await page.locator("#vsm").evaluate((node) => node.clientWidth), 1)
+        assert.equal(await page.locator("#vsm details.handoffs").evaluate((node) => node.open), false)
+        assert.equal(await page.locator("#vsm details.handoffs button").first().textContent(), "Prompt 1")
+        await page.keyboard.press("Escape")
+        await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        await page.waitForTimeout(100)
+        assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+      })
+    } finally { await context.close() }
+  }
+  {
+    const removed = app.replace("focused = continuation;", "void continuation;")
+    assert.notEqual(removed, app, "retired-control continuation removal must change the candidate")
+    const context = await browser.newContext({ viewport: { width: 679, height: 900 } })
+    await context.route("**/app.js", (route) => route.fulfill({ contentType: "text/javascript", body: removed }))
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_retired_figure_continuation_recreates_same_actual_item_focus_loss", async () => {
+        await loaded(page, "#/task/45d37f1db9a5490812f16952142e2b78", "#vsm .vsm-box")
+        await page.locator('#vsm .vsm-data-toggle[data-item="2"]').focus()
+        await page.keyboard.press("Enter")
+        const before = await page.locator("#vsm").evaluate((n) => n.clientWidth)
+        const hash = await page.evaluate(() => location.hash)
+        await page.setViewportSize({ width: 680, height: 900 })
+        await page.waitForTimeout(350)
+        assert.equal(await page.locator("#vsm").evaluate((n) => n.clientWidth) - before, 1)
+        assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+        assert.equal(await page.evaluate(() => location.hash), hash)
+        assert.equal(await page.locator("#evidence-drawer[open]").count(), 0)
+      })
+    } finally { await context.close() }
+  }
+  {
+    const expression = nativeSource.slice(drawerStart, drawerEnd).trim().replace("const drawerCheck = ", "")
+    const reverted = expression.replace('#vsm .vsm-box[aria-label$="Opens the evidence."], #vsm .vsm-wait[aria-label$="Opens the evidence."]', '#vsm [aria-label$="Opens the evidence."]')
+    assert.notEqual(reverted, expression, "the keyboard eligibility removal must change the native check")
+    const checkWithoutEligibility = runInNewContext(`(${reverted})`, {
+      ROUTES,
+      open: async (page) => { await page.goto("about:blank"); await loaded(page, denseHash, "#vsm .vsm-box") },
+    })
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_keyboard_target_eligibility_recreates_wrong_selection_premise", async () => {
+        await assert.rejects(checkWithoutEligibility(page, "Enter"), /Enter did not select the evidence/)
+      })
+    } finally { await context.close() }
   }
 } catch (error) {
   results.push({ name: "harness_exception", passed: false, error: error.message })
