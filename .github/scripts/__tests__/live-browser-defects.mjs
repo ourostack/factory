@@ -129,7 +129,13 @@ try {
         const label = await control.getAttribute("aria-label")
         await control.evaluate((node) => { node.dataset.fixtureOldOpener = "true" })
         await control.focus()
-        if (mode === "missing") await control.evaluate((node) => node.setAttribute("aria-label", "Unavailable previous evidence control"))
+        if (mode === "missing") await control.evaluate((node) => {
+          node.setAttribute("aria-label", "Unavailable previous evidence control")
+          const summary = document.querySelector("#vsm details.handoffs > summary")
+          if (summary) { summary.textContent = "Unavailable previous disclosure"; summary.parentElement.open = true }
+          const toggle = document.querySelector("#vsm .vsm-data-toggle")
+          if (toggle) toggle.setAttribute("data-item", "unavailable-previous-figure")
+        })
         if (mode === "outside") await page.locator("nav a").first().focus()
         if (mode === "drawer") {
           await page.keyboard.press("Enter")
@@ -168,6 +174,67 @@ try {
         } else if (mode === "outside") assert.equal(after.active, before.active, "map refresh must not steal outside focus")
         else assert.equal(after.body, true, "an unavailable equivalent must not focus another evidence item")
         return { mode, before, changed, after }
+      })
+    } finally { await context.close() }
+  }
+  for (const mode of ["drawer", "focused", "closed", "figures"]) {
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    const page = await context.newPage()
+    try {
+      await actualCheck(`actual_recorded_disclosures_survive_effective_pixel_resize_${mode}`, async () => {
+        await loaded(page, `#/task/${task}`, "#vsm .vsm-box")
+        const handoffs = page.locator("#vsm details.handoffs")
+        const summary = handoffs.locator(":scope > summary")
+        assert.equal((await summary.textContent()).trim(), "The 212 prompts as a table")
+        const prompt = handoffs.getByRole("button", { name: "Prompt 1", exact: true })
+        if (mode === "drawer" || mode === "focused") {
+          await summary.focus()
+          await page.keyboard.press("Enter")
+          await prompt.focus()
+          if (mode === "drawer") {
+            await page.keyboard.press("Enter")
+            await page.waitForSelector("#evidence-drawer[open]")
+          }
+        } else if (mode === "closed") {
+          await page.getByText("The map as a table", { exact: true }).focus()
+          await page.keyboard.press("Enter")
+          await summary.focus()
+        } else {
+          await page.locator("#vsm .vsm-data-toggle").first().focus()
+          await page.keyboard.press("Enter")
+        }
+        const snapshot = () => page.evaluate(() => ({
+          width: document.getElementById("vsm").clientWidth,
+          disclosures: [...document.querySelectorAll("#vsm details > summary")].map((n) => ({ label: n.textContent, open: n.parentElement.open })),
+          figures: [...document.querySelectorAll("#vsm .vsm-data-toggle")].map((n) => ({ label: n.textContent, expanded: n.getAttribute("aria-expanded") })),
+          active: document.activeElement.outerHTML, hash: location.hash,
+          drawer: document.getElementById("drawer-body").textContent,
+          modal: document.getElementById("evidence-drawer").open,
+        }))
+        const before = await snapshot()
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        const changed = await snapshot()
+        if (mode === "drawer") {
+          await page.keyboard.press("Escape")
+          await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+          await page.waitForTimeout(100)
+        }
+        const after = await snapshot()
+        await save(`disclosure-focus-${mode}.json`, JSON.stringify({ before, changed, after }, null, 2))
+        assert.equal(before.width - changed.width, 1, "the actual map must change1021→1020, not a capped-width proxy")
+        assert.deepEqual(changed.disclosures, before.disclosures, "preserve each native disclosure's own open or closed state")
+        assert.deepEqual(changed.figures, before.figures, "preserve per-item figure disclosure states")
+        assert.equal(changed.hash, before.hash)
+        if (mode === "drawer") {
+          assert.equal(changed.modal, true)
+          assert.equal(changed.active, before.active, "reconstruction must not steal modal focus")
+          assert.equal(changed.drawer, before.drawer)
+        }
+        if (mode === "drawer" || mode === "focused") {
+          assert.equal(await prompt.evaluate((node) => document.activeElement === node), true, "return to the same real reachable Prompt1")
+        } else assert.equal(after.active, before.active, "the focused disclosure's logical control must remain reachable")
+        return { before, changed, after }
       })
     } finally { await context.close() }
   }
@@ -435,6 +502,34 @@ try {
         assert.equal(beforeWidth - await page.locator("#vsm").evaluate((node) => node.clientWidth), 1)
         await page.keyboard.press("Escape")
         await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
+      })
+    } finally { await context.close() }
+  }
+  {
+    const removed = app.replace("if (summary) summary.parentElement.open = state.open;", "void summary;")
+    assert.notEqual(removed, app, "native disclosure-state removal must change the candidate")
+    const context = await browser.newContext({ viewport: { width: 1061, height: 900 } })
+    await context.route("**/app.js", (route) => route.fulfill({ contentType: "text/javascript", body: removed }))
+    const page = await context.newPage()
+    try {
+      await actualCheck("removing_disclosure_state_restoration_recreates_real_prompt_escape_focus_loss", async () => {
+        await loaded(page, `#/task/${task}`, "#vsm .vsm-box")
+        const beforeWidth = await page.locator("#vsm").evaluate((node) => node.clientWidth)
+        const summary = page.locator("#vsm details.handoffs > summary")
+        await summary.focus()
+        await page.keyboard.press("Enter")
+        await page.locator("#vsm details.handoffs").getByRole("button", { name: "Prompt 1", exact: true }).focus()
+        await page.keyboard.press("Enter")
+        await page.waitForSelector("#evidence-drawer[open]")
+        await page.setViewportSize({ width: 1060, height: 900 })
+        await page.waitForTimeout(350)
+        assert.equal(beforeWidth - await page.locator("#vsm").evaluate((node) => node.clientWidth), 1)
+        assert.equal(await page.locator("#vsm details.handoffs").evaluate((node) => node.open), false)
+        assert.equal(await page.locator("#vsm details.handoffs button").first().textContent(), "Prompt 1")
+        await page.keyboard.press("Escape")
+        await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+        await page.waitForTimeout(100)
         assert.equal(await page.evaluate(() => document.activeElement === document.body), true)
       })
     } finally { await context.close() }

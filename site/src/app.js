@@ -2252,6 +2252,7 @@
         data.appendChild(dl);
         const more = el("button", "vsm-data-toggle", "All figures");
         more.type = "button";
+        more.dataset.item = String(i);
         more.setAttribute("aria-expanded", "false");
         more.addEventListener("click", () => {
           const openNow = data.classList.toggle("is-open");
@@ -3169,10 +3170,12 @@
     // Redraw the layout when its width changes; evidence groups stay fixed.
     lastMapWidth = vsmEl.clientWidth;
     lastMapRender = () => safely("vsm", () => {
-      const controlKey = (node) => JSON.stringify([node.tagName, node.getAttribute("aria-label"), node.getAttribute("data-item"), node.getAttribute("data-step"), node.getAttribute("href"), node.textContent]);
+      const controlKey = (node) => JSON.stringify([node.tagName, node.getAttribute("aria-label"), node.getAttribute("data-item"), node.getAttribute("data-step"), node.getAttribute("href"), node.matches(".vsm-data-toggle") ? "figures" : node.textContent]);
       const remember = (node) => node && vsmEl.contains(node) ? controlKey(node) : null;
       const focusedKey = remember(document.activeElement);
       const openerKey = remember(drawerOpener);
+      const disclosures = [...vsmEl.querySelectorAll("details > summary")].map((summary) => ({ key: controlKey(summary), open: summary.parentElement.open }));
+      const figures = [...vsmEl.querySelectorAll(".vsm-data-toggle")].map((toggle) => ({ key: controlKey(toggle), open: toggle.getAttribute("aria-expanded") === "true" }));
       drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
       if (drawn && selectedSummary) drawn.highlight(selectedSummary);
       // Rebind only an unambiguous logical control; the old DOM node is gone.
@@ -3181,6 +3184,15 @@
         const matches = [...vsmEl.querySelectorAll("button, a[href], summary")].filter((node) => controlKey(node) === key);
         return matches.length === 1 ? matches[0] : null;
       };
+      // Reachability is part of restoration, before either focus or Escape.
+      for (const state of disclosures) {
+        const summary = replacement(state.key);
+        if (summary) summary.parentElement.open = state.open;
+      }
+      for (const state of figures) {
+        const toggle = replacement(state.key);
+        if (toggle && (toggle.getAttribute("aria-expanded") === "true") !== state.open) toggle.click();
+      }
       if (openerKey) drawerOpener = replacement(openerKey);
       const focused = replacement(focusedKey);
       if (focused) focused.focus({ preventScroll: true });
