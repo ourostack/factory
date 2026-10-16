@@ -204,7 +204,12 @@ main:focus, h1:focus { outline: none; }
   color: var(--text-primary) !important;
   text-decoration: none;
   margin-right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
+/* The approved Factory render, the site's mark. */
+.site-mark { width: 28px; height: 28px; object-fit: contain; flex: none; }
 .steps {
   display: flex;
   flex-wrap: wrap;

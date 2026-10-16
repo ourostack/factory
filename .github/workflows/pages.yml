@@ -99,6 +99,7 @@ jobs:
           node .github/scripts/triage-values.mjs --store .
           node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json --pulls-out "$RUNNER_TEMP/pulls.json" --pulls-cache "$RUNNER_TEMP/pulls-cache.json" | tee -a "$GITHUB_STEP_SUMMARY"
           cp site/src/index.html site/src/styles.css site/src/format.js site/src/preferences.js site/src/briefing.js site/src/walk.js site/src/steps.js site/src/app.js site/dist/
+          cp site/src/factory-render-128.webp site/src/factory-render-256.webp site/dist/
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the pull request cache
@@ -118,6 +119,17 @@ jobs:
         run: |
           set -euo pipefail
           node site/scripts/publish-files.mjs --reports _reports --dist site/dist --template site/src/llms-template.txt --pulls "$RUNNER_TEMP/pulls.json" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The share card (og.png) is drawn here from the page's own og:title and
+      # og:description, so it always matches the copy. The two renderers are
+      # pinned and installed into the runner's temp folder, never the site. A
+      # card failure warns and leaves the data site to deploy without it.
+      - name: Draw the share card
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/og" --no-save --no-audit --no-fund --silent satori@0.25.0 @resvg/resvg-js@2.6.2
+          node site/scripts/share-card.mjs --deps "$RUNNER_TEMP/og" --out site/dist/og.png | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
