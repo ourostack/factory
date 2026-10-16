@@ -122,10 +122,11 @@ test("the gate enumerates every CSS width from 320 to 1440, both themes and text
 test("the gate covers every primary and legacy route", () => {
   const byName = Object.fromEntries(G.ROUTES.map((r) => [r.name, r]))
   const expected = {
-    overview: ["#/", "overview"], tasks: ["#/tasks", "tasks"], task: ["#/task/{task}", "task"],
+    overview: ["#/", "overview"], time: ["#/time", "time"], tasks: ["#/tasks", "tasks"], task: ["#/task/{task}", "task"],
     session: ["#/task/{task}/session/{session}", "session"], compare: ["#/compare", "compare"],
     findings: ["#/causes", "causes"], cause: ["#/causes/{cause}", "cause"], improvements: ["#/improvements", "act"],
     improvements_contextual: ["#/improvements?cause={cause}&task={task}&return={return}", "act"],
+    improvement_detail: ["#/improvements/{improvement}", "act"],
     why: ["#/why", "why"], help: ["#/help", "help"], legacy_act: ["#/act", "act"],
   }
   assert.deepEqual(Object.keys(byName).sort(), Object.keys(expected).sort())
@@ -133,12 +134,24 @@ test("the gate covers every primary and legacy route", () => {
     assert.equal(byName[name].hash, hash, name)
     assert.equal(byName[name].view, view, name)
   }
-  for (const name of ["overview", "compare", "cause", "improvements_contextual", "task"]) assert.ok(G.SCREENSHOT_ROUTES.includes(name), name)
+  for (const name of ["overview", "time", "compare", "cause", "improvements_contextual", "improvement_detail", "task"]) assert.ok(G.SCREENSHOT_ROUTES.includes(name), name)
   assert.ok(G.SCREENSHOT_VARIANTS.some((v) => v.theme === "dark") && G.SCREENSHOT_VARIANTS.some((v) => v.scale === 2))
 })
 
 const clean = { doc: { scrollWidth: 390, clientWidth: 390, bodyScrollWidth: 390 }, frames: [], clipped: [], clippedY: [], offscreen: [], overlaps: [], controlOverlaps: [] }
 const codes = (m) => G.assessLayout(m).map((p) => p.code)
+
+test("learning arrival gate requires the complete conclusion, material limit and destination on the first phone screen", () => {
+  assert.equal(typeof G.assessLearningArrival, "function")
+  const good = { height: 844, conclusion: { top: 300, bottom: 470 }, caveat: { top: 480, bottom: 570 }, next: { top: 580, bottom: 620 } }
+  assert.deepEqual(G.assessLearningArrival(good), [])
+  for (const key of ["conclusion", "caveat", "next"]) {
+    assert.ok(G.assessLearningArrival({ ...good, [key]: null }).some((p) => p.includes(key)))
+    assert.ok(G.assessLearningArrival({ ...good, [key]: { top: 830, bottom: 870 } }).some((p) => p.includes(key)))
+  }
+  for (const name of ["learning_overview_first_phone_screen", "learning_twin_and_current_result_sections",
+    "time_observations_and_compact_controls", "learning_evidence_chain_retains_return", "task_reference_is_not_requested_outcome"]) assert.ok(G.REQUIRED_CHECKS.includes(name), name)
+})
 
 test("only an explicitly marked, visibly labeled, bounded precision-timeline frame may pan; the document never overflows", () => {
   assert.deepEqual(codes(clean), [])
@@ -288,7 +301,7 @@ test("the Improvements page is checked against triage queues the real reducer bu
 })
 
 test("the in-page pass clicks through the reader's links on one loaded page, under its own budget rule", () => {
-  assert.deepEqual(G.IN_PAGE_STEPS.map((s) => s.route), ["tasks", "task", "session", "compare", "findings", "improvements", "why", "help", "overview"])
+  assert.deepEqual(G.IN_PAGE_STEPS.map((s) => s.route), ["tasks", "task", "session", "time", "compare", "findings", "improvements", "why", "help", "overview"])
   for (const step of G.IN_PAGE_STEPS) assert.ok(G.ROUTES.some((r) => r.name === step.route) && /a(\.[\w-]+)?\[href[\^*]?="(#\/|\/session\/)/.test(step.click), step.route)
   // The task and session reached by click are the ones every other check reads.
   assert.equal(G.IN_PAGE_STEPS[1].click, '#view-tasks a[href^="#/task/{task}"]')

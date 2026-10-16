@@ -14,11 +14,13 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
+import { validateImprovementChecks } from "./improvement-checks.mjs";
 
 // The page's own words for each reason. A reason with no words would reach
 // a reader as a code, so it fails the build here.
 const { hasReasonText, lifecycleClockIssues } = createRequire(import.meta.url)("../src/format.js");
 const { validateBriefing } = createRequire(import.meta.url)("../src/briefing.js");
+const { validateLearning } = createRequire(import.meta.url)("../src/learning.js");
 
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
@@ -218,6 +220,18 @@ export function checkNumbers(data) {
         if (!validateImprovementQueue(v).ok) bad("improvements", "triage_projection_invalid");
         continue;
       }
+      // Exact, closed canonical comparison schema, including its nullable
+      // missing medians and interval. No other numeric path is exempted.
+      if (top && k === "improvement_checks") {
+        if (!validateImprovementChecks(v).ok) bad("improvement_checks", "improvement_checks_invalid");
+        continue;
+      }
+      // Only this exact top-level, closed projection has schema-owned counts,
+      // offsets and nullable comparison intervals. Nested copies are not exempt.
+      if (top && k === "learning") {
+        if (!validateLearning(v).ok) bad("learning", "learning_projection_invalid");
+        continue;
+      }
       if (top && k === "overview") {
         if (!validateBriefing(v, validateImprovementQueue).ok) bad("overview", "overview_projection_invalid");
         else for (const group of ["attention", "agents", "investigation"]) {
@@ -347,7 +361,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(2);
   }
   const doc = JSON.parse(readFileSync(file, "utf8"));
-  const violations = doc && doc.schema === "factory.site.by_week/1" ? checkByWeek(doc) : checkNumbers(doc);
+  const violations = doc?.schema === "factory.site.by_week/1" ? checkByWeek(doc) :
+    doc?.schema === "factory-learning/1" ? checkNumbers({ learning: doc }) : checkNumbers(doc);
   if (violations.length) {
     for (const v of violations.slice(0, 50)) console.error(`numbers-check: ${v.code} at ${v.path}`);
     console.error(`numbers-check: ${violations.length} violation(s) in ${file}`);

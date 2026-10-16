@@ -39,6 +39,7 @@ export const SCREENSHOT_WIDTHS = Object.freeze([320, 390, 768, 1280, 1440])
 // {cause} and {return} are filled from the build's own data.
 export const ROUTES = Object.freeze([
   { name: "overview", hash: "#/", view: "overview" },
+  { name: "time", hash: "#/time", view: "time" },
   { name: "tasks", hash: "#/tasks", view: "tasks" },
   { name: "task", hash: "#/task/{task}", view: "task" },
   { name: "session", hash: "#/task/{task}/session/{session}", view: "session" },
@@ -47,12 +48,13 @@ export const ROUTES = Object.freeze([
   { name: "cause", hash: "#/causes/{cause}", view: "cause" },
   { name: "improvements", hash: "#/improvements", view: "act" },
   { name: "improvements_contextual", hash: "#/improvements?cause={cause}&task={task}&return={return}", view: "act" },
+  { name: "improvement_detail", hash: "#/improvements/{improvement}", view: "act" },
   { name: "why", hash: "#/why", view: "why" },
   { name: "help", hash: "#/help", view: "help" },
   { name: "legacy_act", hash: "#/act", view: "act" },
 ].map((r) => Object.freeze(r)))
 
-export const SCREENSHOT_ROUTES = Object.freeze(["overview", "task", "compare", "cause", "improvements_contextual"])
+export const SCREENSHOT_ROUTES = Object.freeze(["overview", "time", "task", "compare", "cause", "improvements_contextual", "improvement_detail"])
 export const SCREENSHOT_VARIANTS = Object.freeze([
   Object.freeze({ theme: "light", scale: 1 }), Object.freeze({ theme: "dark", scale: 1 }), Object.freeze({ theme: "light", scale: 2 }),
 ])
@@ -93,7 +95,8 @@ export const IN_PAGE_STEPS = Object.freeze([
   { route: "tasks", click: 'nav.steps a[href="#/tasks"]' },
   { route: "task", click: '#view-tasks a[href^="#/task/{task}"]' },
   { route: "session", click: '#view-task a[href*="/session/{session}"]' },
-  { route: "compare", click: 'nav.steps a[href="#/compare"]' },
+  { route: "time", click: 'nav.steps a[href="#/time"]' },
+  { route: "compare", click: '#view-time a[href="#/compare"]' },
   { route: "findings", click: '#view-compare .next-step a[href="#/causes"]' },
   { route: "improvements", click: 'nav.steps a[href="#/improvements"]' },
   { route: "why", click: 'a.why-link[href="#/why"]' },
@@ -167,6 +170,8 @@ export function inPageBudget(times, expected, budget = IN_PAGE_BUDGET_MS) {
 
 // Fixed-name checks a run must record; a run that misses one fails.
 export const REQUIRED_CHECKS = Object.freeze([
+  "learning_overview_first_phone_screen", "learning_twin_and_current_result_sections",
+  "time_observations_and_compact_controls", "learning_evidence_chain_retains_return", "task_reference_is_not_requested_outcome",
   "keyboard_enter_selects_evidence_escape_closes_and_returns_focus", "keyboard_space_selects_evidence_escape_closes_and_returns_focus",
   "keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", "tab_order_follows_the_page_on_primary_routes",
   "filter_change_updates_aggregates_and_coverage", "clear_selection_without_the_original_link",
@@ -220,7 +225,15 @@ export function firstScreenHeight(width) { return width <= FIRST_SCREEN.phoneMax
 // data-role="conclusion" and any caveat with data-role="caveat"; the first
 // marked sentence in the view must be the conclusion. The marker decides,
 // never the wording.
-export const CONCLUSIONS = Object.freeze({ task: "#view-task", compare: "#view-compare", overview: "#view-overview" })
+export const CONCLUSIONS = Object.freeze({ task: "#view-task", compare: "#view-compare", overview: "#view-overview", time: "#view-time" })
+export function assessLearningArrival(read) {
+  const problems = []
+  for (const key of ["conclusion", "caveat", "next"]) {
+    const r = read[key]
+    if (!r || !(r.top >= 0 && r.bottom > r.top && r.bottom <= read.height)) problems.push(`${key} is not fully visible on the first screen`)
+  }
+  return problems
+}
 export function assessFirstScreen(m, width, scale = 1) {
   if (!m || !m.found) return "no conclusion is shown"
   if (m.role !== "conclusion") return `the conclusion's place holds a caveat, not a conclusion: "${String(m.text).slice(0, 80)}"`
@@ -677,7 +690,7 @@ function serve(site) {
 
 async function digestSite(site) {
   const out = {}
-  for (const f of ["index.html", "app.js", "format.js", "steps.js", "walk.js", "briefing.js", "preferences.js", "styles.css", "data.json", "rollups/overview.json", "rollups/improvements.json"]) {
+  for (const f of ["index.html", "app.js", "format.js", "steps.js", "walk.js", "briefing.js", "preferences.js", "learning.js", "reader.js", "styles.css", "data.json", "rollups/overview.json", "rollups/improvements.json", "rollups/learning.json"]) {
     try { out[f] = createHash("sha256").update(await readFile(join(site, f))).digest("hex") } catch { out[f] = null }
   }
   return out
@@ -725,11 +738,13 @@ async function pickTargets(site) {
   sessions.sort((a, b) => a.size - b.size)
   const pick = sessions[Math.floor(sessions.length / 2)] || null
   const task = pick ? pick.job : data.jobs[0] && data.jobs[0].id
-  return { data, cause, task, session: pick ? pick.session : null }
+  const improvement = data.learning?.improvements?.rows?.find((r) => r.status === "checked") || data.learning?.improvements?.rows?.[0]
+  return { data, cause, task, session: pick ? pick.session : null, improvement: improvement ? improvement.ref.replace("#", "/") : null }
 }
 
 export function routeHash(route, t) {
   return route.hash.replace("{task}", t.task).replace("{session}", t.session || "").replace("{cause}", encodeURIComponent(t.cause))
+    .replace("{improvement}", t.improvement || "")
     .replace("{return}", encodeURIComponent(`#/causes/${t.cause}`))
 }
 
@@ -877,7 +892,7 @@ export async function main(argv = process.argv.slice(2)) {
     catch (e) { record(name, false, { error: String(e && e.message || e).slice(0, 2000) }) }
   }
   let chromium
-  try { ({ chromium } = await import(pathToFileURL(args.playwright).href)) }
+  try { const imported = await import(pathToFileURL(args.playwright).href); chromium = imported.chromium || imported.default?.chromium }
   catch (e) { record("gate_blocked_browser_module_unavailable", false, { error: String(e) }) }
   const here = dirname(fileURLToPath(import.meta.url))
   const { deriveImprovementQueue, validateImprovementQueue } = await import(pathToFileURL(join(here, "improvement-queue.mjs")).href)
@@ -928,6 +943,9 @@ export async function main(argv = process.argv.slice(2)) {
       await load(page, url + routeHash(route, targets))
       await settle(page, route.view)
       if (scale !== 1) await page.waitForFunction((s) => window.__gateTextScale === s, scale)
+    }
+    const revealMonitoring = async (page, overview = false) => {
+      await page.locator(overview ? "#overview-monitoring" : "#improvement-monitoring").evaluate((node) => { node.open = true })
     }
     const layout = async (page, refresh = true) => assessLayout(await page.evaluate(measureLayout, { refresh }))
     // The tab-order and touch-target readings of the page as it stands, so a
@@ -1402,9 +1420,9 @@ export async function main(argv = process.argv.slice(2)) {
     await check("render_error_is_isolated", async () => {
       const { context, page } = await newPage({ width: 390 })
       try {
-        await page.route("**/data.json", async (r) => r.fulfill({ json: { ...targets.data, overview: { malformed: true } } }))
+        await page.route("**/data.json", async (r) => r.fulfill({ json: { ...targets.data, learning: { malformed: true } } }))
         await load(page, url + "#/")
-        await page.waitForFunction(() => /malformed|could not|unavailable/i.test(document.getElementById("overview-state")?.textContent || ""))
+        await page.waitForFunction(() => /malformed|could not|unavailable/i.test(document.getElementById("learning-overview")?.textContent || ""))
         await page.getByRole("link", { name: "Tasks", exact: true }).first().click()
         await settle(page, "tasks")
       } finally { await context.close() }
@@ -1588,7 +1606,93 @@ export async function main(argv = process.argv.slice(2)) {
       return seen
     })
 
-    // 8. JSON twins agree with each other and with what the page says.
+    await check("learning_overview_first_phone_screen", async () => {
+      const { context, page } = await newPage({ width: 390, height: 844 })
+      try {
+        await open(page, ROUTES.find((r) => r.name === "overview"))
+        return await page.evaluate(() => {
+          for (const selector of ["#learning-overview [data-role=conclusion]", "#learning-overview [data-role=caveat]", "#learning-overview .reader-next"]) {
+            const node = document.querySelector(selector), r = node?.getBoundingClientRect()
+            if (!node?.textContent.trim() || !r || r.top < 0 || r.bottom > 844) throw new Error(`Missing or below first screen: ${selector}`)
+          }
+          if (document.getElementById("status-line").classList.contains("status-abnormal")) {
+            const warning = document.getElementById("material-warning");
+            if (!warning || warning.hidden || !/ownership/i.test(warning.textContent) || !warning.querySelector("a")) throw new Error("Material alarm consequence, ownership or repair is hidden");
+          }
+          return { height: 844, conclusion: document.querySelector("#overview-conclusion").textContent }
+        })
+      } finally { await context.close() }
+    })
+    await check("learning_twin_and_current_result_sections", async () => {
+      const twin = JSON.parse(await readFile(join(args.site, "rollups/learning.json"), "utf8"))
+      if (JSON.stringify(twin) !== JSON.stringify(targets.data.learning)) throw new Error("Learning twin differs from data")
+      const { context, page } = await newPage()
+      try {
+        await open(page, ROUTES.find((r) => r.name === "improvements"))
+        const rows = targets.data.learning.improvements.rows
+        if (await page.locator("#problems .reader-improvement").count() !== rows.length) throw new Error("Current improvement rows differ from learning")
+        for (const section of ["results_available", "awaiting_result", "investigating"]) {
+          const n = await page.locator(`#problems [data-section="${section}"] .reader-improvement`).count()
+          if (n !== rows.filter((r) => r.section === section).length) throw new Error(`Incorrect result section: ${section}`)
+        }
+        await open(page, ROUTES.find((r) => r.name === "overview"))
+        if (await page.locator("#learning-overview details[data-history-weeks]").count()) await page.locator("#learning-overview details[data-history-weeks]").evaluate((d) => { d.open = true })
+        const historyText = await page.locator("#learning-overview").innerText()
+        for (const w of targets.data.learning.evolution.weeks.rows) {
+          const n = w.flow_efficiency.n.toLocaleString("en-US"), N = w.flow_efficiency.N.toLocaleString("en-US")
+          if (!historyText.includes(`${n} of ${N} tasks support this median`)) throw new Error(`Median sample missing for ${w.week}`)
+        }
+        const { buildLearning } = createRequire(import.meta.url)(join(here, "..", "src", "learning.js"))
+        for (const availability of ["unavailable", "partial"]) {
+          const learning = availability === "unavailable" ? buildLearning({}) : structuredClone(targets.data.learning)
+          if (availability === "partial") { learning.improvements.availability = "partial"; learning.improvements.reasons = ["first_page_only"] }
+          await page.route("**/data.json", (r) => r.fulfill({ json: { ...targets.data, learning } }))
+          await open(page, ROUTES.find((r) => r.name === "improvements"))
+          const text = await page.locator("#problems").innerText()
+          if (!new RegExp(availability === "unavailable" ? "Improvement evidence is unavailable" : "first page.*more may exist").test(text) || /No published card is in this state/.test(text)) throw new Error(`${availability} collection reads as complete`)
+          await page.unroute("**/data.json")
+        }
+        return { rows: rows.length }
+      } finally { await context.close() }
+    })
+    await check("time_observations_and_compact_controls", async () => {
+      const { context, page } = await newPage({ width: 390 })
+      try {
+        await open(page, ROUTES.find((r) => r.name === "time"))
+        const text = await page.locator("#learning-time").innerText()
+        if (!/not automatically avoidable waste/.test(text) || !/Recurring production behavior/.test(text)) throw new Error("Observation and behavior distinctions missing")
+        if (await page.locator("#learning-time input[type=checkbox]").count()) throw new Error("Task inventory displaces Time & waste")
+        return { behavior_questions: await page.locator("#learning-time .reader-behavior").count() }
+      } finally { await context.close() }
+    })
+    await check("learning_evidence_chain_retains_return", async () => {
+      const row = targets.data.learning.improvements.rows.find((r) => r.finding_ids.some((id) => targets.data.learning.findings.find((f) => f.id === id)?.examples.length))
+      if (!row) throw new Error("No real linked improvement/task evidence chain")
+      const hash = `#/improvements/${row.ref.replace("#", "/")}`
+      const { context, page } = await newPage()
+      try {
+        await open(page, { name: "improvement_detail", view: "act", hash })
+        await page.locator('#problems a[href^="#/task/"]').first().click()
+        await settle(page, "task")
+        const back = page.locator('#navigation-context a').filter({ hasText: "Return to the investigation" })
+        if (!(await back.getAttribute("href"))?.startsWith(hash)) throw new Error("Task loses improvement return")
+        await back.click()
+        await settle(page, "act")
+        if (await page.locator("#problems .reader-improvement").getAttribute("data-ref") !== row.ref) throw new Error("Return substitutes another improvement")
+        return { improvement: row.ref }
+      } finally { await context.close() }
+    })
+    await check("task_reference_is_not_requested_outcome", async () => {
+      const { context, page } = await newPage()
+      try {
+        await open(page, ROUTES.find((r) => r.name === "task"))
+        const basis = await page.locator(".task-outcome-basis").innerText()
+        if (!/Requested outcome not published|Authorized local requested outcome/.test(basis)) throw new Error("Task reference is presented as requested outcome")
+        return { basis }
+      } finally { await context.close() }
+    })
+
+    // JSON twins agree with each other and with what the page says.
     await check("json_twins_match_data_and_rendered_meaning", async () => {
       const twin = async (p) => JSON.parse(await readFile(join(args.site, p), "utf8"))
       const overview = await twin("rollups/overview.json"), improvements = await twin("rollups/improvements.json")
@@ -1604,6 +1708,7 @@ export async function main(argv = process.argv.slice(2)) {
         if (Array.isArray(overview.attention) && counts.attention !== overview.attention.length) throw new Error(`attention: page ${counts.attention}, twin ${overview.attention.length}`)
         if (Array.isArray(overview.investigation) && counts.investigation !== overview.investigation.length) throw new Error(`investigation: page ${counts.investigation}, twin ${overview.investigation.length}`)
         await open(page, ROUTES.find((r) => r.name === "improvements"))
+        await revealMonitoring(page)
         const text = await page.locator("#view-act").innerText()
         const rows = await page.locator(".improvement-row").count()
         if (improvements.state === "not_reviewed" && (!/not (been )?reviewed/i.test(text) || rows)) throw new Error("not-reviewed twin is not what the page says")
@@ -1629,6 +1734,7 @@ export async function main(argv = process.argv.slice(2)) {
     const clipboardFailure = async (page) => {
       await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(privateQueue) }))
       await open(page, contextual)
+      await revealMonitoring(page)
       const row = page.locator(".improvement-row").first()
       await row.getByRole("button", { name: /^Copy as a prompt for your agent: improvement \d+$/ }).click()
       await page.waitForTimeout(200)
@@ -1652,6 +1758,7 @@ export async function main(argv = process.argv.slice(2)) {
       try {
         await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(privateQueue) }))
         await open(page, contextual)
+        await revealMonitoring(page)
         const row = page.locator(".improvement-row").first()
         await row.getByRole("button", { name: /^Copy as a prompt for your agent: improvement \d+$/ }).click()
         await page.waitForFunction(() => typeof window.__copied === "string")
@@ -1668,8 +1775,10 @@ export async function main(argv = process.argv.slice(2)) {
         const doc = withQueue(privateQueue)
         await page.route("**/data.json", (r) => r.fulfill({ json: doc }))
         await open(page, ROUTES[0])
+        await revealMonitoring(page, true)
         const overviewText = await page.locator("#view-overview").innerText()
         await open(page, ROUTES.find((r) => r.name === "improvements"))
+        await revealMonitoring(page)
         const rowText = await page.locator(".improvement-row").first().innerText()
         const row = privateQueue.rows[0]
         if (row.availability !== "private_detail_not_published") throw new Error(`fixture availability ${row.availability}`)
@@ -1689,6 +1798,7 @@ export async function main(argv = process.argv.slice(2)) {
           const q = queues[name]
           await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(q) }))
           await open(page, ROUTES.find((r) => r.name === "improvements"))
+          await revealMonitoring(page)
           const text = await page.locator("#view-act").innerText()
           if (name === "empty_never_reviewed") {
             if (!/not (been )?reviewed/i.test(text) || await page.locator(".improvement-row").count()) throw new Error("empty queue not shown as not reviewed")
@@ -1747,6 +1857,7 @@ export async function main(argv = process.argv.slice(2)) {
       await page.unroute("**/data.json").catch(() => {})
       await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(q) }))
       await open(page, ROUTES.find((r) => r.name === "improvements"))
+      await revealMonitoring(page)
       if (plant) await page.evaluate(plant)
       const read = await page.evaluate(() => {
         const rows = [...document.querySelectorAll("#view-act .improvement-row")]

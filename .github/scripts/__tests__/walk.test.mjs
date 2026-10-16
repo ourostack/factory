@@ -43,9 +43,10 @@ test("Overview is the default, Tasks is explicit, and task evidence keeps its ex
     assert.deepEqual(F.parseRoute(bad), { view: "missing" }, bad)
   }
   // The tab that shows as current.
-  assert.equal(F.stepOf("task"), "task")
-  assert.equal(F.stepOf("session"), "task")
-  for (const v of ["compare", "causes", "act"]) assert.equal(F.stepOf(v), v)
+  assert.equal(F.stepOf("task"), "tasks")
+  assert.equal(F.stepOf("session"), "tasks")
+  for (const v of ["time", "compare", "causes", "cause"]) assert.equal(F.stepOf(v), "time")
+  assert.equal(F.stepOf("act"), "act")
   for (const v of ["why", "about", "store", "missing"]) assert.equal(F.stepOf(v), null)
 })
 
@@ -165,10 +166,11 @@ test("when a pull request cannot be read, the name comes from what was read and 
   assert.deepEqual(checkNumbers({ jobs: [{ id: "p", name: "x", name_basis: "partial", more_prs: measured(2), finish_order: measured(1) }] }), [])
 })
 
-test("the Act lede does not promise a check that does not exist yet", () => {
+test("Improvements distinguishes a completed inconclusive check from no check", () => {
   const html = read("site/src/index.html")
   const act = html.slice(html.indexOf('id="view-act"'), html.indexOf('id="view-why"'))
-  assert.match(act, /[Aa] check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet/)
+  assert.match(act, /A completed check can be inconclusive\. A missing check is different/)
+  assert.doesNotMatch(act, /no issue has that yet|none has been checked/)
   assert.doesNotMatch(act, /a check that the countermeasure worked/)
 })
 
@@ -587,7 +589,7 @@ test("the Pages workflow publishes the data files and llms.txt, and writes the s
   const wf = read(".github/workflows/pages.yml")
   assert.match(wf, /node site\/scripts\/publish-files\.mjs --reports _reports --dist site\/dist --template site\/src\/llms-template\.txt --pulls "\$RUNNER_TEMP\/pulls\.json" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
   // The build's GitHub reads for the PR clock go to the runner's temp folder, never into site/dist.
-  assert.match(wf, /node site\/scripts\/build-data\.mjs --reports _reports --main \. --out site\/dist\/data\.json --pulls-out "\$RUNNER_TEMP\/pulls\.json" --pulls-cache "\$RUNNER_TEMP\/pulls-cache\.json" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
+  assert.match(wf, /node site\/scripts\/build-data\.mjs --reports _reports --main \. --desk _desk --out site\/dist\/data\.json --pulls-out "\$RUNNER_TEMP\/pulls\.json" --pulls-cache "\$RUNNER_TEMP\/pulls-cache\.json" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
   // The pull request reads are cached across builds (never under site/dist): restored before the data build, saved after it.
   const restore = wf.indexOf("uses: actions/cache/restore@v4")
   const save = wf.indexOf("uses: actions/cache/save@v4")
@@ -676,13 +678,14 @@ test("a reload at #main opens the default view, and the view routes before the s
   assert.doesNotMatch(main.slice(main.indexOf("routeSafely(data);")), /\n    render(?!Health|StatusLine)[A-Za-z]+\(/)
 })
 
-test("the Act page does not call a closed issue fixed: its pull request is a countermeasure, merged and not yet checked", () => {
+test("Improvements never treats a countermeasure merge or issue closure as its measured result", () => {
   const app = read("site/src/app.js")
   assert.match(app, /fact\("Countermeasure", span\)/)
-  assert.match(app, /" \(merged, not yet checked\)"/)
+  assert.match(app, /merged; current result unavailable in this view/)
+  assert.doesNotMatch(app, /merged, not yet checked/)
   assert.doesNotMatch(app, /"fixed by "/)
   assert.doesNotMatch(app, /: "var\(--status-good\)"\);\n/)
-  assert.match(read("site/src/index.html"), /each with the pull request that answered it, where there is one\./)
+  assert.match(read("site/src/index.html"), /A merged change, a closed issue and a measured benefit are independent facts/)
 })
 
 test("one term for the time agents were busy: Working time", () => {

@@ -26,6 +26,111 @@ Waiting for the next prompt is split by why the agent stopped (Desk's reports; e
 
 ## Data files
 
+### Connected process learning
+
+`data.json.learning` and `rollups/learning.json` are the identical, validated
+`factory-learning/1` object. `learning.js` publishes the pure browser
+`FactoryLearning.buildLearning({data,causes,history,checks})` and
+`FactoryLearning.validateLearning(doc)` interfaces; CommonJS exports the same
+functions. `history` is `{by_week,evidence}`: `by_week` is the existing
+`factory.site.by_week/1` builder output, and `evidence` contains only public
+`{job,timeline:{waits,agents}}` inputs. No comparison or grouping is rerun.
+The legacy `data.overview`/`rollups/overview.json` contract remains separate
+and unchanged. The existing UI has not yet migrated to this new projection.
+
+- `sources.reports` identifies the report generation; `sources.checks`
+  retains the independent Desk/facts/reports revisions supplied by the
+  canonical checker. `alignment:"same_reports"` means only the report
+  revisions agree, not that facts, issues and reports were captured together.
+  Different or unavailable report generations limit the overview conclusion.
+- `scope.outcome_records` and `accepted_outcomes` come from the full
+  `outcomes.signoff` population, including outcomes without timed work.
+  `task_reports` counts `data.jobs` rows; `timed_tasks` counts those with a
+  recorded-window figure. Neither is the accepted-outcome denominator.
+  `attention` and `attention_turns` retain the canonical sample `n`, accepted
+  denominator `N`, state, direction and exclusions. No attention ratio is
+  reported beside zero accepted outcomes. `capture` and `first_pass_yield`
+  retain their own distinct populations and uncertainty.
+- `overview` gives one supported conclusion, `finding` and `improvement`
+  references when available, material `limits` and an explicit safe `href`.
+  No data means `code:"evidence_unavailable"`, not an all-clear conclusion.
+- `findings` is bounded to 24 public cause rows, including explicitly
+  reported next-prompt sub-causes. Each carries a stated `figure`,
+  `population`, `affected_tasks`, up to six representative `examples`,
+  source JSON paths and a deep destination. Its population `n` is the
+  finished, fully labeled jobs with readable intervals counted by the cause
+  builder; `N` is all considered records, including excluded/open jobs.
+  `basis:job_hours` in the source means task exposure, not unique factory
+  time or utilization. Waiting observations, evaluator-classified waste,
+  unclassified work and reported stop classifications stay distinct.
+  A tool-kind suffix identifies the evidence for a defect label; it never
+  identifies a production stage. Classification is not proof of avoidability.
+- `behaviors` asks about review/repair, human stops and team coordination.
+  Recorded return counts retain catch-point/sample limits, not a count of
+  complete review cycles. Their `by_reason` figures keep agent error,
+  changed ask, new information and external causes separate; a changed ask
+  is not automatically corrective waste. Stop `observation` is the host's end/asks/pending
+  facts; `judgment` separately retains actual why/source/confidence/reasons.
+  Older facts with no recorded host stop preserve `observation:null`; this
+  does not erase a separately recorded judgment or invent host facts.
+  Never infer one from the other. Team root/child counts are published
+  topology, not task-exclusive worker allocation. Stage and coordination
+  `duration` remain unavailable; each question states its
+  `missing_observation` and owning `collection_path`. Examples are bounded,
+  not a census of events.
+- `evolution.versions` retains every available canonical release grouping,
+  including `mixed`, with each measure's population. `evolution.weeks`
+  preserves all available finish weeks, their time/class/waste figures,
+  task points, bounded finish dates, empty weeks, unsplit tasks and
+  `unplaced` jobs. Its weekly `production_ms` is unavailable: `lead_ms`
+  is the distinct recorded window, never a substitute production clock.
+  Task mix, shared workers, changed capture and bounded finish dates prevent
+  a before/after causal claim. No history is interpolated.
+- `improvements` summarizes the canonical `data.improvement_checks`
+  (`factory-improvement-checks/1`). Each row links its exact `source_path`
+  there and retains `card`, `sample_jobs`, exclusions, before/after jobs,
+  independent groups, median states, change and interval with capture
+  bounds. A missing median is unavailable; an observed zero is measured or
+  partial zero. The interval is the canonical bootstrap interval, not a
+  causal guarantee. A partial difference/interval has unknown capture bound.
+  `status:"checked",verdict:"too_few_jobs"` is a completed **inconclusive**
+  result in `section:"results_available"`; it is not a missing check.
+  `waiting_for_version` and `no_check` are `awaiting_result`; malformed
+  (`refused`) or unavailable checks remain explicit under `investigating`.
+  Checked `confirmed`, `not_confirmed` and `no_clear_change` retain the
+  hypothesis-relative results better, worse and no detected change.
+  GitHub `issue_state` and `implementation.merged` are separate observations,
+  never the measurement result or proof that a change helped.
+
+Only the producer's explicit public `kaizen_issues[].cause` mapping can
+connect a finding and an improvement (`association:"mapped_measure_only"`).
+These examples are not original triggering jobs; `original_evidence` is
+`not_published`. Unknown public/private review associations are not guessed.
+No issue bodies, titles, prompts, local paths, session associations or
+private decision prose are copied into this projection.
+
+Handoffs identify `file:"rollups/learning.json"`, an exact JSON selector,
+a safe existing local `href` and
+`authority_limit:"inspect_only_no_new_authority"`. For example, inspect
+`$.findings[?(@.id=="waiting:next_prompt")]`, its example's `map_path`,
+`start_ms`/`end_ms` task offsets and `source_path` in `rollups/causes.json`;
+then inspect the related improvement at
+`$.improvements.rows[?(@.ref=="ourostack/factory#53")]` and its canonical
+`data.json` check. A map's existing period selector must be resolved from
+that map, not invented from a source-list index. Routes currently point at
+the supported cause/task/compare/improvements destinations; no future UI
+route or execution authority is implied.
+
+The exact top-level `data.learning` subtree has a closed numeric/privacy
+validator: counts, populations, offsets, bounds, comparison conservation,
+source revisions, fixed text, enums and destinations are checked before
+publication. Unknown fields or invalid projections refuse publication
+without overwriting the last good twin. Other data and nested subtrees
+retain the ordinary number gate; there is no general numeric exemption.
+`validateLearning` returns `{ok:false,codes:["learning_projection_invalid"]}`
+without echoing rejected content. Browser consumers should withhold only
+the learning panel when validation fails, keeping unrelated views usable.
+
 ### Improvement annotations: inspect, do not execute
 
 `data.json.improvements` and `rollups/improvements.json` contain the same

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>The factory</title>
-<meta name="description" content="Where the time went on real agentic work, walked the way Lean walks a factory floor: follow one task, compare tasks, rank the causes, act. No who, no content." />
+<meta name="description" content="Understand agentic software production: where time went, which losses are supported, what changed and whether it helped. Follow the evidence to real tasks and teams." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232a78d6'/%3E%3Cpath d='M7 22V10l6 5 6-5v12M25 22V13' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="alternate" type="text/plain" href="llms.txt" title="Index of the data files, for agents" />
 <link rel="stylesheet" href="styles.css" />
@@ -72,15 +72,17 @@
     <a class="site-name" href="#/">The factory</a>
     <nav class="steps" aria-label="Primary navigation">
       <a class="step" data-step="overview" href="#/">Overview</a>
-      <a class="step" data-step="tasks" href="#/tasks">Tasks</a>
-      <a class="step" data-step="compare" href="#/compare">Compare</a>
+      <a class="step" data-step="time" href="#/time">Time &amp; waste</a>
       <a class="step" data-step="act" href="#/improvements">Improvements</a>
+      <a class="step" data-step="tasks" href="#/tasks">Tasks</a>
     </nav>
     <a class="why-link" data-step="why" href="#/why">Why Lean?</a>
     <a class="why-link" data-step="help" href="#/help">Help</a>
+    <a class="why-link" data-step="store" href="#/store">Data health</a>
   </div>
   <div class="wrap">
     <p id="status-line" class="status-line" aria-live="polite">Loading the store&hellip;</p>
+    <p id="material-warning" class="material-warning" hidden></p>
     <details id="display-settings" class="display-settings">
       <summary>Time zone: <span id="zone-current">UTC</span><span id="zone-saved"></span></summary>
       <div class="display-preferences">
@@ -97,16 +99,18 @@
 <main id="main" tabindex="-1">
 
 <div id="view-overview" class="view" hidden>
-  <div class="wrap briefing-wrap">
-    <p class="step-label">Factory briefing</p>
-    <h1 class="view-title">What needs a closer look?</h1>
-    <p id="overview-conclusion" class="lede overview-conclusion" data-role="conclusion"><span class="is-loading" aria-busy="true">Loading the published briefing&hellip;</span></p>
-    <p class="lede">Start with the work that needs attention, then follow its evidence. This is an open experiment in understanding agent work—not a measure of people or factory-wide utilization.</p>
-    <p class="chart-caption">Website briefing and evidence navigation. Production and request clocks are shown where Desk publishes them. <span id="overview-triage-note">No triage review is published in this build.</span></p>
-    <p id="overview-changes" class="visit-note"></p>
-    <p id="overview-published" class="chart-caption"></p>
-    <p id="overview-state" role="status"><span class="is-loading" aria-busy="true">Loading the published briefing&hellip;</span></p>
-    <div class="briefing-columns">
+  <div class="wrap reader-wrap">
+    <h1 class="view-title">Understand the production process</h1>
+    <p id="overview-state" role="status"></p>
+    <div id="learning-overview">
+      <p id="overview-conclusion" class="reader-conclusion" data-role="conclusion"><span class="is-loading" aria-busy="true">Loading process evidence&hellip;</span></p>
+    </div>
+    <details class="reader-details" id="overview-monitoring">
+      <summary>Material alarms, claims and monitoring details</summary>
+      <p id="overview-published" class="chart-caption"></p>
+      <p id="overview-changes" class="visit-note"></p>
+      <p class="chart-caption"><span id="overview-triage-note">No triage review is published in this build.</span> Missing monitoring is not an all-clear.</p>
+      <div class="briefing-columns">
       <section class="block" aria-labelledby="attention-title">
         <h2 class="block-title" id="attention-title">Needs your attention</h2>
         <div id="overview-attention"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
@@ -119,7 +123,8 @@
         <h2 class="block-title" id="investigation-title">Worth investigating</h2>
         <div id="overview-investigation"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
       </section>
-    </div>
+      </div>
+    </details>
     <section id="overview-guide" class="block guide" aria-labelledby="guide-title">
       <h2 id="guide-title" class="block-title">A short guide, if you need one</h2>
       <div id="guide-stops"></div>
@@ -127,14 +132,21 @@
       <p class="chart-caption">Optional. Replay it from Help at any time.</p>
     </section>
     <details class="more-details"><summary>What these summaries can—and cannot—say</summary><p>Missing capture is not zero work. A task-flow ratio is not agent utilization. A proposed improvement route is not ownership or execution authority. Acceptance stays separate from delivery; finish days and weeks have UTC-day precision.</p><a href="#/why">Read Why Lean?</a></details>
-    <p><a href="rollups/overview.json">Read this briefing as JSON</a></p>
+    <p class="chart-caption">Lean connects an observed problem to a process change and a check of what happened—not just whether the change shipped.</p>
+  </div>
+</div>
+
+<div id="view-time" class="view" hidden>
+  <div class="wrap reader-wrap">
+    <h1 class="view-title">Time &amp; waste</h1>
+    <div id="learning-time"><p><span class="is-loading" aria-busy="true">Loading recorded process observations&hellip;</span></p></div>
   </div>
 </div>
 
 <div id="view-tasks" class="view" hidden>
   <div class="wrap">
     <h1 class="view-title">Tasks</h1>
-    <p class="lede">Choose recorded work to inspect its evidence. Overall elapsed and recorded working time keep their existing meanings; each task's production clocks are on its page, and Compare draws them side by side.</p>
+    <p class="lede">Follow one piece of work: its outcome where authorized, production periods, interruptions, root/subagent team and acceptance. Public pull-request titles are references, not the requested outcome.</p>
     <div id="task-list"><p><span class="is-loading" aria-busy="true">Loading recorded tasks&hellip;</span></p></div>
   </div>
 </div>
@@ -142,7 +154,7 @@
 <div id="view-help" class="view" hidden>
   <div class="wrap prose">
     <h1 class="view-title">Find your way through the factory</h1>
-    <p class="lede">Three optional stops. You can use any destination directly.</p>
+    <p class="lede">Four destinations, no required tour. Start with the question you want to answer.</p>
     <div id="help-stops"></div>
     <p><a href="#/why">Why Lean?</a> explains the ideas behind the experiment. You do not need the glossary before inspecting the work.</p>
   </div>
@@ -151,33 +163,38 @@
 <!-- ============ STEP 1: FOLLOW A TASK ============ -->
 <div id="view-task" class="view">
   <div class="wrap">
-    <p class="step-label">Step 1 of 4 &middot; Follow a task</p>
+    <p class="step-label"><a href="#/tasks">Tasks</a> &middot; one production story</p>
     <p id="landing-note" class="chart-caption landing-note" hidden></p>
     <div id="task-head"></div>
     <p id="task-lede" class="lede task-lede"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
+    <nav class="task-story-links" aria-label="Task story evidence">
+      <a href="#/tasks" data-task-jump="journey">Periods and interruptions</a>
+      <a href="#/tasks" data-task-jump="team">Team and sessions</a>
+      <a href="#/tasks" data-task-jump="delivery">Pull-request evidence</a>
+    </nav>
     <section class="block vsm-block" aria-labelledby="vsm-title">
-      <h2 class="block-title" id="vsm-title">The value stream map</h2>
+      <h2 class="block-title" id="vsm-title">The recorded journey</h2>
       <p class="map-selection" id="map-selection" hidden><span id="map-selection-text">An item on the map is selected.</span> <button type="button" id="map-clear">Clear selection</button></p>
       <p class="chart-caption">A value stream map draws one piece of work from start to finish. Each box is a burst of agent work inside a session (one run of an agent harness, such as one Claude Code conversation). Desk starts a new burst after 15 minutes idle or when an operator prompt arrives; to fit the screen, the map may also fold shorter waits into the box beside them, and the note under the map gives the threshold at this width. Each triangle between boxes is a wait, labeled with how long it lasted and what it waited on. The map is not to scale: the ladder under it carries the time. Select any box, triangle or ladder step to see the evidence behind it.</p>
       <div id="vsm"></div>
     </section>
-    <section class="block" aria-labelledby="time-went-title">
-      <h2 class="block-title" id="time-went-title">Where this task's time went</h2>
+    <details class="block task-breakdown">
+      <summary id="time-went-title">Recorded time breakdown and classification</summary>
       <div id="time-went"></div>
-    </section>
+    </details>
     <div id="job-detail"><p class="chart-empty"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     <details id="other-tasks" class="other-tasks">
       <summary>Other recorded tasks</summary>
       <div id="task-picker"></div>
     </details>
-    <p class="next-step"><a href="#/compare">Next: <span class="step-n" aria-hidden="true">2</span>Compare tasks</a>, to put this task beside every other.</p>
+    <p class="next-step"><a href="#/time">Explore Time &amp; waste</a> or <a href="#/compare?mode=production">compare production time</a>.</p>
   </div>
 </div>
 
 <!-- ============ ONE SESSION ============ -->
 <div id="view-session" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 1 of 4 &middot; Follow a task &middot; one session</p>
+    <p class="step-label">Task evidence &middot; one session</p>
     <div id="session-detail"></div>
     <section class="block" aria-labelledby="swimlane-title">
       <h2 class="block-title" id="swimlane-title">The session, to scale</h2>
@@ -189,7 +206,7 @@
 <!-- ============ STEP 2: COMPARE TASKS ============ -->
 <div id="view-compare" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 2 of 4 &middot; Compare tasks</p>
+    <p class="step-label"><a href="#/time">Time &amp; waste</a> &middot; comparison analysis</p>
     <h1 class="view-title">Compare tasks</h1>
     <p id="comparison-conclusion" class="comparison-conclusion" data-role="conclusion"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
     <p class="lede comparison-question">Which recorded tasks have long windows or interruptions worth inspecting? Compare the selected tasks' existing recorded measures, not factory capacity.</p>
@@ -238,14 +255,14 @@
       <h2 class="block-title" id="stackup-table-title">The same, as a table</h2>
       <div id="stackup-table"></div>
     </section>
-    <p class="next-step"><a href="#/causes">Next: <span class="step-n" aria-hidden="true">3</span>Rank causes</a>, to see which causes cost the most time across these tasks.</p>
+    <p class="next-step"><a href="#/causes">Inspect ranked findings</a> or <a href="#/time">return to Time &amp; waste</a>.</p>
   </div>
 </div>
 
 <!-- ============ STEP 3: RANK CAUSES ============ -->
 <div id="view-causes" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 3 of 4 &middot; Rank causes</p>
+    <p class="step-label"><a href="#/time">Time &amp; waste</a> &middot; ranked findings</p>
     <h1 class="view-title">Rank causes</h1>
     <p class="lede">Which recorded patterns deserve investigation? Findings describe observed task exposure, not proven root causes or savings. A ranking orders the published evidence; it is not a measure of global worker inactivity.</p>
     <p id="causes-lede" class="lede causes-lede"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
@@ -268,50 +285,50 @@
       <h2 class="block-title" id="pareto-table-title">The ranking, as a list</h2>
       <div id="pareto-table"></div>
     </section>
-    <p class="next-step"><a href="#/act">Next: <span class="step-n" aria-hidden="true">4</span>Act</a>, to see the problems taken on so far.</p>
+    <p class="next-step"><a href="#/improvements">Inspect related Improvements</a>.</p>
   </div>
 </div>
 
 <!-- ============ STEP 3: ONE CAUSE ============ -->
 <div id="view-cause" class="view" hidden>
   <div class="wrap">
-    <p class="step-label">Step 3 of 4 &middot; <a href="#/causes">Rank causes</a> &middot; one cause</p>
+    <p class="step-label"><a href="#/time">Time &amp; waste</a> &middot; <a href="#/causes">all findings</a> &middot; one finding</p>
     <div id="cause-detail"><p class="chart-empty"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
-    <p class="next-step"><a href="#/causes">Back to every cause</a> &middot; <a href="#/act">Next: <span class="step-n" aria-hidden="true">4</span>Act</a></p>
+    <div id="cause-learning"></div>
+    <p class="next-step"><a href="#/time">Back to Time &amp; waste</a> &middot; <a href="#/improvements">Inspect Improvements</a></p>
   </div>
 </div>
 
 <!-- ============ STEP 4: ACT ============ -->
 <div id="view-act" class="view" hidden>
-  <div class="wrap">
-    <p class="step-label">Step 4 of 4 &middot; Act</p>
+  <div class="wrap reader-wrap">
     <h1 class="view-title">Improvements</h1>
+    <p id="improvement-status" class="lede improvement-status" role="status"><span class="is-loading" aria-busy="true">Loading current checks&hellip;</span></p>
+    <p class="reader-limit">A completed check can be inconclusive. A missing check is different. A merged change, a closed issue and a measured benefit are independent facts.</p>
+    <div id="problems"></div>
+    <div class="unlabeled-note" id="act-unlabeled" hidden></div>
+    <details class="reader-details" id="improvement-monitoring">
+      <summary>Improvement-system monitoring, triage coverage and ownership</summary>
     <section class="block improvement-alarms" id="improvement-alarms" aria-labelledby="improvement-alarms-title" tabindex="-1">
       <h2 class="block-title" id="improvement-alarms-title">Active improvement-system alarms</h2>
       <div id="improvement-alarm-list"><p><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     </section>
-    <p id="improvement-status" class="lede improvement-status" role="status"><span class="is-loading" aria-busy="true">Loading the improvement status&hellip;</span></p>
     <details class="how-to-read" id="improvement-limits">
       <summary>How to read this list</summary>
       <p>These are recorded issues and recommendations, not an execution queue. A route alone grants no claim or new authority. Inspection does not grant authority or create ownership.</p>
-      <p>Reviewed improvements come first, stale or conflicting reviews before recorded decision gates. This is not a savings ranking. Health alarms appear in the health status at the top of every page.</p>
+      <p>Canonical problems and their current checks lead the page. The annotations below are secondary triage context, not a savings ranking or a second backlog. Health alarms remain in the status at the top of every page.</p>
       <p>Not reviewed yet means no triage review is published. <span id="improvement-triage-note">No triage review is published in this build.</span> Ownership and private decisions are not published, and no review links to its public issue in this version. Empty review data does not prove there are no problems.</p>
       <p>The public annotation list is not a task-filtered execution queue. Investigation context is retained for inspection; private associations are not inferred.</p>
-      <p>When a cause is worth fixing, Lean takes it on as one problem and writes it up on one page, an <dfn>A3</dfn>, named for the sheet of paper it fits on: the evidence, the cause, a countermeasure, and then a check of whether it worked. A check needs labeled tasks on both sides of the countermeasure, before and after it shipped, and no issue has that yet, so none has been checked. To start one, open a cause on <a href="#/causes">Rank causes</a> and copy its A3 prompt.</p>
+      <p>Lean keeps the problem, explanation, countermeasure and result check connected. A check can run and find too little comparable evidence; that is a completed inconclusive result, not proof that no check happened. Open a <a href="#/time">supported finding</a> for its evidence and a scoped inspection handoff.</p>
     </details>
     <div id="triage-brief"></div>
-    <section class="block" aria-labelledby="problems-title">
-      <h2 class="block-title" id="problems-title">Problems in hand</h2>
-      <p class="chart-caption">One row per kaizen issue, each with the pull request that answered it, where there is one. A row names the cause it works on only where the site's mapping table links it to one, and gives its check.</p>
-      <div id="problems"></div>
-      <div class="unlabeled-note" id="act-unlabeled" hidden></div>
-    </section>
     <section class="block" aria-labelledby="owners-title">
       <h2 class="block-title" id="owners-title">Alarms with an owner</h2>
       <p class="chart-caption">Open issues labeled <code>factory-alarm</code>: each owns the alarms in the status line that its title names.</p>
       <div id="alarm-owners"></div>
     </section>
-    <p class="next-step"><a href="#/">Back to <span class="step-n" aria-hidden="true">1</span>Follow a task</a>, to walk again with the next task, or read <a href="#/why">why Lean</a>.</p>
+    </details>
+    <p class="next-step"><a href="#/">Back to Overview</a> or <a href="#/time">follow process evidence</a>.</p>
   </div>
 </div>
 
@@ -328,12 +345,12 @@
     <h2 class="block-title">Why it matters more with AI agents</h2>
     <p>AI "amplifies what's already there" (<a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" target="_blank" rel="noopener">DORA 2025</a>). An agent that writes code in minutes can still leave a task waiting days for review, rework or a human answer. Speed can even be an illusion: in one study, experienced developers took 19% longer with early-2025 AI tools while believing they had been sped up by about 20% (<a href="https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/" target="_blank" rel="noopener">METR</a>). Measuring where the time actually goes, task by task, is how the factory tells real improvement from the feeling of it. The operator's attention is the scarce resource the factory protects.</p>
 
-    <h2 class="block-title">The four steps, and why in this order</h2>
+    <h2 class="block-title">Four questions, not a required tour</h2>
     <ol class="plain-list">
-      <li><a href="#/">Follow a task.</a> Go and see one real piece of work end to end, before any average.</li>
-      <li><a href="#/compare">Compare tasks.</a> Put many tasks side by side so the pattern shows instead of the anecdote.</li>
-      <li><a href="#/causes">Rank causes.</a> Order the causes of waste by the time they cost, so the few that matter most stand out.</li>
-      <li><a href="#/act">Act.</a> Take one problem on, with a countermeasure and a check that it worked.</li>
+      <li><a href="#/">Overview.</a> What do we understand about the production process and its evolution?</li>
+      <li><a href="#/time">Time &amp; waste.</a> Where did time go, and which supported losses deserve investigation?</li>
+      <li><a href="#/improvements">Improvements.</a> What changed, and did it help, hurt or remain inconclusive?</li>
+      <li><a href="#/tasks">Tasks.</a> What happened in one piece of work and its whole agent team?</li>
     </ol>
 
     <h2 class="block-title">The eight wastes, in agent work</h2>
@@ -546,7 +563,7 @@
 <div id="view-missing" class="view" hidden>
   <div class="wrap">
     <h1 class="view-title">Page not found</h1>
-    <p class="lede">This address is not part of the site. Start the walk at <a href="#/">Follow a task</a>, or read <a href="#/why">why Lean</a>.</p>
+    <p class="lede">This address is not part of the site. Start at <a href="#/">Overview</a>, inspect <a href="#/tasks">Tasks</a>, or read <a href="#/why">why Lean</a>.</p>
   </div>
 </div>
 
@@ -556,7 +573,7 @@
   <div class="wrap">
     <div class="footer-links">
       <a href="#/about">About</a>
-      <a href="#/store">The store's numbers</a>
+      <a href="#/store">Data health and all numbers</a>
       <a href="llms.txt">llms.txt</a>
       <a href="https://github.com/ourostack/factory" target="_blank" rel="noopener">ourostack/factory</a>
       <a href="https://github.com/ourostack/desk" target="_blank" rel="noopener">ourostack/desk</a>
@@ -578,10 +595,12 @@
   <div id="drawer-body"></div>
 </dialog>
 <script src="format.js"></script>
+<script src="learning.js"></script>
 <script src="preferences.js"></script>
 <script src="briefing.js"></script>
 <script src="walk.js"></script>
 <script src="steps.js"></script>
+<script src="reader.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

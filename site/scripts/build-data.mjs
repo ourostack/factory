@@ -6,6 +6,8 @@
 //                     factory-build already produced from the store's facts
 //   --main    <dir>   `main` (facts/*.json, and its Git history for intake
 //                     dates, since published facts carry no clock time)
+//   --desk    <dir>   current Desk main, including mcp/package.json (ESM).
+//                     Required except for offline fixture/preview builds.
 // and writes one JSON file (--out) the static page fetches at runtime.
 //
 // It writes two files next to each other: data.json (every number with its
@@ -25,7 +27,8 @@ import {
   existsSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { compareJobs, jobSummary, scopeMember } from "./job-summary.mjs";
 import { harnessSummary } from "./harness-summary.mjs";
@@ -52,6 +55,7 @@ const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
 // written into data.json so agents read the mapping as data.
 const { kaizenCauseOf, readLifecycleClocks } = createRequire(import.meta.url)("../src/steps.js");
 const { buildBriefing } = createRequire(import.meta.url)("../src/briefing.js");
+const { buildLearning } = createRequire(import.meta.url)("../src/learning.js");
 import { checkByWeek, checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
@@ -65,6 +69,7 @@ import { taskNames } from "./task-names.mjs";
 import { createPullReader, maxLookups, prAnchor, prKey, pullsDoc } from "./pr-clock.mjs";
 import { readTriageBatches } from "../../.github/scripts/triage-values.mjs";
 import { deriveImprovementQueue, validateImprovementQueue } from "./improvement-queue.mjs";
+import { buildImprovementChecks, CHECK_METHOD } from "./improvement-checks.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -74,10 +79,11 @@ function arg(name, fallback) {
 const reportsDir = arg("reports");
 const mainDir = arg("main");
 const outFile = arg("out");
+const deskDir = arg("desk");
 
 if (!reportsDir || !mainDir || !outFile) {
   console.error(
-    "usage: build-data.mjs --reports <reports-branch-checkout> --main <main-checkout> --out <data.json path>",
+    "usage: build-data.mjs --reports <reports-branch-checkout> --main <main-checkout> --desk <current-desk-checkout> --out <data.json path>",
   );
   process.exit(1);
 }
@@ -106,6 +112,37 @@ function percentile(sorted, p) {
 }
 
 const OFFLINE = process.env.FACTORY_SITE_OFFLINE === "1";
+if (!deskDir && !OFFLINE) throw new Error("current Desk source --desk is required");
+let canonical;
+if (deskDir) {
+  const pipeline = resolve(deskDir, "plugins/desk/mcp/src/factory/pipeline");
+  // Keep the checkout's mcp/package.json ESM boundary. Missing imports,
+  // exports or runtime failures deliberately stop the build before writing.
+  const [kaizen, build, compare] = await Promise.all([
+    import(pathToFileURL(join(pipeline, "kaizen.js"))),
+    import(pathToFileURL(join(pipeline, "build.js"))),
+    import(pathToFileURL(join(pipeline, "compare.js"))),
+  ]);
+  if (typeof kaizen.parseCard !== "function" || typeof kaizen.checkCard !== "function" || typeof build.storeRecords !== "function" ||
+      compare.CONFIDENCE !== CHECK_METHOD.confidence || compare.BOOTSTRAP_RESAMPLES !== CHECK_METHOD.bootstrap_resamples ||
+      compare.MIN_GROUPS_PER_SIDE !== CHECK_METHOD.min_groups_per_side) throw new Error("canonical Desk comparison interface changed");
+  const records = build.storeRecords(mainDir);
+  if (!Array.isArray(records)) throw new Error("canonical Desk storeRecords must return records");
+  canonical = { records, parseCard: kaizen.parseCard, checkCard: kaizen.checkCard };
+}
+function sourceRevision(dir) {
+  if (!dir) return "unavailable";
+  try {
+    const sha = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (/^[a-f0-9]{40}$/.test(sha)) return sha;
+  } catch (error) {
+    if (!OFFLINE) throw error;
+  }
+  if (!OFFLINE) throw new Error("improvement checks source revision unavailable");
+  return "unavailable";
+}
+const checkSources = { desk: sourceRevision(deskDir), facts: sourceRevision(mainDir), reports: sourceRevision(reportsDir) };
+console.log(`Improvement checks sources (independent snapshots): ${JSON.stringify(checkSources)}`);
 const sum = (v) => v.reduce((a, b) => a + b, 0);
 const medianOf = (v) => percentile([...v].sort((a, b) => a - b), 50);
 const p75Of = (v) => percentile([...v].sort((a, b) => a - b), 75);
@@ -215,12 +252,16 @@ const jobFiles = listJSON(jobsDir);
 // What each job's finish day is worked out from (finish-date.mjs), read from
 // the same report as the summary.
 const finishInputs = new Map();
+const learningEvidence = [];
 const jobs = jobFiles.map((f) => {
   const report = readJSON(join(jobsDir, f), {});
   const summary = jobSummary(report, f);
   const clocks = readLifecycleClocks(report);
   if (clocks !== null) summary.clocks = clocks;
   finishInputs.set(summary.id, finishInputsOf(report));
+  if (report.timeline?.waits?.length || report.timeline?.agents?.length) {
+    learningEvidence.push({ job: summary.id, timeline: { waits: report.timeline.waits, agents: report.timeline.agents } });
+  }
   return summary;
 });
 // Until an outcome is accepted, the band answers per delivered task instead.
@@ -753,6 +794,8 @@ async function fetchAlarmIssues() {
 }
 
 const [kaizenFetch, andonFetch, alarmFetch] = await Promise.all([fetchIssues("kaizen"), fetchIssues("andon"), fetchAlarmIssues()]);
+const improvementChecks = buildImprovementChecks({ issues: kaizenFetch, ...canonical });
+improvementChecks.sources = checkSources;
 // Each kaizen issue carries the cause the site maps it to, or null.
 const kaizenIssues = (await mapLimit(kaizenFetch.issues, 4, enrichIssue)).map((i) => {
   // The cause an issue works on, from the page's own mapping table; an
@@ -997,6 +1040,7 @@ const data = {
   },
   kaizen: { raised: kaizenRaised, resolved: kaizenResolved, verification: kaizenFetch.verification },
   kaizen_issues: kaizenIssues,
+  improvement_checks: improvementChecks,
   andon_issues: andonIssues,
   andon_verification: andonFetch.verification,
   alarm_issues: alarmFetch.issues,
@@ -1042,6 +1086,12 @@ const byWeek = buildByWeek({
   stackup: readJSON(join(reportsDir, "rollups/stackup.json"), null),
   tasks: readJSON(join(reportsDir, "rollups/tasks.json"), null),
   finishDates: new Map(jobs.map((j) => [j.id, j.finish_date])),
+});
+data.learning = buildLearning({
+  data,
+  causes: readJSON(join(reportsDir, "rollups/causes.json"), null),
+  history: { by_week: byWeek, evidence: learningEvidence },
+  checks: data.improvement_checks,
 });
 
 const violations = [

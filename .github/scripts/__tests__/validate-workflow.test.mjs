@@ -374,6 +374,9 @@ test("S2-1: first landed main contains helpers atomically; merge/build/pages use
     const reports = r.run(workflowRun(build, "Build the reports"), false, { FACTORY_SITE_OFFLINE: "1" })
     assert.equal(reports.status, 0, reports.stdout + reports.stderr)
     cpSync(join(r.dir, "_out"), join(r.dir, "_reports"), { recursive: true })
+    // Pages now explicitly imports current Desk; reuse the owned source
+    // rather than making this offline workflow fixture clone another copy.
+    symlinkSync(process.env.DESK_DIR, join(r.dir, "_desk"), "dir")
     const site = r.run(workflowRun(pages, "Build site data"), false, { FACTORY_SITE_OFFLINE: "1" })
     assert.equal(site.status, 0, site.stdout + site.stderr)
     assert.equal(r.run(workflowRun(mergeText, "Find the pull requests at the validated head"), true).status, 0)

@@ -4,9 +4,21 @@ This is the public factory store for [Desk](https://github.com/ourostack/desk). 
 
 ## What this is for
 
-This store is for anyone deciding how to get more accepted outcomes for less human attention: an operator, a team lead, or an agent improving its own system. The value it cares about is an outcome a human accepted. Everything measured here serves one question: how much human attention does an accepted outcome cost, and where does the rest go? Agent time, tokens and tool calls are inputs; they matter only because they help explain that ratio.
+This store makes the software-production process visible to the people and agents improving it. It asks where time went, which losses were avoidable, what changed, and whether later work improved or worsened. Accepted outcomes, human attention and rework help judge those changes together; output quality alone does not explain how the factory works.
 
 **Designed for many desks; proven on one so far.**
+
+## Follow the process, not an activity scoreboard
+
+The site has four starting points: **Overview** explains the current process evidence and its history; **Time & waste** connects observations to concrete task periods; **Improvements** follows problems through changes and current checks; **Tasks** tells each task's whole team story. Comparisons and worker timelines provide deeper evidence. Existing task, session, comparison, cause and action links still work.
+
+A recorded delay is not automatically waste. An evaluator's classification is not a host observation. Work on another task is not proof of lost factory capacity, and overlapping task windows are task exposure, not unique factory time. Production episodes, recorded activity and acceptance waits remain separate clocks.
+
+Improvement checks reuse Desk's canonical version-exposure comparison, including shared-session groups, excluded records and capture limits. Both open and closed public cards receive a current read-only check. A missing baseline can make a completed check inconclusive; an absent check is different. Issue closure and a merged countermeasure establish neither benefit nor acceptance. Before/after associations do not establish causation, and differences between partial lower bounds have unknown capture direction.
+
+The same learning projection is available in `data.json` under `learning` and at `rollups/learning.json` (`factory-learning/1`). `improvement_checks` retains the canonical check inputs, result and source revisions. Pages supplies current Desk `main` through `--desk`; source-import or comparison-runtime failures fail the build rather than replace the last good deployment with an empty success.
+
+Public task labels use a public PR title only as an explicitly labeled reference, never as the original requested outcome. Private outcomes remain private. Where stage timing, coordination cost, original trigger work or a standardization decision is unavailable, the site says so rather than infer it from a status or tool call.
 
 ## How the public site shows numbers
 

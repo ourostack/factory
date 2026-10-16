@@ -194,9 +194,10 @@ test("the purpose and limit statements are on the page and in the README", () =>
   const html = read("site/src/index.html")
   const readme = read("README.md")
   for (const text of [html, readme]) {
-    assert.match(text, /how much human attention does an accepted outcome cost/)
+    assert.match(text, /human attention/i)
     assert.match(text, /Designed for many desks; proven on one so far\./)
   }
+  assert.match(readme, /where time went, which losses were avoidable, what changed, and whether later work improved or worsened/);
 })
 
 test("the health panel contains its own failures and links go through the guard", () => {

@@ -426,6 +426,20 @@ test("the site build reads every pull request on every task's timeline from GitH
   mkdirSync(join(main, "facts"), { recursive: true })
   execFileSync("git", ["init", "-q", main])
   json(join(reports, "jobs/j2.json"), { job: "j2", formulas: { status: { class: "declared", value: "done" } }, timeline: { prs: [{ repo: "o/private", number: 3, at_ms: 7 }] } })
+  // This production-mode fixture supplies the canonical source explicitly;
+  // there are no facts or cards here, so no comparison is requested.
+  const desk = join(dir, "desk")
+  const pipeline = join(desk, "plugins/desk/mcp/src/factory/pipeline")
+  mkdirSync(pipeline, { recursive: true })
+  json(join(desk, "plugins/desk/mcp/package.json"), { type: "module" })
+  writeFileSync(join(pipeline, "kaizen.js"), "export const parseCard=()=>{throw Error('no cards expected')}; export const checkCard=parseCard")
+  writeFileSync(join(pipeline, "build.js"), "export const storeRecords=()=>[]")
+  writeFileSync(join(pipeline, "compare.js"), "export const CONFIDENCE=0.95, BOOTSTRAP_RESAMPLES=10000, MIN_GROUPS_PER_SIDE=6")
+  for (const path of [main, reports, desk]) {
+    execFileSync("git", ["init", "-q", path])
+    execFileSync("git", ["-C", path, "add", "."])
+    execFileSync("git", ["-C", path, "-c", "user.name=fixture", "-c", "user.email=16390116+arimendelow@users.noreply.github.com", "commit", "-qm", "PR clock inputs", "--allow-empty"])
+  }
   // A stand-in for GitHub: two pull requests with ETags, a private one it will not show, and a log of every pull request request.
   const stub = join(dir, "stub.mjs")
   const log = join(dir, "requests.log")
@@ -447,7 +461,7 @@ globalThis.fetch = async (url, init = {}) => {
   const pullsOut = join(dir, "tmp/pulls.json")
   const cache = join(dir, "tmp/pulls-cache.json")
   const requests = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [])
-  const run = (extra, env) => spawnSync("node", ["--import", stub, new URL("../../../site/scripts/build-data.mjs", import.meta.url).pathname, "--reports", reports, "--main", main, "--out", out, ...extra], { env: { ...process.env, GITHUB_TOKEN: "", FACTORY_SITE_OFFLINE: "", FACTORY_SITE_MAX_PR_LOOKUPS: "", STUB_LOG: log, ...env }, encoding: "utf8" })
+  const run = (extra, env) => spawnSync("node", ["--import", stub, new URL("../../../site/scripts/build-data.mjs", import.meta.url).pathname, "--reports", reports, "--main", main, "--desk", desk, "--out", out, ...extra], { env: { ...process.env, GITHUB_TOKEN: "", FACTORY_SITE_OFFLINE: "", FACTORY_SITE_MAX_PR_LOOKUPS: "", STUB_LOG: log, ...env }, encoding: "utf8" })
   const r = run(["--pulls-out", pullsOut, "--pulls-cache", cache], {})
   assert.equal(r.status, 0, r.stderr)
   const pulls = JSON.parse(readFileSync(pullsOut, "utf8"))

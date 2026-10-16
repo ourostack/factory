@@ -300,12 +300,12 @@ test("a cause the mapping table links to a kaizen issue shows that issue and ask
   const rows = S.actRows(issues, null)
   const taken = S.causeIssues(rows, "waiting:next_prompt")
   assert.equal(taken.length, 1)
-  assert.equal(S.takenOnWords(taken), "Already taken on: factory#53, with countermeasure desk#65 (merged, not yet checked).")
+  assert.equal(S.takenOnWords(taken), "Already taken on: factory#53, with countermeasure desk#65 (merged; inspect its current result on Improvements).")
   assert.deepEqual(S.causeIssues(rows, "waiting:other_task"), [])
   assert.equal(S.takenOnWords([]), "")
   const d = { label: "Waiting · next prompt (the agent had stopped)", key: "waiting:next_prompt", ms: 36 * H, tasks: [], jobs: 1, all: { rank: 2, of: 4, share: 0.23 } }
   const text = S.a3Prompt(d, { route: "https://s/#/causes/waiting:next_prompt", dataUrl: "https://s/rollups/causes.json", indexUrl: "https://s/llms.txt", existing: taken })
-  assert.match(text, /^Factory cause "Waiting · next prompt \(the agent had stopped\)" \(waiting:next_prompt\): an A3 already exists at ourostack\/factory#53 \(https:\/\/github\.com\/ourostack\/factory\/issues\/53\), with countermeasure ourostack\/desk#65, merged, not yet checked; help me check or extend it\./)
+  assert.match(text, /^Factory cause "Waiting · next prompt \(the agent had stopped\)" \(waiting:next_prompt\): an A3 already exists at ourostack\/factory#53 \(https:\/\/github\.com\/ourostack\/factory\/issues\/53\), with countermeasure ourostack\/desk#65, merged; inspect the current result on Improvements; help me check or extend it\./)
   assert.doesNotMatch(text, /start an A3/i)
   assert.match(text, /Index of every data file: https:\/\/s\/llms\.txt$/)
   // The mapping is published as data: each kaizen issue's cause, from the same table.
@@ -318,13 +318,13 @@ test("a cause the mapping table links to a kaizen issue shows that issue and ask
   assert.equal(stated[0].cause.key, "waiting:api_retry")
   assert.equal(S.actRows([{ ...issues[1], cause: "<bad>" }], null)[0].cause, null, "a malformed published cause is ignored")
   const app = read("site/src/app.js")
-  assert.match(app, /S\.causeIssues\(S\.actRows\(data\.kaizen_issues, doc\), key\)/)
+  assert.match(app, /S\.causeIssues\(S\.actRows\(data\.kaizen_issues, doc, undefined, L\.validateLearning\(data\.learning\)\.ok \? data\.learning\.improvements\.rows : undefined\), key\)/)
   assert.match(app, /"Check or extend the A3 with your agent"/)
 })
 
 // ------------------------------------------------------------ Act (M-7)
 
-test("Act's rows read as plain sentences and its count says how many are closed and that none is checked", () => {
+test("legacy issue rows keep plain problem sentences and separate closure from effect", () => {
   for (const ref of ["ourostack/factory#39", "ourostack/factory#50", "ourostack/factory#51", "ourostack/factory#52", "ourostack/factory#53", "ourostack/factory#54"]) {
     const t = S.issueTitle(ref, "x")
     assert.match(t, /^[A-Z].*\.$/, ref)
@@ -335,8 +335,8 @@ test("Act's rows read as plain sentences and its count says how many are closed 
   assert.equal(S.issueTitle("ourostack/factory#99", "Checkout guard fails closed"), "Checkout guard fails closed")
   assert.equal(S.issueTitle("ourostack/factory#99", undefined), null)
   const closed = (n) => ({ ref: `x#${n}`, state: "closed" })
-  assert.equal(S.actSummary([1, 2, 3, 4, 5, 6].map(closed)), "6 problems taken on so far. All 6 are closed; none is checked yet, because no countermeasure has labeled tasks on both sides of it.")
-  assert.equal(S.actSummary([closed(1), { ref: "x#2", state: "open" }]), "2 problems taken on so far. 1 of 2 is open and 1 closed; none is checked yet, because no countermeasure has labeled tasks on both sides of it.")
+  assert.equal(S.actSummary([1, 2, 3, 4, 5, 6].map(closed)), "6 problems taken on so far. All 6 are closed. Issue closure and countermeasure merge do not establish effect; inspect each current check on Improvements.")
+  assert.equal(S.actSummary([closed(1), { ref: "x#2", state: "open" }]), "2 problems taken on so far. 1 of 2 is open and 1 closed. Issue closure and countermeasure merge do not establish effect; inspect each current check on Improvements.")
   assert.equal(S.actSummary([]), "")
   assert.match(read("site/src/app.js"), /el\("p", "act-summary", S\.actSummary\(rows\)\)/)
 })
