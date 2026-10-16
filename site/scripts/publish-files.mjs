@@ -19,6 +19,7 @@ const { slimMap } = require("../src/walk.js");
 const { reasonTable } = require("../src/format.js");
 const { readLifecycleClocks } = require("../src/steps.js");
 const { validateBriefing } = require("../src/briefing.js");
+const { validateLearning } = require("../src/learning.js");
 import { prClock } from "./pr-clock.mjs";
 import { forRollupFile } from "./finish-date.mjs";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
@@ -121,11 +122,15 @@ export function publishData({ reports, dist, pulls = null }) {
   const dataPath = join(dist, "data.json");
   let improvements;
   let overview;
+  let learning;
   if (existsSync(dataPath)) {
     const data = JSON.parse(readFileSync(dataPath, "utf8"));
     improvements = data.improvements;
     overview = data.overview;
+    learning = data.learning;
   }
+  if (learning !== undefined && (!validateLearning(learning).ok || checkNumbers({ learning }).length)) throw new Error("learning_projection_invalid");
+  if (learning === undefined && (existsSync(join(reports, "rollups/learning.json")) || existsSync(join(dist, "rollups/learning.json")))) throw new Error("learning_projection_invalid");
   if (overview !== undefined && (!validateBriefing(overview, validateImprovementQueue).ok || checkNumbers({ overview }).length)) throw new Error("overview_projection_invalid");
   if (overview === undefined && (existsSync(join(reports, "rollups/overview.json")) || existsSync(join(dist, "rollups/overview.json")))) throw new Error("overview_projection_invalid");
   if (improvements !== undefined && !validateImprovementQueue(improvements).ok) throw new Error("triage_projection_invalid");
@@ -146,7 +151,7 @@ export function publishData({ reports, dist, pulls = null }) {
   const copied = [];
   for (const [sub, depth] of [["jobs", 1], ["rollups", 0]]) {
     for (const rel of jsonFiles(join(reports, sub), depth)) {
-      if (sub === "rollups" && ["improvements.json", "overview.json"].includes(rel)) continue; // checked data twins only
+      if (sub === "rollups" && ["improvements.json", "overview.json", "learning.json"].includes(rel)) continue; // checked data twins only
       const to = join(dist, sub, rel);
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(join(reports, sub, rel), to);
@@ -159,6 +164,13 @@ export function publishData({ reports, dist, pulls = null }) {
   // One projection is the source of both twins. Never publish a stale reports
   // queue over the freshly checked main-branch queue in data.json.
   if (existsSync(dataPath)) {
+    if (learning !== undefined) {
+      const path = join(dist, "rollups", "learning.json");
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(learning), "utf8");
+      copyFileSync(new URL("../src/learning.js", import.meta.url), join(dist, "learning.js"));
+      copied.push("rollups/learning.json");
+    }
     if (overview !== undefined) {
       const path = join(dist, "rollups", "overview.json");
       mkdirSync(dirname(path), { recursive: true });
@@ -232,6 +244,7 @@ export function sizeLine(files, label = "Published data files") {
 // What each file is for, in the walk's order. A file is listed only when
 // it was published in this build.
 const GROUPS = [
+  { title: "Connected process learning", match: (p) => p === "rollups/learning.json", what: () => "the exact factory-learning/1 data.learning twin: one supported conclusion, bounded observation versus classification findings, task evidence and inspect-only handoffs, review/repair/human-stop/team questions, all available release/week history and canonical current improvement-check summaries; task exposure is not utilization and a merged change is not a measured benefit" },
   { title: "Start here: the whole site in one file", match: (p) => p === "data.json", what: () => "every number on the page, each with its state (measured, partial or no data), reasons and, when partial, its bound; jobs[] holds each task's name, finish date and finish order; kaizen_issues (the problems in hand, each with the `cause` key it works on when one is known) and alarm_issues (who owns each alarm) are step 4, Act" },
   { title: "Factory briefing", match: (p) => p === "rollups/overview.json", what: () => "the exact factory-overview/1 data.overview twin: attention, public claims, one investigation and explicit monitoring/review limitations; triage handoffs are inspection-only, not execution authority; automation is not demonstrated" },
   { title: "Reading the reasons", match: (p) => p === "reasons.json", what: () => "every reason code a figure can carry (censored, log_truncated, card_dates_shorter_than_work, …) with the plain words the page shows for it" },

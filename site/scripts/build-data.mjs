@@ -55,6 +55,7 @@ const { alarmKeys } = createRequire(import.meta.url)("../src/format.js");
 // written into data.json so agents read the mapping as data.
 const { kaizenCauseOf, readLifecycleClocks } = createRequire(import.meta.url)("../src/steps.js");
 const { buildBriefing } = createRequire(import.meta.url)("../src/briefing.js");
+const { buildLearning } = createRequire(import.meta.url)("../src/learning.js");
 import { checkByWeek, checkNumbers } from "./check-numbers.mjs";
 import { attentionPerDelivered, outcomesSummary, releaseTrend } from "./outcomes.mjs";
 import { WASTE_ACTIONS, fixNext } from "./fix-next.mjs";
@@ -251,12 +252,16 @@ const jobFiles = listJSON(jobsDir);
 // What each job's finish day is worked out from (finish-date.mjs), read from
 // the same report as the summary.
 const finishInputs = new Map();
+const learningEvidence = [];
 const jobs = jobFiles.map((f) => {
   const report = readJSON(join(jobsDir, f), {});
   const summary = jobSummary(report, f);
   const clocks = readLifecycleClocks(report);
   if (clocks !== null) summary.clocks = clocks;
   finishInputs.set(summary.id, finishInputsOf(report));
+  if (report.timeline?.waits?.length || report.timeline?.agents?.length) {
+    learningEvidence.push({ job: summary.id, timeline: { waits: report.timeline.waits, agents: report.timeline.agents } });
+  }
   return summary;
 });
 // Until an outcome is accepted, the band answers per delivered task instead.
@@ -1081,6 +1086,12 @@ const byWeek = buildByWeek({
   stackup: readJSON(join(reportsDir, "rollups/stackup.json"), null),
   tasks: readJSON(join(reportsDir, "rollups/tasks.json"), null),
   finishDates: new Map(jobs.map((j) => [j.id, j.finish_date])),
+});
+data.learning = buildLearning({
+  data,
+  causes: readJSON(join(reportsDir, "rollups/causes.json"), null),
+  history: { by_week: byWeek, evidence: learningEvidence },
+  checks: data.improvement_checks,
 });
 
 const violations = [

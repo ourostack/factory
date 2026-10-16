@@ -588,6 +588,7 @@ const jobReport = (id, status, timeline) => ({
   ...(timeline ? { timeline } : {}),
 })
 
+const FA = "a".repeat(32), FB = "b".repeat(32), FC = "c".repeat(32)
 function storeFixture({ withDesk }) {
   const dir = mkdtempSync(join(tmpdir(), "finish-build-"))
   const reports = join(dir, "reports")
@@ -596,26 +597,26 @@ function storeFixture({ withDesk }) {
   write(join(reports, "rollups/measures.json"), { groupings: {} })
   write(join(reports, "rollups/muda.json"), { groupings: { overall: { all: { jobs: 3, jobs_labeled: 0, wastes: [] } } }, wastes: ["defects"] })
   const desk = withDesk ? { finished_on: { state: "measured", value: "2026-10-02", basis: "transition", reasons: [] } } : {}
-  write(join(reports, "jobs/aaaaaaaa.json"), jobReport("aaaaaaaa", "done", { lead_window: win(100000), ...desk, prs: [], intervals: [{ session_id: "s1", host: "claude-code" }] }))
-  write(join(reports, "jobs/bbbbbbbb.json"), jobReport("bbbbbbbb", "done", { intervals: [{ session_id: "s2", host: "claude-code" }] }))
-  write(join(reports, "jobs/cccccccc.json"), jobReport("cccccccc", "processing", { lead_window: win(1), prs: [], intervals: [{ session_id: "s3", host: "claude-code" }] }))
+  write(join(reports, `jobs/${FA}.json`), jobReport(FA, "done", { lead_window: win(100000), ...desk, prs: [], intervals: [{ session_id: "s1", host: "claude-code" }] }))
+  write(join(reports, `jobs/${FB}.json`), jobReport(FB, "done", { intervals: [{ session_id: "s2", host: "claude-code" }] }))
+  write(join(reports, `jobs/${FC}.json`), jobReport(FC, "processing", { lead_window: win(1), prs: [], intervals: [{ session_id: "s3", host: "claude-code" }] }))
   write(join(reports, "rollups/stackup.json"), {
     schema: "desk.factory.rollups/1",
-    jobs: [stackRow("aaaaaaaa"), stackRow("bbbbbbbb"), stackRow("cccccccc", { status: "processing" })],
+    jobs: [stackRow(FA), stackRow(FB), stackRow(FC, { status: "processing" })],
   })
-  write(join(reports, "rollups/tasks.json"), { jobs: [taskRow("aaaaaaaa"), taskRow("bbbbbbbb"), taskRow("cccccccc")] })
-  write(join(main, "facts/claude-code-s1.json"), facts("s1", [{ job: "aaaaaaaa" }]))
-  write(join(main, "facts/claude-code-s2.json"), facts("s2", [{ job: "bbbbbbbb" }]))
-  write(join(main, "facts/claude-code-s3.json"), facts("s3", [{ job: "cccccccc" }]))
+  write(join(reports, "rollups/tasks.json"), { jobs: [taskRow(FA), taskRow(FB), taskRow(FC)] })
+  write(join(main, "facts/claude-code-s1.json"), facts("s1", [{ job: FA }]))
+  write(join(main, "facts/claude-code-s2.json"), facts("s2", [{ job: FB }]))
+  write(join(main, "facts/claude-code-s3.json"), facts("s3", [{ job: FC }]))
   execFileSync("git", ["init", "-q", main])
   const commit = (msg, iso) => {
     execFileSync("git", ["-C", main, "add", "."])
     execFileSync("git", ["-C", main, "-c", "user.name=x", "-c", "user.email=x@example.com", "commit", "-q", "-m", msg], { env: { ...process.env, GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso } })
   }
   commit("intake", "2026-10-01T09:00:00Z")
-  write(join(main, "labels/aaaaaaaa/s1.json"), { job: "aaaaaaaa" })
+  write(join(main, `labels/${FA}/s1.json`), { job: FA })
   commit("labels a", "2026-10-03T09:00:00Z")
-  write(join(main, "labels/bbbbbbbb/s2.json"), { job: "bbbbbbbb" })
+  write(join(main, `labels/${FB}/s2.json`), { job: FB })
   commit("labels b", "2026-10-05T09:00:00Z")
   return { dir, reports, main, out: join(dir, "dist/data.json") }
 }
@@ -633,12 +634,12 @@ test("the build with Desk's finish day absent dates each task from the day its l
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   const by = Object.fromEntries(data.jobs.map((j) => [j.id, j]))
-  assert.deepEqual(by.aaaaaaaa.finish_date, { state: "partial", value: "2026-10-03", reasons: ["finish_from_labels_landing"], basis: "labels_landed", bound: "upper" })
-  assert.equal(by.bbbbbbbb.finish_date.value, "2026-10-05")
-  assert.deepEqual(by.cccccccc.finish_date, { state: "unavailable", reasons: ["open_job"] })
-  assert.equal(by.aaaaaaaa.finish_basis, "labels")
-  assert.ok(by.aaaaaaaa.finish_order.value < by.bbbbbbbb.finish_order.value)
-  assert.ok(by.bbbbbbbb.finish_order.value < by.cccccccc.finish_order.value)
+  assert.deepEqual(by[FA].finish_date, { state: "partial", value: "2026-10-03", reasons: ["finish_from_labels_landing"], basis: "labels_landed", bound: "upper" })
+  assert.equal(by[FB].finish_date.value, "2026-10-05")
+  assert.deepEqual(by[FC].finish_date, { state: "unavailable", reasons: ["open_job"] })
+  assert.equal(by[FA].finish_basis, "labels")
+  assert.ok(by[FA].finish_order.value < by[FB].finish_order.value)
+  assert.ok(by[FB].finish_order.value < by[FC].finish_order.value)
   assert.deepEqual(checkNumbers(data), [])
   const weeks = JSON.parse(readFileSync(join(dirname(fx.out), "rollups/by_week.json"), "utf8"))
   assert.equal(weeks.schema, "factory.site.by_week/1")
@@ -653,8 +654,8 @@ test("the build with Desk's finish day present uses it first, as measured", () =
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   const by = Object.fromEntries(data.jobs.map((j) => [j.id, j]))
-  assert.deepEqual(by.aaaaaaaa.finish_date, { state: "measured", value: "2026-10-02", reasons: [], basis: "desk_transition" })
-  assert.equal(by.bbbbbbbb.finish_date.basis, "labels_landed")
+  assert.deepEqual(by[FA].finish_date, { state: "measured", value: "2026-10-02", reasons: [], basis: "desk_transition" })
+  assert.equal(by[FB].finish_date.basis, "labels_landed")
   assert.deepEqual(checkNumbers(data), [])
   const weeks = JSON.parse(readFileSync(join(dirname(fx.out), "rollups/by_week.json"), "utf8"))
   assert.deepEqual(weeks.weeks.map((w) => [w.week, w.n, w.n_partial]), [["2026-W40", 1, 0], ["2026-W41", 1, 1]])
@@ -667,7 +668,7 @@ test("the build with no stack-up file writes no by-week file and still dates the
   assert.equal(r.status, 0, r.stderr)
   assert.equal(existsSync(join(dirname(fx.out), "rollups/by_week.json")), false)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
-  assert.equal(data.jobs.find((j) => j.id === "aaaaaaaa").finish_date.value, "2026-10-03")
+  assert.equal(data.jobs.find((j) => j.id === FA).finish_date.value, "2026-10-03")
 })
 
 // ---------------------------------------------------------------- re-review of #200 (N1-N6)
