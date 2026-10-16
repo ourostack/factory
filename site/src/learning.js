@@ -338,7 +338,7 @@
       "finding_ids", "limits", "href", "source_path", "handoff"]) ||
         refOf(r.url) !== r.ref || !["open", "closed"].includes(r.issue_state) ||
         !["checked", "waiting_for_version", "no_check", "refused", "unavailable"].includes(r.status) ||
-        !codeList(r.reasons, CHECK_CODES) || r.section !== checkSection(r.status) || !figureOK(r.change, true) ||
+        !codeList(r.reasons, CHECK_CODES) || !Array.isArray(r.excluded) || r.section !== checkSection(r.status) || !figureOK(r.change, true) ||
         !codeList(r.limits, LIMITS) || r.href !== "#/improvements" ||
         !handoffOK(r.handoff, improvementSelector(r.ref), r.href) || r.source_path !== `$.improvement_checks.checks["${r.ref}"]` ||
         !exact(r.implementation, ["url", "merged"]) ||
@@ -356,7 +356,7 @@
     }
     if (!cardOK(r.card) || r.card.version === null || r.reasons.length || !["measured", "partial"].includes(r.measurement_state) ||
         r.result !== resultOf(r.verdict) || !r.result || !count(r.sample_jobs) || !sideOK(r.before) || !sideOK(r.after) ||
-        !Array.isArray(r.excluded) || !unique(r.excluded.map((e) => e.reason)) ||
+        !unique(r.excluded.map((e) => e.reason)) ||
         !r.excluded.every((e) => exact(e, ["reason", "jobs"]) && EXCLUSIONS.includes(e.reason) && count(e.jobs) && e.jobs > 0) ||
         r.sample_jobs !== r.before.jobs + r.after.jobs + r.excluded.reduce((n, e) => n + e.jobs, 0)) return false;
     for (const side of [r.before, r.after]) if (side.median.state !== "unavailable" &&
@@ -493,9 +493,9 @@
           if (!exact(stop, ["task", "start_ms", "end_ms", "observation", "judgment", "href", "source_file", "source_path"]) || b.id !== "human_stops" ||
               !id(stop.task) || !number(stop.start_ms) || !number(stop.end_ms) || stop.end_ms < stop.start_ms ||
               stop.href !== taskHref(stop.task, "waiting:next_prompt") || stop.source_file !== `jobs/${stop.task}.json` || !/^\$\.timeline\.waits\[\d+\]$/.test(stop.source_path) ||
-              !exact(stop.observation, ["end", "asks", "pending_agents"]) ||
+              stop.observation !== null && (!exact(stop.observation, ["end", "asks", "pending_agents"]) ||
               !["end_turn", "max_tokens", "rate_limit", "api_error", "refusal", "interrupted", "ask_question", "ask_plan", "not_recorded"].includes(stop.observation.end) ||
-              ![true, false, null].includes(stop.observation.asks) || ![true, false, null].includes(stop.observation.pending_agents) ||
+              ![true, false, null].includes(stop.observation.asks) || ![true, false, null].includes(stop.observation.pending_agents)) ||
               !exact(stop.judgment, ["why", "source", "confidence", "reasons"]) || !WHYS.includes(stop.judgment.why) ||
               !["evaluator", "rule", "none"].includes(stop.judgment.source) || ![null, "high", "medium", "low"].includes(stop.judgment.confidence) ||
               !reasons(stop.judgment.reasons)) return bad();

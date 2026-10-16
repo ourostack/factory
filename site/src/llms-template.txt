@@ -71,6 +71,8 @@ and unchanged. The existing UI has not yet migrated to this new projection.
   changed ask, new information and external causes separate; a changed ask
   is not automatically corrective waste. Stop `observation` is the host's end/asks/pending
   facts; `judgment` separately retains actual why/source/confidence/reasons.
+  Older facts with no recorded host stop preserve `observation:null`; this
+  does not erase a separately recorded judgment or invent host facts.
   Never infer one from the other. Team root/child counts are published
   topology, not task-exclusive worker allocation. Stage and coordination
   `duration` remain unavailable; each question states its

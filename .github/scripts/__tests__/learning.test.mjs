@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { buildImprovementChecks } from "../../../site/scripts/improvement-checks.mjs";
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs";
 import { buildByWeek } from "../../../site/scripts/by-week.mjs";
@@ -235,6 +236,61 @@ test("waiting for version, no check, refused and unavailable never become comple
   }
 });
 
+function uncheckedLearning(status = "waiting_for_version") {
+  const x = input();
+  x.checks = checks({ version: null });
+  if (status !== "waiting_for_version") {
+    const reasons = { no_check: ["no_block"], refused: ["missing_key"], unavailable: ["canonical_source_unavailable"] }[status];
+    x.checks.checks["ourostack/factory#53"] = {
+      ref: "ourostack/factory#53", url: "https://github.com/ourostack/factory/issues/53", issue_state: "closed", status, reasons,
+    };
+    if (status === "unavailable") { x.checks.availability = "unavailable"; x.checks.reasons = reasons; }
+  }
+  return buildLearning(x);
+}
+
+test("unchecked exclusions require an actual empty array for every unchecked status", () => {
+  for (const status of ["waiting_for_version", "no_check", "refused", "unavailable"]) {
+    const clean = uncheckedLearning(status);
+    assert.equal(validateLearning(clean).ok, true);
+    for (const excluded of [{ length: 0, private: "private prose", raw: 42 }, "", null, {}, ["private prose"]]) {
+      const doc = structuredClone(clean);
+      doc.improvements.rows[0].excluded = excluded;
+      assert.deepEqual(validateLearning(doc), { ok: false, codes: ["learning_projection_invalid"] }, status);
+    }
+  }
+});
+
+test("top-level numbers gate rejects private numeric prose inside array-like unchecked exclusions", () => {
+  const doc = uncheckedLearning();
+  doc.improvements.rows[0].excluded = { length: 0, private: "private prose", raw: 42 };
+  assert.deepEqual(checkNumbers({ learning: doc }), [{ path: "learning", code: "learning_projection_invalid" }]);
+});
+
+test("older null host-stop observations preserve the separately recorded judgment", () => {
+  const x = input();
+  x.history.evidence[0].timeline.waits[0].stop = null;
+  const doc = buildLearning(x);
+  const stop = doc.behaviors.find((b) => b.id === "human_stops").stops[0];
+  assert.equal(stop.observation, null);
+  assert.deepEqual(stop.judgment, { why: "stopped_short", source: "evaluator", confidence: "medium", reasons: [] });
+  assert.deepEqual(validateLearning(doc), { ok: true, codes: [] });
+  assert.deepEqual(checkNumbers({ learning: doc }), []);
+  for (const observation of [
+    {}, [], "not recorded", { end: "end_turn", asks: false },
+    { end: "end_turn", asks: false, pending_agents: false, private: "private prose" },
+    { end: "end_turn", asks: "false", pending_agents: false },
+    { end: "private prose", asks: null, pending_agents: null },
+  ]) {
+    const malformed = structuredClone(doc);
+    malformed.behaviors.find((b) => b.id === "human_stops").stops[0].observation = observation;
+    assert.deepEqual(validateLearning(malformed), { ok: false, codes: ["learning_projection_invalid"] });
+    const source = input();
+    source.history.evidence[0].timeline.waits[0].stop = observation;
+    assert.throws(() => buildLearning(source), /learning_projection_invalid/);
+  }
+});
+
 test("process questions expose actual stop judgment separately from host facts, not tool-inferred stage times", () => {
   const doc = buildLearning(input());
   const stops = doc.behaviors.find((b) => b.id === "human_stops");
@@ -359,6 +415,56 @@ test("scoped handoffs identify public JSON selectors, task/map destinations and 
 });
 
 const root = resolve("site/dist/task2-validation", `learning-${process.pid}`);
+test("publisher refuses array-like unchecked exclusions before overwriting the last good twin", () => {
+  const reports = join(root, "round1-exclusions-reports"), dist = join(root, "round1-exclusions-dist");
+  mkdirSync(reports, { recursive: true });
+  mkdirSync(dist, { recursive: true });
+  const learning = uncheckedLearning();
+  writeFileSync(join(dist, "data.json"), JSON.stringify({ learning }));
+  publishData({ reports, dist });
+  const before = readFileSync(join(dist, "rollups/learning.json"), "utf8");
+  learning.improvements.rows[0].excluded = { length: 0, private: "private prose", raw: 42 };
+  writeFileSync(join(dist, "data.json"), JSON.stringify({ learning }));
+  assert.throws(() => publishData({ reports, dist }), /learning_projection_invalid/);
+  assert.equal(readFileSync(join(dist, "rollups/learning.json"), "utf8"), before);
+});
+
+test("actual canonical older-facts wait producer survives site build and publication with stop null", async () => {
+  if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return; }
+  const { jobWaits } = await import(pathToFileURL(join(resolve(process.env.DESK_DIR), "plugins/desk/mcp/src/factory/pipeline/stretches.js")));
+  const waits = jobWaits({
+    job: A, sessions: [{ offset_ms: 100 }],
+    source_sessions: [{
+      session: { host: "claude-code", id: "4b34c4fa-57d6-4fe0-a822-d452dc681b1f" },
+      jobs: [{ job: A }], intervals: [{ kind: "human_wait", agent: 0, start_ms: 10, end_ms: 20 }],
+    }],
+  });
+  assert.equal(waits.length, 1);
+  assert.equal(waits[0].stop, null, "older facts have no host-stop field");
+  assert.equal(waits[0].start_ms, 110);
+  const reports = join(root, "round1-old-facts-reports"), store = join(root, "round1-old-facts-store"), dist = join(root, "round1-old-facts-dist");
+  mkdirSync(join(reports, "jobs"), { recursive: true });
+  mkdirSync(join(reports, "rollups"), { recursive: true });
+  mkdirSync(store, { recursive: true });
+  execFileSync("git", ["init", "--quiet", store]);
+  execFileSync("git", ["init", "--quiet", reports]);
+  writeFileSync(join(reports, "rollups/coverage.json"), "{}");
+  writeFileSync(join(reports, `jobs/${A}.json`), JSON.stringify({
+    job: A, timeline: { waits: waits.map((wait) => ({
+      ...wait, why: "not_known", why_source: "none", confidence: null, reasons: ["not_in_published_facts"],
+    })) },
+  }));
+  execFileSync(process.execPath, ["site/scripts/build-data.mjs", "--reports", reports, "--main", store, "--out", join(dist, "data.json")],
+    { cwd: new URL("../../../", import.meta.url), env: { ...process.env, FACTORY_SITE_OFFLINE: "1" }, stdio: "pipe" });
+  const d = JSON.parse(readFileSync(join(dist, "data.json")));
+  const stop = d.learning.behaviors.find((b) => b.id === "human_stops").stops[0];
+  assert.equal(stop.observation, null);
+  assert.deepEqual(stop.judgment, { why: "not_known", source: "none", confidence: null, reasons: ["not_in_published_facts"] });
+  assert.deepEqual(checkNumbers(d), []);
+  publishData({ reports, dist });
+  assert.deepEqual(JSON.parse(readFileSync(join(dist, "rollups/learning.json"))), d.learning);
+});
+
 test("publication twins one validated learning object, ignores stale reports twin and refuses malformed before writes", () => {
   const reports = join(root, "publish-reports"), dist = join(root, "publish-dist");
   mkdirSync(join(reports, "rollups"), { recursive: true });
