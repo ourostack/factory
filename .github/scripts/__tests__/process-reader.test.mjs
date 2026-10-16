@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import { buildImprovementChecks } from "../../../site/scripts/improvement-checks.mjs";
+import { buildByWeek } from "../../../site/scripts/by-week.mjs";
 
 const require = createRequire(import.meta.url);
 const F = require("../../../site/src/format.js");
@@ -97,6 +98,44 @@ test("missing or malformed learning withholds only the learning view, never clai
   assert.doesNotMatch(root.textContent, /0 tasks|no problems|all clear/i);
   const invalid = learning(); invalid.overview.href = "https://evil.test";
   assert.throws(() => render("time", invalid), /learning.*invalid/i);
+});
+
+test("unavailable and truncated issue collections cannot read as complete empty improvement lists", () => {
+  for (const [verification, truncated, expected] of [
+    ["unavailable", false, /improvement evidence.*unavailable|could not.*read.*improvement/i],
+    ["verified", true, /first page.*more.*may exist/i],
+  ]) {
+    const checks = buildImprovementChecks({ issues: { verification, truncated, issues: [] }, records: [],
+      parseCard: () => ({ ok: false, errors: [{ code: "no_block" }] }), checkCard: () => null });
+    const doc = L.buildLearning({ data: { schema: "factory-site/3", jobs: [] }, checks });
+    const root = render("improvements", doc, []);
+    assert.match(root.textContent, expected);
+    assert.doesNotMatch(root.textContent, /No published card is in this state/);
+  }
+});
+
+test("each historical median shows its own sample rather than the readable-task denominator", () => {
+  const by_week = buildByWeek({ stackup: { jobs: [{ job: A, status: m("done"), lead_time_ms: m(100), working_ms: m(50), idle_ms: m(50) }] },
+    tasks: { jobs: [] }, finishDates: new Map([[A, { ...m("2026-09-22"), basis: "desk_transition" }]]) });
+  const doc = L.buildLearning({ data: { schema: "factory-site/3", jobs: [{ id: A, lead_time_ms: m(100) }] }, history: { by_week } });
+  const week = doc.evolution.weeks.rows[0];
+  week.population.n = 0;
+  week.flow_efficiency = { median: m(0.5), n: 1, N: 1 };
+  assert.equal(L.validateLearning(doc).ok, true);
+  const root = render("overview", doc);
+  assert.match(root.textContent, /1 of 1 tasks support this median/);
+});
+
+test("material alarms expose consequence ownership and repair destination outside diagnostics", () => {
+  assert.equal(typeof R.materialWarning, "function");
+  assert.equal(R.materialWarning({ alarms: [] }), null);
+  const warning = R.materialWarning({ alarms: [{ key: "loop:loop_alarms_open", owner: null }] });
+  assert.match(warning.effect, /recommendations.*may.*current|recommendations.*stale/i);
+  assert.match(warning.ownership, /public.*ownership.*unavailable/i);
+  assert.equal(warning.href, "#/improvements");
+  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="material-warning"/);
+  assert.ok(html.indexOf('id="material-warning"') < html.indexOf('<main'));
 });
 
 test("a direction-unknown partial finding is never an exact number in the opening conclusion", () => {

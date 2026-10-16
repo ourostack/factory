@@ -1115,6 +1115,17 @@
       verdict = { status: "unknown", reason: "the health record could not be read, so health cannot be told" };
     }
     const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues, alarmIssuesVerification: data.alarm_issues_verification });
+    const warning = R.materialWarning(s);
+    const warningNode = document.getElementById("material-warning");
+    warningNode.replaceChildren();
+    warningNode.hidden = !warning;
+    if (warning) {
+      warningNode.append(`${warning.effect} ${warning.ownership} `);
+      const repair = el("a", null, "Inspect impact and repair paths");
+      setLocalHref(repair, warning.href, { plain: true });
+      if (warning.href === "#/improvements") repair.addEventListener("click", () => { focusAfterRender = "improvement-alarms"; });
+      warningNode.appendChild(repair);
+    }
     container.className = `status-line status-${s.state}`;
     // One line: the state, what each alarm is about (each word linked to its
     // glossary entry) and whether anyone is on it; the full text sits behind
@@ -1138,7 +1149,7 @@
         } else line.appendChild(document.createTextNode(t.text));
       });
       const unowned = s.alarms.filter((a) => !a.owner).length;
-      line.appendChild(document.createTextNode(` (${s.alarms.length === 1 ? "1 alarm" : `${s.alarms.length} alarms`}${unowned === s.alarms.length ? `, ${unowned === 1 ? "no one is on it" : "no one is on them"}` : unowned ? `, ${unowned} with no one on ${unowned === 1 ? "it" : "them"}` : ", each with an owner"}). `));
+      line.appendChild(document.createTextNode(` (${s.alarms.length === 1 ? "1 alarm" : `${s.alarms.length} alarms`}${unowned ? ", public ownership incomplete" : ", each owned by a public issue"}). `));
     } else if (s.state === "normal") {
       line.appendChild(document.createTextNode("no alarm. "));
     } else {

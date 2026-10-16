@@ -29,6 +29,17 @@
   };
   const measureName = (key) => MEASURE[key] || `Evaluator-classified ${String(key).replace(/^muda_time\./, "").replace(/_/g, " ")}`;
   const kindOf = (key) => key === "flow_efficiency" ? "pct1" : COUNT_MEASURES.has(key) ? "count" : "hours";
+  function materialWarning(status) {
+    const alarms = Array.isArray(status?.alarms) ? status.alarms : [];
+    if (!alarms.length) return null;
+    const loop = alarms.some((a) => a.key?.startsWith("loop:"));
+    const collection = alarms.some((a) => a.key?.startsWith("capture") || a.key === "labels_mismatch");
+    return {
+      effect: loop ? "Improvement recommendations may be stale." : collection ? "Some work may be missing or misclassified." : "A recorded work or quality problem needs investigation.",
+      ownership: alarms.every((a) => a.owner?.url) ? "Public issues own these alerts." : "Public alarm ownership is unavailable for at least one alert.",
+      href: loop ? "#/improvements" : "#/store",
+    };
+  }
   function improvementHref(ref) {
     const match = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})#([1-9]\d{0,9})$/.exec(ref);
     if (!match) throw new TypeError("unsupported improvement reference");
@@ -253,10 +264,13 @@
       const weeks = learning.evolution.weeks;
       if (weeks.rows.length) {
         box.append(p(`${count(weeks.rows.length)} available finish weeks; the whole published history is below, not a fixed short lookback. Weekly production time is unavailable. These are recorded task windows, summed as task exposure.`));
-        const table = tableOf(["Finish week (UTC)", "Included / considered", "Recorded working", "Recorded interruptions", "Working share · median"], weeks.rows.map((w) => [
-          w.week, `${count(w.population.n)} / ${count(w.population.N)} fully readable; ${count(w.partial_tasks)} partial`,
-          figure(w.working_ms), figure(w.idle_ms), figure(w.flow_efficiency.median, "pct1"),
-        ]));
+        const table = tableOf(["Finish week (UTC)", "Included / considered", "Recorded working", "Recorded interruptions", "Working share · median"], weeks.rows.map((w) => {
+          const median = el("span");
+          median.append(figure(w.flow_efficiency.median, "pct1"),
+            p(`${count(w.flow_efficiency.n)} of ${count(w.flow_efficiency.N)} tasks support this median.`, "chart-caption"));
+          return [w.week, `${count(w.population.n)} / ${count(w.population.N)} fully readable; ${count(w.partial_tasks)} partial`,
+            figure(w.working_ms), figure(w.idle_ms), median];
+        }));
         box.append(table);
         const taskDetails = el("div");
         for (const w of weeks.rows) {
@@ -394,6 +408,14 @@
     }
     function improvements(host, learning, issues = [], selected = null) {
       validate(learning); currentLearning = learning; host.replaceChildren();
+      const coverage = learning.improvements;
+      if (coverage.availability === "unavailable") {
+        host.append(p("Improvement evidence is unavailable in this build. The public cards or canonical check source could not be read; an empty view does not mean there is no work.", "reader-limit"), jsonLink());
+        return;
+      }
+      if (coverage.availability === "partial") {
+        host.append(p("Only the first page of public cards was read; more may exist. These sections describe the observed subset, not the complete improvement population.", "reader-limit"));
+      }
       if (selected) {
         const row = learning.improvements.rows.find((r) => r.ref === selected);
         if (!row) { host.append(p("This public improvement has no current check row in this generation. No substitute was selected."), local("Inspect all improvements", "#/improvements")); return; }
@@ -405,7 +427,8 @@
         if (rows.length) {
           const grid = el("div", "reader-columns");
           for (const row of rows) grid.append(resultCard(row, issues)); s.append(grid);
-        } else s.append(p(key === "results_available" ? "No completed current check is published. This is not evidence of no effect." :
+        } else s.append(p(coverage.availability === "partial" ? "No card in the observed subset has this state; other cards may exist." :
+          key === "results_available" ? "No completed current check is published. This is not evidence of no effect." :
           key === "awaiting_result" ? "No published card is in this state." : "No additional accepted canonical check row is in this state."));
         host.append(s);
       }
@@ -426,5 +449,5 @@
     }
     return { overview, time, improvements, connections };
   }
-  return { createReader, improvementHref, taskIdentity, checkLimit };
+  return { createReader, improvementHref, taskIdentity, checkLimit, materialWarning };
 });

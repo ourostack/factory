@@ -282,6 +282,7 @@ main { padding: 28px 0 48px; display: block; }
 
 /* Process learning: conclusions first, evidence at its own level of detail. */
 .reader-wrap { max-width: 1240px; }
+.material-warning { margin: .35rem 0; font-size: .85rem; line-height: 1.4; max-width: 90ch; }
 .reader-conclusion { margin: 0 0 .65rem; max-width: 68ch; font-size: 1.2rem; line-height: 1.5; font-weight: 600; }
 .reader-limit { color: var(--text-secondary); max-width: 76ch; margin: .65rem 0; }
 .reader-next { display: inline-block; padding: .45rem 0; font-weight: 650; margin: 0 0 .8rem; }

@@ -1615,6 +1615,10 @@ export async function main(argv = process.argv.slice(2)) {
             const node = document.querySelector(selector), r = node?.getBoundingClientRect()
             if (!node?.textContent.trim() || !r || r.top < 0 || r.bottom > 844) throw new Error(`Missing or below first screen: ${selector}`)
           }
+          if (document.getElementById("status-line").classList.contains("status-abnormal")) {
+            const warning = document.getElementById("material-warning");
+            if (!warning || warning.hidden || !/ownership/i.test(warning.textContent) || !warning.querySelector("a")) throw new Error("Material alarm consequence, ownership or repair is hidden");
+          }
           return { height: 844, conclusion: document.querySelector("#overview-conclusion").textContent }
         })
       } finally { await context.close() }
@@ -1630,6 +1634,22 @@ export async function main(argv = process.argv.slice(2)) {
         for (const section of ["results_available", "awaiting_result", "investigating"]) {
           const n = await page.locator(`#problems [data-section="${section}"] .reader-improvement`).count()
           if (n !== rows.filter((r) => r.section === section).length) throw new Error(`Incorrect result section: ${section}`)
+        }
+        await open(page, ROUTES.find((r) => r.name === "overview"))
+        const historyText = await page.locator("#learning-overview").innerText()
+        for (const w of targets.data.learning.evolution.weeks.rows) {
+          const n = w.flow_efficiency.n.toLocaleString("en-US"), N = w.flow_efficiency.N.toLocaleString("en-US")
+          if (!historyText.includes(`${n} of ${N} tasks support this median`)) throw new Error(`Median sample missing for ${w.week}`)
+        }
+        const { buildLearning } = createRequire(import.meta.url)(join(here, "..", "src", "learning.js"))
+        for (const availability of ["unavailable", "partial"]) {
+          const learning = availability === "unavailable" ? buildLearning({}) : structuredClone(targets.data.learning)
+          if (availability === "partial") { learning.improvements.availability = "partial"; learning.improvements.reasons = ["first_page_only"] }
+          await page.route("**/data.json", (r) => r.fulfill({ json: { ...targets.data, learning } }))
+          await open(page, ROUTES.find((r) => r.name === "improvements"))
+          const text = await page.locator("#problems").innerText()
+          if (!new RegExp(availability === "unavailable" ? "Improvement evidence is unavailable" : "first page.*more may exist").test(text) || /No published card is in this state/.test(text)) throw new Error(`${availability} collection reads as complete`)
+          await page.unroute("**/data.json")
         }
         return { rows: rows.length }
       } finally { await context.close() }
