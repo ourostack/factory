@@ -81,7 +81,6 @@
     const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
     const first = F.landingChoice(jobs).job;
     const stops = [
-      ["Understand the process", "A supported observation, its material limits and all available history.", "#/"],
       ["Follow time and waste", "Separate recorded observations from classified losses; follow a period to its task and team.", "#/time"],
       ["Check a process change", "Inspect the canonical problem, countermeasure and current result—not just its merge status.", "#/improvements"],
       ["Inspect a task's story", first ? "Follow production periods, interruptions, team, delivery and acceptance." : "No task is published yet. Missing capture is not zero work.", "#/tasks"],
@@ -1356,9 +1355,10 @@
     }
     const name = localName(j.id);
     const tn = R.taskIdentity(j, localNames);
-    const h = el("h1", "view-title task-title", tn.title);
+    const h = el("h1", "view-title task-title", tn.reference ? "One task's production story" : tn.title);
     container.appendChild(h);
     const basis = el("p", "task-outcome-basis", tn.basis);
+    if (tn.reference) basis.appendChild(el("span", "task-public-reference", tn.title));
     container.appendChild(basis);
     const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
     const keyLine = name

@@ -1420,9 +1420,9 @@ export async function main(argv = process.argv.slice(2)) {
     await check("render_error_is_isolated", async () => {
       const { context, page } = await newPage({ width: 390 })
       try {
-        await page.route("**/data.json", async (r) => r.fulfill({ json: { ...targets.data, overview: { malformed: true } } }))
+        await page.route("**/data.json", async (r) => r.fulfill({ json: { ...targets.data, learning: { malformed: true } } }))
         await load(page, url + "#/")
-        await page.waitForFunction(() => /malformed|could not|unavailable/i.test(document.getElementById("overview-state")?.textContent || ""))
+        await page.waitForFunction(() => /malformed|could not|unavailable/i.test(document.getElementById("learning-overview")?.textContent || ""))
         await page.getByRole("link", { name: "Tasks", exact: true }).first().click()
         await settle(page, "tasks")
       } finally { await context.close() }
@@ -1636,6 +1636,7 @@ export async function main(argv = process.argv.slice(2)) {
           if (n !== rows.filter((r) => r.section === section).length) throw new Error(`Incorrect result section: ${section}`)
         }
         await open(page, ROUTES.find((r) => r.name === "overview"))
+        if (await page.locator("#learning-overview details[data-history-weeks]").count()) await page.locator("#learning-overview details[data-history-weeks]").evaluate((d) => { d.open = true })
         const historyText = await page.locator("#learning-overview").innerText()
         for (const w of targets.data.learning.evolution.weeks.rows) {
           const n = w.flow_efficiency.n.toLocaleString("en-US"), N = w.flow_efficiency.N.toLocaleString("en-US")

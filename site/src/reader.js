@@ -271,7 +271,9 @@
           return [w.week, `${count(w.population.n)} / ${count(w.population.N)} fully readable; ${count(w.partial_tasks)} partial`,
             figure(w.working_ms), figure(w.idle_ms), median];
         }));
-        box.append(table);
+        const allWeeks = details("Inspect all finish weeks and their samples", table);
+        allWeeks.dataset.historyWeeks = "";
+        box.append(allWeeks);
         const taskDetails = el("div");
         for (const w of weeks.rows) {
           const s = el("section");

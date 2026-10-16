@@ -124,6 +124,8 @@ test("each historical median shows its own sample rather than the readable-task 
   assert.equal(L.validateLearning(doc).ok, true);
   const root = render("overview", doc);
   assert.match(root.textContent, /1 of 1 tasks support this median/);
+  assert.ok(by(root, "details").some((d) => d.children[0].textContent === "Inspect all finish weeks and their samples" && by(d, "table").length),
+    "complete history is available on demand rather than an inventory on arrival");
 });
 
 test("material alarms expose consequence ownership and repair destination outside diagnostics", () => {
@@ -226,6 +228,9 @@ test("task naming never turns public pull-request titles into requested outcomes
   assert.equal(identity.reference, "A public PR title");
   assert.doesNotMatch(identity.title, /and 4 more/);
   assert.equal(R.taskIdentity(job, { [A]: { title: "Authorized local request" } }).title, "Authorized local request");
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8");
+  assert.match(app, /"view-title task-title", tn\.reference \? "One task's production story" : tn\.title/);
+  assert.match(app, /"task-public-reference", tn\.title/);
 });
 
 test("legacy issue summaries do not contradict a current completed check or confuse merge with effect", () => {
