@@ -131,6 +131,34 @@ export const EVERY_SESSION_WIDTHS = Object.freeze([1280, 768, 390])
 // resized to the other, in both directions: the chart must become what a
 // fresh load at that width draws.
 export const RESIZE_WIDTHS = Object.freeze([390, 1280])
+
+export async function checkImprovementDisclosure(page, expectedRows) {
+  const reviews = page.locator("#improvement-reviews")
+  if (await reviews.count() !== 1) throw new Error("Detailed reviews need an explicit disclosure before Problems in hand")
+  if (await reviews.evaluate((node) => node.open)) throw new Error("Detailed reviews must start collapsed")
+  const outside = await page.evaluate(() => ["improvement-alarms", "improvement-status", "problems"].every((id) => {
+    const node = document.getElementById(id)
+    return node && !node.closest("details") && node.getClientRects().length > 0
+  }))
+  if (!outside) throw new Error("Alarms, counts and Problems in hand must remain outside the review disclosure")
+  const rows = page.locator("#triage-brief .improvement-row")
+  if (await rows.count() !== expectedRows) throw new Error("Disclosure changed the published review count")
+  if (expectedRows && await rows.first().isVisible()) throw new Error("Collapsed review bodies still take space")
+  const before = await page.locator("#problems-title").evaluate((node) => node.getBoundingClientRect().top + scrollY)
+  const summary = reviews.locator(":scope > summary")
+  await summary.focus()
+  await summary.press("Enter")
+  if (!await reviews.evaluate((node) => node.open)) throw new Error("Enter does not expand the review disclosure")
+  if (expectedRows && (!await rows.first().isVisible() || !await rows.last().isVisible())) throw new Error("Expanded disclosure hides published reviews")
+  const after = await page.locator("#problems-title").evaluate((node) => node.getBoundingClientRect().top + scrollY)
+  if (expectedRows && after <= before) throw new Error("Collapsing reviews does not bring Problems in hand closer")
+  await summary.focus()
+  await summary.press("Space")
+  if (await reviews.evaluate((node) => node.open)) throw new Error("Space does not collapse the review disclosure")
+  if (!await summary.evaluate((node) => node === document.activeElement)) throw new Error("Disclosure loses keyboard focus")
+  return { rows: expectedRows, problems_collapsed_y: before, problems_expanded_y: after, keyboard_expand_and_collapse: true }
+}
+
 // Runs in the page: what the session chart drew, to compare a resized page
 // with a fresh one.
 export function readSessionChart() {
@@ -1588,6 +1616,23 @@ export async function main(argv = process.argv.slice(2)) {
       return seen
     })
 
+    await check("improvement_reviews_do_not_bury_problems_in_hand", async () => {
+      const results = []
+      for (const width of [390, 1280]) {
+        const { context, page } = await newPage({ width })
+        try {
+          await open(page, ROUTES.find((r) => r.name === "improvements"))
+          results.push({ width, ...await checkImprovementDisclosure(page, targets.data.improvements.rows.length) })
+        } finally { await context.close() }
+      }
+      return { results }
+    })
+
+    const inspectReviews = async (page) => {
+      const summary = page.locator("#improvement-reviews > summary")
+      if (!await page.locator("#improvement-reviews").evaluate((node) => node.open)) await summary.click()
+    }
+
     // 8. JSON twins agree with each other and with what the page says.
     await check("json_twins_match_data_and_rendered_meaning", async () => {
       const twin = async (p) => JSON.parse(await readFile(join(args.site, p), "utf8"))
@@ -1629,6 +1674,7 @@ export async function main(argv = process.argv.slice(2)) {
     const clipboardFailure = async (page) => {
       await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(privateQueue) }))
       await open(page, contextual)
+      await inspectReviews(page)
       const row = page.locator(".improvement-row").first()
       await row.getByRole("button", { name: /^Copy as a prompt for your agent: improvement \d+$/ }).click()
       await page.waitForTimeout(200)
@@ -1652,6 +1698,7 @@ export async function main(argv = process.argv.slice(2)) {
       try {
         await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(privateQueue) }))
         await open(page, contextual)
+        await inspectReviews(page)
         const row = page.locator(".improvement-row").first()
         await row.getByRole("button", { name: /^Copy as a prompt for your agent: improvement \d+$/ }).click()
         await page.waitForFunction(() => typeof window.__copied === "string")
@@ -1670,6 +1717,7 @@ export async function main(argv = process.argv.slice(2)) {
         await open(page, ROUTES[0])
         const overviewText = await page.locator("#view-overview").innerText()
         await open(page, ROUTES.find((r) => r.name === "improvements"))
+        await inspectReviews(page)
         const rowText = await page.locator(".improvement-row").first().innerText()
         const row = privateQueue.rows[0]
         if (row.availability !== "private_detail_not_published") throw new Error(`fixture availability ${row.availability}`)
@@ -1689,6 +1737,7 @@ export async function main(argv = process.argv.slice(2)) {
           const q = queues[name]
           await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(q) }))
           await open(page, ROUTES.find((r) => r.name === "improvements"))
+          await inspectReviews(page)
           const text = await page.locator("#view-act").innerText()
           if (name === "empty_never_reviewed") {
             if (!/not (been )?reviewed/i.test(text) || await page.locator(".improvement-row").count()) throw new Error("empty queue not shown as not reviewed")
@@ -1747,6 +1796,7 @@ export async function main(argv = process.argv.slice(2)) {
       await page.unroute("**/data.json").catch(() => {})
       await page.route("**/data.json", (r) => r.fulfill({ json: withQueue(q) }))
       await open(page, ROUTES.find((r) => r.name === "improvements"))
+      await inspectReviews(page)
       if (plant) await page.evaluate(plant)
       const read = await page.evaluate(() => {
         const rows = [...document.querySelectorAll("#view-act .improvement-row")]

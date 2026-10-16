@@ -61,6 +61,9 @@ const server = createServer(async (req, res) => {
 let base
 async function load(page, hash, selector) {
   await page.goto(base + hash)
+  if (selector.startsWith("#triage-brief")) {
+    await page.locator("#improvement-reviews > summary").click()
+  }
   await page.waitForSelector(selector)
   await page.waitForFunction(() => ![...document.querySelectorAll(".loading, .is-loading")].some((e) => e.getBoundingClientRect().height > 0))
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
@@ -269,7 +272,20 @@ try {
       await load(page, `#/causes/${encodeURIComponent(key)}`, "#cause-detail")
       assert.ok((await page.locator("#cause-detail").innerText()).trim())
       const copy = page.locator("#cause-detail button").filter({ hasText: /Copy|Start an A3/ })
-      if (await copy.count()) { await copy.first().click(); assert.ok(await page.evaluate(() => !!window.fixtureCopied)) }
+      if (await copy.count()) {
+        const payload = page.locator("#cause-detail .finding-prompt")
+        assert.equal(await payload.count(), 1, "Agent handoff text is behind an explicit disclosure")
+        assert.equal(await payload.evaluate((node) => node.open), false)
+        assert.equal(await payload.locator(".prompt-text").isVisible(), false)
+        if (key.startsWith("waiting:next_prompt:")) {
+          assert.equal(await page.evaluate(() => Boolean(document.getElementById("why-waits-title").compareDocumentPosition(document.querySelector(".a3-block")) & Node.DOCUMENT_POSITION_FOLLOWING)), true, "Concrete stops precede the optional handoff")
+        }
+        await payload.locator("summary").focus()
+        await page.keyboard.press("Enter")
+        assert.equal(await payload.locator(".prompt-text").isVisible(), true)
+        await copy.first().click()
+        assert.equal(await page.evaluate(() => window.fixtureCopied), await payload.locator(".prompt-text").textContent())
+      }
     })
   }
   await scenario("absent_stack_uses_the_retained_legacy_waste_data", async (page, context) => {

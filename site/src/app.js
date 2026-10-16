@@ -5452,7 +5452,7 @@
     // Copy as a prompt: an A3 on this why.
     const a3 = el("section", "block a3-block");
     a3.setAttribute("aria-labelledby", "a3-title");
-    const a3h = el("h2", "block-title", "Start an A3");
+    const a3h = el("h2", "block-title", "Start a one-page improvement plan (A3)");
     a3h.id = "a3-title";
     a3.appendChild(a3h);
     a3.appendChild(el("p", "chart-caption", `An A3 tells one problem's story on one page: the evidence, the cause, a countermeasure and its check. This prompt asks: ${S.WHY_A3[d.why]} It hands the agent this why, its time, its largest tasks and where its data is.`));
@@ -5465,11 +5465,13 @@
     const status = el("span", "copy-status");
     status.setAttribute("role", "status");
     const pre = el("p", "prompt-text", text);
+    const payload = el("details", "finding-prompt"); payload.append(el("summary", null, "Inspect the agent prompt"), pre);
     btn.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(text);
         status.textContent = "Copied. Paste it to the agent.";
       } catch (err) {
+        payload.open = true;
         const range = document.createRange();
         range.selectNodeContents(pre);
         const sel = window.getSelection();
@@ -5478,7 +5480,7 @@
         status.textContent = "Copy failed. The prompt is selected; copy it with the keyboard.";
       }
     });
-    pbox.append(btn, status, pre);
+    pbox.append(btn, status, payload);
     a3.appendChild(pbox);
     box.appendChild(a3);
 
@@ -5532,6 +5534,7 @@
     body.appendChild(loadingNote());
     ws.appendChild(body);
     box.appendChild(ws);
+    box.appendChild(ts); box.appendChild(a3);
     // Every task that may hold a stop of this class, not only those with
     // counted time in it (a stop its task's own work overlapped counts none).
     const jobs = Array.isArray(d.scan_jobs) ? d.scan_jobs : d.tasks.map((t) => t.job);
