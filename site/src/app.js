@@ -1120,7 +1120,7 @@
     warningNode.hidden = !warning;
     if (warning) {
       warningNode.append(`${warning.effect} ${warning.ownership} `);
-      const repair = el("a", null, "Inspect impact and repair paths");
+      const repair = el("a", null, "Impact and repair");
       setLocalHref(repair, warning.href, { plain: true });
       if (warning.href === "#/improvements") repair.addEventListener("click", () => { focusAfterRender = "improvement-alarms"; });
       warningNode.appendChild(repair);

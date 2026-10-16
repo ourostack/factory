@@ -36,7 +36,7 @@
     const collection = alarms.some((a) => a.key?.startsWith("capture") || a.key === "labels_mismatch");
     return {
       effect: loop ? "Improvement recommendations may be stale." : collection ? "Some work may be missing or misclassified." : "A recorded work or quality problem needs investigation.",
-      ownership: alarms.every((a) => a.owner?.url) ? "Public issues own these alerts." : "Public alarm ownership is unavailable for at least one alert.",
+      ownership: alarms.every((a) => a.owner?.url) ? "Public alarm ownership: recorded." : "Public alarm ownership: incomplete.",
       href: loop ? "#/improvements" : "#/store",
     };
   }

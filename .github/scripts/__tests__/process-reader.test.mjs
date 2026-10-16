@@ -133,11 +133,16 @@ test("material alarms expose consequence ownership and repair destination outsid
   assert.equal(R.materialWarning({ alarms: [] }), null);
   const warning = R.materialWarning({ alarms: [{ key: "loop:loop_alarms_open", owner: null }] });
   assert.match(warning.effect, /recommendations.*may.*current|recommendations.*stale/i);
-  assert.match(warning.ownership, /public.*ownership.*unavailable/i);
+  assert.match(warning.ownership, /public.*ownership.*incomplete/i);
+  assert.ok(warning.ownership.length <= 36, "ownership remains compact beside the alarm consequence on narrow enlarged-text screens");
+  const owned = R.materialWarning({ alarms: [{ key: "loop:loop_alarms_open", owner: { url: "https://github.com/ourostack/factory/issues/53" } }] });
+  assert.match(owned.ownership, /public.*ownership.*recorded/i);
   assert.equal(warning.href, "#/improvements");
   const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8");
   assert.match(html, /id="material-warning"/);
   assert.ok(html.indexOf('id="material-warning"') < html.indexOf('<main'));
+  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8");
+  assert.match(app, /el\("a", null, "Impact and repair"\)/);
 });
 
 test("a direction-unknown partial finding is never an exact number in the opening conclusion", () => {
