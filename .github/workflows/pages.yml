@@ -73,6 +73,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # Current main, never a pinned comparison fork. The full clone keeps
+      # plugins/desk/mcp/package.json, its ESM module boundary and all imports.
+      - name: Clone Desk main
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch main https://github.com/ourostack/desk _desk
+          echo "Desk main: $(git -C _desk rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Apply store corrections
         run: |
           set -euo pipefail
@@ -97,7 +105,7 @@ jobs:
           set -euo pipefail
           mkdir -p site/dist
           node .github/scripts/triage-values.mjs --store .
-          node site/scripts/build-data.mjs --reports _reports --main . --out site/dist/data.json --pulls-out "$RUNNER_TEMP/pulls.json" --pulls-cache "$RUNNER_TEMP/pulls-cache.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          node site/scripts/build-data.mjs --reports _reports --main . --desk _desk --out site/dist/data.json --pulls-out "$RUNNER_TEMP/pulls.json" --pulls-cache "$RUNNER_TEMP/pulls-cache.json" | tee -a "$GITHUB_STEP_SUMMARY"
           cp site/src/index.html site/src/styles.css site/src/format.js site/src/preferences.js site/src/briefing.js site/src/walk.js site/src/steps.js site/src/app.js site/dist/
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
 

@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
+import { validateImprovementChecks } from "./improvement-checks.mjs";
 
 // The page's own words for each reason. A reason with no words would reach
 // a reader as a code, so it fails the build here.
@@ -216,6 +217,12 @@ export function checkNumbers(data) {
       // contract, not a measurement. All other paths keep the existing walk.
       if (top && k === "improvements") {
         if (!validateImprovementQueue(v).ok) bad("improvements", "triage_projection_invalid");
+        continue;
+      }
+      // Exact, closed canonical comparison schema, including its nullable
+      // missing medians and interval. No other numeric path is exempted.
+      if (top && k === "improvement_checks") {
+        if (!validateImprovementChecks(v).ok) bad("improvement_checks", "improvement_checks_invalid");
         continue;
       }
       if (top && k === "overview") {
