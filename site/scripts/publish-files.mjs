@@ -169,6 +169,7 @@ export function publishData({ reports, dist, pulls = null }) {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, JSON.stringify(learning), "utf8");
       copyFileSync(new URL("../src/learning.js", import.meta.url), join(dist, "learning.js"));
+      copyFileSync(new URL("../src/reader.js", import.meta.url), join(dist, "reader.js"));
       copied.push("rollups/learning.json");
     }
     if (overview !== undefined) {

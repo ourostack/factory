@@ -33,13 +33,15 @@ test("improvement-system alarms state their effect, owner or unassigned, and nex
   assert.doesNotMatch(owned[0].next, /Assign an owner/)
   // Capture alarms are not improvement-system alarms.
   assert.deepEqual(S.improvementAlarms(F.statusLine({ capture: { alarms: [{ host: "x", code: "coverage_dropped" }] } })), [])
-  // The Improvements view leads with them, and the Overview link lands there.
+  // Current checks lead; alarm detail remains reachable from Overview.
   const html = read("site/src/index.html")
-  assert.ok(html.indexOf('id="improvement-alarms"') > 0 && html.indexOf('id="improvement-alarms"') < html.indexOf('id="improvement-status"'), "alarms come first on Improvements")
+  assert.ok(html.indexOf('id="improvement-monitoring"') < html.indexOf('id="improvement-alarms"'), "alarms remain in the named monitoring disclosure")
+  assert.ok(html.indexOf('id="improvement-status"') < html.indexOf('id="improvement-monitoring"'), "current-check arrival precedes diagnostics")
   const app = read("site/src/app.js")
   assert.match(app, /S\.improvementAlarms\(/)
   assert.match(app, /Open this alarm on Improvements/)
   assert.match(app, /focusAfterRender = "improvement-alarms"/)
+  assert.match(app, /getElementById\("improvement-monitoring"\)\.open = true/)
 })
 
 test("the main navigation never carries task, filter or selection context", () => {

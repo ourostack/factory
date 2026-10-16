@@ -1752,7 +1752,7 @@
     // An A3 already open for this cause: check or extend it, never start a duplicate.
     const open = arr(l.existing).filter((x) => x && x.url);
     if (open.length) {
-      const at = open.map((x) => `${x.ref} (${x.url})${x.countermeasure ? `, with countermeasure ${x.countermeasure.ref}${x.countermeasure.merged ? ", merged, not yet checked" : ", not yet merged"}` : ""}`).join("; ");
+      const at = open.map((x) => `${x.ref} (${x.url})${x.countermeasure ? `, with countermeasure ${x.countermeasure.ref}${x.countermeasure.merged ? ", merged; inspect the current result on Improvements" : ", not yet merged"}` : ""}`).join("; ");
       return `Factory cause "${d.label}" (${d.key}): an A3 already exists at ${at}; help me check or extend it. ${facts} Walk me through its biggest stretches first, then help me check whether the countermeasure worked, with labeled tasks from before and after it shipped, or extend the A3 if the cause is still open.${index}`;
     }
     // Stops of this class that count no waiting are named with their length
@@ -1812,16 +1812,15 @@
     return m ? `${m[1]}/${m[2]}#${m[3]}` : null;
   }
 
-  // Until a countermeasure has labeled tasks on both sides of it, its check
-  // cannot be made. Desk does not publish when a countermeasure shipped
-  // relative to the labeled tasks, so today no issue can be checked.
-  const CHECK_WORDS = "not enough labeled tasks yet";
+  // Kept for old API consumers; it is an absence of a supplied current check,
+  // not a claim about whether the canonical checker has run.
+  const CHECK_WORDS = "current check not supplied; inspect Improvements";
 
   // One row per kaizen issue: its title, its countermeasure pull request,
   // its cause where KAIZEN_CAUSES names one, and its check state. Open
   // issues first, then the newest. `doc` is causes.json (to say whether the
   // mapped cause is ranked in this build).
-  function actRows(issues, doc, table) {
+  function actRows(issues, doc, table, currentChecks) {
     const map = table || KAIZEN_CAUSES;
     const ranked = new Set(doc && Array.isArray(doc.causes) ? doc.causes.map((c) => c && c.cause) : []);
     const num = (ref) => Number((/#([0-9]+)$/.exec(String(ref)) || [])[1] || 0);
@@ -1835,6 +1834,7 @@
         const stated = typeof i.cause === "string" && isCauseKey(i.cause) ? i.cause : null;
         const key = stated || (ref && Object.prototype.hasOwnProperty.call(map, ref) ? map[ref] : null);
         const res = i.resolution && typeof i.resolution === "object" ? i.resolution : null;
+        const checked = arr(currentChecks).find((r) => r.ref === ref);
         return {
           ref: ref || String(i.ref || "issue"),
           short: typeof i.ref === "string" ? i.ref : ref,
@@ -1843,7 +1843,11 @@
           state: i.issue_state === "open" ? "open" : i.issue_state === "closed" ? "closed" : "unknown",
           countermeasure: res && typeof res.url === "string" ? { ref: refOf(res.url) || String(res.ref || "pull request"), url: res.url, merged: res.merged === true, kind: res.kind || null } : null,
           cause: key ? { key, label: W.causeWords(key), href: causeRoute(key), ranked: ranked.has(key) } : null,
-          check: CHECK_WORDS,
+          check: checked ? {
+            better: "better on the chosen measure", worse: "worse on the chosen measure",
+            no_detected_change: "no detected change", inconclusive: "completed check: inconclusive",
+            awaiting_result: "awaiting a result", refused: "check refused", unavailable: "check unavailable",
+          }[checked.result] || CHECK_WORDS : CHECK_WORDS,
         };
       })
       .sort((a, b) => Number(b.state === "open") - Number(a.state === "open") || num(b.ref) - num(a.ref));
@@ -1858,7 +1862,7 @@
     const open = list.filter((r) => r.state === "open").length;
     const n = list.length;
     const head = closed === n ? (n === 1 ? "The one issue is closed" : n === 2 ? "Both issues are closed" : `All ${n} are closed`) : open === n ? (n === 1 ? "The one issue is open" : `All ${n} are open`) : `${open} of ${n} ${open === 1 ? "is" : "are"} open and ${closed} closed`;
-    return `${plural(n, "problem")} taken on so far. ${head}; none is checked yet, because no countermeasure has labeled tasks on both sides of it.`;
+    return `${plural(n, "problem")} taken on so far. ${head}. Issue closure and countermeasure merge do not establish effect; inspect each current check on Improvements.`;
   }
 
   // The kaizen issues already open for a cause: the A3 already taken on.
@@ -1871,7 +1875,7 @@
   function takenOnWords(list) {
     const xs = arr(list);
     if (!xs.length) return "";
-    return `Already taken on: ${xs.map((x) => `${shortRef(x.ref)}${x.countermeasure ? `, with countermeasure ${shortRef(x.countermeasure.ref)} (${x.countermeasure.merged ? "merged, not yet checked" : "not yet merged"})` : ", with no countermeasure yet"}`).join("; ")}.`;
+    return `Already taken on: ${xs.map((x) => `${shortRef(x.ref)}${x.countermeasure ? `, with countermeasure ${shortRef(x.countermeasure.ref)} (${x.countermeasure.merged ? "merged; inspect its current result on Improvements" : "not yet merged"})` : ", with no countermeasure yet"}`).join("; ")}.`;
   }
 
   // An alarm key in words, as the status line names it.
@@ -2033,11 +2037,12 @@
   }
   // The one plain sentence that opens Improvements: what triage has
   // reviewed, then how many published improvement issues follow.
-  function improvementStatus({ queue, issues, issuesVerified }) {
+  function improvementStatus({ queue, issues, issuesVerified, placement = "legacy" }) {
     const n = Number.isSafeInteger(issues) && issues >= 0 ? issues : 0;
     const issuesWords = (verb) => !issuesVerified ? "the published improvement issues could not be checked for this build"
       : n === 0 ? "no improvement issue has been published yet"
-      : `${n} published improvement ${n === 1 ? "issue" : "issues"} ${verb === "follow" ? (n === 1 ? "follows" : "follow") : (n === 1 ? "is listed below" : "are listed below")} under Problems in hand`;
+      : placement === "details" ? `${n} published improvement ${n === 1 ? "issue is" : "issues are"} in the canonical problem and current-check list above`
+        : `${n} published improvement ${n === 1 ? "issue" : "issues"} ${verb === "follow" ? (n === 1 ? "follows" : "follow") : (n === 1 ? "is listed below" : "are listed below")} under Problems in hand`;
     const valid = queue && queue.schema === "factory-improvements/1" && Array.isArray(queue.rows);
     if (!valid) return `Improvement review details are unavailable; ${issuesWords("listed")}.`;
     // A machine may report reviews and publish none of them: say that, not "none reviewed".
@@ -2056,7 +2061,7 @@
     const stale = shown.filter((r) => r.conflict !== true && !["withdrawn", "source_unknown"].includes(r.state) && (r.state !== "reviewed" || r.availability === "stale_or_conflicting")).length;
     const refresh = [stale && `${stale} stale`, notCurrent && `${notCurrent} not current`, conflicting && `${conflicting} in conflict`].filter(Boolean);
     const k = shown.length;
-    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} listed first${refresh.length ? `, those needing a refresh first (${refresh.join(", ")})` : ""}${withdrawn ? `${refresh.length ? "," : ""} with ${withdrawn} withdrawn ${withdrawn === 1 ? "review" : "reviews"} last` : ""}; ${issuesWords("follow")}.`;
+    return `${k} reviewed ${k === 1 ? "improvement is" : "improvements are"} ${placement === "details" ? "listed in these coverage details" : "listed first"}${refresh.length ? `, those needing a refresh first (${refresh.join(", ")})` : ""}${withdrawn ? `${refresh.length ? "," : ""} with ${withdrawn} withdrawn ${withdrawn === 1 ? "review" : "reviews"} last` : ""}; ${issuesWords("follow")}.`;
   }
   // What triage covered, from the queue's own coverage: one source's count,
   // never a sum. Unknown coverage says so and why as far as the queue tells.

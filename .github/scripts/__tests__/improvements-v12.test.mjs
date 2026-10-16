@@ -109,7 +109,7 @@ test("why_lean_is_an_open_experiment_not_a_uniqueness_claim", () => {
   const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
   const why = html.slice(html.indexOf('id="view-why"'), html.indexOf('id="view-about"'))
   const experiment = why.indexOf("open experiment")
-  assert.ok(experiment >= 0 && experiment < why.indexOf("The four steps"), "the experiment framing comes before the method")
+  assert.ok(experiment >= 0 && experiment < why.indexOf("Four questions"), "the experiment framing comes before the method")
   assert.match(why, /designed so many teams can adopt it alongside their own engineering lifecycle/)
   assert.match(why, /tested only on the desks and agent hosts that publish to this store/)
   assert.match(why, /href="https:\/\/dora\.dev\/guides\/value-stream-management\/"/, "names the existing application of Lean to software delivery")
@@ -238,15 +238,14 @@ test("improvements_lead_with_one_status_sentence_and_keep_limits_in_how_to_read"
   const page = html()
   const act = page.slice(page.indexOf('id="view-act"'), page.indexOf('id="view-why"'))
   const h1 = act.indexOf("</h1>")
-  // Active improvement-system alarms come first; then the plain status sentence.
-  const afterAlarms = act.slice(act.indexOf("</section>", h1) + 10)
-  assert.match(act.slice(h1 + 5).trimStart(), /^<section class="block improvement-alarms" id="improvement-alarms"/)
-  assert.match(afterAlarms.trimStart(), /^<p id="improvement-status" class="lede improvement-status" role="status">/)
+  // Current checks lead; monitoring/triage stays available in a named disclosure.
+  assert.match(act.slice(h1 + 5).trimStart(), /^<p id="improvement-status" class="lede improvement-status" role="status">/)
+  assert.ok(act.indexOf('id="problems"') < act.indexOf('id="improvement-monitoring"'))
+  assert.match(act, /<details class="reader-details" id="improvement-monitoring">\s*<summary>Improvement-system monitoring, triage coverage and ownership<\/summary>/)
   const details = act.match(/<details class="how-to-read" id="improvement-limits">\s*<summary>How to read this list<\/summary>([\s\S]*?)<\/details>/)
   assert.ok(details, "one labeled disclosure holds the limits and the A3 explanation")
-  for (const limit of [/not an execution queue/, /A route alone grants no claim or new authority/, /Inspection does not grant authority or create ownership/, /not a savings ranking/, /<span id="improvement-triage-note">No triage review is published in this build\.<\/span> Ownership and private decisions are not published/, /not a task-filtered execution queue/, /<dfn>A3<\/dfn>/]) assert.match(details[1], limit)
-  // No caveat paragraph stands between the status sentence and the list.
-  assert.equal((act.slice(0, act.indexOf('id="improvement-limits"')).match(/<p /g) || []).length, 2, "step label and status sentence only")
+  for (const limit of [/not an execution queue/, /A route alone grants no claim or new authority/, /Inspection does not grant authority or create ownership/, /not a savings ranking/, /<span id="improvement-triage-note">No triage review is published in this build\.<\/span> Ownership and private decisions are not published/, /not a task-filtered execution queue/, /completed inconclusive result/]) assert.match(details[1], limit)
+  assert.match(act, /A completed check can be inconclusive\. A missing check is different/)
   const fn = appSource().slice(appSource().indexOf("function renderPublicImprovements"), appSource().indexOf("async function renderAct"))
   assert.doesNotMatch(fn, /Inspection does not grant authority|Automated triage is not demonstrated|not a task-filtered execution queue/)
   // A failed data load replaces "Loading" with an explicit status.

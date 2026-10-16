@@ -776,7 +776,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
 
 test("the page loads walk.js, opens evidence in a real dialog, and places operator prompts and pull request times only through walk.js", () => {
   const html = read("site/src/index.html")
-  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="app\.js"><\/script>/)
+  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="reader\.js"><\/script>\s*<script src="app\.js"><\/script>/)
   assert.match(html, /<dialog id="evidence-drawer" class="drawer" aria-labelledby="drawer-title">/)
   for (const id of ["task-picker", "task-head", "task-lede", "vsm", "time-went", "job-detail", "swimlane"]) assert.match(html, new RegExp(`id="${id}"`))
   const app = read("site/src/app.js")

@@ -130,12 +130,12 @@ test("doubled text is budgeted against the baseline's doubled text; its ratio to
 
 test("each conclusion is marked as one, and the gate reads that marker instead of a caveat phrase list", () => {
   assert.equal(G.CAVEAT_PATTERN, undefined, "no phrase list decides what a conclusion is")
-  assert.deepEqual(G.CONCLUSIONS, { task: "#view-task", compare: "#view-compare", overview: "#view-overview" })
+  assert.deepEqual(G.CONCLUSIONS, { task: "#view-task", compare: "#view-compare", overview: "#view-overview", time: "#view-time" })
   assert.equal(G.assessFirstScreen({ found: true, role: "conclusion", top: 300, text: "The recorded window is incomplete." }, 390), null, "wording alone never fails a marked conclusion")
   assert.match(G.assessFirstScreen({ found: true, role: "caveat", top: 300, text: "Keep the bounds in view." }, 390), /caveat/)
   assert.match(G.assessFirstScreen({ found: false }, 390), /no conclusion/)
   const html = read("site/src/index.html")
-  assert.match(html, /<p id="overview-conclusion" [^>]*data-role="conclusion"/)
+  assert.match(read("site/src/reader.js"), /conclusion\.id = "overview-conclusion"; conclusion\.dataset\.role = "conclusion"/)
   assert.match(html, /<p id="comparison-conclusion" [^>]*data-role="conclusion"/)
   assert.match(html, /<p id="compare-lede" [^>]*data-role="caveat"/)
   const app = read("site/src/app.js")

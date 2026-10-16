@@ -858,7 +858,7 @@
   // sub-causes of waiting for the next prompt by why the agent stopped,
   // "waiting:next_prompt:<why>" (Desk D5; the classes of addendum §4).
   const CAUSE_ID = /^(?:[a-z][a-z_]{0,40}:[a-z0-9][a-z0-9_.-]{0,60}|waiting:next_prompt:(?:stopped_short|question|error_limit|interrupted|decision|approval|acceptance|not_known))$/;
-  const PAGES = ["overview", "tasks", "compare", "causes", "act", "why", "about", "store", "help"];
+  const PAGES = ["overview", "time", "tasks", "compare", "causes", "act", "why", "about", "store", "help"];
   // The first site's in-page sections, and where each one lives now.
   const OLD_ANCHORS = {
     answer: "#/store",
@@ -928,7 +928,7 @@
     // selectors are not required and cannot contradict its validated path.
     if (route.view === "cause" && CAUSE_ID.test(route.cause)) {
       context.cause = route.cause;
-      context.return = `#/causes/${route.cause}`;
+      context.return = context.return || `#/causes/${route.cause}`;
     }
     return context;
   }
@@ -954,7 +954,7 @@
     if (targetRoute.job) context.task = targetRoute.job;
     if (targetRoute.view === "cause") {
       context.cause = targetRoute.cause;
-      context.return = `#/causes/${targetRoute.cause}`;
+      context.return = context.return || `#/causes/${targetRoute.cause}`;
     }
     return routeWithContext(path, context);
   }
@@ -996,6 +996,11 @@
     if (!h.startsWith("#/")) return { view: "missing" };
     const parts = h.slice(2).replace(/\/+$/, "").split("/");
     if (parts.length === 1 && parts[0] === "improvements") return { view: "act" };
+    if (parts[0] === "improvements" && parts.length === 4 &&
+        /^[A-Za-z0-9-]{1,39}$/.test(parts[1]) && /^[A-Za-z0-9._-]{1,100}$/.test(parts[2]) &&
+        ![".", ".."].includes(parts[2]) && /^[1-9]\d{0,9}$/.test(parts[3])) {
+      return { view: "act", improvement: `${parts[1]}/${parts[2]}#${parts[3]}` };
+    }
     if (parts[0] === "task") {
       if (parts.length === 2 && ROUTE_ID.test(parts[1])) return { view: "task", job: parts[1], ...(select && select.kind !== "stretch" ? { select } : {}) };
       if (parts.length === 4 && parts[2] === "session" && ROUTE_ID.test(parts[1]) && ROUTE_ID.test(parts[3])) return { view: "session", job: parts[1], session: parts[3], ...(select && select.kind === "stretch" ? { select } : {}) };
@@ -1068,9 +1073,9 @@
 
   // Which of the four steps a view belongs to, for the tab that shows as current.
   function stepOf(view) {
-    if (view === "task" || view === "session") return "task";
-    if (view === "cause") return "causes";
-    return ["compare", "causes", "act"].includes(view) ? view : null;
+    if (view === "task" || view === "session") return "tasks";
+    if (["time", "compare", "causes", "cause"].includes(view)) return "time";
+    return ["overview", "tasks", "act"].includes(view) ? view : null;
   }
 
   // A route link built from data: "#/" and plain path segments only, so data

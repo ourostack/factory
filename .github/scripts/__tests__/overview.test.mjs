@@ -405,7 +405,7 @@ test("the briefing navigation preserves all evidence views, Why Lean, About and 
   // The usable consumer destinations, then Why Lean and Help. Legacy
   // evidence views remain directly reachable rather than compulsory stops.
   const at = (t) => html.indexOf(t)
-  assert.ok(at(">Overview<") < at(">Tasks<") && at(">Tasks<") < at(">Compare<") && at(">Compare<") < at(">Improvements<") && at(">Improvements<") < at(">Why Lean?<"))
+  assert.ok(at(">Overview<") < at(">Time &amp; waste<") && at(">Time &amp; waste<") < at(">Improvements<") && at(">Improvements<") < at(">Tasks<") && at(">Tasks<") < at(">Why Lean?<"))
   for (const id of ["view-overview", "view-tasks", "view-help", "overview-attention", "overview-agents", "overview-investigation"]) assert.match(html, new RegExp(`id="${id}"`))
   // "Declared" is explained in the guide, now on the About page.
   assert.match(html, /"Declared" means taken from the task card/)

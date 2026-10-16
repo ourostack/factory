@@ -130,7 +130,7 @@ test("the first-screen check is per width, wants the conclusion sentence, and co
   assert.equal(G.firstScreenHeight(320), 640)
   assert.equal(G.firstScreenHeight(480), 640)
   assert.equal(G.firstScreenHeight(481), 900)
-  assert.deepEqual(Object.keys(G.CONCLUSIONS).sort(), ["compare", "overview", "task"])
+  assert.deepEqual(Object.keys(G.CONCLUSIONS).sort(), ["compare", "overview", "task", "time"])
   assert.equal(G.assessFirstScreen({ found: true, role: "conclusion", top: 600, text: "Waiting is the largest recorded part." }, 390), null)
   assert.match(G.assessFirstScreen({ found: true, role: "conclusion", top: 700, text: "Waiting is the largest." }, 390), /below the first screen \(640 px/)
   assert.equal(G.assessFirstScreen({ found: true, role: "conclusion", top: 700, text: "Waiting is the largest." }, 800), null)
@@ -150,9 +150,10 @@ test("Overview and Compare lead with their conclusion, right under the heading",
   assert.equal(B.conclusionWords({ state: "limited", attention: [], investigation: [] }), "Nothing in this briefing is flagged for attention or investigation.")
   const html = read("site/src/index.html")
   const after = (view, id) => { const v = html.slice(html.indexOf(`id="view-${view}"`)); return v.slice(v.indexOf("</h1>") + 5).trimStart().startsWith(`<p id="${id}"`) }
-  assert.ok(after("overview", "overview-conclusion"), "the Overview's conclusion follows its heading")
+  const overview = html.slice(html.indexOf('id="view-overview"'), html.indexOf('id="view-time"'))
+  assert.ok(overview.indexOf("</h1>") < overview.indexOf('id="overview-conclusion"') && overview.indexOf('id="overview-conclusion"') < overview.indexOf('id="overview-monitoring"'), "the learning conclusion precedes monitoring inventories")
   assert.ok(after("compare", "comparison-conclusion"), "Compare's conclusion follows its heading")
-  assert.match(read("site/src/app.js"), /getElementById\("overview-conclusion"\)\.textContent = B\.conclusionWords\(doc\)/)
+  assert.match(read("site/src/app.js"), /reader\.overview\(learning, data\.learning/)
 })
 
 test("a partial zero reads 'none recorded', never 'at least none'", () => {

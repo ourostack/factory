@@ -390,7 +390,7 @@ test("each cause has its own route, #/causes/<key>, under the Rank causes tab; a
   assert.equal(S.CAUSE_KEY, F.CAUSE_ID)
   assert.deepEqual(F.parseRoute("#/causes/defects:shell/"), { view: "cause", cause: "defects:shell" })
   for (const bad of ["#/causes/nope", "#/causes/<x>:y", "#/causes/a:b/c", "#/causes/%E0%A4%A", "#/causes/waiting:"]) assert.deepEqual(F.parseRoute(bad), { view: "missing" }, bad)
-  assert.equal(F.stepOf("cause"), "causes")
+  assert.equal(F.stepOf("cause"), "time")
   assert.equal(S.causeRoute("waiting:next_prompt"), "#/causes/waiting:next_prompt")
   assert.equal(S.causeRoute("javascript:alert(1)//"), "#/causes")
   assert.equal(S.isCauseKey("Waiting:x"), false)
@@ -482,7 +482,7 @@ test("Act lists one row per kaizen issue with its countermeasure, a cause only f
   assert.deepEqual(rows[1].countermeasure, { ref: "ourostack/desk#65", url: "https://github.com/ourostack/desk/pull/65", merged: true, kind: "countermeasure" })
   assert.equal(rows[1].title, "Agents stopped and waited too long for the operator's next prompt while using Desk's skills.", "a plain sentence from the title table, not the issue's internal code")
   assert.equal(rows[0].title, "waiting for the next prompt", "an issue with no row reads from its own title")
-  assert.ok(rows.every((r) => r.check === "not enough labeled tasks yet"))
+  assert.ok(rows.every((r) => r.check === "current check not supplied; inspect Improvements"))
   assert.deepEqual(Object.keys(S.KAIZEN_CAUSES).sort(), ["ourostack/factory#52", "ourostack/factory#53"])
   for (const k of Object.values(S.KAIZEN_CAUSES)) assert.ok(S.isCauseKey(k))
   assert.deepEqual(S.actRows(null, null), [])
@@ -521,14 +521,15 @@ test("the evidence drawer gives a labeled wait the swimlane's cross-hatch, not t
 
 // ------------------------------------------------------------- the page
 
-test("the walk reads in order: each step names its number and ends with a link to the next", () => {
+test("analysis retains onward links without a compulsory numbered tour", () => {
   const html = read("site/src/index.html")
   const view = (id, next) => html.slice(html.indexOf(`id="view-${id}"`), html.indexOf(`id="view-${next}"`))
-  assert.match(view("task", "session"), /Step 1 of 4[\s\S]*<a href="#\/compare">Next: <span class="step-n" aria-hidden="true">2<\/span>Compare tasks<\/a>/)
-  assert.match(view("compare", "causes"), /Step 2 of 4[\s\S]*<a href="#\/causes">Next: <span class="step-n" aria-hidden="true">3<\/span>Rank causes<\/a>/)
-  assert.match(view("causes", "cause"), /Step 3 of 4[\s\S]*<a href="#\/act">Next: <span class="step-n" aria-hidden="true">4<\/span>Act<\/a>/)
-  assert.match(view("cause", "act"), /<a href="#\/act">Next: /)
-  assert.match(view("act", "why"), /Step 4 of 4[\s\S]*Back to <span class="step-n" aria-hidden="true">1<\/span>Follow a task/)
+  assert.doesNotMatch(html, /Step [1-4] of 4/)
+  assert.match(view("task", "session"), /href="#\/time"/)
+  assert.match(view("compare", "causes"), /href="#\/causes"/)
+  assert.match(view("causes", "cause"), /href="#\/improvements"/)
+  assert.match(view("cause", "act"), /href="#\/improvements"/)
+  assert.match(view("act", "why"), /href="#\/time"/)
   // Both charts switch between the same two modes.
   for (const v of ["compare", "causes"]) {
     const x = view(v, v === "compare" ? "causes" : "cause")

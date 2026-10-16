@@ -15,6 +15,10 @@
 
   const F = window.FactoryFormat;
   const B = window.FactoryBriefing;
+  const L = window.FactoryLearning;
+  const R = window.FactoryReader;
+  const reader = R.createReader({ document, setLocalHref, taskLabel: (id) => jobLabel(currentData?.jobs.find((job) => job.id === id) || { id }),
+    issueTitle: (ref, title) => window.FactorySteps.issueTitle(ref, title) });
   const P = window.FactoryPreferences;
   let storage = null;
   try { storage = window.localStorage; } catch { /* fully usable without persistence */ }
@@ -77,9 +81,10 @@
     const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
     const first = F.landingChoice(jobs).job;
     const stops = [
-      ["Understand a task", first ? "Inspect one task's recorded work, waits and evidence." : "No recorded task is available yet. The task list explains the absence.", first ? F.safeRoute("task", first.id) : "#/tasks"],
-      ["Inspect a finding", "A ranked pattern is a question to investigate, not a proven cause.", "#/causes"],
-      ["Hand off an improvement", "Inspect recorded issues and review limits before asking your linked agent to act.", "#/improvements"],
+      ["Understand the process", "A supported observation, its material limits and all available history.", "#/"],
+      ["Follow time and waste", "Separate recorded observations from classified losses; follow a period to its task and team.", "#/time"],
+      ["Check a process change", "Inspect the canonical problem, countermeasure and current result—not just its merge status.", "#/improvements"],
+      ["Inspect a task's story", first ? "Follow production periods, interruptions, team, delivery and acceptance." : "No task is published yet. Missing capture is not zero work.", "#/tasks"],
     ];
     const list = el("ol", "guide-stops");
     for (const [title, body, href] of stops) {
@@ -132,25 +137,23 @@
     node.appendChild(list);
   }
   function renderOverview(data) {
-    const doc = data.overview;
-    if (!B.validateBriefing(doc).ok) throw new Error("The published briefing is unavailable or malformed; other views remain usable.");
+    const learning = document.getElementById("learning-overview");
+    if (!L.validateLearning(data.learning).ok) emptyState(learning, "Process learning is unavailable or malformed in this build. No conclusion is inferred. Tasks, comparisons and Data health remain available.");
+    else reader.overview(learning, data.learning, data.kaizen_issues || []);
+    document.getElementById("overview-state").textContent = "";
     document.getElementById("overview-published").textContent = `Published data build: ${F.formatInstant(data.built_at, preferences.zone)}. This is not a task finish or acceptance timestamp.`;
-    document.getElementById("overview-conclusion").textContent = B.conclusionWords(doc);
     const triageNote = document.getElementById("overview-triage-note");
     if (triageNote) triageNote.textContent = S.triageNote(data.improvements);
-    document.getElementById("overview-state").textContent = doc.state === "attention" ? "Start with the recorded problems below. Monitoring and ownership may still be incomplete." : "Monitoring or review evidence is incomplete. This is not an all-clear.";
-    renderBriefRows(document.getElementById("overview-attention"), doc.attention, "No specific attention item is supported by this payload. Missing monitoring does not mean there are no problems.");
-    renderBriefRows(document.getElementById("overview-agents"), doc.agents, "No current public claim is available for this briefing. This does not mean local work is unowned.");
-    renderBriefRows(document.getElementById("overview-investigation"), doc.investigation, "Inspect evidence coverage before choosing an improvement.");
-    const change = B.visitChanges(doc, visitPrevious);
+    const doc = data.overview;
+    const validLegacy = B.validateBriefing(doc).ok;
+    renderBriefRows(document.getElementById("overview-attention"), validLegacy ? doc.attention : [], "No specific public attention item is supported. Missing monitoring does not mean there are no problems.");
+    renderBriefRows(document.getElementById("overview-agents"), validLegacy ? doc.agents : [], "No current public claim is available. This does not mean local work is unowned.");
+    renderBriefRows(document.getElementById("overview-investigation"), validLegacy ? doc.investigation : [], "Inspect evidence coverage before choosing an improvement.");
     const note = document.getElementById("overview-changes");
-    note.textContent = change.state === "comparable" ? `${change.added} briefing items appeared and ${change.removed} are no longer in this published snapshot. This is a snapshot comparison, not a complete change history.` :
-      change.state === "same_generation" ? "This is the same published report generation as your last successful overview visit. No complete change history is available." :
-      change.previous_visit ? `Your last successful overview visit was ${F.formatInstant(change.previous_visit, preferences.zone)}. Comparable previous evidence is unavailable; showing the present state.` :
-      "First visit, or no usable saved visit. Start with the briefing; the short guide below is optional.";
+    note.textContent = "The history above shows supported finish-week and release observations. A change in alarm or annotation counts is not a measured process improvement.";
     renderGuide(document.getElementById("guide-stops"), data);
     document.getElementById("overview-guide").hidden = preferences.dismissed;
-    saveDisplay({ previous: B.snapshot(doc, new Date().toISOString()) });
+    if (validLegacy) saveDisplay({ previous: B.snapshot(doc, new Date().toISOString()) });
   }
   // Tasks: the same task table as the task page, optionally filtered by
   // lifecycle status from a validated selector (#/tasks?status=…).
@@ -937,7 +940,10 @@
 
   // A task's name as text: its public pull request title "and N more", or
   // "Private task" and a short key (format.js taskName).
-  const jobLabel = (j) => F.taskNameText(localNames, j);
+  const jobLabel = (j) => {
+    const identity = R.taskIdentity(j, localNames);
+    return identity.title;
+  };
 
   // A figure in a dense table or a list: "partial" beside it, its reason in
   // the title and in the table's one note; no "declared" chip.
@@ -1338,18 +1344,19 @@
       return null;
     }
     const name = localName(j.id);
-    const tn = F.taskName(localNames, j);
+    const tn = R.taskIdentity(j, localNames);
     const h = el("h1", "view-title task-title", tn.title);
-    if (tn.more) h.appendChild(el("span", "task-more", ` and ${tn.more} more pull request${tn.more === 1 ? "" : "s"}`));
     container.appendChild(h);
+    const basis = el("p", "task-outcome-basis", tn.basis);
+    container.appendChild(basis);
     const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
-    const keyLine = tn.kind === "local"
+    const keyLine = name
       ? `${where ? `${where} · ` : ""}key ${j.id}`
-      : tn.kind === "public"
-        ? tn.partial
+      : tn.reference
+        ? j.name_basis === "partial"
           ? `Named after the earliest-opened of the public pull requests that could be read; some could not be read for this build, so an earlier one may exist. Task key ${j.id}.`
-          : `Named after its earliest-opened public pull request. Task key ${j.id}.`
-        : tn.kind === "unnamed"
+          : `Public-reference basis: earliest-opened public pull request; not the requested outcome. Task key ${j.id}.`
+        : j.pull_requests.length
           ? `Its pull requests' titles could not be read for this build. Task key ${j.id}.`
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
     const reference = el("details", "task-reference");
@@ -1424,6 +1431,7 @@
     if (!j) return;
     // Pull requests.
     const prs = el("section", "block");
+    prs.id = "task-pr-evidence";
     prs.appendChild(el("h2", "block-title", "Pull requests"));
     const prLine = el("p", "chart-caption");
     prLine.appendChild(document.createTextNode("Public pull requests that first appeared in the task's sessions (opened or mentioned): "));
@@ -1442,7 +1450,9 @@
 
     // Sessions.
     const ses = el("section", "block");
-    ses.appendChild(el("h2", "block-title", "Sessions"));
+    ses.id = "task-team-evidence";
+    ses.appendChild(el("h2", "block-title", "Team and session evidence"));
+    ses.appendChild(el("p", "chart-caption", "Root agents and subagents belong to this task's story. Open a session for its worker timeline and topology. Shared-session totals are not this task's exclusive allocation; overlapping workers count once in elapsed work, while worker-hours are different."));
     const byId = new Map((sessions || []).map((s) => [s.session_id, s]));
     if (!j.sessions.length) {
       ses.appendChild(el("p", "chart-empty", "No session is on this task's timeline."));
@@ -3065,6 +3075,14 @@
     const vsmEl = document.getElementById("vsm");
     const twEl = document.getElementById("time-went");
     renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
+    for (const link of document.querySelectorAll("[data-task-jump]")) {
+      setLocalHref(link, location.hash);
+      link.onclick = (event) => {
+        event.preventDefault();
+        const target = document.getElementById({ journey: "vsm-title", team: "task-team-evidence", delivery: "task-pr-evidence" }[link.dataset.taskJump]);
+        if (target) { target.tabIndex = -1; target.scrollIntoView({ block: "start" }); target.focus({ preventScroll: true }); }
+      };
+    }
     if (!j) {
       ledeEl.textContent = "";
       vsmEl.innerHTML = "";
@@ -5298,7 +5316,7 @@
     // The A3: an issue already taken on for this cause (Act's mapping
     // table), or S2's copy-as-prompt that starts one, naming the cause, its
     // time, its top tasks and its data.
-    const existing = S.causeIssues(S.actRows(data.kaizen_issues, doc), key);
+    const existing = S.causeIssues(S.actRows(data.kaizen_issues, doc, undefined, L.validateLearning(data.learning).ok ? data.learning.improvements.rows : undefined), key);
     const a3 = el("section", "block a3-block");
     a3.setAttribute("aria-labelledby", "a3-title");
     const a3h = el("h2", "block-title", existing.length ? "Its one-page improvement plan (A3)" : "Start a one-page improvement plan (A3)");
@@ -5313,12 +5331,12 @@
         if (x.countermeasure) {
           taken.appendChild(document.createTextNode(", with countermeasure "));
           taken.appendChild(safeLink(x.countermeasure.ref.replace(/^ourostack\//, ""), x.countermeasure.url));
-          taken.appendChild(document.createTextNode(x.countermeasure.merged ? " (merged, not yet checked)" : " (not yet merged)"));
+          taken.appendChild(document.createTextNode(x.countermeasure.merged ? " (merged; inspect its current result on Improvements)" : " (not yet merged)"));
         } else taken.appendChild(document.createTextNode(", with no countermeasure yet"));
       });
       taken.appendChild(document.createTextNode(". "));
-      const act = el("a", null, "See it on Act");
-      const safe = F.safeRoute("act");
+      const act = el("a", null, "Inspect the current result on Improvements");
+      const safe = "#/improvements";
       setLocalHref(act, safe);
       taken.appendChild(act);
       a3.appendChild(taken);
@@ -5580,6 +5598,10 @@
     const queue = data.improvements;
     const note = document.getElementById("improvement-triage-note");
     if (note) note.textContent = S.triageNote(queue);
+    node.appendChild(el("p", "triage-status", S.improvementStatus({
+      queue, issues: S.actRows(data.kaizen_issues, null).length,
+      issuesVerified: data.kaizen?.verification !== "unavailable", placement: "details",
+    })));
     if (!queue || queue.schema !== "factory-improvements/1" || !Array.isArray(queue.rows)) return;
     // What triage covered and whether its runner works come before any row:
     // a review is only as current as the count it came from.
@@ -5689,15 +5711,17 @@
     const triageNode = document.getElementById("triage-brief");
     safely("improvement-alarm-list", () => renderImprovementAlarms(document.getElementById("improvement-alarm-list"), data));
     safely("triage-brief", () => renderPublicImprovements(triageNode, data));
-    const causes = await walkFile("rollups/causes.json");
+    const learningValid = L.validateLearning(data.learning).ok;
+    const causes = learningValid ? null : await walkFile("rollups/causes.json");
     if (seq !== stepSeq) return;
     box.innerHTML = "";
     unlabeledNote(document.getElementById("act-unlabeled"), data, "act");
     const verified = !(data.kaizen && data.kaizen.verification === "unavailable");
-    const rows = S.actRows(data.kaizen_issues, causes);
+    const rows = S.actRows(data.kaizen_issues, causes, undefined, learningValid ? data.learning.improvements.rows : undefined);
     const statusEl = document.getElementById("improvement-status");
-    if (statusEl) statusEl.textContent = S.improvementStatus({ queue: data.improvements, issues: rows.length, issuesVerified: verified });
-    if (!rows.length) {
+    if (statusEl) statusEl.textContent = learningValid ? "Canonical problems, changes and their current checks. Choose a problem to follow the connected evidence." : "Current learning checks are unavailable or malformed. Legacy public issues remain below; no result is inferred.";
+    if (learningValid) reader.improvements(box, data.learning, data.kaizen_issues || [], F.parseRoute(location.hash).improvement);
+    else if (!rows.length) {
       emptyState(box, verified ? "No kaizen issue has been opened yet." : "Kaizen issues could not be checked for this build (GitHub could not be reached). This says nothing about how many exist.");
     } else {
       if (!verified) box.appendChild(el("p", "chart-caption", "GitHub could not be reached for this build, so this list may be missing issues."));
@@ -5724,7 +5748,7 @@
         if (r.countermeasure) {
           const span = el("span");
           span.appendChild(safeLink(r.countermeasure.ref, r.countermeasure.url));
-          span.appendChild(document.createTextNode(r.countermeasure.merged ? " (merged, not yet checked)" : " (not yet merged)"));
+          span.appendChild(document.createTextNode(r.countermeasure.merged ? " (merged; current result unavailable in this view)" : " (not yet merged)"));
           fact("Countermeasure", span);
         } else fact("Countermeasure", "none yet");
         if (r.cause) {
@@ -5773,8 +5797,8 @@
     }, 150);
   });
 
-  const VIEWS = ["overview", "tasks", "help", "task", "session", "compare", "causes", "cause", "act", "why", "about", "store", "missing"];
-  const VIEW_TITLE = { overview: "Factory briefing", tasks: "Tasks", help: "Help", task: "Follow a task", session: "One session", compare: "Compare tasks", causes: "Rank causes", cause: "Rank causes", act: "Improvements", why: "Why Lean?", about: "About", store: "The store's numbers", missing: "Page not found" };
+  const VIEWS = ["overview", "time", "tasks", "help", "task", "session", "compare", "causes", "cause", "act", "why", "about", "store", "missing"];
+  const VIEW_TITLE = { overview: "Overview", time: "Time & waste", tasks: "Tasks", help: "Help", task: "One task", session: "One session", compare: "Compare tasks", causes: "Rank findings", cause: "One finding", act: "Improvements", why: "Why Lean?", about: "About", store: "Data health", missing: "Page not found" };
   let routedOnce = false;
 
   function route(data) {
@@ -5816,6 +5840,7 @@
     for (const link of document.querySelectorAll("nav.steps a")) if (link.dataset.destination) setLocalHref(link, link.dataset.destination);
     renderNavigationContext(r);
     if (r.view === "overview") safely("overview-state", () => renderOverview(data));
+    if (r.view === "time") safely("learning-time", () => reader.time(document.getElementById("learning-time"), data.learning));
     if (r.view === "tasks") safely("task-list", () => renderTaskList(data));
     if (r.view === "help") renderGuide(document.getElementById("help-stops"), data);
     if (drawerEl && drawerEl.open) drawerEl.close();
@@ -5845,7 +5870,10 @@
     if (r.view === "causes") renderCauses(data).catch(failed("pareto"));
     if (r.view === "act") renderAct(data).catch(failed("problems"));
     document.title = `${title} \u00b7 The factory`;
-    if (r.view === "cause") renderCause(data, r.cause).catch(failed("cause-detail"));
+    if (r.view === "cause") {
+      safely("cause-learning", () => reader.connections(document.getElementById("cause-learning"), data.learning, r.cause));
+      renderCause(data, r.cause).catch(failed("cause-detail"));
+    }
     window.scrollTo(0, 0);
     // A glossary link (#/why?term=…) opens Why Lean? at that entry.
     if (r.view === "why" && r.term) {
@@ -5869,7 +5897,10 @@
     if (r.view === "act" && focusAfterRender === "improvement-alarms") {
       focusAfterRender = `done:${location.hash}`;
       const target = document.getElementById("improvement-alarms");
-      if (target) { target.scrollIntoView({ block: "start" }); target.focus({ preventScroll: true }); routedOnce = true; return; }
+      if (target) {
+        document.getElementById("improvement-monitoring").open = true;
+        target.scrollIntoView({ block: "start" }); target.focus({ preventScroll: true }); routedOnce = true; return;
+      }
     }
     // After the first page load, move focus to the new view's heading, so a
     // keyboard or screen reader user lands where the content changed.
