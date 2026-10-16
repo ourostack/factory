@@ -1202,7 +1202,8 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .lane-frame { overflow: auto; max-height: 70vh; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); -webkit-overflow-scrolling: touch; position: relative; }
 .lane-inner { display: flex; width: max-content; min-width: 100%; }
 .lane-labels { position: sticky; left: 0; z-index: 2; width: 112px; flex: none; background: var(--page-plane); border-right: 1px solid var(--border); }
-.lane-label { position: absolute; left: 0; right: 0; font-size: 12px; line-height: 1.2; color: var(--text-secondary); display: flex; align-items: center; padding-right: 6px; overflow: hidden; }
+/* Two full-size label lines fit the renderer's 26px row per 12px of text. */
+.lane-label { position: absolute; left: 0; right: 0; font-size: 12px; line-height: 1; color: var(--text-secondary); display: flex; align-items: center; padding-right: 6px; overflow: hidden; }
 .lane-label-labels { font-weight: 650; color: var(--text-primary); }
 .lane-plot { flex: none; }
 .lane-svg { display: block; }
