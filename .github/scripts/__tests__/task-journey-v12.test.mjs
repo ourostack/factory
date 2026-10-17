@@ -217,3 +217,36 @@ test("task_conclusion_does_not_join_mismatching_rollup_and_map_windows_into_one_
   assert.doesNotMatch(summary.conclusion, /2 recorded work periods/)
   assert.match(summary.caveat, /map and rollup.*different recorded windows/i)
 })
+
+test("missing_or_malformed_capture_collections_and_states_never_become_zero_work", () => {
+  const zero = { job: "chosen", lead_window: measured(null), bursts_state: measured(null), bursts: [],
+    gaps: [{ start_ms: 0, end_ms: 1000, waited_on: "no_session" }] }
+  zero.lead_window.start_ms = 0; zero.lead_window.end_ms = 1000
+  assert.equal(W.recordedJourney(zero).working_ms, 0, "an explicitly empty measured collection can establish a real zero")
+  for (const change of [
+    (m) => { delete m.bursts },
+    (m) => { m.bursts = null },
+    (m) => { m.bursts = "not a collection" },
+    (m) => { m.bursts = { state: "measured", items: "not an array" } },
+    (m) => { m.bursts = { state: "unsupported", items: [] } },
+    (m) => { m.bursts_state = "measured" },
+    (m) => { m.bursts_state = {} },
+    (m) => { m.lead_window.state = "unsupported" },
+    (m) => { m.bursts = [{ start_ms: 0, end_ms: 1000, working_ms: measured(1000) }]; delete m.gaps },
+    (m) => { m.bursts = [{ start_ms: 0, end_ms: 1000, working_ms: measured(1000) }]; m.gaps = { state: "measured", items: "not an array" } },
+  ]) {
+    const map = structuredClone(zero); change(map)
+    const story = W.recordedJourney(map)
+    assert.equal(story.state, "unavailable", JSON.stringify(map))
+    assert.equal(Object.hasOwn(story, "working_ms"), false)
+  }
+})
+
+test("a_foreign_map_cannot_tell_the_requested_tasks_story_even_with_the_same_duration", () => {
+  const map = { ...journeyMap(), job: "foreign" }
+  assert.equal(W.recordedJourney(map, "chosen").state, "unavailable")
+  assert.match(W.mapEvidenceProblem(map, "chosen"), /identity|different task/i)
+  const own = { ...map, job: "chosen" }
+  assert.equal(W.mapEvidenceProblem(own, "chosen"), null)
+  assert.equal(W.recordedJourney(own, "chosen").state, "ok")
+})

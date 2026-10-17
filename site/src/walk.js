@@ -994,10 +994,26 @@
     };
   }
 
+  function mapEvidenceProblem(map, expectedJob) {
+    const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    const states = ["measured", "partial", "unavailable"];
+    if (!object(map)) return "The recorded map is incomplete.";
+    if (expectedJob !== undefined && map.job !== expectedJob) return "The map identity does not match this task. Its journey and evidence are withheld.";
+    if (!object(map.lead_window) || !states.includes(map.lead_window.state)) return "The recorded window state is incomplete.";
+    if (map.bursts_state !== undefined && (!object(map.bursts_state) || !states.includes(map.bursts_state.state))) return "The recorded capture coverage state is incomplete.";
+    for (const key of ["bursts", "gaps"]) {
+      const collection = map[key];
+      if (!Array.isArray(collection) && !(object(collection) && states.includes(collection.state) && Array.isArray(collection.items))) return `The recorded partition's ${key} collection is incomplete.`;
+    }
+    return null;
+  }
+
   // A complete account of the captured frame, not a claim of complete real
   // work. Unlike the legacy layout, this never substitutes span for work.
-  function recordedJourney(map) {
+  function recordedJourney(map, expectedJob) {
     const missing = (reason) => ({ state: "unavailable", reason });
+    const problem = mapEvidenceProblem(map, expectedJob);
+    if (problem) return missing(problem);
     const frame = map && map.lead_window;
     if (!frame || frame.state === "unavailable" || !Number.isFinite(frame.start_ms) || !Number.isFinite(frame.end_ms) || frame.end_ms <= frame.start_ms) return missing("The recorded window is not recorded.");
     const list = (x) => Array.isArray(x) ? x : x && Array.isArray(x.items) ? x.items : [];
@@ -1345,7 +1361,7 @@
     const waitLow = low(waitN), waitHigh = high(waitN), workLow = low(workN), workHigh = high(workN);
     const waitingFirst = waitLow !== null && workHigh !== null && waitLow > workHigh;
     const workingFirst = workLow !== null && waitHigh !== null && workLow >= waitHigh;
-    const journey = o.map ? recordedJourney(o.map) : null;
+    const journey = o.map ? recordedJourney(o.map, o.job ?? row.job) : null;
     const agrees = journey && journey.state === "ok" && Math.abs(journey.total_ms - lead.value) <= .001;
     const conclusion = agrees ? [journey.headline, journey.pause].filter(Boolean).join(" ")
       : waitingFirst ? "Waiting is the largest recorded part of this task's elapsed time. Inspect its evidence before deciding what to change."
@@ -3195,6 +3211,7 @@
     ledeText,
     FOLD_STEPS,
     mapModel,
+    mapEvidenceProblem,
     recordedJourney,
     durationDetail,
     sessionWords,

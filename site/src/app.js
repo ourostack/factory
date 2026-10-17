@@ -2063,10 +2063,10 @@
   }
 
   function renderMap(container, ctx) {
-    const { j, map, row, tasksPublished, idle, unlabeled } = ctx;
+    const { j, map, mapProblem, row, tasksPublished, idle, unlabeled } = ctx;
     container.innerHTML = "";
     if (!map) {
-      emptyState(container, tasksPublished === false ? "The value stream map is not published yet: the walk's data files are not part of this build." : "This task's value stream map is not published yet, so no box or triangle is drawn rather than empty ones.");
+      emptyState(container, mapProblem || (tasksPublished === false ? "The value stream map is not published yet: the walk's data files are not part of this build." : "This task's value stream map is not published yet, so no box or triangle is drawn rather than empty ones."));
       return null;
     }
     const width = container.clientWidth || 1000;
@@ -2144,7 +2144,7 @@
       });
     };
     const overview = el("div", "task-journey-overview");
-    reader.journey(overview, map, { onSelect: (index, opener) => {
+    reader.journey(overview, map, { job: j.id, onSelect: (index, opener) => {
       const item = model.items[index];
       if (!item) return;
       clearEvidenceSelection(true);
@@ -3110,8 +3110,10 @@
       return;
     }
     ledeEl.replaceChildren(loadingNote("span"));
-    const [tasks, stack, map] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile(mapPath(j.id))]);
+    const [tasks, stack, mapFile] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile(mapPath(j.id))]);
     if (seq !== walkSeq) return;
+    const mapProblem = mapFile == null ? null : W.mapEvidenceProblem(mapFile, j.id);
+    const map = mapProblem ? null : mapFile;
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
     const row = taskRows ? taskRows.find((r) => r.job === j.id) || null : null;
     const stackRow = stack && Array.isArray(stack.jobs) ? stack.jobs.find((r) => r.job === j.id) || null : null;
@@ -3137,11 +3139,12 @@
       unlabeled = null;
     }
     safely("vsm", () => {
-      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
+      drawn = renderMap(vsmEl, { j, map, mapProblem, row, tasksPublished: !!taskRows, idle, unlabeled });
     });
     safely("task-lede", () => {
       renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
-      const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled, map });
+      const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled, map, job: j.id });
+      if (mapProblem) summary.caveat = [mapProblem, summary.caveat].filter(Boolean).join(" ");
       // The conclusion leads: right under the task title, before the
       // reference and status lines, so it starts on the first screen.
       const conclusion = el("p", "task-conclusion", summary.conclusion);
@@ -3216,7 +3219,7 @@
       const figureBoxKey = figureBox ? controlKey(figureBox) : null;
       const disclosures = [...vsmEl.querySelectorAll("details > summary")].map((summary) => ({ key: controlKey(summary), open: summary.parentElement.open }));
       const figures = [...vsmEl.querySelectorAll(".vsm-data-toggle")].map((toggle) => ({ key: controlKey(toggle), open: toggle.getAttribute("aria-expanded") === "true" }));
-      drawn = renderMap(vsmEl, { j, map, row, tasksPublished: !!taskRows, idle, unlabeled });
+      drawn = renderMap(vsmEl, { j, map, mapProblem, row, tasksPublished: !!taskRows, idle, unlabeled });
       if (drawn && selectedSummary) drawn.highlight(selectedSummary);
       // Rebind only an unambiguous logical control; the old DOM node is gone.
       const replacement = (key) => {

@@ -90,6 +90,14 @@ test("the full-population journey link explicitly bypasses inherited task filter
   const link = by(host, "a").find((n) => n.textContent === "Compare with all recorded tasks")
   assert.equal(link.href, `#/compare?return=%23%2Ftask%2F${A}`)
 })
+
+test("the_reader_refuses_foreign_task_evidence_before_it_can_change_the_followed_task", () => {
+  const root = render("journey", { job: "foreign", lead_window: { state: "measured", start_ms: 0, end_ms: 1000 },
+    bursts: [{ start_ms: 0, end_ms: 1000, working_ms: m(1000) }], gaps: [] }, { job: A })
+  assert.match(root.textContent, /identity|different task/i)
+  assert.equal(by(root, "button").length, 0)
+  assert.equal(by(root, "a").length, 0)
+})
 function learning({ verdict = "too_few_jobs", status = "checked", partial = false } = {}) {
   const checks = buildImprovementChecks({
     issues: [{ number: 53, url: "https://github.com/ourostack/factory/issues/53", state: "closed", body: "PRIVATE BODY" }],

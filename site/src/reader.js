@@ -115,9 +115,9 @@
     const jsonLink = (path = "rollups/learning.json", label = "Read the same evidence as JSON") => {
       const a = el("a", null, label); a.href = path; return a;
     };
-    function journey(host, map, { onSelect } = {}) {
+    function journey(host, map, { onSelect, job } = {}) {
       host.replaceChildren();
-      const story = W.recordedJourney(map);
+      const story = W.recordedJourney(map, job);
       const box = el("section", "journey-overview");
       box.append(el("h3", "sub-title", "Whole recorded window"));
       host.append(box);
@@ -161,7 +161,7 @@
       }
       box.append(story.items.length > 5 ? details("Read every period and pause", list) : list);
       box.append(p("No task session is not proof that the factory was idle. Other tasks can run independently; this task clock cannot align unrelated sessions. Uncategorized time stays unknown. Period names describe capture, not inferred production stages.", "chart-caption journey-limits"));
-      const taskRoute = F.safeRoute("task", map.job);
+      const taskRoute = F.safeRoute("task", job ?? map.job);
       if (taskRoute) box.append(local("Compare with all recorded tasks", F.routeWithContext("#/compare", { return: taskRoute }), null, { plain: true }));
     }
     function evidenceNote(value) {
