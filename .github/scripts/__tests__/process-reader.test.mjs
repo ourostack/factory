@@ -17,7 +17,7 @@ const p = (value) => ({ state: "partial", value, bound: "lower", reasons: ["log_
 
 // Only the DOM operations used to construct a tree; no renderer logic lives here.
 class Node {
-  constructor(tag = "") { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = {}; this._text = ""; }
+  constructor(tag = "") { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = {}; this.style = {}; this._text = ""; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map((c) => typeof c === "string" ? c : c.textContent).join(""); }
   append(...nodes) { this.children.push(...nodes); }
@@ -35,6 +35,69 @@ const render = (method, doc, ...args) => {
   R.createReader({ document })[method](host, doc, ...args);
   return host;
 };
+
+test("the existing task journey shows the whole clock and opens the same period evidence", () => {
+  const map = {
+    job: A,
+    lead_window: { state: "measured", start_ms: 0, end_ms: 7200000 },
+    bursts_state: m(null),
+    bursts: [
+      { start_ms: 0, end_ms: 60000, working_ms: m(1000), idle_by_waited_on_ms: { next_prompt: 59000 } },
+      { start_ms: 7140000, end_ms: 7200000, working_ms: m(2000) },
+    ],
+    gaps: [{ start_ms: 60000, end_ms: 7140000, waited_on: "no_session" }],
+    transitions: [{ offset_ms: 59000, to: "blocked" }],
+    observations: [{ offset_ms: 7199000, status: "done" }],
+  };
+  const selected = [];
+  const root = render("journey", map, { onSelect: (index, opener) => selected.push({ index, opener }) });
+  assert.match(root.textContent, /Whole recorded window/);
+  assert.match(root.textContent, /3s.*Recorded activity|Recorded activity.*3s/);
+  assert.match(root.textContent, /1h 58m.*No task session|No task session.*1h 58m/);
+  assert.match(root.textContent, /58s.*Uncategorized|Uncategorized.*58s/);
+  assert.match(root.textContent, /not.*factory.*idle|not.*factory utilization/i);
+  assert.match(root.textContent, /period.*short pauses|includes.*pauses/i);
+  assert.match(root.textContent, /blocked/i);
+  assert.match(root.textContent, /Delivered.*last observed/);
+  const buttons = by(root, "button");
+  assert.equal(buttons.length, 3);
+  assert.match(buttons[1].textContent, /Pause 1.*1h 58m/);
+  buttons[1].listeners.click();
+  assert.deepEqual(selected, [{ index: 1, opener: buttons[1] }], "overview selection uses the existing map item, not a new evidence identity");
+  const strip = nodes(root).find((n) => n.className === "journey-scale");
+  assert.equal(strip.attributes["aria-hidden"], "true", "readable buttons, not sub-pixel bars, are the hit targets");
+  assert.equal(strip.children.length, 3);
+  const comparison = by(root, "a").find((n) => n.textContent.includes("all recorded tasks"));
+  assert.ok(comparison, "the same task remains followable in the full comparison population");
+  assert.equal(comparison.href, `#/compare?return=%23%2Ftask%2F${A}`);
+  assert.ok(!comparison.href.includes("task="), "do not filter the other tasks out");
+})
+
+test("the task journey withholds a complete-looking overview when capture cannot partition the clock", () => {
+  const root = render("journey", { lead_window: { state: "unavailable" } });
+  assert.match(root.textContent, /not recorded|incomplete/i);
+  assert.equal(by(root, "button").length, 0);
+  assert.doesNotMatch(root.textContent, /0s|0 periods/);
+})
+
+test("the full-population journey link explicitly bypasses inherited task filters", () => {
+  const host = new Node("div")
+  const reader = R.createReader({ document, setLocalHref: (link, href, opts) => {
+    link.href = opts?.plain ? href : F.contextualRoute(href, `#/task/${A}?cause=waiting%3Anext_prompt`)
+  } })
+  reader.journey(host, { job: A, lead_window: { state: "measured", start_ms: 0, end_ms: 1000 },
+    bursts: [{ start_ms: 0, end_ms: 1000, working_ms: m(1000) }], gaps: [] })
+  const link = by(host, "a").find((n) => n.textContent === "Compare with all recorded tasks")
+  assert.equal(link.href, `#/compare?return=%23%2Ftask%2F${A}`)
+})
+
+test("the_reader_refuses_foreign_task_evidence_before_it_can_change_the_followed_task", () => {
+  const root = render("journey", { job: "foreign", lead_window: { state: "measured", start_ms: 0, end_ms: 1000 },
+    bursts: [{ start_ms: 0, end_ms: 1000, working_ms: m(1000) }], gaps: [] }, { job: A })
+  assert.match(root.textContent, /identity|different task/i)
+  assert.equal(by(root, "button").length, 0)
+  assert.equal(by(root, "a").length, 0)
+})
 function learning({ verdict = "too_few_jobs", status = "checked", partial = false } = {}) {
   const checks = buildImprovementChecks({
     issues: [{ number: 53, url: "https://github.com/ourostack/factory/issues/53", state: "closed", body: "PRIVATE BODY" }],

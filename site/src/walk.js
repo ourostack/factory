@@ -115,6 +115,15 @@
     return `${p.n}${p.unit}${p.s ? ` ${p.s}s` : ""}`;
   }
 
+  // For adjacent elapsed windows, whole hours alone can hide their difference.
+  function durationDetail(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return "Not recorded";
+    if (ms > 0 && ms < SECOND) return "<1s";
+    const seconds = Math.round(ms / SECOND);
+    const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = seconds % 60;
+    return [h ? `${h}h` : "", m ? `${m}m` : "", s || (!h && !m) ? `${s}s` : ""].filter(Boolean).join(" ");
+  }
+
   // A share rounded the way its bound reads: format.js shareFigure, mirrored
   // here because walk.js loads on its own (the share-edge test holds the two
   // equal). A lower bound rounds down, an upper bound up; within a point of
@@ -985,6 +994,75 @@
     };
   }
 
+  function mapEvidenceProblem(map, expectedJob) {
+    const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    const states = ["measured", "partial", "unavailable"];
+    if (!object(map)) return "The recorded map is incomplete.";
+    if (expectedJob !== undefined && map.job !== expectedJob) return "The map identity does not match this task. Its journey and evidence are withheld.";
+    if (!object(map.lead_window) || !states.includes(map.lead_window.state)) return "The recorded window state is incomplete.";
+    if (map.bursts_state !== undefined && (!object(map.bursts_state) || !states.includes(map.bursts_state.state))) return "The recorded capture coverage state is incomplete.";
+    for (const key of ["bursts", "gaps"]) {
+      const collection = map[key];
+      if (!Array.isArray(collection) && !(object(collection) && states.includes(collection.state) && Array.isArray(collection.items))) return `The recorded partition's ${key} collection is incomplete.`;
+    }
+    return null;
+  }
+
+  // A complete account of the captured frame, not a claim of complete real
+  // work. Unlike the legacy layout, this never substitutes span for work.
+  function recordedJourney(map, expectedJob) {
+    const missing = (reason) => ({ state: "unavailable", reason });
+    const problem = mapEvidenceProblem(map, expectedJob);
+    if (problem) return missing(problem);
+    const frame = map && map.lead_window;
+    if (!frame || frame.state === "unavailable" || !Number.isFinite(frame.start_ms) || !Number.isFinite(frame.end_ms) || frame.end_ms <= frame.start_ms) return missing("The recorded window is not recorded.");
+    const list = (x) => Array.isArray(x) ? x : x && Array.isArray(x.items) ? x.items : [];
+    if ([map.bursts_state, map.bursts, map.gaps].some((x) => x && x.state && x.state !== "measured")) return missing("The recorded partition is incomplete.");
+    const bursts = list(map.bursts), gaps = list(map.gaps);
+    const parts = [...bursts.map((x) => ({ x, work: true })), ...gaps.map((x) => ({ x, work: false }))];
+    if (parts.some(({ x }) => !x || typeof x !== "object" || Array.isArray(x))) return missing("The recorded partition contains an incomplete interval.");
+    parts.sort((a, b) => a.x.start_ms - b.x.start_ms);
+    const by = {};
+    let through = frame.start_ms, working = 0;
+    for (const { x, work } of parts) {
+      if (!Number.isFinite(x.start_ms) || !Number.isFinite(x.end_ms) || x.end_ms < x.start_ms || x.start_ms !== through) return missing("The recorded partition has a gap or overlap.");
+      through = x.end_ms;
+      const span = x.end_ms - x.start_ms;
+      const n = work ? stated(x.working_ms) : null;
+      if (work && (n.state !== "measured" || !Number.isFinite(n.value) || n.value < 0 || n.value > span)) return missing("Working time is not measured within the recorded partition.");
+      const idle = span - (work ? n.value : 0);
+      const src = x.idle_by_waited_on_ms;
+      if (src !== undefined) {
+        if (!src || typeof src !== "object" || Array.isArray(src)) return missing("The recorded idle partition is incomplete.");
+        let named = 0;
+        for (const value of Object.values(src)) {
+          const v = stated(value);
+          if (v.state !== "measured" || !Number.isFinite(v.value) || v.value < 0) return missing("The recorded idle partition is not measured.");
+          named += v.value;
+        }
+        if (named > idle) return missing("The recorded idle partition exceeds its window.");
+      }
+      if (work) working += n.value;
+      for (const [key, ms] of Object.entries(work ? burstIdleBy(x) : gapIdleBy(x))) by[key] = (by[key] || 0) + ms;
+    }
+    const total = frame.end_ms - frame.start_ms;
+    if (through !== frame.end_ms || Math.abs(working + Object.values(by).reduce((a, b) => a + b, 0) - total) > .001) return missing("The recorded partition is incomplete.");
+    const model = mapModel(map, { shortGapGrouping: true });
+    const marks = statusMarks(map, model);
+    let period = 0, pause = 0;
+    const items = model.items.map((it) => ({
+      item: it.index, kind: it.type, start_ms: it.start_ms, end_ms: it.end_ms,
+      label: it.type === "box" ? `Work period ${++period}` : `Pause ${++pause}`,
+      working_ms: it.type === "box" ? it.working_ms : 0,
+      by: it.type === "box" ? it.inner_by : it.by,
+      statuses: marks.filter((mark) => mark.item === it.index).map(({ status, observed }) => ({ status, observed })),
+    }));
+    const longest = items.filter((it) => it.kind === "wait").sort((a, b) => (b.end_ms - b.start_ms) - (a.end_ms - a.start_ms))[0];
+    const headline = `${period} recorded work period${period === 1 ? "" : "s"} across ${durationDetail(total)}.${longest ? ` Longest pause: ${durationDetail(longest.end_ms - longest.start_ms)}.` : ""}`;
+    const pauseWords = longest && (longest.by.no_session || 0) > (longest.end_ms - longest.start_ms) / 2 ? "Most of that pause has no session recorded for this task." : "";
+    return { state: "ok", start_ms: frame.start_ms, end_ms: frame.end_ms, total_ms: total, working_ms: working, by, items, headline, pause: pauseWords };
+  }
+
   // "session 2 of 3", "sessions 1-2 of 3".
   function sessionWords(numbers, total) {
     if (!numbers || !numbers.length || !total) return "session not placed";
@@ -1283,10 +1361,15 @@
     const waitLow = low(waitN), waitHigh = high(waitN), workLow = low(workN), workHigh = high(workN);
     const waitingFirst = waitLow !== null && workHigh !== null && waitLow > workHigh;
     const workingFirst = workLow !== null && waitHigh !== null && workLow >= waitHigh;
-    const conclusion = waitingFirst ? "Waiting is the largest recorded part of this task's elapsed time. Inspect its evidence before deciding what to change."
+    const journey = o.map ? recordedJourney(o.map, o.job ?? row.job) : null;
+    const agrees = journey && journey.state === "ok" && Math.abs(journey.total_ms - lead.value) <= .001;
+    const conclusion = agrees ? [journey.headline, journey.pause].filter(Boolean).join(" ")
+      : waitingFirst ? "Waiting is the largest recorded part of this task's elapsed time. Inspect its evidence before deciding what to change."
       : workingFirst ? "Recorded working time is at least as large as recorded waiting. This does not show whether the work was necessary or waste."
         : "The recorded figures cannot yet say whether waiting or working is the larger part of this task's elapsed time. Inspect its evidence before comparing it with other tasks.";
-    const caveat = exact ? "" : "The recorded window or its work split is incomplete, so keep the bounds in view before comparing tasks.";
+    const caveat = agrees ? "This describes the captured window, not continuous execution or factory utilization. Keep the separate clock bounds in view."
+      : journey && journey.state === "ok" ? "The map and rollup name different recorded windows. Keep them separate; this is a publication discrepancy."
+      : exact ? "" : "The recorded window or its work split is incomplete, so keep the bounds in view before comparing tasks.";
     const value = model.parts.find((p) => p && typeof p === "object" && p.key === "value");
     const classification = value ? `Evaluator-labeled value-adding work: ${textOf(value).text}.${row.labels_from_shared_session ? " Labels come from a shared session; this classification is partial." : ""} Classification describes work, not capture completeness.`
       : "Work is not labeled or its value-adding share is not recorded. Unclassified work is not automatically waste.";
@@ -3128,6 +3211,9 @@
     ledeText,
     FOLD_STEPS,
     mapModel,
+    mapEvidenceProblem,
+    recordedJourney,
+    durationDetail,
     sessionWords,
     dataBox,
     reworkWords,
