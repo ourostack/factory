@@ -131,3 +131,89 @@ test("zone_changes_only_supported_instants_not_relative_clock_days_or_duration",
   assert.equal(W.clockWords(0, 600000, 0), "from 0s to 10m after the task's start (10 minutes)")
   assert.equal(W.durationWords(600000), "10 minutes")
 })
+
+const journeyMap = () => ({
+  lead_window: { state: "partial", start_ms: -1000, end_ms: 10001000, reasons: ["work_before_card"] },
+  bursts_state: measured(null),
+  bursts: [
+    { start_ms: 0, end_ms: 60000, working_ms: measured(30000), sessions: ["s1"], idle_by_waited_on_ms: { next_prompt: 30000 } },
+    { start_ms: 10000000, end_ms: 10001000, working_ms: measured(1000), sessions: ["s2"] },
+  ],
+  gaps: [
+    { start_ms: -1000, end_ms: 0, waited_on: "unknown" },
+    { start_ms: 60000, end_ms: 10000000, waited_on: "no_session", idle_by_waited_on_ms: { no_session: 9900000, unknown: 40000 } },
+  ],
+  transitions: [{ offset_ms: 59000, to: "blocked" }],
+  observations: [{ offset_ms: 10000500, status: "done" }],
+})
+
+test("whole_journey_covers_the_recorded_window_once_including_short_pauses_and_unknown_edges", () => {
+  const map = journeyMap(), saved = JSON.stringify(map)
+  const story = W.recordedJourney(map)
+  assert.equal(story.state, "ok")
+  assert.equal(story.total_ms, 10002000)
+  assert.equal(story.working_ms, 31000)
+  assert.deepEqual(story.by, { next_prompt: 30000, no_session: 9900000, unknown: 41000 })
+  assert.deepEqual(story.items.map(({ item, kind, start_ms, end_ms }) => ({ item, kind, start_ms, end_ms })), [
+    { item: 0, kind: "box", start_ms: -1000, end_ms: 60000 },
+    { item: 1, kind: "wait", start_ms: 60000, end_ms: 10000000 },
+    { item: 2, kind: "box", start_ms: 10000000, end_ms: 10001000 },
+  ])
+  assert.match(story.headline, /2 recorded work periods/)
+  assert.match(story.headline, /2h 46m 42s.*2h 45m 40s/, "the whole frame and longest pause must not round to the same duration")
+  assert.match(story.pause, /no session recorded for this task/i)
+  assert.doesNotMatch(story.pause, /factory was idle|blocked because|waste/i)
+  assert.deepEqual(story.items[0].statuses, [{ status: "blocked", observed: false }])
+  assert.deepEqual(story.items[2].statuses, [{ status: "done", observed: true }])
+  assert.equal(story.items[0].working_ms, 30000, "period span is not continuous work")
+  assert.equal(JSON.stringify(map), saved)
+})
+
+test("journey_duration_keeps_hours_minutes_and_seconds_distinct_without_inventing_zero", () => {
+  assert.equal(W.durationDetail(94967009), "26h 22m 47s")
+  assert.equal(W.durationDetail(91913453), "25h 31m 53s")
+  assert.equal(W.durationDetail(995826), "16m 36s")
+  assert.equal(W.durationDetail(0), "0s")
+  assert.equal(W.durationDetail(524), "<1s")
+  assert.equal(W.durationDetail(null), "Not recorded")
+})
+
+test("whole_journey_does_not_turn_missing_or_overlapping_capture_into_an_exact_account", () => {
+  for (const change of [
+    (m) => { m.bursts[0] = null },
+    (m) => { m.gaps[0] = "not an interval" },
+    (m) => { m.bursts_state = { state: "partial", reasons: ["log_truncated"] } },
+    (m) => { m.bursts[0].working_ms = unavailable },
+    (m) => { m.bursts[0].working_ms = { state: "partial", value: 30000, bound: "lower", reasons: ["log_truncated"] } },
+    (m) => { m.bursts[0].working_ms = measured(60001) },
+    (m) => { m.gaps[0].end_ms = -1 },
+    (m) => { m.gaps[0].end_ms = 1 },
+    (m) => { m.gaps[1].idle_by_waited_on_ms.no_session = 10000000 },
+    (m) => { m.lead_window.end_ms = NaN },
+    (m) => { m.lead_window.state = "unavailable" },
+  ]) {
+    const map = journeyMap(); change(map)
+    const story = W.recordedJourney(map)
+    assert.equal(story.state, "unavailable")
+    assert.match(story.reason, /not recorded|incomplete|overlap|partition|window|measured/)
+    assert.equal(Object.hasOwn(story, "total_ms"), false)
+  }
+  assert.equal(W.recordedJourney(null).state, "unavailable")
+})
+
+test("task_conclusion_uses_positive_recorded_journey_evidence_without_replacing_the_bound_clocks", () => {
+  const partialRow = { ...row, lead_time_ms: measured(10002000), working_ms: { state: "partial", value: 31000, bound: "lower", reasons: ["log_truncated"] } }
+  const summary = W.taskSummary(partialRow, F.reasonText, { map: journeyMap() })
+  assert.match(summary.conclusion, /2 recorded work periods/)
+  assert.doesNotMatch(summary.conclusion, /cannot yet say|factory.*idle/)
+  assert.match(summary.caveat, /captured|recorded/)
+  assert.match(summary.figures.find((x) => x.label === "Recorded working").text, /at least/)
+  const incomplete = journeyMap(); incomplete.bursts_state = unavailable
+  assert.doesNotMatch(W.taskSummary(partialRow, F.reasonText, { map: incomplete }).conclusion, /2 recorded work periods/)
+})
+
+test("task_conclusion_does_not_join_mismatching_rollup_and_map_windows_into_one_story", () => {
+  const summary = W.taskSummary(row, F.reasonText, { map: journeyMap() })
+  assert.doesNotMatch(summary.conclusion, /2 recorded work periods/)
+  assert.match(summary.caveat, /map and rollup.*different recorded windows/i)
+})

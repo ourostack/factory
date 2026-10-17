@@ -1,9 +1,9 @@
 // Human views of the validated learning projection. No accounting or checks
 // are recalculated here; legacy charts remain available for deeper analysis.
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(require("./format.js"), require("./learning.js"));
-  else root.FactoryReader = factory(root.FactoryFormat, root.FactoryLearning);
-})(typeof self !== "undefined" ? self : this, function (F, L) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./format.js"), require("./learning.js"), require("./walk.js"));
+  else root.FactoryReader = factory(root.FactoryFormat, root.FactoryLearning, root.FactoryWalk);
+})(typeof self !== "undefined" ? self : this, function (F, L, W) {
   "use strict";
   const RESULT = { better: "Better on the chosen measure", worse: "Worse on the chosen measure", no_detected_change: "No detected change",
     inconclusive: "Inconclusive", awaiting_result: "Awaiting a result", refused: "Check refused", unavailable: "Check unavailable" };
@@ -83,10 +83,10 @@
       return n;
     };
     const p = (text, cls) => el("p", cls, text);
-    const local = (text, href, cls) => {
+    const local = (text, href, cls, opts) => {
       if (!F.localDestination(href.split("?")[0])) throw new TypeError("unsupported reader route");
       const a = el("a", cls, text);
-      if (setLocalHref) setLocalHref(a, href); else a.href = href;
+      if (setLocalHref) setLocalHref(a, href, opts); else a.href = href;
       return a;
     };
     const publicLink = (text, href) => {
@@ -115,6 +115,55 @@
     const jsonLink = (path = "rollups/learning.json", label = "Read the same evidence as JSON") => {
       const a = el("a", null, label); a.href = path; return a;
     };
+    function journey(host, map, { onSelect } = {}) {
+      host.replaceChildren();
+      const story = W.recordedJourney(map);
+      const box = el("section", "journey-overview");
+      box.append(el("h3", "sub-title", "Whole recorded window"));
+      host.append(box);
+      if (story.state !== "ok") {
+        box.append(p(`${story.reason} A complete-looking overview is withheld; inspect the available evidence below.`, "chart-caption"));
+        return;
+      }
+      const labels = { working: "Recorded activity", next_prompt: "After agent stop, before next prompt",
+        other_task: "Other tasks in a shared session", api_retry: "API retry", tool_failure: "After a failed tool call",
+        long_tool_call: "Long tool call", queue_before_start: "Before the first session", no_session: "No task session recorded", unknown: "Uncategorized time" };
+      box.append(p(`${W.durationDetail(story.total_ms)} from the first capture boundary to the last. Durations below are rounded to seconds.`, "journey-total"));
+      const strip = el("div", "journey-scale");
+      strip.setAttribute("aria-hidden", "true");
+      for (const item of story.items) {
+        const span = el("span", item.kind === "box" ? "journey-period" : "journey-pause");
+        span.style.width = `${(item.end_ms - item.start_ms) / story.total_ms * 100}%`;
+        strip.append(span);
+      }
+      box.append(strip, p("To scale: blue spans are work periods, including short pauses, not continuous execution. Hatched spans are the longer pauses. Use the readable controls below for their evidence.", "chart-caption"));
+      const totals = el("dl", "journey-totals");
+      const add = (parent, label, ms) => {
+        const value = el("span", null, W.durationDetail(ms)); value.title = `${ms} ms`;
+        fact(parent, label, value);
+      };
+      add(totals, labels.working, story.working_ms);
+      for (const key of W.WAIT_KEYS) if (story.by[key] > 0) add(totals, labels[key], story.by[key]);
+      box.append(totals);
+      const list = el("ol", "journey-periods");
+      for (const item of story.items) {
+        const li = el("li", `journey-${item.kind}`);
+        const button = el("button", "journey-evidence", `${item.label} · ${W.durationDetail(item.end_ms - item.start_ms)}`);
+        button.type = "button"; button.dataset.item = item.item;
+        button.addEventListener("click", () => { if (onSelect) onSelect(item.item, button); });
+        li.append(button);
+        const detail = [];
+        if (item.kind === "box") detail.push(`${W.durationDetail(item.working_ms)} recorded activity`);
+        for (const key of W.WAIT_KEYS) if (item.by[key] > 0) detail.push(`${W.durationDetail(item.by[key])} ${labels[key].toLowerCase()}`);
+        li.append(p(detail.join("; ")));
+        for (const status of item.statuses) li.append(p(W.cardStatusWords(status.status, status.observed), "journey-status"));
+        list.append(li);
+      }
+      box.append(story.items.length > 5 ? details("Read every period and pause", list) : list);
+      box.append(p("No task session is not proof that the factory was idle. Other tasks can run independently; this task clock cannot align unrelated sessions. Uncategorized time stays unknown. Period names describe capture, not inferred production stages.", "chart-caption journey-limits"));
+      const taskRoute = F.safeRoute("task", map.job);
+      if (taskRoute) box.append(local("Compare with all recorded tasks", F.routeWithContext("#/compare", { return: taskRoute }), null, { plain: true }));
+    }
     function evidenceNote(value) {
       const d = F.describe(value, "count");
       return [d.nofn, d.reason].filter(Boolean).join(". ");
@@ -449,7 +498,7 @@
       host.append(p(finding.related_improvements.length ? "The published mapping associates a measure, not original triggering tasks. Merge and issue closure do not prove effect." :
         "No supported public improvement mapping is published for this finding. A linked task is not automatically an original trigger."));
     }
-    return { overview, time, improvements, connections };
+    return { overview, time, improvements, connections, journey };
   }
   return { createReader, improvementHref, taskIdentity, checkLimit, materialWarning };
 });

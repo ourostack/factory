@@ -2143,6 +2143,14 @@
         more: (box) => stretchesIn(box, j, map, it, ctxDrawer),
       });
     };
+    const overview = el("div", "task-journey-overview");
+    reader.journey(overview, map, { onSelect: (index, opener) => {
+      const item = model.items[index];
+      if (!item) return;
+      clearEvidenceSelection(true);
+      open(opener, { kind: item.type, item });
+    } });
+    container.appendChild(overview);
     const openMark = Object.assign((opener, thing) => openClock(opener, thing, { j, map, ctxDrawer, clock }), { job: j });
     // Marks outside the lead window go to a margin before or after the
     // map, never to its edge (their positions do not depend on the layout).
@@ -3133,7 +3141,7 @@
     });
     safely("task-lede", () => {
       renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
-      const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled });
+      const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled, map });
       // The conclusion leads: right under the task title, before the
       // reference and status lines, so it starts on the first screen.
       const conclusion = el("p", "task-conclusion", summary.conclusion);
@@ -4769,6 +4777,8 @@
     const context = F.navigationContext(location.hash);
     const selectedJobs = S.selectTaskPopulation(data.jobs, context);
     const selectedIds = new Set(selectedJobs.map((j) => j.id));
+    const back = context.return ? F.parseRoute(context.return) : null;
+    const followed = back && back.view === "task" ? data.jobs.find((job) => job.id === back.job) : null;
     const filtered = ["task", "status", "from", "to", "evidence"].some((k) => context[k]);
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs.filter((r) => selectedIds.has(r.job)) : null;
     const stackRows = stack && Array.isArray(stack.jobs) ? stack.jobs.filter((r) => selectedIds.has(r.job)) : null;
@@ -4788,6 +4798,17 @@
         ? ` The date filter excluded ${inexact} ${inexact === 1 ? "task" : "tasks"} without an exact UTC finish day (open, bounded or undated), because their finish day cannot be placed inside the range.`
         : " Date filters include exact UTC finish days only.";
       scope.textContent = `${selectedJobs.length} of ${data.jobs.length} recorded tasks selected. Percentages use each included task's own recorded elapsed window, not global utilization or capacity.${dateNote} Category emphasis changes no totals or denominators.`;
+      if (followed) {
+        scope.prepend(document.createTextNode(`Following ${jobLabel(followed)}. `));
+        if (selectedIds.has(followed.id)) {
+          const find = el("button", "link-button", "Find the task being followed"); find.type = "button";
+          find.addEventListener("click", () => {
+            const target = document.querySelector("#stackup-table tr.is-followed-task");
+            if (target) { target.tabIndex = -1; target.scrollIntoView({ block: "center" }); target.focus({ preventScroll: true }); }
+          });
+          scope.appendChild(find);
+        } else scope.appendChild(document.createTextNode(" The task being followed is excluded by these filters."));
+      }
     });
     // The conclusion names the largest recorded window, in the view's unit.
     const writeConclusion = (bars) => {
@@ -4803,7 +4824,19 @@
         conclusion.append(document.createTextNode("Start by inspecting "), jobLink(candidate.job, candidate.name), document.createTextNode(`: ${candidate.view_words}, the largest displayed recorded window in this selection. Bounds or missing capture can change that ordering; this is an investigation lead, not a savings estimate.`));
       }
     };
-    const drawTable = (bars) => safely("stackup-table", () => (bars.length ? drawStackTable(document.getElementById("stackup-table"), bars) : emptyState(document.getElementById("stackup-table"), "No selected task comparison is available.")));
+    const drawTable = (bars) => safely("stackup-table", () => {
+      const container = document.getElementById("stackup-table");
+      if (!bars.length) return emptyState(container, "No selected task comparison is available.");
+      drawStackTable(container, bars);
+      if (followed) for (const link of container.querySelectorAll("a[href]")) {
+        if (F.parseRoute(link.getAttribute("href")).job !== followed.id) continue;
+        const row = link.closest("tr");
+        if (row && !row.classList.contains("is-followed-task")) {
+          row.classList.add("is-followed-task");
+          link.after(el("span", "cell-day", "Task being followed"));
+        }
+      }
+    });
     const draw = () => {
       const mode = modes.compare;
       const current = F.navigationContext(location.hash);

@@ -870,6 +870,23 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .improvement-row p, .improvement-row pre, .finding-prompt .prompt-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .finding-improvements { display: inline-block; margin: .75rem 0; }
 .task-summary { margin: 1.25rem 0; }
+.journey-overview { margin: 1rem 0 2rem; }
+.journey-total { font-weight: 600; }
+.journey-scale { display: flex; height: 1.5rem; width: 100%; overflow: hidden; border-radius: 3px; background: var(--surface-2); }
+.journey-scale > span { display: block; flex-shrink: 0; }
+.journey-period { background: var(--series-1); }
+.journey-pause { background: repeating-linear-gradient(135deg, transparent 0 4px, var(--text-secondary) 4px 5px); opacity: .45; }
+.journey-totals { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; margin: 1rem 0; }
+.journey-totals > div { min-width: 0; }
+.journey-totals dt { color: var(--text-secondary); font-size: .875rem; }
+.journey-totals dd { margin: .2rem 0 0; font-weight: 600; }
+.journey-periods { padding-left: 1.5rem; }
+.journey-periods > li { padding: .5rem 0; }
+.journey-evidence { text-align: left; padding: .5rem .75rem; white-space: normal; }
+.journey-periods p { margin: .4rem 0; overflow-wrap: anywhere; }
+.journey-status { font-weight: 600; }
+.journey-limits { max-width: 75ch; }
+.is-followed-task td:first-child { border-left: 3px solid var(--link); font-weight: 600; }
 .task-summary-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
 .task-summary-figures > div { padding: .9rem; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
 .task-summary-figures dt { color: var(--text-secondary); margin-bottom: .4rem; }
