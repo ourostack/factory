@@ -204,14 +204,16 @@ function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, in
   let head, sourceHead
   if (introducing) {
     // CI runs tests from a merge RESULT checkout. Its HEAD is not a PR head.
-    // Keep current code and intake bytes, except triage: this historical
-    // maintenance introduction predates triage authority. Its triage subtree
-    // must match the old base, not silently introduce modern reviewed intake.
+    // Introduce current code against the historical store's own data. Recent
+    // captures and their old labels are not a maintenance-code fixture.
     // Never weaken the released validator's merge-bearing-head refusal.
     sourceHead = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    const entries = git("ls-tree", sourceHead).split("\n").filter((entry) => !entry.endsWith("\ttriage"))
-    const historicalTriage = git("ls-tree", base, "--", "triage")
-    if (historicalTriage) entries.push(historicalTriage)
+    const dataRoots = new Set(["facts", "labels", "capture", "corrections", "triage"])
+    const entries = git("ls-tree", sourceHead).split("\n").filter((entry) => !dataRoots.has(entry.split("\t")[1]))
+    for (const name of dataRoots) {
+      const historical = git("ls-tree", base, "--", name)
+      if (historical) entries.push(historical)
+    }
     const tree = execFileSync("git", ["mktree"], {
       cwd: dir, input: entries.join("\n") + "\n", encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
     }).trim()
@@ -314,9 +316,10 @@ test("S2-1: real introducing maintenance head validates with exact 050c278a base
   const r = authorityWorkflow({}, { actualBase: true, introducing: true })
   try {
     assert.equal(r.base, "050c278a8119b6d7ebb681f4f0ab6b57ea800dd2")
-    assert.equal(r.git("ls-tree", r.head, "--", "triage"), r.git("ls-tree", r.base, "--", "triage"))
-    const nonTriage = (ref) => r.git("ls-tree", ref).split("\n").filter((entry) => !entry.endsWith("\ttriage"))
-    assert.deepEqual(nonTriage(r.head), nonTriage(r.sourceHead))
+    const dataRoots = new Set(["facts", "labels", "capture", "corrections", "triage"])
+    for (const name of dataRoots) assert.equal(r.git("ls-tree", r.head, "--", name), r.git("ls-tree", r.base, "--", name))
+    const code = (ref) => r.git("ls-tree", ref).split("\n").filter((entry) => !dataRoots.has(entry.split("\t")[1]))
+    assert.deepEqual(code(r.head), code(r.sourceHead))
     for (const p of [".github/scripts/check-capture.sh", ".github/scripts/check-corrections.mjs", ".github/scripts/check-intake-plugins.sh"]) {
       assert.deepEqual(readFileSync(join(r.dir, p)), execFileSync("git", ["-C", ROOT, "cat-file", "blob", `${r.base}:${p}`]))
     }

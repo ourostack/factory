@@ -159,10 +159,7 @@ test("the task view leads with its conclusion, then the production clocks and jo
   assert.match(app, /S\.clockFigures\(clocks, F\.reasonText\)/)
   assert.match(app, /S\.productionJourney\(clocks, F\.reasonText\)/)
   assert.match(app, /S\.acceptanceFigure\(j, F\.reasonText\)/)
-  assert.ok(app.indexOf('el("p", "task-conclusion"') < app.indexOf("S.clockFigures(clocks, F.reasonText)"), "the conclusion comes before the clocks")
   assert.doesNotMatch(app, /New production grouping is not available/)
-  // The conclusion sits right under the task title, before the reference and status lines.
-  assert.match(app, /title\.after\(conclusion\)/)
 })
 
 test("llms.txt documents the clock fields, their twins and their limits", () => {

@@ -163,31 +163,22 @@
 <!-- ============ STEP 1: FOLLOW A TASK ============ -->
 <div id="view-task" class="view">
   <div class="wrap">
-    <p class="step-label"><a href="#/tasks">Tasks</a> &middot; one production story</p>
+    <p class="step-label"><a href="#/tasks">Tasks</a></p>
     <p id="landing-note" class="chart-caption landing-note" hidden></p>
     <div id="task-head"></div>
-    <p id="task-lede" class="lede task-lede"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p>
-    <nav class="task-story-links" aria-label="Task story evidence">
-      <a href="#/tasks" data-task-jump="journey">Periods and interruptions</a>
-      <a href="#/tasks" data-task-jump="team">Team and sessions</a>
-      <a href="#/tasks" data-task-jump="delivery">Pull-request evidence</a>
-    </nav>
-    <section class="block vsm-block" aria-labelledby="vsm-title">
-      <h2 class="block-title" id="vsm-title">The recorded journey</h2>
-      <p class="map-selection" id="map-selection" hidden><span id="map-selection-text">An item on the map is selected.</span> <button type="button" id="map-clear">Clear selection</button></p>
-      <p class="chart-caption">A value stream map draws one piece of work from start to finish. Each box is a burst of agent work inside a session (one run of an agent harness, such as one Claude Code conversation). Desk starts a new burst after 15 minutes idle or when an operator prompt arrives; to fit the screen, the map may also fold shorter waits into the box beside them, and the note under the map gives the threshold at this width. Each triangle between boxes is a wait, labeled with how long it lasted and what it waited on. The map is not to scale: the ladder under it carries the time. Select any box, triangle or ladder step to see the evidence behind it.</p>
+    <section class="block vsm-block" aria-label="Task timeline">
       <div id="vsm"></div>
     </section>
-    <details class="block task-breakdown">
-      <summary id="time-went-title">Recorded time breakdown and classification</summary>
-      <div id="time-went"></div>
+    <details class="reader-details" id="task-records">
+      <summary>Session records and delivery details</summary>
+      <div id="job-detail"></div>
+      <div id="task-clock-details"></div>
     </details>
-    <div id="job-detail"><p class="chart-empty"><span class="is-loading" aria-busy="true">Loading&hellip;</span></p></div>
     <details id="other-tasks" class="other-tasks">
       <summary>Other recorded tasks</summary>
       <div id="task-picker"></div>
     </details>
-    <p class="next-step"><a href="#/time">Explore Time &amp; waste</a> or <a href="#/compare?mode=production">compare production time</a>.</p>
+    <p class="next-step"><a href="#/time">Explore time across tasks</a></p>
   </div>
 </div>
 

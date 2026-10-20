@@ -85,8 +85,6 @@ test("the map legend lists only the markers on this map, in plain words", () => 
   assert.doesNotMatch(app, /`card: \$\{m\.status\}/)
   assert.match(app, /All marker types/)
   assert.match(app, /const present = \{/)
-  // A Clear selection control sits with the map.
-  assert.match(read("site/src/index.html"), /id="map-clear"/)
   assert.equal(W.cardStatusWords("done", true), "Delivered (card moved to done; last observed)")
   assert.equal(W.cardStatusWords("cancelled", false), "Cancelled")
   assert.equal(W.cardStatusWords("doing", false), "In progress (doing)")

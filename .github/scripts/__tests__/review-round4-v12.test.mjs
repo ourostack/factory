@@ -86,8 +86,6 @@ test("the task page leads with a conclusion; the caveat follows it and is never 
   assert.match(ranked.conclusion, /^Waiting is the largest recorded part/)
   const exact = W.taskSummary({ ...row, lead_time_ms: m(10 * H), working_ms: m(H) }, F.reasonText, { idle: { state: "measured", value: 9 * H, by: [] } })
   assert.equal(exact.caveat, "")
-  const app = read("site/src/app.js")
-  assert.match(app, /el\("p", "task-caveat", summary\.caveat\)/)
 })
 
 test("a task with no finish day says why in lifecycle words, never 'still open' beside 'Awaiting acceptance'", () => {
@@ -109,8 +107,8 @@ test("Improvements with an investigated cause says whether any published improve
 
 test("an unavailable selection never says it is selected; the Overview alarm link lands focus on the alarms", () => {
   const app = read("site/src/app.js")
-  assert.match(app, /"selection-note"/)
-  assert.match(app, /querySelector\("\.selection-note"\)/, "the selected-item note is removed when the item is not found")
+  assert.match(app, /"selection-unavailable"/)
+  assert.match(app, /querySelectorAll\("\.selection-note"\)/, "the retired selected-item note is removed")
   // The router focuses the alarms section, not the heading, after the Overview link.
   assert.match(app, /if \(r\.view === "act" && focusAfterRender === "improvement-alarms"\)/)
 })

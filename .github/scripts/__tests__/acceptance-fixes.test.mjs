@@ -330,8 +330,6 @@ test("M3: an open task's lede says it is still open once", () => {
   assert.equal(W.afterFinish("This task is still open. So far it has taken at least "), "So far it has taken at least ")
   assert.equal(W.afterFinish("This task took 5 hours"), "It took 5 hours")
   assert.equal(W.afterFinish("Other text"), "Other text")
-  const app = read("site/src/app.js")
-  assert.match(app, /W\.afterFinish\(next\.textContent\)/)
 })
 
 // ------------------------------------------------------------------ M4
@@ -340,8 +338,6 @@ test("M4: every view states its own fold threshold in the same words, apart from
   assert.equal(W.foldWords({ fold_ms: 0 }), "At this width the map folds no wait: every work burst has its own box and every wait its own triangle.")
   assert.equal(W.foldWords({ fold_ms: 5 * 60000 }), "At this width the map folds waits shorter than 5 minutes into the box beside them, so it stays legible; each box says how many bursts it holds, and the ladder shows the folded waits beside its working time. A wider or narrower screen may fold a different threshold.")
   assert.match(W.foldWords({ fold_ms: Infinity }), /^At this width the map folds every wait into one box/)
-  const html = read("site/src/index.html")
-  assert.match(html, /Desk starts a new burst after 15 minutes idle or when an operator prompt arrives; to fit the screen, the map may also fold shorter waits into the box beside them, and the note under the map gives the threshold at this width/)
 })
 
 // ------------------------------------------------------------------ M5

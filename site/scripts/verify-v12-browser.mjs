@@ -76,8 +76,8 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "ladder_marks_overlap_across_items", "session_chart_stale_after_resize",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "task_share_removed", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
+  "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize",
 ])
 
 // The triage queues the Improvements page is checked against. Each is built
@@ -94,6 +94,7 @@ export const TRIAGE_QUEUES = Object.freeze([
 export const IN_PAGE_STEPS = Object.freeze([
   { route: "tasks", click: 'nav.steps a[href="#/tasks"]' },
   { route: "task", click: '#view-tasks a[href^="#/task/{task}"]' },
+  { route: "task", click: '#task-records > summary' },
   { route: "session", click: '#view-task a[href*="/session/{session}"]' },
   { route: "time", click: 'nav.steps a[href="#/time"]' },
   { route: "compare", click: '#view-time a[href="#/compare"]' },
@@ -172,7 +173,7 @@ export function inPageBudget(times, expected, budget = IN_PAGE_BUDGET_MS) {
 export const REQUIRED_CHECKS = Object.freeze([
   "learning_overview_first_phone_screen", "learning_twin_and_current_result_sections",
   "time_observations_and_compact_controls", "learning_evidence_chain_retains_return", "task_reference_is_not_requested_outcome",
-  "keyboard_enter_selects_evidence_escape_closes_and_returns_focus", "keyboard_space_selects_evidence_escape_closes_and_returns_focus",
+  "keyboard_enter_opens_inline_records_and_keeps_focus", "keyboard_space_opens_inline_records_and_keeps_focus",
   "keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", "tab_order_follows_the_page_on_primary_routes",
   "filter_change_updates_aggregates_and_coverage", "clear_selection_without_the_original_link",
   "guide_never_blocks_the_page", "touch_targets_are_at_least_24px", "status_and_legends_carry_non_color_markers",
@@ -185,7 +186,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "conclusion_starts_within_the_first_screen", "page_height_within_budget_at_doubled_text",
   "narrow_one_task_plot_keeps_text_in_bounds", "compare_axis_sum_and_lead_share_one_unit", "compare_task_figures_match_everywhere", "compare_no_bound_before_under", "task_page_lead_time_matches_compare", "task_pages_no_bound_before_under", "pages_settle_within_budget",
   "in_page_navigation_keeps_layout_charts_tab_order_and_targets", "in_page_navigation_settles_within_budget",
-  "ladder_marks_at_an_item_boundary_stay_apart", "every_task_page_and_one_session_each_layout_is_clean",
+  "task_timeline_has_no_popup_targets", "every_task_page_and_one_session_each_layout_is_clean",
   "session_chart_follows_the_window_width_both_ways",
   ...TRIAGE_QUEUES.map((n) => `triage_queue_${n}_page_says_what_the_queue_says`),
 ])
@@ -254,6 +255,13 @@ export function measureConclusion(scope) {
 // duration in the text wins.
 const UNIT_NAME = { d: "days", day: "days", h: "hours", hour: "hours", m: "minutes", minute: "minutes", s: "seconds", second: "seconds", ms: "milliseconds", millisecond: "milliseconds" }
 const BOUND_OF = { "≥": "lower", "at least": "lower", "≤": "upper", "at most": "upper", "~": "about", about: "about", "<": "under", under: "under" }
+const gateFormat = createRequire(import.meta.url)("../src/format.js")
+function compactDuration(text) {
+  if (typeof text !== "string") return null
+  const compact = text.trim().replace(/^(at least|at most|about) /, "")
+  if (!/^(?:\d+[dhms]\s*)+$/.test(compact)) return null
+  return [...compact.matchAll(/(\d+)([dhms])/g)].reduce((sum, match) => sum + Number(match[1]) * { d: 86400000, h: 3600000, m: 60000, s: 1000 }[match[2]], 0)
+}
 export function durationForm(text) {
   const t = String(text || "")
   const hits = []
@@ -307,6 +315,21 @@ export function assessLeadAgreement(rows) {
   for (const r of rows || []) {
     const c = durationForm(r.compare)
     if (!c) continue
+    const compact = compactDuration(r.caption)
+    if (compact !== null) {
+      const unit = { days: 86400000, hours: 3600000, minutes: 60000, seconds: 1000, milliseconds: 1 }[c.unit]
+      const expected = Number.isFinite(r.expected_ms) ? r.expected_ms : c.value * unit
+      const figure = { state: c.bound ? "partial" : "measured", value: expected, reasons: [],
+        ...(c.bound ? { bound: c.bound === "about" ? null : c.bound, bound_reason: "bound_reasons_conflict" } : {}) }
+      const expectedCompare = durationForm(gateFormat.describe(figure, "hours").text)
+      const bound = /^(at least|at most|about) /.exec(r.caption)?.[1]
+      if (!Number.isFinite(expected) || Math.abs(compact - expected) > 1000 ||
+        BOUND_OF[bound] !== (c.bound || undefined) ||
+        !expectedCompare || expectedCompare.value !== c.value || expectedCompare.unit !== c.unit) {
+        out.push(`${r.job}: the task page's caption reads "${r.caption}", Compare "${r.compare}"`)
+      }
+      continue
+    }
     for (const [key, name] of [["caption", "caption"], ["aria", "accessible label"]]) {
       const f = durationForm(r[key])
       if (!f) { out.push(`${r.job}: the task page's ${name} has no lead time, Compare reads "${r.compare}"`); continue }
@@ -317,6 +340,8 @@ export function assessLeadAgreement(rows) {
 }
 // Runs in the page: the task page's lead time, from its one-bar chart.
 export function taskLeadFigures() {
+  const current = document.querySelector('#view-task [data-figure="elapsed"]')
+  if (current) return { caption: current.textContent, aria: current.textContent }
   const t = document.querySelector("#view-task .tw-title"), b = document.querySelector("#view-task .tw-bar")
   const cap = t ? t.textContent : null
   return { caption: cap ? (cap.match(/(?:one bar: |scale 0 to )(.*)$/) || [null, cap])[1] : null, aria: b ? (b.getAttribute("aria-label") || "").replace(/^Lead time /, "") : null }
@@ -329,6 +354,15 @@ export function taskPageTexts() {
 // Runs in the page: each part of the task page's time bar as its duration and
 // its share of the lead time, by group and by part.
 export function taskShareFigures() {
+  const current = document.querySelector("#view-task .journey-share")
+  const expected = !!document.querySelector("#view-task .journey-scale")
+  if (current || expected) return { groups: [], parts: [], expected, recorded: {
+    working: document.querySelector('#view-task [data-figure="working"]')?.textContent,
+    covered: document.querySelector('#view-task [data-figure="elapsed"]')?.textContent,
+    working_ms: Number(document.querySelector('#view-task [data-figure="working"]')?.dataset.ms),
+    covered_ms: Number(document.querySelector('#view-task [data-figure="elapsed"]')?.dataset.ms),
+    share: current?.textContent.match(/(?:(?:at most|at least|under|about) )?\d+(?:\.\d+)?%/)?.[0],
+  } }
   // "under 1%" is kept: its part still has time beside a 100%.
   const split = (t) => { const m = /^\s*(.*?) · (under )?(\d+(?:\.\d+)?)% of the lead time/.exec(t || ""); return m ? { dur: m[1].trim(), pct: `${m[2] ? "<" : ""}${m[3]}` } : null }
   const groups = [...document.querySelectorAll("#view-task .tw-group-head")].map((h) => { const l = h.querySelector("strong"); return split(h.textContent.slice(l ? l.textContent.length : 0)) }).filter(Boolean)
@@ -339,6 +373,20 @@ export function taskShareFigures() {
 // and a part reading 100% is the only one with time.
 export function assessShareEdges(figs) {
   const out = []
+  if (figs.expected && !figs.recorded) out.push("recorded working share is missing")
+  if (figs.recorded) {
+    const { working, covered, share, working_ms: work, covered_ms: total } = figs.recorded
+    const agrees = (text, ms) => text === "<1s" ? ms > 0 && ms < 1000 : compactDuration(text) !== null && Math.abs(compactDuration(text) - ms) <= 1000
+    if (!Number.isFinite(work) || !Number.isFinite(total) || total <= 0 || !share || !agrees(working, work) || !agrees(covered, total)) out.push("recorded working share has incomplete figures")
+    else {
+      const actual = work / total * 100, shown = Number(share.replace(/[^\d.]/g, ""))
+      const bad = share.startsWith("under ") ? actual >= shown :
+        share.startsWith("at most ") ? actual > shown + 1e-6 || shown - actual > .101 :
+          share.startsWith("at least ") ? actual < shown - 1e-6 || actual - shown > .101 : Math.abs(actual - shown) > .051
+      const exact = !/^(under|at most|at least|about) /.test(share)
+      if (bad || (exact && ((actual > 0 && shown === 0) || (actual < 100 && shown === 100)))) out.push(`a group of ${working} reads ${share} of ${covered}`)
+    }
+  }
   const zero = (d) => /^(?:none|(?:at least |at most |about )?0 seconds)$/.test(d)
   for (const [name, list] of [["group", figs.groups || []], ["part", figs.parts || []]]) {
     list.forEach((f, i) => {
@@ -1086,35 +1134,26 @@ export async function main(argv = process.argv.slice(2)) {
       } finally { await context.close() }
     }
 
-    // 4. Keyboard: selection, drawer open and Escape close with focus return, Clear with Space, select by type-ahead.
-    // An evidence item on a task's value-stream map opens the drawer in
-    // place. (A cause page's evidence link navigates to the task instead, so
-    // its opener is no longer on screen.)
-    // Ladder steps also open evidence but record no selection, so both keys
-    // are tried on the same value-stream box.
+    // Task records expand inline and retain focus on the disclosure.
     const drawerCheck = async (page, key = "Enter", nth = 0) => {
       await open(page, ROUTES.find((r) => r.name === "task"))
-      const item = page.locator('#vsm .vsm-box[aria-label$="Opens the evidence."], #vsm .vsm-wait[aria-label$="Opens the evidence."]').nth(nth)
-      if (!(await item.count())) throw new Error("no in-place evidence item on the task page")
+      const item = page.locator("#task-records > summary")
       await item.evaluate((a) => { a.dataset.gateOpener = "1" })
       await item.focus()
       await page.keyboard.press(key)
-      await page.waitForSelector("#evidence-drawer[open]")
-      await page.waitForFunction(() => location.hash.includes("selection="), null, { timeout: 3000 }).catch(() => {})
-      if (!page.url().includes("selection=")) throw new Error(`${key} did not select the evidence`)
-      const inside = await page.evaluate(() => document.getElementById("evidence-drawer").contains(document.activeElement))
-      if (!inside) throw new Error("focus did not move into the opened drawer")
-      await page.keyboard.press("Escape")
-      await page.waitForFunction(() => !document.getElementById("evidence-drawer").open)
+      await page.waitForSelector("#task-records[open]")
+      if (await page.locator("#evidence-drawer[open]").count()) throw new Error("task records opened a popup")
+      await page.keyboard.press(key)
+      await page.waitForFunction(() => !document.getElementById("task-records").open)
       await page.waitForTimeout(200)
       const back = await page.evaluate(() => document.activeElement && document.activeElement.dataset && document.activeElement.dataset.gateOpener === "1")
-      if (!back) throw new Error("Escape closed the drawer but focus did not return to the opener")
+      if (!back) throw new Error("focus did not return to the opener")
     }
     {
       const { context, page } = await newPage({ width: 1280 })
       try {
-        await check("keyboard_enter_selects_evidence_escape_closes_and_returns_focus", () => drawerCheck(page, "Enter", 0))
-        await check("keyboard_space_selects_evidence_escape_closes_and_returns_focus", () => drawerCheck(page, "Space", 0))
+        await check("keyboard_enter_opens_inline_records_and_keeps_focus", () => drawerCheck(page, "Enter", 0))
+        await check("keyboard_space_opens_inline_records_and_keeps_focus", () => drawerCheck(page, "Space", 0))
         await check("keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", async () => {
           await open(page, ROUTES.find((r) => r.name === "compare"))
           await page.focus("#compare-status")
@@ -1528,7 +1567,8 @@ export async function main(argv = process.argv.slice(2)) {
       const jobs = Object.entries(all.cellsByJob).filter(([, c]) => durationForm(c))
       if (!jobs.length) throw new Error("no Compare lead time to compare")
       const pages = new Map((await readTaskPages()).filter((r) => r.width === 1280).map((r) => [r.job, r]))
-      const rows = jobs.map(([job, compare]) => ({ job, compare, caption: pages.has(job) ? pages.get(job).caption : null, aria: pages.has(job) ? pages.get(job).aria : null }))
+      const rows = jobs.map(([job, compare]) => ({ job, compare, expected_ms: targets.data.jobs.find((item) => item.id === job)?.lead_time_ms?.value,
+        caption: pages.has(job) ? pages.get(job).caption : null, aria: pages.has(job) ? pages.get(job).aria : null }))
       const off = assessLeadAgreement(rows)
       if (off.length) throw new Error(`${off.length} of ${rows.length * 2} lead times differ: ${off.slice(0, 4).join("; ")}`)
       return { tasks: rows.length, sample: rows.slice(0, 5) }
@@ -1538,7 +1578,9 @@ export async function main(argv = process.argv.slice(2)) {
       if (!pages.length) throw new Error("no task page was read")
       const bad = pages.flatMap((r) => assessShareEdges(r.shares).map((x) => `${r.job.slice(0, 8)} at ${r.width} px: ${x}`))
       if (bad.length) throw new Error(`${bad.length} found: ${[...new Set(bad)].slice(0, 4).join("; ")}`)
-      return { pages: pages.length, figures: pages.reduce((a, r) => a + r.shares.groups.length + r.shares.parts.length, 0) }
+      const figures = pages.reduce((a, r) => a + r.shares.groups.length + r.shares.parts.length + (r.shares.recorded ? 1 : 0), 0)
+      if (!figures) throw new Error("no task working share was checked")
+      return { pages: pages.length, figures }
     })
     await check("task_pages_no_bound_before_under", async () => {
       const pages = await readTaskPages()
@@ -1687,7 +1729,7 @@ export async function main(argv = process.argv.slice(2)) {
       try {
         await open(page, ROUTES.find((r) => r.name === "task"))
         const basis = await page.locator(".task-outcome-basis").innerText()
-        if (!/Requested outcome not published|Authorized local requested outcome/.test(basis)) throw new Error("Task reference is presented as requested outcome")
+        if (!/Task description is private|Named from a public pull request/.test(basis)) throw new Error("Task reference is presented as requested outcome")
         return { basis }
       } finally { await context.close() }
     })
@@ -1968,30 +2010,22 @@ export async function main(argv = process.argv.slice(2)) {
     })
     await check("in_page_navigation_settles_within_budget", async () => inPageBudget(IN_PAGE_TIMES, IN_PAGE_STEPS.length * IN_PAGE_WIDTHS.length))
 
-    // 9d. A task whose prompts fall at the end of one item and the start of
-    // the next: the marks of neighbouring items must not draw on one
-    // another. The map is a published task's, with its identities replaced.
-    const ladderMap = { ...JSON.parse(await readFile(join(here, "..", "..", ".github", "scripts", "__tests__", "fixtures", "v12-ladder-neighbours-map.json"), "utf8")), job: targets.task }
-    const ladderPage = async (page, errors, plant = null) => {
-      await page.route(`**/map/${targets.task}.json`, (r) => r.fulfill({ json: ladderMap }))
+    // The task's timeline is readable directly, with no popup targets.
+    const taskTimelinePage = async (page, errors, plant = null) => {
       await open(page, ROUTES.find((r) => r.name === "task"))
-      // The fixture must draw what it is for: marks in neighbouring items, close enough to meet.
-      const marks = await page.evaluate(() => [...document.querySelectorAll("#vsm .mark-lane-prompt .lad-mark")].map((b) => ({ item: Number(b.dataset.item), r: b.getBoundingClientRect().toJSON() })))
-      const phone = await page.evaluate(() => !!document.querySelector("#vsm .vsm-phone, .vsm-phone #vsm, #vsm.vsm-phone"))
-      const [a, z] = phone ? ["top", "bottom"] : ["left", "right"]
-      const close = marks.some((m) => marks.some((n) => n.item === m.item + 1 && n.r[a] - m.r[z] < 4 && n.r[a] - m.r[z] > -40))
-      if (!close) throw new Error(`the fixture drew no prompt marks meeting across an item boundary (${marks.length} marks)`)
       if (plant) await page.evaluate(plant)
-      const hit = (await layout(page)).filter((p) => p.code === "overlapping_controls" && (!plant || p.planted))
-      if (hit.length) throw new Error(`${plant ? "planted " : ""}overlapping_controls: ${JSON.stringify(hit.slice(0, 2))}`)
+      const targets = await page.locator("#vsm button, #vsm [role=button], #vsm .vsm-box, #vsm .vsm-wait, #vsm .lad").count()
+      if (targets) throw new Error(`${plant ? "planted " : ""}task popup targets: ${targets}`)
+      if (await page.locator("#evidence-drawer[open]").count()) throw new Error("task popup is open")
+      if (!(await page.locator("#task-records > summary").count())) throw new Error("direct session records are missing")
       if (errors.length) throw new Error(`page errors: ${errors.slice(0, 2).join("; ")}`)
-      return marks.length
+      return { popup_targets: targets }
     }
-    await check("ladder_marks_at_an_item_boundary_stay_apart", async () => {
+    await check("task_timeline_has_no_popup_targets", async () => {
       const out = {}
       for (const width of [1280, 390]) {
         const { context, page, errors } = await newPage({ width })
-        try { out[width] = { prompt_marks: await ladderPage(page, errors) } } finally { await context.close() }
+        try { out[width] = await taskTimelinePage(page, errors) } finally { await context.close() }
       }
       return out
     })
@@ -2282,11 +2316,12 @@ export async function main(argv = process.argv.slice(2)) {
           await page.goto("about:blank")
           await page.goto(url + `#/task/${encodeURIComponent(job)}`)
           await settle(page, "task")
-          const before = assessLeadAgreement([{ job, compare, ...(await page.evaluate(taskLeadFigures)) }])
+          const expected_ms = targets.data.jobs.find((item) => item.id === job)?.lead_time_ms?.value
+          const before = assessLeadAgreement([{ job, compare, expected_ms, ...(await page.evaluate(taskLeadFigures)) }])
           if (before.length) throw new Error(`before planting: ${before[0]}`)
           // The caption's number moves; Compare's cell and the accessible label do not.
-          await page.evaluate(() => { const t = document.querySelector("#view-task .tw-title"); t.dataset.gatePlanted = "1"; t.textContent = t.textContent.replace(/(\d[\d,]*(?:\.\d+)?)( (?:day|hour|minute|second|millisecond)s?\b)/, (m, n, u) => `${Number(n.replace(/,/g, "")) + 1}${u}`) })
-          const off = assessLeadAgreement([{ job, compare, ...(await page.evaluate(taskLeadFigures)) }])
+          await page.evaluate(() => { const t = document.querySelector('#view-task [data-figure="elapsed"]'); t.dataset.gatePlanted = "1"; t.textContent = "999999h" })
+          const off = assessLeadAgreement([{ job, compare, expected_ms, ...(await page.evaluate(taskLeadFigures)) }])
           if (off.length) throw new Error(`planted lead time: ${off[0]}`)
         }, /^planted lead time: .*the task page's caption reads/)
         await expectFailure("bound_before_under_on_task_page", async () => {
@@ -2295,23 +2330,33 @@ export async function main(argv = process.argv.slice(2)) {
           await settle(page, "task")
           const before = boundsBeforeUnder(await page.evaluate(taskPageTexts))
           if (before.length) throw new Error(`before planting: ${before[0]}`)
-          await page.evaluate(() => { const b = document.querySelector("#view-task .tw-bar") || document.getElementById("task-lede"); b.dataset.gatePlanted = "1"; b.setAttribute("aria-label", `${b.getAttribute("aria-label") || ""} (about under a second)`) })
+          await page.evaluate(() => { const b = document.getElementById("vsm"); b.dataset.gatePlanted = "1"; b.setAttribute("aria-label", "about under a second") })
           const bad = boundsBeforeUnder(await page.evaluate(taskPageTexts))
           if (bad.length) throw new Error(`planted bound on a task page: ${bad[0]}`)
         }, /^planted bound on a task page: about under/)
         await expectFailure("share_edge_on_task_page", async () => {
           // A task whose bar has two parts with time: one planted to read 100%.
-          const two = (await readTaskPages()).find((r) => r.width === 1280 && r.shares.groups.filter((g) => !/^(?:none|(?:at least |at most |about )?0 seconds)$/.test(g.dur)).length >= 2)
+          const two = (await readTaskPages()).find((r) => r.width === 1280 && r.shares.recorded?.working_ms > 0 && r.shares.recorded.working_ms < r.shares.recorded.covered_ms)
           if (!two) throw new Error("no task page has two groups with time")
           await page.goto("about:blank")
           await page.goto(url + `#/task/${encodeURIComponent(two.job)}`)
           await settle(page, "task")
           const before = assessShareEdges(await page.evaluate(taskShareFigures))
           if (before.length) throw new Error(`before planting: ${before[0]}`)
-          await page.evaluate(() => { const h = [...document.querySelectorAll("#view-task .tw-group-head")].find((x) => / · \d+(?:\.\d+)?% of the lead time/.test(x.textContent)); h.dataset.gatePlanted = "1"; for (const n of h.childNodes) if (n.nodeType === 3) n.textContent = n.textContent.replace(/\d+(?:\.\d+)?% of the lead time/, "100% of the lead time") })
+          await page.evaluate(() => { const h = document.querySelector("#view-task .journey-share"); h.dataset.gatePlanted = "1"; h.textContent = "100% of the time covered was spent working." })
           const bad = assessShareEdges(await page.evaluate(taskShareFigures))
           if (bad.length) throw new Error(`planted share edge: ${bad[0]}`)
-        }, /^planted share edge: a group of .* reads 100% beside/)
+        }, /^planted share edge: a group of .* reads 100%/)
+        await expectFailure("task_share_removed", async () => {
+          const complete = (await readTaskPages()).find((row) => row.shares.recorded)
+          if (!complete) throw new Error("no complete task timeline for the removal control")
+          await page.goto("about:blank")
+          await page.goto(url + `#/task/${encodeURIComponent(complete.job)}`)
+          await settle(page, "task")
+          await page.locator("#view-task .journey-share").evaluate((node) => node.remove())
+          const errors = assessShareEdges(await page.evaluate(taskShareFigures))
+          if (errors.length) throw new Error(`planted missing share: ${errors[0]}`)
+        }, /^planted missing share: recorded working share/)
         await expectFailure("share_label_differs_from_words", async () => {
           await page.goto("about:blank")
           await page.goto(url + "#/compare?mode=share")
@@ -2399,7 +2444,7 @@ export async function main(argv = process.argv.slice(2)) {
           try {
             await stuck.page.goto(url + `#/task/${encodeURIComponent(targets.task)}`)
             await settle(stuck.page, "task")
-            await stuck.page.evaluate(() => { const n = document.createElement("span"); n.className = "is-loading"; n.dataset.gatePlanted = "1"; n.textContent = "Fetching"; document.getElementById("task-lede").appendChild(n) })
+            await stuck.page.evaluate(() => { const n = document.createElement("span"); n.className = "is-loading"; n.dataset.gatePlanted = "1"; n.textContent = "Fetching"; document.getElementById("vsm").appendChild(n) })
             await settle(stuck.page, "task", 3000)
           } finally { await stuck.context.close() }
         }, /^route never settled: task \(the network was idle, but the view stayed marked as loading\)/)
@@ -2431,8 +2476,8 @@ export async function main(argv = process.argv.slice(2)) {
     }
     await expectFailure("broken_focus_return", async () => {
       const breakFocus = { fn: () => document.addEventListener("DOMContentLoaded", () => {
-        const d = document.getElementById("evidence-drawer")
-        if (d) d.addEventListener("close", () => setTimeout(() => { if (document.activeElement) document.activeElement.blur() }, 50))
+        const d = document.getElementById("task-records")
+        if (d) d.addEventListener("toggle", () => { if (!d.open) setTimeout(() => { if (document.activeElement) document.activeElement.blur() }, 50) })
       }) }
       const { context, page } = await newPage({ width: 1280, init: [breakFocus] })
       try { await drawerCheck(page) } finally { await context.close() }
@@ -2458,20 +2503,17 @@ export async function main(argv = process.argv.slice(2)) {
       const { context, page, errors } = await newPage({ width: 390 })
       try { await triagePage(page, errors, "known_counts", () => { const h = document.querySelector("#view-act .improvement-row h3"); h.dataset.gatePlanted = "1"; h.textContent = h.textContent.replace("Improvement 1 of 2", "Improvement 2 of 2") }) } finally { await context.close() }
     }, /^row 1 is headed "Improvement 2 of 2/)
-    await expectFailure("ladder_marks_overlap_across_items", async () => {
-      // The second of two neighbouring prompt marks is moved back onto the first.
+    await expectFailure("task_popup_target_returns", async () => {
       const { context, page, errors } = await newPage({ width: 1280 })
       try {
-        await ladderPage(page, errors, () => {
-          const marks = [...document.querySelectorAll("#vsm .mark-lane-prompt .lad-mark")]
-          const pair = marks.map((m, i) => [marks[i - 1], m]).find(([p, m]) => p && Number(m.dataset.item) === Number(p.dataset.item) + 1)
-          const [p, m] = pair
-          m.dataset.gatePlanted = "1"
-          const axis = m.closest(".vsm-phone") ? "top" : "left"
-          m.style[axis] = `${parseFloat(m.style[axis]) - (m.getBoundingClientRect()[axis] - p.getBoundingClientRect()[axis])}px`
+        await taskTimelinePage(page, errors, () => {
+          const target = document.createElement("button")
+          target.textContent = "Open work details"
+          target.dataset.gatePlanted = "1"
+          document.getElementById("vsm").appendChild(target)
         })
       } finally { await context.close() }
-    }, /^planted overlapping_controls/)
+    }, /^planted task popup targets:/)
     await expectFailure("session_chart_stale_after_resize", async () => {
       // The page never hears the window resize, as before the redraw existed.
       await resizeCheck([{ fn: () => window.addEventListener("resize", (e) => e.stopImmediatePropagation(), true) }])

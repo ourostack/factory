@@ -1355,11 +1355,9 @@
     }
     const name = localName(j.id);
     const tn = R.taskIdentity(j, localNames);
-    const h = el("h1", "view-title task-title", tn.reference ? "One task's production story" : tn.title);
+    const h = el("h1", "view-title task-title", tn.reference ? `Task ${j.id.slice(0, 8)}` : tn.title);
     container.appendChild(h);
-    const basis = el("p", "task-outcome-basis", tn.basis);
-    if (tn.reference) basis.appendChild(el("span", "task-public-reference", tn.title));
-    container.appendChild(basis);
+    if (!name) container.appendChild(el("p", "task-outcome-basis", tn.reference ? "Named from a public pull request." : "Task description is private."));
     const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
     const keyLine = name
       ? `${where ? `${where} · ` : ""}key ${j.id}`
@@ -1372,6 +1370,7 @@
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
     const reference = el("details", "task-reference");
     reference.append(el("summary", null, "Task reference and finish-date evidence"), el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
+    if (tn.reference) reference.appendChild(el("p", "task-public-reference", tn.title));
     container.appendChild(reference);
 
     // One line on sign-off (the operator's recorded acceptance or return of
@@ -1379,7 +1378,9 @@
     // when one is recorded.
     const status = el("p", "task-status");
     status.appendChild(outcomeNode(j));
-    if (j.signoff.state === "unavailable") status.appendChild(el("span", "muted", ` (${F.describe(j.signoff, "text").reason.replace(/\bsign-off\b/g, "acceptance")})`));
+    if (j.signoff.state === "unavailable") {
+      if (j.outcome === "delivered" || j.outcome === "awaiting_signoff") status.appendChild(el("span", "muted", " · Acceptance not recorded"));
+    }
     else {
       status.appendChild(document.createTextNode(" · Acceptance record: "));
       status.appendChild(cellNum(j.signoff, "text"));
@@ -1462,8 +1463,8 @@
     // Sessions.
     const ses = el("section", "block");
     ses.id = "task-team-evidence";
-    ses.appendChild(el("h2", "block-title", "Team and session evidence"));
-    ses.appendChild(el("p", "chart-caption", "Root agents and subagents belong to this task's story. Open a session for its worker timeline and topology. Shared-session totals are not this task's exclusive allocation; overlapping workers count once in elapsed work, while worker-hours are different."));
+    ses.appendChild(el("h2", "block-title", "Session records"));
+    ses.appendChild(el("p", "chart-caption", "Open a session to inspect its activity."));
     const byId = new Map((sessions || []).map((s) => [s.session_id, s]));
     if (!j.sessions.length) {
       ses.appendChild(el("p", "chart-empty", "No session is on this task's timeline."));
@@ -3080,188 +3081,45 @@
   async function renderTaskWalk(data, id, select) {
     const seq = ++walkSeq;
     const j = renderTaskHead(document.getElementById("task-head"), data.jobs, id);
-    const ledeEl = document.getElementById("task-lede");
-    let summaryEl = document.getElementById("task-summary");
-    if (!summaryEl) {
-      summaryEl = el("section", "task-summary"); summaryEl.id = "task-summary";
-      summaryEl.setAttribute("aria-label", "Task conclusion and recorded figures");
-      ledeEl.before(summaryEl);
-      const reading = el("details", "task-reading-details");
-      reading.appendChild(el("summary", null, "Measure definitions, bounds and classification"));
-      ledeEl.before(reading); reading.appendChild(ledeEl);
-    }
-    summaryEl.innerHTML = "";
     const vsmEl = document.getElementById("vsm");
-    const twEl = document.getElementById("time-went");
+    const records = document.getElementById("task-records");
+    records.open = false;
+    lastMapRender = null;
+    vsmEl.replaceChildren(loadingNote());
+    const clocks = document.getElementById("task-clock-details");
+    clocks.replaceChildren();
     renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
-    for (const link of document.querySelectorAll("[data-task-jump]")) {
-      setLocalHref(link, location.hash);
-      link.onclick = (event) => {
-        event.preventDefault();
-        const target = document.getElementById({ journey: "vsm-title", team: "task-team-evidence", delivery: "task-pr-evidence" }[link.dataset.taskJump]);
-        if (target) { target.tabIndex = -1; target.scrollIntoView({ block: "start" }); target.focus({ preventScroll: true }); }
-      };
-    }
+    const reference = document.querySelector("#task-head .task-reference");
+    if (reference) document.getElementById("job-detail").prepend(reference);
     if (!j) {
-      ledeEl.textContent = "";
-      vsmEl.innerHTML = "";
-      twEl.innerHTML = "";
+      vsmEl.replaceChildren();
       renderPicker(document.getElementById("task-picker"), data.jobs, null, id);
       return;
     }
-    ledeEl.replaceChildren(loadingNote("span"));
-    const [tasks, stack, mapFile] = await Promise.all([walkFile("rollups/tasks.json"), walkFile("rollups/stackup.json"), walkFile(mapPath(j.id))]);
+    const [tasks, mapFile] = await Promise.all([walkFile("rollups/tasks.json"), walkFile(mapPath(j.id))]);
     if (seq !== walkSeq) return;
     const mapProblem = mapFile == null ? null : W.mapEvidenceProblem(mapFile, j.id);
     const map = mapProblem ? null : mapFile;
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
     const row = taskRows ? taskRows.find((r) => r.job === j.id) || null : null;
-    const stackRow = stack && Array.isArray(stack.jobs) ? stack.jobs.find((r) => r.job === j.id) || null : null;
     safely("task-picker", () => renderPicker(document.getElementById("task-picker"), data.jobs, taskRows, j.id));
-    // One waiting figure for the lede, the map's summary and the bar.
-    const idle = W.idleSplit(row, map);
-    let drawn = null;
-    // Reading figures is inert. Only explicitly labeled controls highlight
-    // evidence; opening a drawer and navigating to a session remain separate.
-    const tokens = [];
-    let selectedSummary = null;
-    const light = (tok, btn) => {
-      if (!drawn) return;
-      const on = drawn.highlight(tok);
-      selectedSummary = on ? tok : null;
-      for (const b of tokens) b.setAttribute("aria-pressed", String(on && b === btn));
-      if (on) drawn.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    };
-    let unlabeled = null;
-    try {
-      unlabeled = stackRow ? W.unlabeledMs(W.timeBar(stackRow, row, idle, F.SEGMENTS)) : null;
-    } catch (err) {
-      unlabeled = null;
-    }
     safely("vsm", () => {
-      drawn = renderMap(vsmEl, { j, map, mapProblem, row, tasksPublished: !!taskRows, idle, unlabeled });
-    });
-    safely("task-lede", () => {
-      renderLede(ledeEl, row, !!taskRows, idle, light, unlabeled);
-      const summary = W.taskSummary(row, F.reasonText, { published: !!taskRows, idle, unlabeled_ms: unlabeled, map, job: j.id });
-      if (mapProblem) summary.caveat = [mapProblem, summary.caveat].filter(Boolean).join(" ");
-      // The conclusion leads: right under the task title, before the
-      // reference and status lines, so it starts on the first screen.
-      const conclusion = el("p", "task-conclusion", summary.conclusion);
-      // The marker, not the wording, says which sentence is the conclusion.
-      conclusion.dataset.role = "conclusion";
-      for (const old of document.querySelectorAll("#task-head .task-conclusion, #task-head .task-caveat")) old.remove();
+      reader.journey(vsmEl, map, { job: j.id, row });
+      const figures = vsmEl.querySelector(".task-time-figures");
       const title = document.querySelector("#task-head .task-title");
-      if (title) title.after(conclusion);
-      else summaryEl.appendChild(conclusion);
-      // The caveat follows the conclusion; it never stands in for it.
-      if (summary.caveat) { const caveat = el("p", "task-caveat", summary.caveat); caveat.dataset.role = "caveat"; conclusion.after(caveat); }
-      const figures = el("dl", "task-summary-figures");
-      for (const f of summary.figures) {
-        const cell = el("div");
-        cell.append(el("dt", null, f.label), el("dd", null, f.text));
-        if (f.details) {
-          const limits = el("details", "figure-limits");
-          limits.append(el("summary", null, "Evidence limits"), el("p", null, f.details));
-          cell.appendChild(limits);
-        }
-        if (drawn) {
-          const b = el("button", "journey-show", `Show ${f.label.toLowerCase()} on this task's journey`);
-          b.type = "button"; b.setAttribute("aria-pressed", "false");
-          b.addEventListener("click", () => {
-            clearEvidenceSelection(true);
-            light(f.token, b);
-          });
-          tokens.push(b); cell.appendChild(b);
-        }
-        figures.appendChild(cell);
-      }
-      summaryEl.appendChild(figures);
-      if (drawn) {
-        const clear = el("button", "journey-clear", "Clear selection"); clear.type = "button";
-        clear.addEventListener("click", () => { selectedSummary = null; clearEvidenceSelection(); });
-        summaryEl.appendChild(clear);
-      }
-      if (summary.classification) summaryEl.appendChild(el("p", "chart-caption", summary.classification));
-      renderTaskClocks(summaryEl, j, row);
-      const definitions = el("details", "task-definitions");
-      definitions.append(el("summary", null, "What do these measures mean?"), el("p", null, "Recorded elapsed is the existing task window, not original-request or production elapsed. Recorded working is activity captured for this task, not all agents' utilization. Work / elapsed is the working share of that window (flow efficiency). The evaluator classifies work as value-adding, necessary or waste; missing labels do not prove waste."));
-      summaryEl.appendChild(definitions);
-      // The finish day leads; the next sentence then starts "It took" (M3).
-      ledeEl.prepend(el("span", "lede-finish", finishSentence(j)));
-      const next = ledeEl.childNodes[1];
-      if (next && next.nodeType === 3) next.textContent = W.afterFinish(next.textContent);
-      // The map's header names the day too.
-      const vt = document.getElementById("vsm-title");
-      if (vt) {
-        const old = vt.querySelector(".vsm-finish");
-        if (old) old.remove();
-        vt.appendChild(el("span", "vsm-finish", ` · ${finishSentence(j, "short")}`));
-      }
-      // The operator's own time on this task (A1 I2).
-      ledeEl.appendChild(el("span", "lede-operator", ` ${W.operatorTime(j, map && map.human_turns, map && map.human_turns_state, F.reasonText, F.reasonCore).text}`));
-      const caption = document.querySelector(".vsm-block > .chart-caption");
-      if (caption) caption.textContent = "Detailed recorded timeline: boxes show recorded activity; pauses, operator prompts and pull requests have distinct shapes and text labels. This map is not to scale. Grouping uses the same 15-minute short-gap threshold at every width; only the layout changes. Open an item for evidence; use its separate session link for a time-scaled timeline. Production periods and the time between deliveries are listed under Production clocks above.";
+      if (figures && title) title.after(figures);
+      if (mapProblem) vsmEl.appendChild(el("p", "chart-empty", mapProblem));
     });
-    safely("time-went", () => {
-      renderTimeWent(twEl, { j, row, stackRow, stackPublished: !!stack, idle, light });
-      tokens.push(...twEl.querySelectorAll(".tw-part"));
-    });
-    // Redraw the layout when its width changes; evidence groups stay fixed.
-    lastMapWidth = vsmEl.clientWidth;
-    lastMapRender = () => safely("vsm", () => {
-      const controlKey = (node) => JSON.stringify([node.tagName, node.getAttribute("aria-label"), node.getAttribute("data-item"), node.getAttribute("data-step"), node.getAttribute("href"), node.matches(".vsm-data-toggle") ? "figures" : node.textContent]);
-      const remember = (node) => node && vsmEl.contains(node) ? controlKey(node) : null;
-      const focusedKey = remember(document.activeElement);
-      const openerKey = remember(drawerOpener);
-      const figureBox = document.activeElement.matches(".vsm-phone .vsm-data-toggle") &&
-        [...vsmEl.querySelectorAll(".vsm-box")].find((box) => box.dataset.item === document.activeElement.dataset.item && box.parentElement.contains(document.activeElement));
-      const figureBoxKey = figureBox ? controlKey(figureBox) : null;
-      const disclosures = [...vsmEl.querySelectorAll("details > summary")].map((summary) => ({ key: controlKey(summary), open: summary.parentElement.open }));
-      const figures = [...vsmEl.querySelectorAll(".vsm-data-toggle")].map((toggle) => ({ key: controlKey(toggle), open: toggle.getAttribute("aria-expanded") === "true" }));
-      drawn = renderMap(vsmEl, { j, map, mapProblem, row, tasksPublished: !!taskRows, idle, unlabeled });
-      if (drawn && selectedSummary) drawn.highlight(selectedSummary);
-      // Rebind only an unambiguous logical control; the old DOM node is gone.
-      const replacement = (key) => {
-        if (!key) return null;
-        const matches = [...vsmEl.querySelectorAll("button, a[href], summary")].filter((node) => controlKey(node) === key);
-        return matches.length === 1 ? matches[0] : null;
-      };
-      // Reachability is part of restoration, before either focus or Escape.
-      for (const state of disclosures) {
-        const summary = replacement(state.key);
-        if (summary) summary.parentElement.open = state.open;
-      }
-      for (const state of figures) {
-        const toggle = replacement(state.key);
-        if (toggle && (toggle.getAttribute("aria-expanded") === "true") !== state.open) toggle.click();
-      }
-      if (openerKey) drawerOpener = replacement(openerKey);
-      let focused = replacement(focusedKey);
-      // Wide maps show every figure and intentionally retire this toggle.
-      if (focused && figureBoxKey && focused.matches(".vsm-wide .vsm-data-toggle")) {
-        const continuation = replacement(figureBoxKey);
-        if (continuation && getComputedStyle(continuation).display !== "none" && getComputedStyle(continuation).visibility !== "hidden") {
-          focused = continuation;
-          focused.scrollIntoView({ block: "nearest", inline: "nearest" });
-        }
-      }
-      if (focused) focused.focus({ preventScroll: true });
-    });
-    if (select) safely("vsm", () => {
-      if (!drawn || !drawn.select(select)) {
-        const node = document.getElementById("navigation-context");
-        node.hidden = false;
-        // The item was not found, so nothing may say it is selected.
-        const note = node.querySelector(".selection-note");
-        if (note) note.remove();
-        const mapSel = document.getElementById("map-selection");
-        if (mapSel) mapSel.hidden = true;
-        const gone = el("p", "selection-unavailable", "The requested evidence selection is no longer available in this task. No substitute item was selected.");
-        const clearBtn = node.querySelector("button");
-        if (clearBtn) clearBtn.before(gone); else node.appendChild(gone);
-      }
-    });
+    const clockRecords = el("details", "reader-details");
+    clockRecords.appendChild(el("summary", null, "Request and delivery dates"));
+    renderTaskClocks(clockRecords, j, row);
+    clocks.appendChild(clockRecords);
+    if (select) {
+      records.open = true;
+      const context = document.getElementById("navigation-context");
+      for (const note of context.querySelectorAll(".selection-note")) note.remove();
+      vsmEl.appendChild(el("p", "selection-unavailable", "This link used the retired chart. Open a session record below for its timeline."));
+    }
   }
 
   // A session's swimlane sizes its plot from its frame when drawn, so a
