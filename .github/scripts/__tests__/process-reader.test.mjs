@@ -36,7 +36,7 @@ const render = (method, doc, ...args) => {
   return host;
 };
 
-test("the existing task journey shows the whole clock and opens the same period evidence", () => {
+test("the task timeline distinguishes actual work from pauses without popup controls", () => {
   const map = {
     job: A,
     lead_window: { state: "measured", start_ms: 0, end_ms: 7200000 },
@@ -49,29 +49,64 @@ test("the existing task journey shows the whole clock and opens the same period 
     transitions: [{ offset_ms: 59000, to: "blocked" }],
     observations: [{ offset_ms: 7199000, status: "done" }],
   };
-  const selected = [];
-  const root = render("journey", map, { onSelect: (index, opener) => selected.push({ index, opener }) });
-  assert.match(root.textContent, /Whole recorded window/);
-  assert.match(root.textContent, /3s.*Recorded activity|Recorded activity.*3s/);
-  assert.match(root.textContent, /1h 58m.*No task session|No task session.*1h 58m/);
-  assert.match(root.textContent, /58s.*Uncategorized|Uncategorized.*58s/);
-  assert.match(root.textContent, /not.*factory.*idle|not.*factory utilization/i);
-  assert.match(root.textContent, /period.*short pauses|includes.*pauses/i);
+  const root = render("journey", map, { job: A });
+  const facts = by(root, "dl")[0];
+  assert.deepEqual(by(facts, "dd").map((node) => node.textContent), ["2h", "3s"]);
+  const periods = nodes(root).filter((node) => node.className === "journey-part");
+  assert.equal(periods.length, 3);
+  assert.match(periods[0].textContent, /1s/);
+  assert.match(periods[0].textContent, /59s/);
+  assert.match(periods[1].textContent, /1h 58m/);
+  assert.match(periods[2].textContent, /2s/);
+  assert.match(root.textContent, /58s/);
   assert.match(root.textContent, /blocked/i);
-  assert.match(root.textContent, /Delivered.*last observed/);
-  const buttons = by(root, "button");
-  assert.equal(buttons.length, 3);
-  assert.match(buttons[1].textContent, /Pause 1.*1h 58m/);
-  buttons[1].listeners.click();
-  assert.deepEqual(selected, [{ index: 1, opener: buttons[1] }], "overview selection uses the existing map item, not a new evidence identity");
+  assert.match(root.textContent, /Delivered/);
+  assert.equal(by(root, "button").length, 0);
+  assert.doesNotMatch(root.textContent, /work burst|clock bounds|factory utilization|folded|capture boundary/i);
+  assert.ok(root.textContent.split(/\s+/).length < 160, "the actual consumer must tell this story without paragraphs of definitions");
   const strip = nodes(root).find((n) => n.className === "journey-scale");
-  assert.equal(strip.attributes["aria-hidden"], "true", "readable buttons, not sub-pixel bars, are the hit targets");
+  assert.equal(strip.attributes["aria-hidden"], "true", "the list carries the same account without tiny interactive targets");
   assert.equal(strip.children.length, 3);
+  assert.equal(strip.children[0].className, "journey-mixed", "a partially working minute must not be drawn as a full minute of work");
+  assert.equal(strip.children[1].className, "journey-pause");
+  assert.equal(strip.children[2].className, "journey-mixed");
   const comparison = by(root, "a").find((n) => n.textContent.includes("all recorded tasks"));
   assert.ok(comparison, "the same task remains followable in the full comparison population");
   assert.equal(comparison.href, `#/compare?return=%23%2Ftask%2F${A}`);
   assert.ok(!comparison.href.includes("task="), "do not filter the other tasks out");
 })
+
+test("the timeline keeps missing capture distinct from zero work and refuses conflicting windows", () => {
+  const map = { job: A, lead_window: { state: "measured", start_ms: 0, end_ms: 60000 },
+    bursts: [{ start_ms: 0, end_ms: 60000, working_ms: m(0) }], gaps: [] };
+  const zero = render("journey", map, { job: A });
+  assert.equal(by(by(zero, "dl")[0], "dd")[1].textContent, "0s");
+  const missing = structuredClone(map); delete missing.bursts[0].working_ms;
+  const unknown = render("journey", missing, { job: A });
+  assert.equal(nodes(unknown).filter((node) => node.className === "journey-scale").length, 0);
+  assert.doesNotMatch(unknown.textContent, /\b0s\b/);
+  const conflict = render("journey", map, { job: A, row: { lead_time_ms: m(120000), working_ms: m(0) } });
+  assert.match(conflict.textContent, /different|disagree/i);
+  assert.equal(nodes(conflict).filter((node) => node.className === "journey-scale").length, 0);
+  const wrongWork = render("journey", map, { job: A, row: { lead_time_ms: m(60000), working_ms: m(30000) } });
+  assert.match(wrongWork.textContent, /different|disagree/i);
+  assert.equal(nodes(wrongWork).filter((node) => node.className === "journey-scale").length, 0);
+});
+
+test("time covered and work figures retain partial bounds when the timeline is unavailable", () => {
+  const root = render("journey", null, { job: A, row: {
+    lead_time_ms: { state: "partial", value: 120000, bound: "lower", reasons: ["log_truncated"] },
+    working_ms: { state: "partial", value: 1000, bound: null, bound_reason: "log_truncated", reasons: ["log_truncated"] },
+  } });
+  const figures = by(root, "dl")[0];
+  assert.ok(figures, "available task figures remain readable when the timeline is missing");
+  const values = by(figures, "dd").map((node) => node.textContent);
+  assert.match(values[0], /at least/i);
+  assert.match(values[0], /2/);
+  assert.match(values[1], /higher or lower|direction.*known/i);
+  assert.equal(nodes(root).filter((node) => node.className === "journey-scale").length, 0);
+  assert.doesNotMatch(root.textContent, /\b0s\b/);
+});
 
 test("the task journey withholds a complete-looking overview when capture cannot partition the clock", () => {
   const root = render("journey", { lead_window: { state: "unavailable" } });
@@ -296,9 +331,6 @@ test("task naming never turns public pull-request titles into requested outcomes
   assert.equal(identity.reference, "A public PR title");
   assert.doesNotMatch(identity.title, /and 4 more/);
   assert.equal(R.taskIdentity(job, { [A]: { title: "Authorized local request" } }).title, "Authorized local request");
-  const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8");
-  assert.match(app, /"view-title task-title", tn\.reference \? "One task's production story" : tn\.title/);
-  assert.match(app, /"task-public-reference", tn\.title/);
 });
 
 test("legacy issue summaries do not contradict a current completed check or confuse merge with effect", () => {

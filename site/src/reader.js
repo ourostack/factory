@@ -115,52 +115,87 @@
     const jsonLink = (path = "rollups/learning.json", label = "Read the same evidence as JSON") => {
       const a = el("a", null, label); a.href = path; return a;
     };
-    function journey(host, map, { onSelect, job } = {}) {
+    function journey(host, map, { job, row } = {}) {
       host.replaceChildren();
       const story = W.recordedJourney(map, job);
       const box = el("section", "journey-overview");
-      box.append(el("h3", "sub-title", "Whole recorded window"));
       host.append(box);
-      if (story.state !== "ok") {
-        box.append(p(`${story.reason} A complete-looking overview is withheld; inspect the available evidence below.`, "chart-caption"));
+      const conflict = story.state === "ok" && [["lead_time_ms", story.total_ms], ["working_ms", story.working_ms]]
+        .some(([key, value]) => row?.[key]?.state !== "unavailable" && Number.isFinite(row?.[key]?.value) && row[key].value !== value);
+      const complete = story.state === "ok" && !conflict;
+      const summary = el("dl", "journey-totals task-time-figures");
+      const duration = (label, value, key) => {
+        const uncertain = !complete && value?.state === "partial" &&
+          (value.bound === "unknown" || (value.bound === null && value.bound_reason !== "bound_not_moved"));
+        const text = complete ? W.durationDetail(value) : `${words(value)}${uncertain ? "; could be higher or lower" : ""}`;
+        const node = el("span", null, text);
+        node.dataset.figure = key;
+        if (complete) node.dataset.ms = String(value);
+        fact(summary, label, node);
+      };
+      if (complete || row) {
+        duration("Time covered", complete ? story.total_ms : row.lead_time_ms, "elapsed");
+        duration("Time spent working", complete ? story.working_ms : row.working_ms, "working");
+        box.append(summary);
+      }
+      if (complete) summary.dataset.role = "conclusion";
+      const conclusion = p(complete
+        ? `${W.durationDetail(story.working_ms)} of work across ${W.durationDetail(story.total_ms)}.`
+        : conflict ? "The timeline and task totals disagree." : "The timeline is unavailable.", "task-conclusion");
+      conclusion.dataset.role = "conclusion";
+      if (!complete) box.append(conclusion);
+      if (!complete) {
+        box.append(p(conflict ? "The available task totals are shown above." : story.reason, "chart-caption"));
         return;
       }
-      const labels = { working: "Recorded activity", next_prompt: "After agent stop, before next prompt",
-        other_task: "Other tasks in a shared session", api_retry: "API retry", tool_failure: "After a failed tool call",
-        long_tool_call: "Long tool call", queue_before_start: "Before the first session", no_session: "No task session recorded", unknown: "Uncategorized time" };
-      box.append(p(`${W.durationDetail(story.total_ms)} from the first capture boundary to the last. Durations below are rounded to seconds.`, "journey-total"));
+      box.append(p(`${F.describe(m(story.working_ms / story.total_ms), "pct1").text} of the time covered was spent working.`, "journey-share"));
+      box.append(el("h2", "block-title", "Work and pauses"));
       const strip = el("div", "journey-scale");
       strip.setAttribute("aria-hidden", "true");
-      for (const item of story.items) {
-        const span = el("span", item.kind === "box" ? "journey-period" : "journey-pause");
+      const listOf = (value) => Array.isArray(value) ? value : value.items;
+      const parts = [...listOf(map.bursts).map((item) => ({ ...item, work: true })),
+        ...listOf(map.gaps).map((item) => ({ ...item, work: false }))].sort((a, b) => a.start_ms - b.start_ms);
+      for (const item of parts) {
+        const work = typeof item.working_ms === "number" ? item.working_ms : item.working_ms?.value;
+        const kind = item.work ? work === item.end_ms - item.start_ms ? "period" : "mixed" : "pause";
+        const span = el("span", `journey-${kind}`);
         span.style.width = `${(item.end_ms - item.start_ms) / story.total_ms * 100}%`;
         strip.append(span);
       }
-      box.append(strip, p("To scale: blue spans are work periods, including short pauses, not continuous execution. Hatched spans are the longer pauses. Use the readable controls below for their evidence.", "chart-caption"));
-      const totals = el("dl", "journey-totals");
-      const add = (parent, label, ms) => {
-        const value = el("span", null, W.durationDetail(ms)); value.title = `${ms} ms`;
-        fact(parent, label, value);
-      };
-      add(totals, labels.working, story.working_ms);
-      for (const key of W.WAIT_KEYS) if (story.by[key] > 0) add(totals, labels[key], story.by[key]);
-      box.append(totals);
+      box.append(strip);
+      const key = el("ul", "journey-key");
+      for (const [kind, label] of [["period", "Working"], ["pause", "Pause"],
+        ...(parts.some((item) => item.work && (typeof item.working_ms === "number" ? item.working_ms : item.working_ms.value) !== item.end_ms - item.start_ms) ? [["mixed", "Work and pauses combined"]] : [])]) {
+        const li = el("li");
+        const swatch = el("span", `journey-${kind}`);
+        swatch.setAttribute("aria-hidden", "true");
+        li.append(swatch, label); key.append(li);
+      }
+      box.append(key);
+      const labels = { next_prompt: "Waiting for a reply", other_task: "Work on other tasks", api_retry: "Retrying a request",
+        tool_failure: "After a failed tool call", long_tool_call: "Waiting for a tool", queue_before_start: "Before the first session",
+        no_session: "No session recorded", unknown: "Unaccounted for" };
       const list = el("ol", "journey-periods");
+      let workNumber = 0;
       for (const item of story.items) {
-        const li = el("li", `journey-${item.kind}`);
-        const button = el("button", "journey-evidence", `${item.label} · ${W.durationDetail(item.end_ms - item.start_ms)}`);
-        button.type = "button"; button.dataset.item = item.item;
-        button.addEventListener("click", () => { if (onSelect) onSelect(item.item, button); });
-        li.append(button);
-        const detail = [];
-        if (item.kind === "box") detail.push(`${W.durationDetail(item.working_ms)} recorded activity`);
-        for (const key of W.WAIT_KEYS) if (item.by[key] > 0) detail.push(`${W.durationDetail(item.by[key])} ${labels[key].toLowerCase()}`);
-        li.append(p(detail.join("; ")));
-        for (const status of item.statuses) li.append(p(W.cardStatusWords(status.status, status.observed), "journey-status"));
+        const li = el("li", "journey-part");
+        const heading = item.kind === "box"
+          ? `Work ${++workNumber}: ${W.durationDetail(item.working_ms)} working`
+          : `Pause: ${W.durationDetail(item.end_ms - item.start_ms)}`;
+        li.append(el("h3", null, heading));
+        const detail = el("dl", "journey-part-times");
+        for (const name of W.WAIT_KEYS) {
+          if (item.by[name] > 0) fact(detail, labels[name], W.durationDetail(item.by[name]));
+        }
+        if (detail.children.length) li.append(detail);
+        for (const status of item.statuses) {
+          li.append(p(status.status === "done" ? "Delivered" : status.status === "blocked" ? "Blocked" :
+            W.cardStatusWords(status.status, status.observed), "journey-status"));
+        }
         list.append(li);
       }
-      box.append(story.items.length > 5 ? details("Read every period and pause", list) : list);
-      box.append(p("No task session is not proof that the factory was idle. Other tasks can run independently; this task clock cannot align unrelated sessions. Uncategorized time stays unknown. Period names describe capture, not inferred production stages.", "chart-caption journey-limits"));
+      box.append(story.items.length > 5 ? details("All work and pauses", list) : list);
+      if (story.by.unknown > 0) box.append(p(`Unaccounted time: ${W.durationDetail(story.by.unknown)}.`, "journey-unknown"));
       const taskRoute = F.safeRoute("task", job ?? map.job);
       if (taskRoute) box.append(local("Compare with all recorded tasks", F.routeWithContext("#/compare", { return: taskRoute }), null, { plain: true }));
     }
