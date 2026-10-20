@@ -383,7 +383,8 @@ export function assessShareEdges(figs) {
       const bad = share.startsWith("under ") ? actual >= shown :
         share.startsWith("at most ") ? actual > shown + 1e-6 || shown - actual > .101 :
           share.startsWith("at least ") ? actual < shown - 1e-6 || actual - shown > .101 : Math.abs(actual - shown) > .051
-      if (bad || (actual > 0 && shown === 0) || (actual < 100 && shown === 100)) out.push(`a group of ${working} reads ${share} of ${covered}`)
+      const exact = !/^(under|at most|at least|about) /.test(share)
+      if (bad || (exact && ((actual > 0 && shown === 0) || (actual < 100 && shown === 100)))) out.push(`a group of ${working} reads ${share} of ${covered}`)
     }
   }
   const zero = (d) => /^(?:none|(?:at least |at most |about )?0 seconds)$/.test(d)

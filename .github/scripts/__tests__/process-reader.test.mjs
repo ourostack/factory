@@ -11,6 +11,7 @@ const L = require("../../../site/src/learning.js");
 const S = require("../../../site/src/steps.js");
 const readerPath = new URL("../../../site/src/reader.js", import.meta.url);
 const R = existsSync(readerPath) ? require(readerPath.pathname) : {};
+const G = await import("../../../site/scripts/verify-v12-browser.mjs");
 const A = "c87c243fe6149fafb9296c32cd11dca0";
 const m = (value) => ({ state: "measured", value, reasons: [] });
 const p = (value) => ({ state: "partial", value, bound: "lower", reasons: ["log_truncated"] });
@@ -132,6 +133,36 @@ test("a partition never upgrades bounded or missing rollup work into exact work"
   } });
   assert.equal(by(by(boundedWindow, "dl")[0], "dd")[0].textContent, "at least 1m");
   assert.match(nodes(boundedWindow).find((node) => node.className === "journey-share").textContent, /^at most 1\.7%/);
+});
+
+test("unknown-direction window or share withholds an exact-looking timeline", () => {
+  const map = { job: A, lead_window: { state: "partial", start_ms: 0, end_ms: 60000, reasons: ["log_truncated"] },
+    bursts: [{ start_ms: 0, end_ms: 60000, working_ms: m(30000) }], gaps: [] };
+  for (const bound of ["unknown", null]) {
+    const row = { lead_time_ms: { state: "partial", value: 60000, bound, bound_reason: "log_truncated", reasons: ["log_truncated"] },
+      working_ms: m(30000), flow_efficiency: { state: "partial", value: .5, bound, bound_reason: "log_truncated", reasons: ["log_truncated"] } };
+    const root = render("journey", map, { job: A, row });
+    assert.match(by(by(root, "dl")[0], "dd")[0].textContent, /higher or lower/i);
+    assert.equal(nodes(root).filter((node) => node.className === "journey-scale").length, 0);
+    assert.equal(nodes(root).filter((node) => node.className === "journey-share").length, 0);
+  }
+});
+
+test("a strict near-hundred share survives reader extraction and the actual gate", () => {
+  const root = render("journey", { job: A, lead_window: { state: "partial", start_ms: 0, end_ms: 1000000 },
+    bursts: [{ start_ms: 0, end_ms: 1000000, working_ms: m(999999) }], gaps: [] }, { job: A, row: {
+    lead_time_ms: { state: "partial", value: 1000000, bound: "lower", reasons: ["card_dates_shorter_than_work"] },
+    working_ms: m(999999), flow_efficiency: { state: "partial", value: .999999, bound: "upper", reasons: ["card_dates_shorter_than_work"] },
+  } });
+  const elements = nodes(root);
+  const document = { querySelector: (selector) => selector.includes("journey-share") ? elements.find((n) => n.className === "journey-share") :
+    selector.includes("journey-scale") ? elements.find((n) => n.className === "journey-scale") :
+      elements.find((n) => n.dataset.figure === (/data-figure="([^"]+)"/.exec(selector) || [])[1] && n.dataset.figure),
+  };
+  const extract = new Function("document", `return (${G.taskShareFigures.toString()})();`);
+  const actual = extract(document);
+  assert.equal(actual.recorded.share, "under 100%");
+  assert.deepEqual(G.assessShareEdges(actual), []);
 });
 
 test("the task journey withholds a complete-looking overview when capture cannot partition the clock", () => {

@@ -19,6 +19,9 @@ test("the current task share checker validates actual recorded figures without s
   const figures = { working: "1s", covered: "1m", working_ms: 1000, covered_ms: 60000, share: "1.7%" }
   assert.deepEqual(G.assessShareEdges({ groups: [], parts: [], recorded: figures }), [])
   assert.ok(G.assessShareEdges({ groups: [], parts: [], recorded: { ...figures, share: "100%" } }).length)
+  assert.deepEqual(G.assessShareEdges({ groups: [], parts: [], recorded: {
+    working: "16m 40s", covered: "at least 16m 40s", working_ms: 999999, covered_ms: 1000000, share: "under 100%",
+  } }), [])
 })
 
 test("compact cross-view figures preserve both rendered quantity and its bound", () => {

@@ -125,7 +125,10 @@
       const work = row?.working_ms;
       const uncertainWork = work && work.state !== "measured" &&
         !(work.state === "partial" && work.bound === null && work.bound_reason === "bound_not_moved");
-      const complete = story.state === "ok" && !conflict && !uncertainWork;
+      const directionUnknown = (figure) => figure?.state === "partial" &&
+        (figure.bound === "unknown" || (figure.bound === null && figure.bound_reason !== "bound_not_moved"));
+      const uncertainWindow = directionUnknown(row?.lead_time_ms) || directionUnknown(row?.flow_efficiency);
+      const complete = story.state === "ok" && !conflict && !uncertainWork && !uncertainWindow;
       const summary = el("dl", "journey-totals task-time-figures");
       const duration = (label, value, key) => {
         const uncertain = !complete && value?.state === "partial" &&
@@ -153,7 +156,7 @@
       if (!complete) box.append(conclusion);
       if (!complete) {
         box.append(p(conflict ? "The available task totals are shown above." :
-          uncertainWork ? "Working time is incomplete." : story.reason, "chart-caption"));
+          uncertainWork ? "Working time is incomplete." : uncertainWindow ? "The time window is incomplete." : story.reason, "chart-caption"));
         return;
       }
       const share = row?.flow_efficiency?.state && row.flow_efficiency.state !== "unavailable"
