@@ -1355,7 +1355,7 @@
     }
     const name = localName(j.id);
     const tn = R.taskIdentity(j, localNames);
-    const h = el("h1", "view-title task-title", tn.title);
+    const h = el("h1", "view-title task-title", tn.reference ? `Task ${j.id.slice(0, 8)}` : tn.title);
     container.appendChild(h);
     if (!name) container.appendChild(el("p", "task-outcome-basis", tn.reference ? "Named from a public pull request." : "Task description is private."));
     const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
@@ -1370,6 +1370,7 @@
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
     const reference = el("details", "task-reference");
     reference.append(el("summary", null, "Task reference and finish-date evidence"), el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
+    if (tn.reference) reference.appendChild(el("p", "task-public-reference", tn.title));
     container.appendChild(reference);
 
     // One line on sign-off (the operator's recorded acceptance or return of
