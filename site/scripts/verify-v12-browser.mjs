@@ -76,7 +76,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "unmarked_scroll_frame", "missing_chart_equivalent", "broken_focus_return", "false_copied_claim",
   "chart_text_out_of_bounds", "unnamed_link",
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
-  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
+  "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "task_share_removed", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
   "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize",
 ])
 
@@ -255,6 +255,13 @@ export function measureConclusion(scope) {
 // duration in the text wins.
 const UNIT_NAME = { d: "days", day: "days", h: "hours", hour: "hours", m: "minutes", minute: "minutes", s: "seconds", second: "seconds", ms: "milliseconds", millisecond: "milliseconds" }
 const BOUND_OF = { "≥": "lower", "at least": "lower", "≤": "upper", "at most": "upper", "~": "about", about: "about", "<": "under", under: "under" }
+const gateFormat = createRequire(import.meta.url)("../src/format.js")
+function compactDuration(text) {
+  if (typeof text !== "string") return null
+  const compact = text.trim().replace(/^(at least|at most|about) /, "")
+  if (!/^(?:\d+[dhms]\s*)+$/.test(compact)) return null
+  return [...compact.matchAll(/(\d+)([dhms])/g)].reduce((sum, match) => sum + Number(match[1]) * { d: 86400000, h: 3600000, m: 60000, s: 1000 }[match[2]], 0)
+}
 export function durationForm(text) {
   const t = String(text || "")
   const hits = []
@@ -312,8 +319,15 @@ export function assessLeadAgreement(rows) {
     if (compact !== null) {
       const unit = { days: 86400000, hours: 3600000, minutes: 60000, seconds: 1000, milliseconds: 1 }[c.unit]
       const expected = Number.isFinite(r.expected_ms) ? r.expected_ms : c.value * unit
-      const tolerance = Number.isFinite(r.expected_ms) ? 1000 : Math.max(1000, expected * .1)
-      if (!Number.isFinite(expected) || Math.abs(compact - expected) > tolerance) out.push(`${r.job}: the task page's caption reads "${r.caption}", Compare "${r.compare}"`)
+      const figure = { state: c.bound ? "partial" : "measured", value: expected, reasons: [],
+        ...(c.bound ? { bound: c.bound === "about" ? null : c.bound, bound_reason: "bound_reasons_conflict" } : {}) }
+      const expectedCompare = durationForm(gateFormat.describe(figure, "hours").text)
+      const bound = /^(at least|at most|about) /.exec(r.caption)?.[1]
+      if (!Number.isFinite(expected) || Math.abs(compact - expected) > 1000 ||
+        BOUND_OF[bound] !== (c.bound || undefined) ||
+        !expectedCompare || expectedCompare.value !== c.value || expectedCompare.unit !== c.unit) {
+        out.push(`${r.job}: the task page's caption reads "${r.caption}", Compare "${r.compare}"`)
+      }
       continue
     }
     for (const [key, name] of [["caption", "caption"], ["aria", "accessible label"]]) {
@@ -321,17 +335,13 @@ export function assessLeadAgreement(rows) {
       if (!f) { out.push(`${r.job}: the task page's ${name} has no lead time, Compare reads "${r.compare}"`); continue }
       if (f.value !== c.value || f.unit !== c.unit || (c.bound && f.bound !== c.bound)) out.push(`${r.job}: the task page's ${name} reads "${String(r[key]).slice(0, 70)}", Compare "${r.compare}"`)
     }
-    function compactDuration(text) {
-      if (typeof text !== "string" || !/^(?:\d+[dhms]\s*)+$/.test(text.trim())) return null
-      return [...text.matchAll(/(\d+)([dhms])/g)].reduce((sum, match) => sum + Number(match[1]) * { d: 86400000, h: 3600000, m: 60000, s: 1000 }[match[2]], 0)
-    }
   }
   return out
 }
 // Runs in the page: the task page's lead time, from its one-bar chart.
 export function taskLeadFigures() {
   const current = document.querySelector('#view-task [data-figure="elapsed"]')
-  if (current) return { caption: current.textContent, aria: null }
+  if (current) return { caption: current.textContent, aria: current.textContent }
   const t = document.querySelector("#view-task .tw-title"), b = document.querySelector("#view-task .tw-bar")
   const cap = t ? t.textContent : null
   return { caption: cap ? (cap.match(/(?:one bar: |scale 0 to )(.*)$/) || [null, cap])[1] : null, aria: b ? (b.getAttribute("aria-label") || "").replace(/^Lead time /, "") : null }
@@ -345,12 +355,13 @@ export function taskPageTexts() {
 // its share of the lead time, by group and by part.
 export function taskShareFigures() {
   const current = document.querySelector("#view-task .journey-share")
-  if (current) return { groups: [], parts: [], recorded: {
+  const expected = !!document.querySelector("#view-task .journey-scale")
+  if (current || expected) return { groups: [], parts: [], expected, recorded: {
     working: document.querySelector('#view-task [data-figure="working"]')?.textContent,
     covered: document.querySelector('#view-task [data-figure="elapsed"]')?.textContent,
     working_ms: Number(document.querySelector('#view-task [data-figure="working"]')?.dataset.ms),
     covered_ms: Number(document.querySelector('#view-task [data-figure="elapsed"]')?.dataset.ms),
-    share: current.textContent.match(/(?:under )?\d+(?:\.\d+)?%/)?.[0],
+    share: current?.textContent.match(/(?:(?:at most|at least|under|about) )?\d+(?:\.\d+)?%/)?.[0],
   } }
   // "under 1%" is kept: its part still has time beside a 100%.
   const split = (t) => { const m = /^\s*(.*?) · (under )?(\d+(?:\.\d+)?)% of the lead time/.exec(t || ""); return m ? { dur: m[1].trim(), pct: `${m[2] ? "<" : ""}${m[3]}` } : null }
@@ -362,13 +373,17 @@ export function taskShareFigures() {
 // and a part reading 100% is the only one with time.
 export function assessShareEdges(figs) {
   const out = []
+  if (figs.expected && !figs.recorded) out.push("recorded working share is missing")
   if (figs.recorded) {
     const { working, covered, share, working_ms: work, covered_ms: total } = figs.recorded
     const agrees = (text, ms) => text === "<1s" ? ms > 0 && ms < 1000 : compactDuration(text) !== null && Math.abs(compactDuration(text) - ms) <= 1000
     if (!Number.isFinite(work) || !Number.isFinite(total) || total <= 0 || !share || !agrees(working, work) || !agrees(covered, total)) out.push("recorded working share has incomplete figures")
     else {
       const actual = work / total * 100, shown = Number(share.replace(/[^\d.]/g, ""))
-      if (share.startsWith("under ") ? actual >= shown : Math.abs(actual - shown) > .051) out.push(`a group of ${working} reads ${share} of ${covered}`)
+      const bad = share.startsWith("under ") ? actual >= shown :
+        share.startsWith("at most ") ? actual > shown + 1e-6 || shown - actual > .101 :
+          share.startsWith("at least ") ? actual < shown - 1e-6 || actual - shown > .101 : Math.abs(actual - shown) > .051
+      if (bad || (actual > 0 && shown === 0) || (actual < 100 && shown === 100)) out.push(`a group of ${working} reads ${share} of ${covered}`)
     }
   }
   const zero = (d) => /^(?:none|(?:at least |at most |about )?0 seconds)$/.test(d)
@@ -1562,7 +1577,9 @@ export async function main(argv = process.argv.slice(2)) {
       if (!pages.length) throw new Error("no task page was read")
       const bad = pages.flatMap((r) => assessShareEdges(r.shares).map((x) => `${r.job.slice(0, 8)} at ${r.width} px: ${x}`))
       if (bad.length) throw new Error(`${bad.length} found: ${[...new Set(bad)].slice(0, 4).join("; ")}`)
-      return { pages: pages.length, figures: pages.reduce((a, r) => a + r.shares.groups.length + r.shares.parts.length, 0) }
+      const figures = pages.reduce((a, r) => a + r.shares.groups.length + r.shares.parts.length + (r.shares.recorded ? 1 : 0), 0)
+      if (!figures) throw new Error("no task working share was checked")
+      return { pages: pages.length, figures }
     })
     await check("task_pages_no_bound_before_under", async () => {
       const pages = await readTaskPages()
@@ -2298,11 +2315,12 @@ export async function main(argv = process.argv.slice(2)) {
           await page.goto("about:blank")
           await page.goto(url + `#/task/${encodeURIComponent(job)}`)
           await settle(page, "task")
-          const before = assessLeadAgreement([{ job, compare, ...(await page.evaluate(taskLeadFigures)) }])
+          const expected_ms = targets.data.jobs.find((item) => item.id === job)?.lead_time_ms?.value
+          const before = assessLeadAgreement([{ job, compare, expected_ms, ...(await page.evaluate(taskLeadFigures)) }])
           if (before.length) throw new Error(`before planting: ${before[0]}`)
           // The caption's number moves; Compare's cell and the accessible label do not.
           await page.evaluate(() => { const t = document.querySelector('#view-task [data-figure="elapsed"]'); t.dataset.gatePlanted = "1"; t.textContent = "999999h" })
-          const off = assessLeadAgreement([{ job, compare, ...(await page.evaluate(taskLeadFigures)) }])
+          const off = assessLeadAgreement([{ job, compare, expected_ms, ...(await page.evaluate(taskLeadFigures)) }])
           if (off.length) throw new Error(`planted lead time: ${off[0]}`)
         }, /^planted lead time: .*the task page's caption reads/)
         await expectFailure("bound_before_under_on_task_page", async () => {
@@ -2328,6 +2346,16 @@ export async function main(argv = process.argv.slice(2)) {
           const bad = assessShareEdges(await page.evaluate(taskShareFigures))
           if (bad.length) throw new Error(`planted share edge: ${bad[0]}`)
         }, /^planted share edge: a group of .* reads 100%/)
+        await expectFailure("task_share_removed", async () => {
+          const complete = (await readTaskPages()).find((row) => row.shares.recorded)
+          if (!complete) throw new Error("no complete task timeline for the removal control")
+          await page.goto("about:blank")
+          await page.goto(url + `#/task/${encodeURIComponent(complete.job)}`)
+          await settle(page, "task")
+          await page.locator("#view-task .journey-share").evaluate((node) => node.remove())
+          const errors = assessShareEdges(await page.evaluate(taskShareFigures))
+          if (errors.length) throw new Error(`planted missing share: ${errors[0]}`)
+        }, /^planted missing share: recorded working share/)
         await expectFailure("share_label_differs_from_words", async () => {
           await page.goto("about:blank")
           await page.goto(url + "#/compare?mode=share")

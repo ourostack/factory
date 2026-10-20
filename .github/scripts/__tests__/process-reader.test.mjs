@@ -108,6 +108,32 @@ test("time covered and work figures retain partial bounds when the timeline is u
   assert.doesNotMatch(root.textContent, /\b0s\b/);
 });
 
+test("a partition never upgrades bounded or missing rollup work into exact work", () => {
+  const map = { job: A, lead_window: m(null), bursts: [{ start_ms: 0, end_ms: 60000, working_ms: m(1000) }], gaps: [] };
+  Object.assign(map.lead_window, { start_ms: 0, end_ms: 60000 });
+  for (const [bound, value, expected] of [
+    ["lower", 1000, /at least/i], ["upper", 1000, /at most/i],
+    [null, 1000, /higher or lower/i], ["lower", 0, /none recorded/i],
+  ]) {
+    const copy = structuredClone(map); copy.bursts[0].working_ms = m(value);
+    const root = render("journey", copy, { job: A, row: { lead_time_ms: m(60000),
+      working_ms: { state: "partial", value, bound, bound_reason: "log_truncated", reasons: ["log_truncated"] } } });
+    assert.match(by(by(root, "dl")[0], "dd")[1].textContent, expected);
+    assert.equal(nodes(root).filter((node) => node.className === "journey-scale").length, 0);
+    assert.equal(nodes(root).filter((node) => node.className === "journey-share").length, 0);
+  }
+  const exactWindow = render("journey", map, { job: A, row: { lead_time_ms: m(60000),
+    working_ms: { state: "partial", value: 1000, bound: null, bound_reason: "bound_not_moved", reasons: ["card_dates_shorter_than_work"] } } });
+  assert.equal(by(by(exactWindow, "dl")[0], "dd")[1].textContent, "1s");
+  assert.equal(nodes(exactWindow).filter((node) => node.className === "journey-scale").length, 1);
+  const boundedWindow = render("journey", map, { job: A, row: {
+    lead_time_ms: { state: "partial", value: 60000, bound: "lower", reasons: ["card_dates_shorter_than_work"] },
+    working_ms: m(1000), flow_efficiency: { state: "partial", value: 1 / 60, bound: "upper", reasons: ["card_dates_shorter_than_work"] },
+  } });
+  assert.equal(by(by(boundedWindow, "dl")[0], "dd")[0].textContent, "at least 1m");
+  assert.match(nodes(boundedWindow).find((node) => node.className === "journey-share").textContent, /^at most 1\.7%/);
+});
+
 test("the task journey withholds a complete-looking overview when capture cannot partition the clock", () => {
   const root = render("journey", { lead_window: { state: "unavailable" } });
   assert.match(root.textContent, /not recorded|incomplete/i);

@@ -122,12 +122,19 @@
       host.append(box);
       const conflict = story.state === "ok" && [["lead_time_ms", story.total_ms], ["working_ms", story.working_ms]]
         .some(([key, value]) => row?.[key]?.state !== "unavailable" && Number.isFinite(row?.[key]?.value) && row[key].value !== value);
-      const complete = story.state === "ok" && !conflict;
+      const work = row?.working_ms;
+      const uncertainWork = work && work.state !== "measured" &&
+        !(work.state === "partial" && work.bound === null && work.bound_reason === "bound_not_moved");
+      const complete = story.state === "ok" && !conflict && !uncertainWork;
       const summary = el("dl", "journey-totals task-time-figures");
       const duration = (label, value, key) => {
         const uncertain = !complete && value?.state === "partial" &&
           (value.bound === "unknown" || (value.bound === null && value.bound_reason !== "bound_not_moved"));
-        const text = complete ? W.durationDetail(value) : `${words(value)}${uncertain ? "; could be higher or lower" : ""}`;
+        const source = key === "elapsed" ? row?.lead_time_ms : work;
+        const bound = complete && source?.state === "partial" ? source.bound : null;
+        const rounded = bound === "lower" ? Math.floor(value / 1000) * 1000 : bound === "upper" ? Math.ceil(value / 1000) * 1000 : value;
+        const text = complete ? `${bound === "lower" ? "at least " : bound === "upper" ? "at most " : ""}${W.durationDetail(rounded)}`
+          : `${words(value)}${uncertain ? "; could be higher or lower" : ""}`;
         const node = el("span", null, text);
         node.dataset.figure = key;
         if (complete) node.dataset.ms = String(value);
@@ -145,10 +152,13 @@
       conclusion.dataset.role = "conclusion";
       if (!complete) box.append(conclusion);
       if (!complete) {
-        box.append(p(conflict ? "The available task totals are shown above." : story.reason, "chart-caption"));
+        box.append(p(conflict ? "The available task totals are shown above." :
+          uncertainWork ? "Working time is incomplete." : story.reason, "chart-caption"));
         return;
       }
-      box.append(p(`${F.describe(m(story.working_ms / story.total_ms), "pct1").text} of the time covered was spent working.`, "journey-share"));
+      const share = row?.flow_efficiency?.state && row.flow_efficiency.state !== "unavailable"
+        ? row.flow_efficiency : m(story.working_ms / story.total_ms);
+      box.append(p(`${F.describe(share, "pct1").text} of the time covered was spent working.`, "journey-share"));
       box.append(el("h2", "block-title", "Work and pauses"));
       const strip = el("div", "journey-scale");
       strip.setAttribute("aria-hidden", "true");
