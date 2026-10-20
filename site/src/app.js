@@ -3105,6 +3105,9 @@
     safely("task-picker", () => renderPicker(document.getElementById("task-picker"), data.jobs, taskRows, j.id));
     safely("vsm", () => {
       reader.journey(vsmEl, map, { job: j.id, row });
+      const figures = vsmEl.querySelector(".task-time-figures");
+      const title = document.querySelector("#task-head .task-title");
+      if (figures && title) title.after(figures);
       if (mapProblem) vsmEl.appendChild(el("p", "chart-empty", mapProblem));
     });
     const clockRecords = el("details", "reader-details");

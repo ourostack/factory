@@ -148,11 +148,11 @@
         duration("Time spent working", complete ? story.working_ms : row.working_ms, "working");
         box.append(summary);
       }
-      if (complete) summary.dataset.role = "conclusion";
+      if (complete || row) summary.dataset.role = "conclusion";
       const conclusion = p(complete
         ? `${W.durationDetail(story.working_ms)} of work across ${W.durationDetail(story.total_ms)}.`
         : conflict ? "The timeline and task totals disagree." : "The timeline is unavailable.", "task-conclusion");
-      conclusion.dataset.role = "conclusion";
+      conclusion.dataset.role = row ? "caveat" : "conclusion";
       if (!complete) box.append(conclusion);
       if (!complete) {
         box.append(p(conflict ? "The available task totals are shown above." :
