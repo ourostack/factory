@@ -3036,7 +3036,14 @@
     if (seq !== walkSeq) return;
     j.context = C.validateTaskContext(contextFile, j.id).ok ? C.contextSummary(contextFile) :
       { availability: "unavailable", heading: null, reason: "invalid_context" };
-    renderTaskHead(document.getElementById("task-head"), data.jobs, id);
+    const taskHead = document.getElementById("task-head");
+    const keepHeadingFocus = document.activeElement === taskHead.querySelector(".task-title");
+    renderTaskHead(taskHead, data.jobs, id);
+    if (keepHeadingFocus) {
+      const heading = taskHead.querySelector(".task-title");
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    }
     document.querySelector("#job-detail .task-reference")?.remove();
     const currentReference = document.querySelector("#task-head .task-reference");
     if (currentReference) document.getElementById("job-detail").prepend(currentReference);
