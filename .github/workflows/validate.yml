@@ -124,10 +124,10 @@ jobs:
             printf 'factory-validate: head_tests_unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          # Data paths: a JSON file at any depth under facts/, labels/ or capture/.
+          # Facts/labels/capture JSON, or an exact context/triage record.
           # Anything else, a control character in a path, or a matching error is code.
           code=no
-          data_path='^((facts|labels|capture)/([^/]+/)*[^/]+\.json|triage/[0-9a-f]{16}\.json)$'
+          data_path='^((facts|labels|capture)/([^/]+/)*[^/]+\.json|triage/[0-9a-f]{16}\.json|context/[0-9a-f]{32}\.json)$'
           while IFS= read -r -d '' path; do
             case "$path" in
               *[[:cntrl:]]*) code=yes; break ;;

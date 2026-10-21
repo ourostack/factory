@@ -1356,7 +1356,8 @@
     if (cov.share && cov.share.state !== "unavailable") checked.push("capture coverage");
     else missing.push(`capture coverage (${cov.share ? cov.share.reasons.map(reasonText).join("; ") : "not part of this build"})`);
     const loop = x.loop || {};
-    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ key: `loop:${a.code}`, family: "loop_alarm", text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : "the loop raised an alarm about itself"}`, owner: null });
+    for (const a of Array.isArray(loop.alarms) ? loop.alarms : []) alarms.push({ key: `loop:${a.code}`, family: "loop_alarm", text: `improvement loop: ${a.code === "improvement_age" ? "an improvement item has been open for a week or more" : a.code === "steps_stale" ? "a loop step has stopped succeeding" : a.code === "annotation_refresh" ? "automatic improvement-annotation refresh is incomplete" : "the loop raised an alarm about itself"}`, owner: null,
+      ...(a.code === "annotation_refresh" ? { reason: loop.annotation_refresh?.codes?.some((entry) => entry.code === "resource_unrecoverable" && entry.machines?.value > 0) ? "resource_unrecoverable" : "incomplete" } : {}) });
     if (loop.verdict && loop.verdict.status === "healthy") checked.push("the improvement loop");
     else if (!(Array.isArray(loop.alarms) && loop.alarms.length)) {
       const codes = loop.verdict && Array.isArray(loop.verdict.missing) ? [...new Set(loop.verdict.missing.flatMap((m) => m.codes || []))] : [];
@@ -1386,7 +1387,7 @@
       if (a.owner) continue;
       const i = owners.find((o) => o && o.issue_state !== "closed" && Array.isArray(o.keys) && o.keys.includes(a.key));
       if (i) a.owner = { ref: i.ref, url: i.url };
-      else a.ownerText = ownersChecked ? "no one is on this" : notChecked;
+      else a.ownerText = ownersChecked ? "public repair link not recorded; private work is not inferred" : notChecked;
     }
     if (alarms.length) return { state: "abnormal", alarms, checked, missing };
     if (missing.length) return { state: "not_monitored", alarms, checked, missing };

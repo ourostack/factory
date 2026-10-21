@@ -82,7 +82,6 @@
   </div>
   <div class="wrap">
     <p id="status-line" class="status-line" aria-live="polite">Loading the store&hellip;</p>
-    <p id="material-warning" class="material-warning" hidden></p>
     <details id="display-settings" class="display-settings">
       <summary>Time zone: <span id="zone-current">UTC</span><span id="zone-saved"></span></summary>
       <div class="display-preferences">
@@ -166,14 +165,14 @@
     <p class="step-label"><a href="#/tasks">Tasks</a></p>
     <p id="landing-note" class="chart-caption landing-note" hidden></p>
     <div id="task-head"></div>
+    <section id="task-context" aria-label="Task explanation"></section>
     <section class="block vsm-block" aria-label="Task timeline">
       <div id="vsm"></div>
     </section>
-    <details class="reader-details" id="task-records">
-      <summary>Session records and delivery details</summary>
+    <section class="task-records" id="task-records" aria-label="Session records and delivery details">
       <div id="job-detail"></div>
       <div id="task-clock-details"></div>
-    </details>
+    </section>
     <details id="other-tasks" class="other-tasks">
       <summary>Other recorded tasks</summary>
       <div id="task-picker"></div>
@@ -425,9 +424,9 @@
     <ul class="plain-list">
       <li><strong>No who.</strong> No contributor, operator, account, machine, host name, desk path or branch appears in any facts file. A task is identified only by a one-way key.</li>
       <li><strong>Dates and times are stated, and how precise.</strong> Facts carry durations and offsets from the session start and the task card's creation. The one calendar fact is the UTC day a task finished, never a time of day. Times inside a task sit on the task's own clock, an offset from its card's creation; pull request times come from GitHub, which already shows them. A finish day taken from a later record (the card's last update, or the day the task's labels landed) is marked "on or before". Anyone can therefore read which days the work was done. That cost was accepted on 2026-10-08: accuracy and precision outrank privacy here.</li>
-      <li><strong>No content.</strong> No transcript text, prompt, response, tool argument, file content, file path or task card title ever leaves the contributor's machine.</li>
+      <li><strong>No raw content.</strong> Numerical facts and labels contain no transcript text, prompt, response, tool argument, file content, path or task card title. Separately authorized task explanations contain only bounded, evidence-supported public wording with an independent privacy review; that judgment is not a guarantee.</li>
       <li><strong>Public references only.</strong> References to private repositories are dropped and only counted. Public pull requests and commits are, like any GitHub contribution, already public.</li>
-      <li><strong>Public work is named publicly.</strong> A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened, plus how many more it has. If some of its pull requests could not be read, the name comes from those that could, and the task page says so. A task with no public pull request is shown as "Private task" with a short key.</li>
+      <li><strong>Task purpose needs evidence.</strong> A reviewed public explanation can supply a safe purpose, not a verbatim original request. Otherwise the earliest-readable public pull-request title is only a reference, or the task stays unnamed. Prerequisite Waiting, observed resumption and result do not change the measured clock or imply human acceptance.</li>
       <li><strong>Operator prompts are on the task's clock.</strong> Each prompt is drawn at its time on the task's clock, with how long the agent had been stopped and the size class of the prompt and of the output the operator read; never its text.</li>
       <li><strong>Pull requests are on the task's clock.</strong> Each pull request that first appeared in the task's sessions is drawn at GitHub's opening time and, once merged, when it merged, from the session's own record or from GitHub's times placed through the task's clock anchor, to within seconds. A time known only in part is drawn outlined and its evidence says which way the true time lies; a pull request with no placed time is listed as "opened, time not recorded", with why, and is not drawn. A time outside the task's lead time is listed in a margin before or after the map, with how far outside it lies. Each pull request's drawer says whether the task's session opened it or only mentioned it, as Desk records; a few older records do not say, and their drawers say that.</li>
     </ul>
@@ -460,6 +459,7 @@
   <div class="wrap">
     <h1 class="view-title">The store's numbers</h1>
     <p class="lede">Everything else the store measures, across every task: the cost of an accepted outcome, whether humans accept what agents deliver, the store's own health, and the sessions, tools and models behind the work. Every number is read live from the public store; "no data" is never zero.</p>
+    <section class="block" id="status-evidence" aria-label="Monitoring and repair records"></section>
 
     <section class="block" id="answer" aria-labelledby="answer-title">
       <h2 class="block-title" id="answer-title">What an accepted outcome costs</h2>
@@ -591,6 +591,7 @@
 <script src="briefing.js"></script>
 <script src="walk.js"></script>
 <script src="steps.js"></script>
+<script src="task-context.js"></script>
 <script src="reader.js"></script>
 <script src="app.js"></script>
 </body>

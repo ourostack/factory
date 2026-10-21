@@ -131,6 +131,32 @@ retain the ordinary number gate; there is no general numeric exemption.
 without echoing rejected content. Browser consumers should withhold only
 the learning panel when validation fails, keeping unrelated views usable.
 
+### Reviewed task explanations
+
+`data.json.jobs[].context` is a compact, closed availability/heading/reason
+summary. `context/<public-job>.json` is the corresponding
+`factory-task-context/1` fragment: current-source-checked
+`desk.factory.context/1` record, exact review hash, public evidence references,
+confidence and task-clock anchor placements. Only the separately consented
+ordinary producer and an independent privacy review may supply public prose.
+The site rechecks current public facts, not the reports branch's old snapshot.
+Missing or changed evidence withholds the wording, including in site copies
+of full task reports. `withheld` and `unavailable` never mean no work or no wait.
+
+Prerequisite Waiting explains why progress stopped and what was needed
+before continuing; resumption is stated only if observed. Endpoint pairs
+place context, not a newly measured waiting/installation duration, waste,
+savings or human acceptance. Null placements remain unplaced. Partial and
+shortened lists retain their omission count and terminal observation.
+
+The capture loop slot may separately carry `triage_refresh`, only after
+`context.json` advertises `loop_context: 1`. Its fixed states are `current`,
+`incomplete`, `resource_unrecoverable` or null. `loop_health.annotation_refresh`
+counts recent reporting machines per code, not shared-desk cards. A writer
+resource block affects automatic improvement-note refresh, not necessarily
+task-time capture. Preserve retained files and checkouts during recovery; a public repair-link
+absence is not evidence about private ownership.
+
 ### Improvement annotations: inspect, do not execute
 
 `data.json.improvements` and `rollups/improvements.json` contain the same

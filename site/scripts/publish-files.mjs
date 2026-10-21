@@ -20,6 +20,7 @@ const { reasonTable } = require("../src/format.js");
 const { readLifecycleClocks } = require("../src/steps.js");
 const { validateBriefing } = require("../src/briefing.js");
 const { validateLearning } = require("../src/learning.js");
+const { validateTaskContext, contextSummary } = require("../src/task-context.js");
 import { prClock } from "./pr-clock.mjs";
 import { forRollupFile } from "./finish-date.mjs";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
@@ -123,11 +124,24 @@ export function publishData({ reports, dist, pulls = null }) {
   let improvements;
   let overview;
   let learning;
+  let data;
   if (existsSync(dataPath)) {
-    const data = JSON.parse(readFileSync(dataPath, "utf8"));
+    data = JSON.parse(readFileSync(dataPath, "utf8"));
     improvements = data.improvements;
     overview = data.overview;
     learning = data.learning;
+  }
+  const contexts = new Map();
+  for (const name of jsonFiles(join(dist, "context"), 0)) {
+    if (!/^[0-9a-f]{32}\.json$/.test(name)) throw new Error("task_context_projection_invalid");
+    const doc = JSON.parse(readFileSync(join(dist, "context", name), "utf8"));
+    const summary = data?.jobs?.find((job) => job.id === name.slice(0, -5))?.context;
+    if (!validateTaskContext(doc, name.slice(0, -5)).ok ||
+        JSON.stringify(contextSummary(doc)) !== JSON.stringify(summary)) throw new Error("task_context_projection_invalid");
+    contexts.set(doc.job, doc);
+  }
+  for (const job of data?.jobs || []) {
+    if (job.context !== undefined && !contexts.has(job.id)) throw new Error("task_context_projection_missing");
   }
   if (learning !== undefined && (!validateLearning(learning).ok || checkNumbers({ learning }).length)) throw new Error("learning_projection_invalid");
   if (learning === undefined && (existsSync(join(reports, "rollups/learning.json")) || existsSync(join(dist, "rollups/learning.json")))) throw new Error("learning_projection_invalid");
@@ -154,7 +168,14 @@ export function publishData({ reports, dist, pulls = null }) {
       if (sub === "rollups" && ["improvements.json", "overview.json", "learning.json"].includes(rel)) continue; // checked data twins only
       const to = join(dist, sub, rel);
       mkdirSync(dirname(to), { recursive: true });
-      copyFileSync(join(reports, sub, rel), to);
+      const context = sub === "jobs" && /^[0-9a-f]{32}\.json$/.test(rel) ? contexts.get(rel.slice(0, -5)) : null;
+      if (context) {
+        const report = JSON.parse(readFileSync(join(reports, sub, rel), "utf8"));
+        if (context.record !== null || report.context !== undefined) {
+          report.context = { state: context.availability, reason: context.reason, record: context.record };
+          writeFileSync(to, JSON.stringify(report), "utf8");
+        } else copyFileSync(join(reports, sub, rel), to);
+      } else copyFileSync(join(reports, sub, rel), to);
       copied.push(`${sub}/${rel}`);
     }
   }
@@ -170,6 +191,7 @@ export function publishData({ reports, dist, pulls = null }) {
       writeFileSync(path, JSON.stringify(learning), "utf8");
       copyFileSync(new URL("../src/learning.js", import.meta.url), join(dist, "learning.js"));
       copyFileSync(new URL("../src/reader.js", import.meta.url), join(dist, "reader.js"));
+      copyFileSync(new URL("../src/task-context.js", import.meta.url), join(dist, "task-context.js"));
       copied.push("rollups/learning.json");
     }
     if (overview !== undefined) {
@@ -227,7 +249,7 @@ export function publishData({ reports, dist, pulls = null }) {
     writeFileSync(to, JSON.stringify(map), "utf8");
     maps.push(`map/${rel}`);
   }
-  const all = [...jsonFiles(dist, 0), ...jsonFiles(join(dist, "rollups"), 0).map((p) => `rollups/${p}`), ...jsonFiles(join(dist, "map"), 0).map((p) => `map/${p}`), ...jsonFiles(join(dist, "jobs"), 1).map((p) => `jobs/${p}`)];
+  const all = [...jsonFiles(dist, 0), ...jsonFiles(join(dist, "rollups"), 0).map((p) => `rollups/${p}`), ...jsonFiles(join(dist, "map"), 0).map((p) => `map/${p}`), ...jsonFiles(join(dist, "context"), 0).map((p) => `context/${p}`), ...jsonFiles(join(dist, "jobs"), 1).map((p) => `jobs/${p}`)];
   return { copied, maps, files: [...new Set(all)].map((path) => ({ path, bytes: statSync(join(dist, path)).size })) };
 }
 
@@ -251,6 +273,7 @@ const GROUPS = [
   { title: "Reading the reasons", match: (p) => p === "reasons.json", what: () => "every reason code a figure can carry (censored, log_truncated, card_dates_shorter_than_work, …) with the plain words the page shows for it" },
   { title: "Step 1, follow a task: each task's answer", match: (p) => p === "rollups/tasks.json", what: () => "one row per task, keyed by `job`: its lead time, working time, idle time and its split by what it waited on (`waiting_by_waited_on_ms`), top causes and longest wait, as stated numbers in milliseconds (keys and codes, not the page's sentences; reasons.json gives the words), plus the store's `name` (null for a private task), `finish_order`, `finish_group`, `finish_basis` and `finish_date` (the UTC day the task finished, and the basis it rests on), and Desk's lifecycle `clocks` (production, recorded working inside production, production not recorded as active, request to delivery, queue, and production periods; see Lifecycle clocks above)" },
   { title: "Step 1, follow a task: one task's map", match: (p) => /^map\/[^/]+\.json$/.test(p), what: (p) => `the work bursts, waits, card status changes, operator prompts (each with its why), the waits before them, and pull requests with their opened and merged times on the task clock, of task ${p.slice(4, 12)}: what its value stream map draws; every time is an offset on the task clock (factory.site.map/2), and each operator prompt's \`day\` is its UTC day where a measured clock anchor ties the task to the calendar, else null; each pull request time states whether it is measured or partial (and which way), and is not placed when the task's clock anchor may be off by more than 15 minutes, the gap that splits two work bursts, or rests on one pull request nothing confirms (anchor_unconfirmed)` },
+  { title: "Reviewed task explanations", match: (p) => /^context\/[0-9a-f]{32}\.json$/.test(p), what: () => "factory-task-context/1: current-source-checked public purpose, observed work, prerequisite Waiting, resumption and result; separate privacy review, confidence and exact public evidence anchors. Null placements remain unknown. This explains context, not measured waiting duration, waste, savings or acceptance." },
   { title: "Step 1, follow a task: one task's timeline", match: (p) => /^jobs\/[^/]+\.json$/.test(p), what: (p) => `the timeline and measures of task ${p.slice(5, 13)}` },
   { title: "Step 1, follow a task: one session in detail", match: (p) => /^jobs\/[^/]+\/[^/]+\.json$/.test(p), what: (p) => `one session of task ${p.slice(5, 13)}` },
   { title: "Step 2, compare tasks", match: (p) => p === "rollups/stackup.json", what: () => "one row per task: its lead time split into working time by the evaluator's labels and waiting (idle time) by what it waited on; what each bar of the stack-up draws, with each task's lifecycle `clocks` for the production and request modes (their sums are task exposure, not factory time)" },

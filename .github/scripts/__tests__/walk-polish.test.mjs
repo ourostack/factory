@@ -342,7 +342,7 @@ test("legacy issue rows keep plain problem sentences and separate closure from e
 
 // --------------------------------------- the status line and glossary (M-1, M-11)
 
-test("the status line is one line whose alarm words open their glossary entries, with the detail behind Health details", () => {
+test("the status line gives one scoped consequence and destination; flat monitoring details live on Data health", () => {
   assert.equal(F.glossaryRoute("capture-coverage"), "#/why?term=capture-coverage")
   assert.equal(F.glossaryRoute("x\"><script>"), null)
   assert.deepEqual(F.parseRoute("#/why?term=improvement-loop"), { view: "why", term: "improvement-loop" })
@@ -350,10 +350,11 @@ test("the status line is one line whose alarm words open their glossary entries,
   const html = read("site/src/index.html")
   for (const id of ["capture-coverage", "improvement-loop", "job-hours", "evaluator", "session", "card", "operator", "sign-off", "agent-on-another-task", "labeled-pause", "timeline-ladder", "andon"]) assert.match(html, new RegExp(`<dt id="g-${id}">`), id)
   const app = read("site/src/app.js")
-  assert.match(app, /el\("details", "status-details"\)/)
-  assert.match(app, /el\("summary", null, "Health details"\)/)
-  assert.match(app, /if \(k\.startsWith\("capture:"\) \|\| k === "capture_alarm"\) return \{ text: "capture coverage", term: "capture-coverage" \}/)
-  assert.match(app, /const safe = F\.glossaryRoute\(t\.term\);/)
+  assert.doesNotMatch(app, /el\("details", "status-details"\)|"Health details"/)
+  assert.match(app, /container\.dataset\.state = s\.state/)
+  assert.match(app, /warning\?\.action \|\| "Inspect monitoring coverage"/)
+  assert.match(html, /<section[^>]+id="status-evidence"/)
+  assert.match(app, /evidence\.appendChild\(body\)/)
 })
 
 test("the picker starts at the top with a skip link before it, and the acceptance line is said once (M-8, M-11)", () => {

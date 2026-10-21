@@ -17,6 +17,7 @@
   const B = window.FactoryBriefing;
   const L = window.FactoryLearning;
   const R = window.FactoryReader;
+  const C = window.FactoryTaskContext;
   const reader = R.createReader({ document, setLocalHref, taskLabel: (id) => jobLabel(currentData?.jobs.find((job) => job.id === id) || { id }),
     issueTitle: (ref, title) => window.FactorySteps.issueTitle(ref, title) });
   const P = window.FactoryPreferences;
@@ -1093,13 +1094,6 @@
     return span;
   }
 
-  // The status line under the tabs: abnormal, normal or not monitored
-  // (format.js statusLine). Normal is quiet; abnormal is loud and names each
-  // alarm with who is on it, or says no one is; not monitored says what is
-  // not recorded, so no data never reads as normal.
-  const STATUS_WORD = { abnormal: "Abnormal", normal: "Normal", not_monitored: "Not monitored" };
-  const STATUS_MARK = { abnormal: "\u25a0", normal: "\u25cf", not_monitored: "\u25cb" };
-
   function listWords(xs) {
     if (xs.length <= 1) return xs.join("");
     return `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
@@ -1115,82 +1109,29 @@
     }
     const s = F.statusLine({ verdict, andon: data.andon_issues, andonVerification: data.andon_verification, capture: data.capture_coverage, loop: data.loop_health, fixNext: data.fix_next, alarmIssues: data.alarm_issues, alarmIssuesVerification: data.alarm_issues_verification });
     const warning = R.materialWarning(s);
-    const warningNode = document.getElementById("material-warning");
-    warningNode.replaceChildren();
-    warningNode.hidden = !warning;
-    if (warning) {
-      warningNode.append(`${warning.effect} ${warning.ownership} `);
-      const repair = el("a", null, "Impact and repair");
-      setLocalHref(repair, warning.href, { plain: true });
-      if (warning.href === "#/improvements") repair.addEventListener("click", () => { focusAfterRender = "improvement-alarms"; });
-      warningNode.appendChild(repair);
-    }
     container.className = `status-line status-${s.state}`;
-    // One line: the state, what each alarm is about (each word linked to its
-    // glossary entry) and whether anyone is on it; the full text sits behind
-    // "Health details".
-    const line = el("span", "status-summary");
-    line.appendChild(el("strong", "status-word", `${STATUS_MARK[s.state]} ${STATUS_WORD[s.state]}`));
-    line.appendChild(document.createTextNode(": "));
+    container.dataset.state = s.state;
+    container.append(warning ? `${warning.effect} ` : s.state === "normal"
+      ? "No active alarms in the health checks available for this build. "
+      : "Some health checks are unavailable; this is not an all-clear. ");
+    const repair = el("a", null, warning?.action || "Inspect monitoring coverage");
+    setLocalHref(repair, warning?.href || "#/store", { plain: true });
+    container.appendChild(repair);
+    const evidence = document.getElementById("status-evidence");
+    evidence.replaceChildren(el("h2", "block-title", "Monitoring and public repair records"));
     if (s.state === "abnormal") {
-      const topics = [];
-      for (const a of s.alarms) {
-        const t = statusTopic(a.key);
-        if (!topics.some((x) => x.term === t.term && x.text === t.text)) topics.push(t);
-      }
-      topics.forEach((t, i) => {
-        if (i) line.appendChild(document.createTextNode(i === topics.length - 1 ? " and " : ", "));
-        if (t.term) {
-          const a = el("a", "status-term", t.text);
-          const safe = F.glossaryRoute(t.term);
-          a.href = safe;
-          line.appendChild(a);
-        } else line.appendChild(document.createTextNode(t.text));
-      });
-      const unowned = s.alarms.filter((a) => !a.owner).length;
-      line.appendChild(document.createTextNode(` (${s.alarms.length === 1 ? "1 alarm" : `${s.alarms.length} alarms`}${unowned ? ", public ownership incomplete" : ", each owned by a public issue"}). `));
-    } else if (s.state === "normal") {
-      line.appendChild(document.createTextNode("no alarm. "));
-    } else {
-      line.appendChild(document.createTextNode("no alarm, but not everything is watched. "));
-    }
-    container.appendChild(line);
-    const det = el("details", "status-details");
-    det.appendChild(el("summary", null, "Health details"));
-    const body = el("p", "status-full");
-    if (s.state === "abnormal") {
-      s.alarms.forEach((a, i) => {
-        if (i) body.appendChild(document.createTextNode("; "));
+      s.alarms.forEach((a) => {
+        const body = el("p", "status-full");
         body.appendChild(document.createTextNode(`${a.text.charAt(0).toUpperCase()}${a.text.slice(1)}, `));
         if (a.owner) {
           body.appendChild(document.createTextNode("tracked in "));
           body.appendChild(safeLink(`issue ${a.owner.ref}`, a.owner.url));
-        } else body.appendChild(el("span", a.ownerText === "no one is on this" ? "status-owner" : "status-owner status-owner-unchecked", a.ownerText));
+        } else body.appendChild(el("span", "status-owner status-owner-unchecked", a.ownerText));
+        evidence.appendChild(body);
       });
-      body.appendChild(document.createTextNode(". "));
-    } else if (s.state === "normal") {
-      body.appendChild(document.createTextNode(`Checked ${listWords(s.checked)}. `));
-    } else {
-      body.appendChild(document.createTextNode(`Not recorded: ${listWords(s.missing)}.${s.checked.length ? ` Checked: ${listWords(s.checked)}.` : ""} `));
     }
-    const more = document.createElement("a");
-    const safe = F.safeRoute("store");
-    more.href = safe;
-    more.textContent = "The store's own health, in full";
-    body.appendChild(more);
-    det.appendChild(body);
-    container.appendChild(det);
-  }
-
-  // What an alarm is about, in the status line's one line, and the glossary
-  // entry that defines it.
-  function statusTopic(key) {
-    const k = String(key || "");
-    if (k.startsWith("capture:") || k === "capture_alarm") return { text: "capture coverage", term: "capture-coverage" };
-    if (k.startsWith("loop:") || k === "loop_alarm") return { text: "the improvement loop", term: "improvement-loop" };
-    if (k === "andon") return { text: "andon", term: "andon" };
-    if (k === "site") return { text: "the site's data", term: null };
-    return { text: "an alarm", term: null };
+    if (s.checked.length) evidence.appendChild(el("p", "chart-caption", `Checked: ${listWords(s.checked)}.`));
+    if (s.missing.length) evidence.appendChild(el("p", "chart-caption", `Not recorded: ${listWords(s.missing)}.`));
   }
 
   // A headline figure as plain text: its label, the figure, and its notes.
@@ -1357,7 +1298,7 @@
     const tn = R.taskIdentity(j, localNames);
     const h = el("h1", "view-title task-title", tn.reference ? `Task ${j.id.slice(0, 8)}` : tn.title);
     container.appendChild(h);
-    if (!name) container.appendChild(el("p", "task-outcome-basis", tn.reference ? "Named from a public pull request." : "Task description is private."));
+    if (!name) container.appendChild(el("p", "task-outcome-basis", tn.contextual ? tn.basis : tn.reference ? "Named from a public pull request." : "Task description is not published."));
     const where = [name && name.track, name && name.task].filter(Boolean).join(" / ");
     const keyLine = name
       ? `${where ? `${where} · ` : ""}key ${j.id}`
@@ -1368,8 +1309,8 @@
         : j.pull_requests.length
           ? `Its pull requests' titles could not be read for this build. Task key ${j.id}.`
           : `No public pull request names this task, so it stays private. Task key ${j.id}.`;
-    const reference = el("details", "task-reference");
-    reference.append(el("summary", null, "Task reference and finish-date evidence"), el("p", "task-key", `${keyLine} ${finishWords(j, jobs)}`));
+    const reference = el("section", "task-reference");
+    reference.append(el("h2", "block-title", "Task reference"), el("p", "task-key", `${tn.contextual ? `Public context is independently reviewed; the original request is not quoted. Task key ${j.id}.` : keyLine} ${finishWords(j, jobs)}`));
     if (tn.reference) reference.appendChild(el("p", "task-public-reference", tn.title));
     container.appendChild(reference);
 
@@ -1499,20 +1440,14 @@
     }
     container.appendChild(ses);
 
-    const all = el("details", "more-details");
-    all.appendChild(el("summary", null, "Every measure, with its state and reason"));
-    all.appendChild(
-      el(
-        "p",
-        "chart-caption",
-        `Every measure the store's report holds for this task. "Measured" is the whole figure, and a zero here is a measured zero. "Partial" covers only part of the task ("at least" or "at most" says which way the true figure lies, when that is known). "No data" means the store could not measure it.`,
-      ),
-    );
-    all.appendChild(detailsTable(j));
     const report = el("p", "chart-caption");
     report.appendChild(safeLink("The task's full report on the reports branch", `https://github.com/ourostack/factory/blob/reports/jobs/${j.id}.md`));
-    all.appendChild(report);
-    container.appendChild(all);
+    const json = document.createElement("a");
+    const safe = /^[0-9a-f]{32}$/.test(j.id) ? `jobs/${j.id}.json` : null;
+    if (safe) json.href = safe;
+    json.textContent = "Full task measures and evidence as JSON";
+    if (safe) report.append(" · ", json);
+    container.appendChild(report);
   }
 
   // --------------------------------------------------------- session page
@@ -3082,27 +3017,49 @@
     const seq = ++walkSeq;
     const j = renderTaskHead(document.getElementById("task-head"), data.jobs, id);
     const vsmEl = document.getElementById("vsm");
-    const records = document.getElementById("task-records");
-    records.open = false;
     lastMapRender = null;
     vsmEl.replaceChildren(loadingNote());
     const clocks = document.getElementById("task-clock-details");
     clocks.replaceChildren();
+    const contextEl = document.getElementById("task-context");
+    contextEl.replaceChildren(loadingNote());
     renderJobDetail(document.getElementById("job-detail"), data.jobs, id, data.sessions);
     const reference = document.querySelector("#task-head .task-reference");
     if (reference) document.getElementById("job-detail").prepend(reference);
     if (!j) {
       vsmEl.replaceChildren();
+      contextEl.replaceChildren();
       renderPicker(document.getElementById("task-picker"), data.jobs, null, id);
       return;
     }
-    const [tasks, mapFile] = await Promise.all([walkFile("rollups/tasks.json"), walkFile(mapPath(j.id))]);
+    const [tasks, mapFile, contextFile] = await Promise.all([walkFile("rollups/tasks.json"), walkFile(mapPath(j.id)), walkFile(`context/${j.id}.json`)]);
     if (seq !== walkSeq) return;
+    j.context = C.validateTaskContext(contextFile, j.id).ok ? C.contextSummary(contextFile) :
+      { availability: "unavailable", heading: null, reason: "invalid_context" };
+    const taskHead = document.getElementById("task-head");
+    const keepHeadingFocus = document.activeElement === taskHead.querySelector(".task-title");
+    renderTaskHead(taskHead, data.jobs, id);
+    if (keepHeadingFocus) {
+      const heading = taskHead.querySelector(".task-title");
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    }
+    document.querySelector("#job-detail .task-reference")?.remove();
+    const currentReference = document.querySelector("#task-head .task-reference");
+    if (currentReference) document.getElementById("job-detail").prepend(currentReference);
     const mapProblem = mapFile == null ? null : W.mapEvidenceProblem(mapFile, j.id);
     const map = mapProblem ? null : mapFile;
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;
     const row = taskRows ? taskRows.find((r) => r.job === j.id) || null : null;
     safely("task-picker", () => renderPicker(document.getElementById("task-picker"), data.jobs, taskRows, j.id));
+    safely("task-context", () => reader.context(contextEl, contextFile, { job: j.id }));
+    const waiting = contextEl.querySelector(".context-waiting");
+    if (waiting) {
+      const summary = el("p", "task-prerequisite-summary");
+      const reason = contextFile.record.events.find((event) => event.kind === "waiting");
+      summary.textContent = `Waiting for a prerequisite: ${reason.prerequisite}${reason.resumption ? ` ${reason.resumption}` : ""}`;
+      document.querySelector("#task-head .task-title").after(summary);
+    }
     safely("vsm", () => {
       reader.journey(vsmEl, map, { job: j.id, row });
       const figures = vsmEl.querySelector(".task-time-figures");
@@ -3110,12 +3067,11 @@
       if (figures && title) title.after(figures);
       if (mapProblem) vsmEl.appendChild(el("p", "chart-empty", mapProblem));
     });
-    const clockRecords = el("details", "reader-details");
-    clockRecords.appendChild(el("summary", null, "Request and delivery dates"));
+    const clockRecords = el("section", "task-dates");
+    clockRecords.appendChild(el("h2", "block-title", "Request and delivery dates"));
     renderTaskClocks(clockRecords, j, row);
     clocks.appendChild(clockRecords);
     if (select) {
-      records.open = true;
       const context = document.getElementById("navigation-context");
       for (const note of context.querySelectorAll(".selection-note")) note.remove();
       vsmEl.appendChild(el("p", "selection-unavailable", "This link used the retired chart. Open a session record below for its timeline."));
@@ -4035,9 +3991,7 @@
       cell.append(el("dt", null, f.label), el("dd", null, f.text));
       if (f.meaning) cell.appendChild(el("p", "chart-caption", f.meaning));
       if (f.why) {
-        const why = el("details", "figure-limits");
-        why.append(el("summary", null, f.state === "unavailable" ? "Why it is not available" : f.state === "partial" ? "Why it is a bound" : "What this means"), el("p", null, f.why));
-        cell.appendChild(why);
+        cell.appendChild(el("p", "chart-caption figure-limits", f.why));
       }
       dl.appendChild(cell);
     }
@@ -6072,6 +6026,7 @@
     improvement_age: "an improvement item has been open for a week or more",
     loop_alarms_open: "the loop has raised an alarm about itself",
     steps_stale: "a loop step has stopped succeeding",
+    annotation_refresh: "automatic improvement-note refresh is incomplete",
   };
   const LOOP_NOTICE = {
     headless_blocked: (n) => `the waste evaluator is blocked on ${n} machine${n === 1 ? "" : "s"} (no agent command, not signed in, or host not supported); Desk opens a card after two days`,
@@ -6127,6 +6082,21 @@
     }
     row(dl, "Machines", machinesNode);
     container.appendChild(dl);
+    const refresh = loop.annotation_refresh;
+    if (refresh) {
+      const note = el("p", "annotation-refresh-scope");
+      note.append("Automatic improvement-note refresh: ", num(refresh.reporting, "count"), " of ", num(refresh.considered, "count"),
+        " machines report a specific recent operation state. This concerns note refresh, not task-time collection.");
+      container.appendChild(note);
+      for (const entry of refresh.codes) {
+        const state = el("p", "annotation-refresh-state");
+        state.append(num(entry.machines, "count"), ` machine(s): ${entry.code === "resource_unrecoverable"
+          ? "retained writer state blocked annotation refresh. Preserve the retained files and working checkouts while recovering the annotation writer; confirm recovery with a fresh ordinary refresh."
+          : entry.code === "incomplete" ? "annotation refresh was incomplete. Inspect the local refresh tally for held, unreadable or deferred changes."
+            : "the last annotation refresh completed."}`);
+        container.appendChild(state);
+      }
+    }
     const alarms = Array.isArray(loop.alarms) ? loop.alarms : [];
     const al = el("p", alarms.length ? "capture-alarms capture-alarms-on" : "capture-alarms");
     // The healthy sentence only when every figure it rests on is measured

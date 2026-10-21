@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import { buildImprovementChecks } from "../../../site/scripts/improvement-checks.mjs";
 import { buildByWeek } from "../../../site/scripts/by-week.mjs";
+import { projection } from "./fixtures/task-context.mjs";
 
 const require = createRequire(import.meta.url);
 const F = require("../../../site/src/format.js");
@@ -36,6 +37,43 @@ const render = (method, doc, ...args) => {
   R.createReader({ document })[method](host, doc, ...args);
   return host;
 };
+
+test("several task stories explain actual work, prerequisite Waiting, resumption and result without nested controls", () => {
+  for (const job of ["a".repeat(32), "b".repeat(32)]) {
+    const context = projection(job);
+    if (job[0] === "b") {
+      context.record.heading = "Publish a verified release";
+      context.record.events[0].explanation = "Prepared the release and started its required build.";
+      context.record.events[1].explanation = "Publication required a successful build.";
+      context.record.events[1].reason = "The required build had not finished.";
+      context.record.events[1].prerequisite = "Complete the required build.";
+      context.record.events[1].resumption = "Publication resumed after the build passed.";
+    }
+    const root = render("context", context, { job });
+    assert.match(root.textContent, /Waiting for a prerequisite/);
+    assert.ok(root.textContent.includes(context.record.events[1].reason));
+    assert.ok(root.textContent.includes(context.record.events[1].prerequisite));
+    assert.ok(root.textContent.includes(context.record.events[1].resumption));
+    assert.ok(root.textContent.includes(context.record.events.at(-1).explanation));
+    assert.match(root.textContent, /not a measured waiting duration/i);
+    assert.equal(by(root, "details").length, 0);
+    assert.ok(by(root, "a").some((a) => a.href === `context/${job}.json`));
+    assert.ok(by(root, "a").some((a) => a.href.includes(`/session/${context.record.sources[0].session}`)));
+    assert.equal(R.taskIdentity({ id: job, context: { availability: "published", heading: context.record.heading, reason: null } }).title, context.record.heading);
+  }
+});
+
+test("unavailable, withheld and malformed context cannot imply no work or no waiting", () => {
+  for (const context of [null, { ...projection(), availability: "unavailable", reason: "source_changed", record: null, placements: [] },
+    { ...projection(), availability: "withheld", reason: null, record: null, placements: [] }]) {
+    const root = render("context", context, { job: "a".repeat(32) });
+    assert.match(root.textContent, /not published|unavailable|withheld|changed/i);
+    assert.doesNotMatch(root.textContent, /no work|no waiting|software update|connection worked/i);
+    assert.equal(by(root, "details").length, 0);
+  }
+  const unsafe = projection(); unsafe.record.events[0].explanation = "Private path /Users/hidden";
+  assert.doesNotMatch(render("context", unsafe, { job: "a".repeat(32) }).textContent, /hidden|software update/);
+});
 
 test("the task timeline distinguishes actual work from pauses without popup controls", () => {
   const map = {
@@ -283,21 +321,23 @@ test("each historical median shows its own sample rather than the readable-task 
     "complete history is available on demand rather than an inventory on arrival");
 });
 
-test("material alarms expose consequence ownership and repair destination outside diagnostics", () => {
+test("one scoped alarm exposes the blocked operation and recovery, not speculative task-data or private-ownership claims", () => {
   assert.equal(typeof R.materialWarning, "function");
   assert.equal(R.materialWarning({ alarms: [] }), null);
   const warning = R.materialWarning({ alarms: [{ key: "loop:loop_alarms_open", owner: null }] });
-  assert.match(warning.effect, /recommendations.*may.*current|recommendations.*stale/i);
-  assert.match(warning.ownership, /public.*ownership.*incomplete/i);
-  assert.ok(warning.ownership.length <= 36, "ownership remains compact beside the alarm consequence on narrow enlarged-text screens");
-  const owned = R.materialWarning({ alarms: [{ key: "loop:loop_alarms_open", owner: { url: "https://github.com/ourostack/factory/issues/53" } }] });
-  assert.match(owned.ownership, /public.*ownership.*recorded/i);
-  assert.equal(warning.href, "#/improvements");
+  assert.match(warning.effect, /improvement system/i);
+  assert.doesNotMatch(warning.effect, /capture.*stale|nobody|ownership|recommendations.*stale/i);
+  const specific = R.materialWarning({ alarms: [{ key: "loop:annotation_refresh", reason: "resource_unrecoverable", owner: null }] });
+  assert.match(specific.effect, /improvement.*refresh|annotation.*refresh/i);
+  assert.match(specific.effect, /retained writer state/i);
+  assert.match(specific.action, /recover|recovery/i);
+  assert.equal(specific.href, "#/store");
+  const capture = R.materialWarning({ alarms: [{ key: "loop:annotation_refresh" }, { key: "capture:claude-code" }] });
+  assert.match(capture.effect, /capture/i, "an actual task-data warning takes priority over unrelated automation");
   const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8");
-  assert.match(html, /id="material-warning"/);
-  assert.ok(html.indexOf('id="material-warning"') < html.indexOf('<main'));
+  assert.doesNotMatch(html, /id="material-warning"/, "do not repeat the same warning in a second header row");
   const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8");
-  assert.match(app, /el\("a", null, "Impact and repair"\)/);
+  assert.doesNotMatch(app.slice(app.indexOf("function renderStatusLine"), app.indexOf("// A headline figure")), /el\("details"|public ownership incomplete|Impact and repair/);
 });
 
 test("a direction-unknown partial finding is never an exact number in the opening conclusion", () => {

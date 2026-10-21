@@ -61,6 +61,21 @@ test("one machine's slot is read whole, with n of N machines", () => {
   assert.deepEqual(checkNumbers({ loop_health: l }), [])
 })
 
+test("annotation refresh reports exact fixed reasons and machine scope without summing shared-desk card counts", () => {
+  const l = summarizeLoop({ files: [
+    file(rec(loop({ triage_refresh: "resource_unrecoverable", steps_stale: 1 }))),
+    file(rec(loop({ triage_refresh: "current", improvement_open: 7 }))),
+    file(rec(loop())),
+    file(rec(loop({ triage_refresh: "resource_unrecoverable" })), 74),
+  ], nowMs: NOW })
+  assert.deepEqual(l.annotation_refresh, { reporting: { state: "measured", value: 2, reasons: [] },
+    considered: { state: "measured", value: 4, reasons: [] },
+    codes: [{ code: "current", machines: { state: "measured", value: 1, reasons: [] } },
+      { code: "resource_unrecoverable", machines: { state: "measured", value: 1, reasons: [] } }] })
+  assert.equal(l.open.value, 7)
+  assert.ok(l.alarms.some((alarm) => alarm.code === "annotation_refresh"))
+  assert.deepEqual(checkNumbers({ loop_health: l }), [])
+})
 test("machines may share a desk, so counts are the largest any machine reports, never a sum", () => {
   const l = summarizeLoop({ files: [file(rec(loop())), file(rec(loop({ improvement_open: 7, oldest_open_age_days: 2 })))], nowMs: NOW })
   assert.equal(l.open.value, 7)

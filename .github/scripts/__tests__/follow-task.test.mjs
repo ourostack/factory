@@ -776,7 +776,7 @@ test("the Pages build writes one map file per task, lists it in llms.txt and rep
 
 test("the page loads walk.js, opens evidence in a real dialog, and places operator prompts and pull request times only through walk.js", () => {
   const html = read("site/src/index.html")
-  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="reader\.js"><\/script>\s*<script src="app\.js"><\/script>/)
+  assert.match(html, /<script src="walk\.js"><\/script>\s*<script src="steps\.js"><\/script>\s*<script src="task-context\.js"><\/script>\s*<script src="reader\.js"><\/script>\s*<script src="app\.js"><\/script>/)
   assert.match(html, /<dialog id="evidence-drawer" class="drawer" aria-labelledby="drawer-title">/)
   for (const id of ["task-picker", "task-head", "vsm", "task-records", "job-detail", "swimlane"]) assert.match(html, new RegExp(`id="${id}"`))
   const app = read("site/src/app.js")
@@ -830,7 +830,7 @@ test("the status line finds a repeated alarm by its key, not by its words", () =
   assert.deepEqual(s.alarms.map((a) => a.key), ["capture:claude-code", "labels_mismatch"], "a fix-next alarm whose title starts like another's words is still told, and the capture alarm is not told twice")
 })
 
-test("an open factory-alarm issue whose title carries the alarm's key owns that alarm; one without reads no one is on this (desk#232)", () => {
+test("an open factory-alarm issue names its public repair record; absence does not infer private ownership (desk#232)", () => {
   assert.deepEqual(F.alarmKeys("capture:claude-code — a capture record sent during a quarantine release"), ["capture:claude-code"])
   assert.deepEqual(F.alarmKeys("loop:steps_stale and capture:copilot-cli"), ["loop:steps_stale", "capture:copilot-cli"])
   assert.deepEqual(F.alarmKeys("Recapture:x is not a key; nor is xcapture:y"), [])
@@ -857,7 +857,7 @@ test("an open factory-alarm issue whose title carries the alarm's key owns that 
   assert.match(build, /keys: alarmKeys\(i\.title\)/)
   assert.match(read("site/src/app.js"), /alarmIssues: data\.alarm_issues, alarmIssuesVerification: data\.alarm_issues_verification/)
   const text = Object.fromEntries(s.alarms.map((a) => [a.key, a.ownerText]))
-  assert.equal(text["capture:codex"], "no one is on this")
+  assert.equal(text["capture:codex"], "public repair link not recorded; private work is not inferred")
 })
 
 test("when the build could not check for owner issues, an alarm says its owner was not checked, never that no one is on it (I-R2)", () => {
@@ -879,7 +879,7 @@ test("when the build could not check for owner issues, an alarm says its owner w
   assert.ok(old.alarms.every((a) => a.ownerText === "owner not checked (this build did not look for owner issues)"))
   // A verified empty list is a real answer.
   const ok = F.statusLine({ ...base, alarmIssues: [], alarmIssuesVerification: "verified" })
-  assert.ok(ok.alarms.every((a) => a.ownerText === "no one is on this"))
+  assert.ok(ok.alarms.every((a) => a.ownerText === "public repair link not recorded; private work is not inferred"))
 })
 
 // --------------------------------------- one waiting figure, on real tasks
