@@ -96,6 +96,20 @@ test("publication registers checked context and strips obsolete wording from ful
   assert.throws(() => publishData({ reports, dist }), /task_context_projection_invalid/);
 });
 
+test("unpublished context preserves the exact bytes of a legacy report without context", () => {
+  const root = mkdtempSync(join(tmpdir(), "factory-context-legacy-publish-"));
+  const reports = join(root, "reports"), dist = join(root, "dist");
+  const doc = { ...projection(), availability: "unavailable", reason: "not_published", record: null, placements: [] };
+  mkdirSync(join(dist, "context"), { recursive: true });
+  mkdirSync(join(reports, "jobs"), { recursive: true });
+  writeFileSync(join(dist, "context", `${JOB}.json`), JSON.stringify(doc));
+  writeFileSync(join(dist, "data.json"), JSON.stringify({ jobs: [{ id: JOB, context: module.contextSummary(doc) }] }));
+  const bytes = `${JSON.stringify({ job: JOB, formulas: { unchanged: 123 } }, null, 2)}\n`;
+  writeFileSync(join(reports, "jobs", `${JOB}.json`), bytes);
+  publishData({ reports, dist });
+  assert.equal(readFileSync(join(dist, "jobs", `${JOB}.json`), "utf8"), bytes);
+});
+
 test("only the closed per-task context summary is exempted from numerical traversal", () => {
   assert.deepEqual(checkNumbers({ jobs: [{ context: module.contextSummary(projection()) }] }), []);
   assert.ok(checkNumbers({ jobs: [{ context: { availability: "published", heading: "Safe", reason: null, unguarded: 3 } }] })

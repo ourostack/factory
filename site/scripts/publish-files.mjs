@@ -173,8 +173,8 @@ export function publishData({ reports, dist, pulls = null }) {
         const report = JSON.parse(readFileSync(join(reports, sub, rel), "utf8"));
         if (context.record !== null || report.context !== undefined) {
           report.context = { state: context.availability, reason: context.reason, record: context.record };
-        }
-        writeFileSync(to, JSON.stringify(report), "utf8");
+          writeFileSync(to, JSON.stringify(report), "utf8");
+        } else copyFileSync(join(reports, sub, rel), to);
       } else copyFileSync(join(reports, sub, rel), to);
       copied.push(`${sub}/${rel}`);
     }
