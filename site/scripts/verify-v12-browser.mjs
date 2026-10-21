@@ -994,6 +994,11 @@ export async function main(argv = process.argv.slice(2)) {
     try { const details = await fn(); record(name, true, details ? { details } : {}) }
     catch (e) { record(name, false, { error: String(e && e.message || e).slice(0, 2000) }) }
   }
+  const expectFailure = async (name, fn, mustMatch) => {
+    let failed = false, why = ""
+    try { await fn() } catch (e) { why = String(e && e.message || e).slice(0, 300); failed = mustMatch.test(why) }
+    record(`negative_control_${name}`, failed, failed ? { details: { detected: why } } : { error: why ? `failed for another reason: ${why}` : "the injected defect was not detected" })
+  }
   let chromium
   try { const imported = await import(pathToFileURL(args.playwright).href); chromium = imported.chromium || imported.default?.chromium }
   catch (e) { record("gate_blocked_browser_module_unavailable", false, { error: String(e) }) }
@@ -2337,11 +2342,6 @@ export async function main(argv = process.argv.slice(2)) {
     // The re-timing of each navigation over budget that has none yet.
     const retimeOver = async (times) => {
       for (const t of times) if (t.ms > SETTLE_BUDGET_MS && t.after !== "interaction" && !t.altered && !RETIMES.has(settleKey(t))) RETIMES.set(settleKey(t), await retime(t))
-    }
-    const expectFailure = async (name, fn, mustMatch) => {
-      let failed = false, why = ""
-      try { await fn() } catch (e) { why = String(e && e.message || e).slice(0, 300); failed = mustMatch.test(why) }
-      record(`negative_control_${name}`, failed, failed ? { details: { detected: why } } : { error: why ? `failed for another reason: ${why}` : "the injected defect was not detected" })
     }
     {
       const { context, page } = await newPage({ width: 390 })
