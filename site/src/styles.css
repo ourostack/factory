@@ -89,7 +89,8 @@
 
   --radius: 8px;
   --max-width: 1080px;
-  --prose-width: 70ch;
+  /* Text fills its column: the page container (.wrap) is the only width limit (Ari, 2026-10-20). */
+  --prose-width: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -812,24 +813,24 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .picker-badge::before { content: "· "; font-style: normal; }
 
 /* Read the numbers; choose a separate, named action to inspect evidence. */
-.task-conclusion { font-size: 1.1rem; line-height: 1.6; font-weight: 600; max-width: 65ch; }
-.task-caveat { color: var(--text-secondary); max-width: 65ch; margin: -.3rem 0 .8rem; }
-.clock-relation { max-width: 70ch; color: var(--text-secondary); margin: .6rem 0 0; }
+.task-conclusion { font-size: 1.1rem; line-height: 1.6; font-weight: 600; }
+.task-caveat { color: var(--text-secondary); margin: -.3rem 0 .8rem; }
+.clock-relation { color: var(--text-secondary); margin: .6rem 0 0; }
 .comparison-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; padding: 1rem 0; }
 .comparison-control { display: flex; flex-direction: column; gap: .4rem; min-width: 0; font-size: .9rem; }
 .comparison-control select, .comparison-control input { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; padding: .5rem; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 4px; }
 .comparison-actions, .comparison-scope { grid-column: 1 / -1; }
 .comparison-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
 .comparison-actions button, .findings-clear { font: inherit; padding: .5rem; cursor: pointer; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); }
-.comparison-scope, .comparison-question, .comparison-conclusion, .findings-conclusion { max-width: 70ch; line-height: 1.6; overflow-wrap: anywhere; }
+.comparison-scope, .comparison-question, .comparison-conclusion, .findings-conclusion { line-height: 1.6; overflow-wrap: anywhere; }
 .comparison-conclusion, .findings-conclusion { font-weight: 600; }
 .category-muted { opacity: .22; }
 .comparison-taxonomy, .comparison-history, .improvement-prompt { margin: 1rem 0; }
-.compact-legend { max-width: 70ch; color: var(--text-secondary); line-height: 1.6; }
-.triage-coverage { max-width: 70ch; min-width: 0; margin: 1rem 0; }
+.compact-legend { color: var(--text-secondary); line-height: 1.6; }
+.triage-coverage { min-width: 0; margin: 1rem 0; }
 .triage-coverage p { overflow-wrap: anywhere; }
 .improvement-facts { margin: 0.5rem 0; }
-.improvement-row { padding: 1rem 0; border-bottom: 1px solid var(--border); min-width: 0; max-width: 70ch; }
+.improvement-row { padding: 1rem 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .improvement-row p, .improvement-row pre, .finding-prompt .prompt-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .finding-improvements { display: inline-block; margin: .75rem 0; }
 .task-summary { margin: 1.25rem 0; }
@@ -840,7 +841,7 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .journey-show, .journey-clear { font: inherit; font-size: .85rem; padding: .5rem .7rem; white-space: normal; text-align: left; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-1); color: var(--text-primary); cursor: pointer; }
 .journey-show[aria-pressed="true"] { outline: 2px solid var(--focus); }
 .task-definitions, .task-reading-details, .drawer-technical, .drawer-evidence { margin: 1rem 0; }
-.task-reading-details .task-lede { max-width: 70ch; margin-top: 1rem; }
+.task-reading-details .task-lede { margin-top: 1rem; }
 .prompt-payload { margin-top: .75rem; }
 .prompt-payload .prompt-text { overflow-wrap: anywhere; }
 /* The in-task picker has real headings, and mobile cells carry those labels. */
@@ -1301,7 +1302,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 .vsm-finish { font-size: 14px; font-weight: 400; color: var(--text-secondary); }
 .cell-day { display: block; white-space: normal; font-size: 12.5px; color: var(--text-secondary); }
 /* Compare: over time */
-.ot-base { margin: 6px 0 10px; font-size: 15px; max-width: 72ch; }
+.ot-base { margin: 6px 0 10px; font-size: 15px; }
 .ot-base p { margin: 0 0 6px; }
 .ot-base-more summary { cursor: pointer; min-height: 24px; }
 .ot-base-more p { font-size: 14px; }
@@ -1507,7 +1508,7 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 .display-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; padding-bottom: .35rem; }
 .display-preferences select { max-width: 100%; min-width: 0; padding: .4rem; font: inherit; }
 .display-preferences [role="status"] { font-size: .8rem; color: var(--text-muted); }
-.briefing-wrap .lede, .visit-note { max-width: 70ch; }
+.briefing-wrap .lede, .visit-note { }
 .briefing-columns { display: grid; grid-template-columns: 1fr; gap: 0 2rem; }
 .briefing-columns > * { min-width: 0; }
 .briefing-columns > .block { margin-top: 24px; }
@@ -1515,7 +1516,7 @@ table.data-table.cause-tasks { min-width: 0; width: 100%; }
 .briefing-item { padding: 1rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .briefing-item h3 { margin: .2rem 0 .6rem; font-size: 1.1rem; }
 .briefing-family { font-size: .8rem; font-weight: 600; color: var(--text-muted); }
-.briefing-item p { margin: .5rem 0; max-width: 65ch; }
+.briefing-item p { margin: .5rem 0; }
 .briefing-action { font-weight: 600; }
 .guide-stops { padding-left: 1.5rem; }
 .guide-stops li { padding: .6rem 0; }
