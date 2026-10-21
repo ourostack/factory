@@ -1900,7 +1900,7 @@ export async function main(argv = process.argv.slice(2)) {
       try {
         await open(page, ROUTES.find((r) => r.name === "task"))
         const basis = await page.locator(".task-outcome-basis").innerText()
-        if (!/Task description is private|Named from a public pull request/.test(basis)) throw new Error("Task reference is presented as requested outcome")
+        if (!/Task description is (?:private|not published)|Named from a public pull request|Evidence-supported public task purpose; not a verbatim original request\./.test(basis)) throw new Error("Task reference is presented as requested outcome")
         return { basis }
       } finally { await context.close() }
     })
