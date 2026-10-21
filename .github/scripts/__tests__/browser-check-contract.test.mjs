@@ -222,7 +222,7 @@ test("the gate must catch every planned negative control, and each control is ac
     "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
     "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "task_share_removed", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
     "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize",
-    "task_context_nested_records", "task_context_private_prose", "task_context_numbers_changed"]
+    "task_context_nested_records", "task_context_private_prose", "task_context_numbers_changed", "task_context_stale_heading"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)

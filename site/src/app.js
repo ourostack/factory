@@ -17,6 +17,7 @@
   const B = window.FactoryBriefing;
   const L = window.FactoryLearning;
   const R = window.FactoryReader;
+  const C = window.FactoryTaskContext;
   const reader = R.createReader({ document, setLocalHref, taskLabel: (id) => jobLabel(currentData?.jobs.find((job) => job.id === id) || { id }),
     issueTitle: (ref, title) => window.FactorySteps.issueTitle(ref, title) });
   const P = window.FactoryPreferences;
@@ -3033,6 +3034,12 @@
     }
     const [tasks, mapFile, contextFile] = await Promise.all([walkFile("rollups/tasks.json"), walkFile(mapPath(j.id)), walkFile(`context/${j.id}.json`)]);
     if (seq !== walkSeq) return;
+    j.context = C.validateTaskContext(contextFile, j.id).ok ? C.contextSummary(contextFile) :
+      { availability: "unavailable", heading: null, reason: "invalid_context" };
+    renderTaskHead(document.getElementById("task-head"), data.jobs, id);
+    document.querySelector("#job-detail .task-reference")?.remove();
+    const currentReference = document.querySelector("#task-head .task-reference");
+    if (currentReference) document.getElementById("job-detail").prepend(currentReference);
     const mapProblem = mapFile == null ? null : W.mapEvidenceProblem(mapFile, j.id);
     const map = mapProblem ? null : mapFile;
     const taskRows = tasks && Array.isArray(tasks.jobs) ? tasks.jobs : null;

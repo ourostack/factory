@@ -78,7 +78,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
   "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "task_share_removed", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
   "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize",
-  "task_context_nested_records", "task_context_private_prose", "task_context_numbers_changed",
+  "task_context_nested_records", "task_context_private_prose", "task_context_numbers_changed", "task_context_stale_heading",
 ])
 
 // The triage queues the Improvements page is checked against. Each is built
@@ -114,6 +114,9 @@ export function taskContextPageEvidence() {
   const wait = document.querySelector("#task-head .task-prerequisite-summary")
   return {
     title: document.querySelector("#task-head .task-title")?.textContent || "",
+    identity_text: `${document.getElementById("task-head")?.textContent || ""} ${document.querySelector("#job-detail .task-reference")?.textContent || ""}`,
+    reference_count: document.querySelectorAll("#task-head .task-reference, #job-detail .task-reference").length,
+    figure_groups: document.querySelectorAll("#task-head .task-time-figures").length,
     text: context?.textContent || "",
     wait_summary: wait?.textContent || "",
     wait_bottom: wait?.getBoundingClientRect().bottom ?? null,
@@ -127,15 +130,18 @@ export function taskContextPageEvidence() {
   }
 }
 
-export function assessTaskContextPage(actual, { job, doc, figures, firstScreen = false }) {
+export function assessTaskContextPage(actual, { job, doc, figures, firstScreen = false, expectedTitle = null, forbiddenHeading = null }) {
   const problems = []
   if (actual.nested_records || actual.nested_context || actual.nested_header) problems.push("task_context_nested_records")
   if (!actual.direct_sessions) problems.push("task_context_missing_direct_sessions")
   if (actual.document_overflow) problems.push("task_context_document_overflow")
   if (figures && JSON.stringify(actual.figures) !== JSON.stringify(figures)) problems.push("task_context_numbers_changed")
-  if (/PRIVATE_CONTEXT_SENTINEL|\/Users\/hidden/.test(actual.text)) problems.push("task_context_private_prose")
+  if (actual.reference_count !== 1 || actual.figure_groups !== 1) problems.push("task_context_duplicate_identity")
+  if (forbiddenHeading && actual.identity_text.includes(forbiddenHeading)) problems.push("task_context_stale_heading")
+  if (expectedTitle && actual.title !== expectedTitle) problems.push("task_context_purpose_missing")
+  if (/PRIVATE_CONTEXT_SENTINEL|\/Users\/hidden/.test(`${actual.text} ${actual.identity_text}`)) problems.push("task_context_private_prose")
   if (doc?.availability === "published") {
-    if (doc.record.heading && actual.title !== doc.record.heading) problems.push("task_context_purpose_missing")
+    if (!expectedTitle && doc.record.heading && actual.title !== doc.record.heading) problems.push("task_context_purpose_missing")
     const waiting = doc.record.events.find((event) => event.kind === "waiting")
     const result = doc.record.events.findLast((event) => event.kind === "result")
     for (const phrase of [waiting?.reason, waiting?.prerequisite, waiting?.resumption, result?.explanation].filter(Boolean)) {
@@ -222,6 +228,7 @@ export const REQUIRED_CHECKS = Object.freeze([
   "time_observations_and_compact_controls", "learning_evidence_chain_retains_return", "task_reference_is_not_requested_outcome",
   "keyboard_enter_opens_standalone_picker_and_keeps_focus", "keyboard_space_opens_standalone_picker_and_keeps_focus",
   "task_context_multitask_waits_and_flat_records", "task_context_unavailable_withheld_and_unsafe_are_explicit",
+  "task_context_fresh_fragment_reconciles_identity",
   "keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", "tab_order_follows_the_page_on_primary_routes",
   "filter_change_updates_aggregates_and_coverage", "clear_selection_without_the_original_link",
   "guide_never_blocks_the_page", "touch_targets_are_at_least_24px", "status_and_legends_carry_non_color_markers",
@@ -1715,20 +1722,29 @@ export async function main(argv = process.argv.slice(2)) {
     })
     const contextExamples = await import("../../.github/scripts/__tests__/fixtures/task-context.mjs")
     const contextJobs = targets.data.jobs.filter((job) => job.sessions?.length && /^[0-9a-f]{32}$/.test(job.id)).slice(0, 2)
-    const contextCase = async (page, job, doc, { firstScreen = false, plant = null, expected = doc } = {}) => {
+    const contextCase = async (page, job, doc, {
+      firstScreen = false, plant = null, expected = doc, summary = expected, localTitle = null, inPage = false, forbiddenHeading = null,
+    } = {}) => {
       const route = { name: "task", hash: `#/task/${job.id}`, view: "task" }
       await open(page, route)
       const figures = (await page.evaluate(taskContextPageEvidence)).figures
       const data = { ...targets.data, jobs: targets.data.jobs.map((entry) => entry.id !== job.id ? entry : {
-        ...entry, context: { availability: expected?.availability || "unavailable",
-          heading: expected?.availability === "published" ? expected.record.heading : null, reason: expected?.reason ?? null },
+        ...entry, context: { availability: summary?.availability || "unavailable",
+          heading: summary?.availability === "published" ? summary.record.heading : null, reason: summary?.reason ?? null },
       }) }
       await page.route("**/data.json", (request) => request.fulfill({ json: data }))
       await page.route(`**/context/${job.id}.json`, (request) => doc === null ? request.fulfill({ status: 404, body: "" }) : request.fulfill({ json: doc }))
-      await open(page, route)
+      if (localTitle) await page.route("**/local-names.json", (request) => request.fulfill({
+        json: { version: 1, jobs: { [job.id]: { title: localTitle, track: "local", task: "requested" } } },
+      }))
+      if (inPage) {
+        await open(page, { name: "overview", hash: "#/", view: "overview" })
+        await page.evaluate((hash) => { location.hash = hash }, route.hash)
+        await settle(page, "task")
+      } else await open(page, route)
       if (plant) await page.evaluate(plant)
       const actual = await page.evaluate(taskContextPageEvidence)
-      const problems = assessTaskContextPage(actual, { job: job.id, doc: expected, figures, firstScreen })
+      const problems = assessTaskContextPage(actual, { job: job.id, doc: expected, figures, firstScreen, expectedTitle: localTitle, forbiddenHeading })
       if (problems.length) throw new Error(problems.join("; "))
       return actual
     }
@@ -1781,6 +1797,21 @@ export async function main(argv = process.argv.slice(2)) {
       }
       return { cases: cases.length, unsafe_wording_withheld: true }
     })
+    await check("task_context_fresh_fragment_reconciles_identity", async () => {
+      const job = contextJobs[0], old = contextExample(job)
+      const absent = (availability, reason) => ({ schema: "factory-task-context/1", job: job.id, availability, reason, record: null, placements: [] })
+      const unsafe = contextExample(job)
+      unsafe.record.heading = "PRIVATE_CONTEXT_SENTINEL /Users/hidden"
+      const docs = [null, absent("withheld", null), absent("unavailable", "source_changed"), unsafe, contextExample(job, true)]
+      for (const doc of docs) for (const localTitle of [null, "Authorized local requested outcome"]) {
+        const { context, page } = await newPage({ width: 390, height: 844 })
+        try {
+          await contextCase(page, job, doc, { expected: doc === unsafe ? null : doc, summary: old, inPage: true,
+            localTitle, forbiddenHeading: old.record.heading })
+        } finally { await context.close() }
+      }
+      return { cases: docs.length * 2, old_summary_new_fragment: true, local_name_priority: true }
+    })
     const contextFault = async (plant) => {
       const job = contextJobs[0]
       const { context, page } = await newPage({ width: 390, height: 844 })
@@ -1792,6 +1823,14 @@ export async function main(argv = process.argv.slice(2)) {
       () => document.getElementById("task-context").append(" PRIVATE_CONTEXT_SENTINEL")), /task_context_private_prose/)
     await expectFailure("task_context_numbers_changed", () => contextFault(
       () => { document.querySelector("#task-head [data-figure=working]").textContent = "99h" }), /task_context_numbers_changed/)
+    await expectFailure("task_context_stale_heading", async () => {
+      const job = contextJobs[0], old = contextExample(job)
+      const { context, page } = await newPage({ width: 390, height: 844 })
+      try {
+        await contextCase(page, job, null, { summary: old, inPage: true, forbiddenHeading: old.record.heading,
+          plant: () => { document.querySelector("#task-head .task-title").textContent = "Restore the device connection" } })
+      } finally { await context.close() }
+    }, /task_context_stale_heading/)
     await check("learning_twin_and_current_result_sections", async () => {
       const twin = JSON.parse(await readFile(join(args.site, "rollups/learning.json"), "utf8"))
       if (JSON.stringify(twin) !== JSON.stringify(targets.data.learning)) throw new Error("Learning twin differs from data")
