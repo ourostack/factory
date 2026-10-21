@@ -46,6 +46,7 @@ export const LOOP_KEYS = Object.freeze([
   "loop_alarms_open",
   "steps_stale",
   "headless",
+  "triage_refresh",
 ])
 // One week matches the desk's weekly sitting; the loop's own age alarm uses
 // the same number.
@@ -76,7 +77,8 @@ function slotOf(loop) {
   for (const key of LOOP_KEYS) {
     if (key === "v") continue
     const v = loop[key]
-    if (key === "headless") slot[key] = typeof v === "string" && CODE.test(v) ? v : null
+    if (key === "triage_refresh") slot[key] = ["current", "incomplete", "resource_unrecoverable"].includes(v) ? v : null
+    else if (key === "headless") slot[key] = typeof v === "string" && CODE.test(v) ? v : null
     else slot[key] = isCount(v) ? v : null
   }
   return slot
@@ -129,7 +131,7 @@ export function summarizeLoop({ files, nowMs }) {
     }
     const slot = slotOf(parsed.record.loop)
     if (slot === null) unreadable += 1
-    members.push({ slot, ageDays: Math.floor(ageMs / DAY) })
+    members.push({ slot, ageDays: Math.floor(ageMs / DAY), current: ageMs <= QUIET_AFTER_HOURS * HOUR })
   }
   const slots = members.filter((m) => m.slot).map((m) => m.slot)
 
@@ -158,12 +160,23 @@ export function summarizeLoop({ files, nowMs }) {
   const codes = new Map()
   for (const s of slots) if (s.headless) codes.set(s.headless, (codes.get(s.headless) || 0) + 1)
   const headless = [...codes.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([code, n]) => ({ code, machines: measured(n) }))
+  const refreshCodes = new Map()
+  for (const member of members) {
+    const code = member.current && member.slot?.triage_refresh
+    if (code) refreshCodes.set(code, (refreshCodes.get(code) || 0) + 1)
+  }
+  const annotationRefresh = {
+    reporting: measured([...refreshCodes.values()].reduce((sum, count) => sum + count, 0)),
+    considered: measured(members.length),
+    codes: [...refreshCodes.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([code, n]) => ({ code, machines: measured(n) })),
+  }
 
   const alarms = []
   const over = (f, limit) => f.state !== "unavailable" && f.value >= limit
   if (over(oldest, AGE_ALARM_DAYS)) alarms.push({ code: "improvement_age" })
   if (over(figures.loop_alarms_open, 1)) alarms.push({ code: "loop_alarms_open" })
   if (over(figures.steps_stale, 1)) alarms.push({ code: "steps_stale" })
+  if (refreshCodes.has("resource_unrecoverable") || refreshCodes.has("incomplete")) alarms.push({ code: "annotation_refresh" })
   const notices = []
   const blocked = slots.filter((s) => BLOCKING_HEADLESS.includes(s.headless)).length
   if (blocked) notices.push({ code: "headless_blocked", machines: measured(blocked) })
@@ -184,6 +197,7 @@ export function summarizeLoop({ files, nowMs }) {
     contract: "loop_slot_v1",
     ...figures,
     headless,
+    annotation_refresh: annotationRefresh,
     machines: {
       reporting: measured(slots.length),
       without_loop: measured(withoutLoop),

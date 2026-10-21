@@ -91,11 +91,15 @@ test("data at any depth, JSON only, skips the head's tests; everything else is c
     ["facts/claude-code-1.json"],
     ["labels/c9235d85d3661b139658f4f89ce53dd7/25ae207f-0000-4000-8000-000000000000.json"],
     ["capture/0123456789abcdef.json"],
+    ["context/0123456789abcdef0123456789abcdef.json"],
     ["facts/a.json", "labels/c9235d85d3661b139658f4f89ce53dd7/b.json", "capture/0123456789abcdef.json"],
   ]
   for (const files of data) assert.deepEqual(runScope(files), { status: 0, decided: "run=no", summary: runScope(files).summary }, files.join())
   const code = [
     ["facts/a.mjs"],
+    ["context/0123456789abcdef0123456789abcdef.mjs"],
+    ["context/nested/0123456789abcdef0123456789abcdef.json"],
+    ["context/private-name.json"],
     ["labels/x/y/run.sh"],
     ["labels/c9235d85d3661b139658f4f89ce53dd7/b.JSON"],
     ["Facts/a.json"],

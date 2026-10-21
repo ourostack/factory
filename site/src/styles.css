@@ -901,6 +901,15 @@ table.capture-table td .num-reason { display: block; white-space: normal; max-wi
 .journey-part-times dd { margin: 0; }
 .journey-unknown { color: var(--text-secondary); font-size: .875rem; }
 #task-records { margin: 1.5rem 0; }
+.task-context { max-width: 75ch; margin: 1.5rem 0 2rem; }
+.task-context-events { list-style: none; padding: 0; display: grid; gap: 1rem; }
+.task-context-event { border-left: 3px solid var(--border); padding: .75rem 1rem; min-width: 0; }
+.task-context-event.context-waiting { border-color: var(--link); }
+.task-context-event h3 { margin: 0 0 .5rem; font-size: 1.1rem; }
+.task-context-event p { margin: .4rem 0; overflow-wrap: anywhere; }
+.task-context-evidence { font-size: .875rem; }
+.task-prerequisite-summary { max-width: 75ch; border-left: 3px solid var(--link); padding-left: 1rem; overflow-wrap: anywhere; }
+.task-reference .task-key { overflow-wrap: anywhere; }
 .journey-status { font-weight: 600; }
 .journey-limits { max-width: 75ch; }
 .is-followed-task td:first-child { border-left: 3px solid var(--link); font-weight: 600; }

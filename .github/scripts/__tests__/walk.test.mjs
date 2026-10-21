@@ -159,8 +159,8 @@ test("when a pull request cannot be read, the name comes from what was read and 
   const tn = F.taskName({}, { id: "0123456789abcdef", name: "Read, opened later", name_basis: "partial", more_prs: measured(2) })
   assert.equal(tn.partial, true)
   const html = read("site/src/index.html")
-  assert.match(html, /A task's name is the title of the earliest-opened of its public pull requests, by the time GitHub records it was opened, plus/)
-  assert.match(html, /If some of its pull requests could not be read, the name comes from those that could, and the task page says so\./)
+  assert.match(html, /Otherwise the earliest-readable public pull-request title is only a reference/)
+  assert.match(read("site/src/app.js"), /some could not be read for this build, so an earlier one may exist/)
   assert.doesNotMatch(html, /first public pull request its sessions opened/)
   // The numbers check accepts the basis as a word.
   assert.deepEqual(checkNumbers({ jobs: [{ id: "p", name: "x", name_basis: "partial", more_prs: measured(2), finish_order: measured(1) }] }), [])
@@ -349,7 +349,7 @@ test("empty alarms with no monitoring data read not monitored, never normal, and
   assert.equal(F.statusLine({ verdict: { status: "unknown", reason: "no health record" }, andonVerification: "verified", capture: measuredCapture, loop: healthyLoop }).state, "not_monitored")
 })
 
-test("any alarm is abnormal, names itself, and says who is on it or that no one is", () => {
+test("any alarm retains abnormal state and its public repair record without guessing private ownership", () => {
   const andon = [{ ref: "#9", url: "https://github.com/o/r/issues/9", issue_state: "open" }, { ref: "#8", url: "https://github.com/o/r/issues/8", issue_state: "closed" }]
   const s = F.statusLine({ verdict: alive, andon, andonVerification: "verified", capture: { ...measuredCapture, alarms: [{ host: "codex", code: "coverage_low" }] }, loop: { verdict: { status: "alarm", missing: [] }, alarms: [{ code: "steps_stale" }] } })
   assert.equal(s.state, "abnormal")
@@ -361,8 +361,9 @@ test("any alarm is abnormal, names itself, and says who is on it or that no one 
   // A stale or broken site is abnormal too, even with nothing else recorded.
   assert.equal(F.statusLine({ verdict: { status: "stale", reason: "built 3 days ago" } }).state, "abnormal")
   assert.equal(F.statusLine({ verdict: { status: "broken", reason: "reports missing" } }).state, "abnormal")
-  // The page says "no one is on this" for an alarm without an owner.
-  assert.match(read("site/src/app.js"), /"no one is on this"/)
+  const unlinked = F.statusLine({ verdict: alive, alarmIssues: [], capture: { ...measuredCapture, alarms: [{ host: "codex", code: "coverage_low" }] } })
+  assert.match(unlinked.alarms[0].ownerText, /public repair link not recorded/)
+  assert.doesNotMatch(unlinked.alarms[0].ownerText, /no one|unassigned/)
 })
 
 test("the status line reads abnormal whenever Rank causes raises any alarm, including a labels mismatch", () => {

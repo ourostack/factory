@@ -1,9 +1,9 @@
 // Human views of the validated learning projection. No accounting or checks
 // are recalculated here; legacy charts remain available for deeper analysis.
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(require("./format.js"), require("./learning.js"), require("./walk.js"));
-  else root.FactoryReader = factory(root.FactoryFormat, root.FactoryLearning, root.FactoryWalk);
-})(typeof self !== "undefined" ? self : this, function (F, L, W) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./format.js"), require("./learning.js"), require("./walk.js"), require("./task-context.js"));
+  else root.FactoryReader = factory(root.FactoryFormat, root.FactoryLearning, root.FactoryWalk, root.FactoryTaskContext);
+})(typeof self !== "undefined" ? self : this, function (F, L, W, C) {
   "use strict";
   const RESULT = { better: "Better on the chosen measure", worse: "Worse on the chosen measure", no_detected_change: "No detected change",
     inconclusive: "Inconclusive", awaiting_result: "Awaiting a result", refused: "Check refused", unavailable: "Check unavailable" };
@@ -32,13 +32,16 @@
   function materialWarning(status) {
     const alarms = Array.isArray(status?.alarms) ? status.alarms : [];
     if (!alarms.length) return null;
-    const loop = alarms.some((a) => a.key?.startsWith("loop:"));
+    const site = alarms.some((a) => a.key === "site");
     const collection = alarms.some((a) => a.key?.startsWith("capture") || a.key === "labels_mismatch");
-    return {
-      effect: loop ? "Improvement recommendations may be stale." : collection ? "Some work may be missing or misclassified." : "A recorded work or quality problem needs investigation.",
-      ownership: alarms.every((a) => a.owner?.url) ? "Public alarm ownership: recorded." : "Public alarm ownership: incomplete.",
-      href: loop ? "#/improvements" : "#/store",
-    };
+    if (site) return { effect: "This site's data needs attention; its build is stale or failed.", action: "Inspect data freshness", href: "#/store" };
+    if (collection) return { effect: "Task-time capture or classification needs investigation; some work may be missing or misclassified.", action: "Inspect capture evidence", href: "#/store" };
+    const refresh = alarms.find((a) => a.key === "loop:annotation_refresh");
+    if (refresh) return { effect: refresh.reason !== "resource_unrecoverable" ? "Automatic improvement-note refresh is incomplete; this is separate from task-time collection." :
+      "Automatic improvement-note refresh is blocked by retained writer state that could not be safely recovered; task-time collection is separate.",
+      action: refresh.reason !== "resource_unrecoverable" ? "Inspect annotation refresh" : "Inspect annotation-writer recovery", href: "#/store" };
+    if (alarms.some((a) => a.key?.startsWith("loop:"))) return { effect: "The improvement system has an unresolved alarm; its published record does not identify a task-time collection failure.", action: "Inspect affected operations", href: "#/store" };
+    return { effect: "A recorded quality problem needs investigation.", action: "Inspect the public evidence", href: "#/improvements" };
   }
   function improvementHref(ref) {
     const match = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})#([1-9]\d{0,9})$/.exec(ref);
@@ -48,6 +51,9 @@
   function taskIdentity(job, names) {
     const local = job && names && Object.hasOwn(names, job.id) ? names[job.id] : null;
     if (local) return { title: local.title, basis: "Authorized local requested outcome.", reference: null };
+    if (C.validateContextSummary(job?.context) && job.context.availability === "published" && job.context.heading) {
+      return { title: job.context.heading, basis: "Evidence-supported public task purpose; not a verbatim original request.", reference: null, contextual: true };
+    }
     const reference = typeof job?.name === "string" && job.name ? job.name : null;
     return { title: reference ? `Public reference: ${reference}` : `Private task ${String(job?.id || "").slice(0, 8)}`, reference,
       basis: `Requested outcome not published. ${reference ? "Public-reference basis: earliest-readable public pull-request title, not the original request." :
@@ -115,6 +121,49 @@
     const jsonLink = (path = "rollups/learning.json", label = "Read the same evidence as JSON") => {
       const a = el("a", null, label); a.href = path; return a;
     };
+    function context(host, doc, { job } = {}) {
+      host.replaceChildren();
+      const box = section("What happened", "task-context");
+      host.append(box);
+      if (!C.validateTaskContext(doc, job).ok || doc.availability !== "published") {
+        const availability = C.validateTaskContext(doc, job).ok ? doc.availability : "unavailable";
+        const message = availability === "withheld" ? "The task explanation is withheld for privacy or insufficient support." :
+          doc?.reason === "source_changed" ? "The evidence changed; the earlier explanation is unavailable until reviewed again." :
+          "A reviewed public explanation is not published for this task.";
+        box.append(p(message, "reader-limit"));
+        return;
+      }
+      const events = doc.record.events;
+      const selected = new Set(events.length <= 6 ? events : [...events.slice(0, 2),
+        ...events.filter((event) => event.kind === "waiting").slice(0, 2), ...events.slice(-2)]);
+      const list = el("ol", "task-context-events");
+      for (const event of events.filter((entry) => selected.has(entry))) {
+        const item = el("li", `task-context-event context-${event.kind}`);
+        item.append(el("h3", null, event.kind === "waiting" ? "Waiting for a prerequisite" : event.kind === "result" ? "Observed result" : "Work"),
+          p(event.explanation));
+        if (event.kind === "waiting") {
+          item.append(p(`Why progress stopped: ${event.reason}`), p(`Needed before continuing: ${event.prerequisite}`),
+            p(event.resumption ? `Resumption: ${event.resumption}` : "Resumption is not recorded."));
+        }
+        const links = el("p", "task-context-evidence");
+        const sessions = [...new Set(event.evidence.map((ref) => ref.session))];
+        for (const session of sessions) {
+          if (links.children.length) links.append(" · ");
+          links.append(local(`Session ${session.slice(0, 8)}`, F.safeRoute("task", job ?? doc.job, "session", session)));
+        }
+        const placement = doc.placements.find((entry) => entry.event === event.id);
+        if (placement.spans.some((span) => span.start_ms === null)) links.append(" · Task-clock placement unavailable");
+        item.append(links); list.append(item);
+      }
+      box.append(list);
+      const omitted = events.length - selected.size;
+      if (omitted) box.append(p(`Showing ${selected.size} of ${events.length} published steps; ${omitted} more are in the full public context record.`, "chart-caption"));
+      if (doc.record.coverage.state === "partial") box.append(p(
+        doc.record.coverage.omitted_events > 0 ? `The explanation is partial; ${doc.record.coverage.omitted_events} additional events were omitted by the observer.` :
+          "The explanation is partial: some context or task-clock placement is not recorded.", "reader-limit"));
+      box.append(p("An independent observer explains the evidence, with a separate privacy review. Prerequisite context is not a measured waiting duration or a claim of avoidable waste.", "chart-caption"),
+        jsonLink(`context/${doc.job}.json`, "Full public context record and confidence"));
+    }
     function journey(host, map, { job, row } = {}) {
       host.replaceChildren();
       const story = W.recordedJourney(map, job);
@@ -546,7 +595,7 @@
       host.append(p(finding.related_improvements.length ? "The published mapping associates a measure, not original triggering tasks. Merge and issue closure do not prove effect." :
         "No supported public improvement mapping is published for this finding. A linked task is not automatically an original trigger."));
     }
-    return { overview, time, improvements, connections, journey };
+    return { overview, time, improvements, connections, journey, context };
   }
   return { createReader, improvementHref, taskIdentity, checkLimit, materialWarning };
 });
