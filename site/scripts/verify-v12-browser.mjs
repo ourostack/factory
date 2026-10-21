@@ -78,6 +78,7 @@ export const NEGATIVE_CONTROLS = Object.freeze([
   "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
   "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "task_share_removed", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
   "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize",
+  "task_context_nested_records", "task_context_private_prose", "task_context_numbers_changed",
 ])
 
 // The triage queues the Improvements page is checked against. Each is built
@@ -94,7 +95,7 @@ export const TRIAGE_QUEUES = Object.freeze([
 export const IN_PAGE_STEPS = Object.freeze([
   { route: "tasks", click: 'nav.steps a[href="#/tasks"]' },
   { route: "task", click: '#view-tasks a[href^="#/task/{task}"]' },
-  { route: "task", click: '#task-records > summary' },
+  { route: "task", click: '#other-tasks > summary' },
   { route: "session", click: '#view-task a[href*="/session/{session}"]' },
   { route: "time", click: 'nav.steps a[href="#/time"]' },
   { route: "compare", click: '#view-time a[href="#/compare"]' },
@@ -104,6 +105,52 @@ export const IN_PAGE_STEPS = Object.freeze([
   { route: "help", click: 'a.why-link[href="#/help"]' },
   { route: "overview", click: 'nav.steps a[href="#/"]' },
 ].map((x) => Object.freeze(x)))
+
+export function taskContextPageEvidence() {
+  const context = document.getElementById("task-context")
+  const records = document.getElementById("task-records")
+  const header = document.getElementById("status-line")
+  const visible = (node) => !!node && node.getBoundingClientRect().height > 0
+  const wait = document.querySelector("#task-head .task-prerequisite-summary")
+  return {
+    title: document.querySelector("#task-head .task-title")?.textContent || "",
+    text: context?.textContent || "",
+    wait_summary: wait?.textContent || "",
+    wait_bottom: wait?.getBoundingClientRect().bottom ?? null,
+    context_links: [...context?.querySelectorAll("a") || []].map((node) => node.getAttribute("href")),
+    direct_sessions: [...records?.querySelectorAll("a[href*='/session/']") || []].filter(visible).length,
+    nested_records: records?.tagName === "DETAILS" || !!records?.querySelector("details"),
+    nested_context: !!context?.querySelector("details"),
+    nested_header: !!header?.querySelector("details"),
+    figures: [...document.querySelectorAll("#task-head .task-time-figures [data-figure]")].map((node) => ({ key: node.dataset.figure, text: node.textContent, ms: node.dataset.ms ?? null })),
+    document_overflow: document.documentElement.scrollWidth > innerWidth + 1,
+  }
+}
+
+export function assessTaskContextPage(actual, { job, doc, figures, firstScreen = false }) {
+  const problems = []
+  if (actual.nested_records || actual.nested_context || actual.nested_header) problems.push("task_context_nested_records")
+  if (!actual.direct_sessions) problems.push("task_context_missing_direct_sessions")
+  if (actual.document_overflow) problems.push("task_context_document_overflow")
+  if (figures && JSON.stringify(actual.figures) !== JSON.stringify(figures)) problems.push("task_context_numbers_changed")
+  if (/PRIVATE_CONTEXT_SENTINEL|\/Users\/hidden/.test(actual.text)) problems.push("task_context_private_prose")
+  if (doc?.availability === "published") {
+    if (doc.record.heading && actual.title !== doc.record.heading) problems.push("task_context_purpose_missing")
+    const waiting = doc.record.events.find((event) => event.kind === "waiting")
+    const result = doc.record.events.findLast((event) => event.kind === "result")
+    for (const phrase of [waiting?.reason, waiting?.prerequisite, waiting?.resumption, result?.explanation].filter(Boolean)) {
+      if (!actual.text.includes(phrase)) problems.push("task_context_explanation_missing")
+    }
+    if (waiting && (!actual.text.includes("Waiting for a prerequisite") || !actual.wait_summary.includes(waiting.prerequisite))) problems.push("task_context_wait_missing")
+    if (!actual.context_links.includes(`context/${job}.json`)) problems.push("task_context_full_record_missing")
+    if (!actual.context_links.some((href) => href?.includes(`/task/${job}/session/`))) problems.push("task_context_session_link_missing")
+    if (firstScreen && waiting && !(actual.wait_bottom > 0 && actual.wait_bottom <= 844)) problems.push("task_context_prerequisite_below_first_screen")
+  } else {
+    if (!/not published|unavailable|withheld|changed/i.test(actual.text)) problems.push("task_context_absence_hidden")
+    if (/no work|no waiting/i.test(actual.text)) problems.push("task_context_absence_is_zero")
+  }
+  return [...new Set(problems)]
+}
 // Marks on a task's charts are sized by the time they stand for, so they can
 // be narrower than a touch target; the same prompts and stretches are also
 // opened from the full-size "Prompt N" buttons and rows beside them. Only the
@@ -173,7 +220,8 @@ export function inPageBudget(times, expected, budget = IN_PAGE_BUDGET_MS) {
 export const REQUIRED_CHECKS = Object.freeze([
   "learning_overview_first_phone_screen", "learning_twin_and_current_result_sections",
   "time_observations_and_compact_controls", "learning_evidence_chain_retains_return", "task_reference_is_not_requested_outcome",
-  "keyboard_enter_opens_inline_records_and_keeps_focus", "keyboard_space_opens_inline_records_and_keeps_focus",
+  "keyboard_enter_opens_standalone_picker_and_keeps_focus", "keyboard_space_opens_standalone_picker_and_keeps_focus",
+  "task_context_multitask_waits_and_flat_records", "task_context_unavailable_withheld_and_unsafe_are_explicit",
   "keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", "tab_order_follows_the_page_on_primary_routes",
   "filter_change_updates_aggregates_and_coverage", "clear_selection_without_the_original_link",
   "guide_never_blocks_the_page", "touch_targets_are_at_least_24px", "status_and_legends_carry_non_color_markers",
@@ -738,7 +786,7 @@ function serve(site) {
 
 async function digestSite(site) {
   const out = {}
-  for (const f of ["index.html", "app.js", "format.js", "steps.js", "walk.js", "briefing.js", "preferences.js", "learning.js", "reader.js", "styles.css", "data.json", "rollups/overview.json", "rollups/improvements.json", "rollups/learning.json"]) {
+  for (const f of ["index.html", "app.js", "format.js", "steps.js", "walk.js", "briefing.js", "preferences.js", "learning.js", "task-context.js", "reader.js", "styles.css", "data.json", "rollups/overview.json", "rollups/improvements.json", "rollups/learning.json"]) {
     try { out[f] = createHash("sha256").update(await readFile(join(site, f))).digest("hex") } catch { out[f] = null }
   }
   return out
@@ -1134,17 +1182,17 @@ export async function main(argv = process.argv.slice(2)) {
       } finally { await context.close() }
     }
 
-    // Task records expand inline and retain focus on the disclosure.
+    // The standalone task picker remains keyboard accessible. Records are flat.
     const drawerCheck = async (page, key = "Enter", nth = 0) => {
       await open(page, ROUTES.find((r) => r.name === "task"))
-      const item = page.locator("#task-records > summary")
+      const item = page.locator("#other-tasks > summary")
       await item.evaluate((a) => { a.dataset.gateOpener = "1" })
       await item.focus()
       await page.keyboard.press(key)
-      await page.waitForSelector("#task-records[open]")
+      await page.waitForSelector("#other-tasks[open]")
       if (await page.locator("#evidence-drawer[open]").count()) throw new Error("task records opened a popup")
       await page.keyboard.press(key)
-      await page.waitForFunction(() => !document.getElementById("task-records").open)
+      await page.waitForFunction(() => !document.getElementById("other-tasks").open)
       await page.waitForTimeout(200)
       const back = await page.evaluate(() => document.activeElement && document.activeElement.dataset && document.activeElement.dataset.gateOpener === "1")
       if (!back) throw new Error("focus did not return to the opener")
@@ -1152,8 +1200,8 @@ export async function main(argv = process.argv.slice(2)) {
     {
       const { context, page } = await newPage({ width: 1280 })
       try {
-        await check("keyboard_enter_opens_inline_records_and_keeps_focus", () => drawerCheck(page, "Enter", 0))
-        await check("keyboard_space_opens_inline_records_and_keeps_focus", () => drawerCheck(page, "Space", 0))
+        await check("keyboard_enter_opens_standalone_picker_and_keeps_focus", () => drawerCheck(page, "Enter", 0))
+        await check("keyboard_space_opens_standalone_picker_and_keeps_focus", () => drawerCheck(page, "Space", 0))
         await check("keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", async () => {
           await open(page, ROUTES.find((r) => r.name === "compare"))
           await page.focus("#compare-status")
@@ -1259,12 +1307,12 @@ export async function main(argv = process.argv.slice(2)) {
           await open(page, ROUTES.find((r) => r.name === "compare"))
           const r = await page.evaluate(() => {
             const status = document.getElementById("status-line")
-            const word = /Alive|Stale|Broken|Unknown|Abnormal|Normal/.test(status ? status.textContent : "")
-            const glyph = /[●◐■?]/.test(status ? status.textContent : "")
+            const word = /site|capture|improvement|quality|health/i.test(status ? status.textContent : "")
+            const action = !!status?.querySelector('a[href^="#/"]') && ["abnormal", "normal", "not_monitored"].includes(status.dataset.state)
             const blank = [...document.querySelectorAll("#view-compare .tw-legend li")].filter((li) => !li.textContent.trim()).length
-            return { word, glyph, blank }
+            return { word, action, blank }
           })
-          if (!r.word || !r.glyph || r.blank) throw new Error(JSON.stringify(r))
+          if (!r.word || !r.action || r.blank) throw new Error(JSON.stringify(r))
         })
       } finally { await context.close() }
     }
@@ -1658,13 +1706,92 @@ export async function main(argv = process.argv.slice(2)) {
             if (!node?.textContent.trim() || !r || r.top < 0 || r.bottom > 844) throw new Error(`Missing or below first screen: ${selector}`)
           }
           if (document.getElementById("status-line").classList.contains("status-abnormal")) {
-            const warning = document.getElementById("material-warning");
-            if (!warning || warning.hidden || !/ownership/i.test(warning.textContent) || !warning.querySelector("a")) throw new Error("Material alarm consequence, ownership or repair is hidden");
+            const warning = document.getElementById("status-line");
+            if (!warning?.textContent.trim() || !warning.querySelector("a") || warning.querySelector("details")) throw new Error("Material alarm consequence or action is hidden behind a control");
           }
           return { height: 844, conclusion: document.querySelector("#overview-conclusion").textContent }
         })
       } finally { await context.close() }
     })
+    const contextExamples = await import("../../.github/scripts/__tests__/fixtures/task-context.mjs")
+    const contextJobs = targets.data.jobs.filter((job) => job.sessions?.length && /^[0-9a-f]{32}$/.test(job.id)).slice(0, 2)
+    const contextCase = async (page, job, doc, { firstScreen = false, plant = null, expected = doc } = {}) => {
+      const route = { name: "task", hash: `#/task/${job.id}`, view: "task" }
+      await open(page, route)
+      const figures = (await page.evaluate(taskContextPageEvidence)).figures
+      const data = { ...targets.data, jobs: targets.data.jobs.map((entry) => entry.id !== job.id ? entry : {
+        ...entry, context: { availability: expected?.availability || "unavailable",
+          heading: expected?.availability === "published" ? expected.record.heading : null, reason: expected?.reason ?? null },
+      }) }
+      await page.route("**/data.json", (request) => request.fulfill({ json: data }))
+      await page.route(`**/context/${job.id}.json`, (request) => doc === null ? request.fulfill({ status: 404, body: "" }) : request.fulfill({ json: doc }))
+      await open(page, route)
+      if (plant) await page.evaluate(plant)
+      const actual = await page.evaluate(taskContextPageEvidence)
+      const problems = assessTaskContextPage(actual, { job: job.id, doc: expected, figures, firstScreen })
+      if (problems.length) throw new Error(problems.join("; "))
+      return actual
+    }
+    const contextExample = (job, alternate = false) => {
+      const doc = contextExamples.projection(job.id)
+      const session = job.sessions[0].session_id
+      doc.record.sources[0].session = session
+      for (const event of doc.record.events) for (const ref of event.evidence) ref.session = session
+      for (const placement of doc.placements) for (const span of placement.spans) span.session = session
+      if (alternate) {
+        doc.record.heading = "Publish a verified release with a complete independently checked build and an available download for the next deployment"
+        doc.record.events[0].explanation = "Prepared the release and started its required build."
+        doc.record.events[1].explanation = "Publication depended on a successful build, not on a missing task-time record."
+        doc.record.events[1].reason = "The required build had not finished."
+        doc.record.events[1].prerequisite = "Complete the required build before publishing the verified release."
+        doc.record.events[1].resumption = "Publication resumed after the build passed."
+        doc.record.events[2].explanation = "The release and its download were verified."
+      }
+      return doc
+    }
+    await check("task_context_multitask_waits_and_flat_records", async () => {
+      if (contextJobs.length !== 2) throw new Error("two real task references are required for multi-task context rendering")
+      let cases = 0
+      for (const [index, job] of contextJobs.entries()) for (const width of [320, 390, 1280]) for (const scale of [1, 2]) {
+        const { context, page, errors } = await newPage({ width, height: 844, scale })
+        try {
+          await contextCase(page, job, contextExample(job, index === 1), { firstScreen: index === 0 && width === 390 && scale === 1 })
+          await page.screenshot({ path: join(args.out, `context-${index}-${width}-${scale}x.png`), fullPage: false })
+          const sessionLink = page.locator("#task-context a[href*='/session/']").first()
+          await sessionLink.focus()
+          await page.keyboard.press("Enter")
+          await settle(page, "session")
+          if (!page.url().includes(`/task/${job.id}/session/`)) throw new Error("keyboard evidence link lost its parent task")
+          if (errors.length) throw new Error(errors.join("; "))
+          cases += 1
+        } finally { await context.close() }
+      }
+      return { tasks: contextJobs.length, cases, manual_public_data: false }
+    })
+    await check("task_context_unavailable_withheld_and_unsafe_are_explicit", async () => {
+      const job = contextJobs[0]
+      if (!job) throw new Error("a real task reference is required")
+      const absent = (availability, reason) => ({ schema: "factory-task-context/1", job: job.id, availability, reason, record: null, placements: [] })
+      const unsafe = contextExample(job)
+      unsafe.record.events[0].explanation = "PRIVATE_CONTEXT_SENTINEL /Users/hidden"
+      const cases = [null, absent("withheld", null), absent("unavailable", "source_changed"), unsafe]
+      for (const doc of cases) {
+        const { context, page } = await newPage({ width: 390, height: 844 })
+        try { await contextCase(page, job, doc, { expected: doc === unsafe ? null : doc }) } finally { await context.close() }
+      }
+      return { cases: cases.length, unsafe_wording_withheld: true }
+    })
+    const contextFault = async (plant) => {
+      const job = contextJobs[0]
+      const { context, page } = await newPage({ width: 390, height: 844 })
+      try { await contextCase(page, job, contextExample(job), { plant }) } finally { await context.close() }
+    }
+    await expectFailure("task_context_nested_records", () => contextFault(
+      () => document.getElementById("task-records").appendChild(document.createElement("details"))), /task_context_nested_records/)
+    await expectFailure("task_context_private_prose", () => contextFault(
+      () => document.getElementById("task-context").append(" PRIVATE_CONTEXT_SENTINEL")), /task_context_private_prose/)
+    await expectFailure("task_context_numbers_changed", () => contextFault(
+      () => { document.querySelector("#task-head [data-figure=working]").textContent = "99h" }), /task_context_numbers_changed/)
     await check("learning_twin_and_current_result_sections", async () => {
       const twin = JSON.parse(await readFile(join(args.site, "rollups/learning.json"), "utf8"))
       if (JSON.stringify(twin) !== JSON.stringify(targets.data.learning)) throw new Error("Learning twin differs from data")
@@ -2017,7 +2144,8 @@ export async function main(argv = process.argv.slice(2)) {
       const targets = await page.locator("#vsm button, #vsm [role=button], #vsm .vsm-box, #vsm .vsm-wait, #vsm .lad").count()
       if (targets) throw new Error(`${plant ? "planted " : ""}task popup targets: ${targets}`)
       if (await page.locator("#evidence-drawer[open]").count()) throw new Error("task popup is open")
-      if (!(await page.locator("#task-records > summary").count())) throw new Error("direct session records are missing")
+      if (!(await page.locator("#task-records a[href*='/session/']").count())) throw new Error("direct session records are missing")
+      if (await page.locator("#task-records details").count()) throw new Error("task records are nested behind disclosures")
       if (errors.length) throw new Error(`page errors: ${errors.slice(0, 2).join("; ")}`)
       return { popup_targets: targets }
     }
@@ -2476,7 +2604,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     await expectFailure("broken_focus_return", async () => {
       const breakFocus = { fn: () => document.addEventListener("DOMContentLoaded", () => {
-        const d = document.getElementById("task-records")
+        const d = document.getElementById("other-tasks")
         if (d) d.addEventListener("toggle", () => { if (!d.open) setTimeout(() => { if (document.activeElement) document.activeElement.blur() }, 50) })
       }) }
       const { context, page } = await newPage({ width: 1280, init: [breakFocus] })

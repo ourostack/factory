@@ -25,6 +25,7 @@ import {
   readdirSync,
   mkdirSync,
   existsSync,
+  lstatSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -70,6 +71,8 @@ import { createPullReader, maxLookups, prAnchor, prKey, pullsDoc } from "./pr-cl
 import { readTriageBatches } from "../../.github/scripts/triage-values.mjs";
 import { deriveImprovementQueue, validateImprovementQueue } from "./improvement-queue.mjs";
 import { buildImprovementChecks, CHECK_METHOD } from "./improvement-checks.mjs";
+import { projectTaskContext } from "./task-context.mjs";
+const { contextSummary } = createRequire(import.meta.url)("../src/task-context.js");
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -351,9 +354,11 @@ const sessions = [];
 const sessionBindings = new Map();
 // Each session's facts file, for the order in which tasks' first facts landed.
 const factsFileOf = new Map();
+const publicFacts = [];
 
 for (const f of factFiles) {
   const d = readJSON(join(factsDir, f), {});
+  publicFacts.push(d);
   if (typeof d.session?.id === "string" && !factsFileOf.has(d.session.id)) factsFileOf.set(d.session.id, f);
   if (jobSessionIds.has(d.session?.id)) sessionBindings.set(d.session.id, d.jobs);
   if (jobSessionIds.has(d.session?.id) && /^[A-Za-z0-9._-]+\.json$/.test(f)) {
@@ -380,6 +385,30 @@ for (const f of factFiles) {
   scopedSessionCount += 1;
   scopedEntrypoints[entrypoint] = (scopedEntrypoints[entrypoint] || 0) + 1;
   if (bound) scopedBoundCount += 1;
+}
+
+// Recheck against today's public facts, not the reports branch's older copy.
+// Only the compact heading/state belongs in initial page data.
+const taskContexts = new Map();
+const contextDir = join(mainDir, "context");
+const contextStat = lstatSync(contextDir, { throwIfNoEntry: false });
+let contextValidator = {};
+if (contextStat) {
+  if (!contextStat.isDirectory() || contextStat.isSymbolicLink()) throw new Error("task_context_directory_invalid");
+  if (!deskDir) throw new Error("current Desk source --desk is required for task context");
+  contextValidator = await import(pathToFileURL(resolve(deskDir, "plugins/desk/mcp/src/factory/context-schema.js")));
+  if (typeof contextValidator.validateContextBytes !== "function" || typeof contextValidator.checkContextAgainstFacts !== "function") {
+    throw new Error("canonical task context interface changed");
+  }
+  if (readdirSync(contextDir).some((name) => !/^[0-9a-f]{32}\.json$/.test(name))) throw new Error("task_context_entry_invalid");
+}
+for (const job of jobs.filter((job) => /^[0-9a-f]{32}$/.test(job.id))) {
+  const file = join(contextDir, `${job.id}.json`);
+  const stat = contextStat ? lstatSync(file, { throwIfNoEntry: false }) : null;
+  if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 128 * 1024)) throw new Error("task_context_entry_invalid");
+  const doc = projectTaskContext({ job: job.id, bytes: stat ? readFileSync(file) : null, facts: publicFacts, ...contextValidator });
+  taskContexts.set(job.id, doc);
+  job.context = contextSummary(doc);
 }
 
 // Each job's labeled time, from the evaluator's label files on main
@@ -1108,6 +1137,10 @@ if (violations.length) {
 mkdirSync(dirname(outFile), { recursive: true });
 writeFileSync(outFile, JSON.stringify(data), "utf8");
 writeFileSync(join(dirname(outFile), "health.json"), JSON.stringify(health), "utf8");
+if (taskContexts.size) {
+  mkdirSync(join(dirname(outFile), "context"), { recursive: true });
+  for (const [job, doc] of taskContexts) writeFileSync(join(dirname(outFile), "context", `${job}.json`), JSON.stringify(doc), "utf8");
+}
 if (byWeek) {
   mkdirSync(join(dirname(outFile), "rollups"), { recursive: true });
   writeFileSync(join(dirname(outFile), "rollups/by_week.json"), JSON.stringify(byWeek), "utf8");

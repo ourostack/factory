@@ -236,6 +236,11 @@ test("whole golden legacy facts build retains pinned baseline numbers and report
     for (const j of now.jobs) {
       assert.ok(Object.hasOwn(j, "clocks"), `${j.id} carries Desk's clocks`)
       assert.deepEqual(j.clocks, JSON.parse(readFileSync(join(reports, "jobs", `${j.id}.json`), "utf8")).clocks, `${j.id} clocks equal its report twin`)
+      assert.deepEqual(j.context, { availability: "unavailable", heading: null, reason: "not_published" })
+      const context = JSON.parse(readFileSync(join(current, "context", `${j.id}.json`), "utf8"))
+      assert.equal(context.job, j.id)
+      assert.equal(context.record, null)
+      assert.deepEqual(context.placements, [])
     }
     const { built_at: oldStamp, ...oldData } = old
     const { built_at: nowStamp, overview: additiveOverview, improvement_checks: additiveChecks, learning: additiveLearning, ...nowRest } = now
@@ -251,11 +256,15 @@ test("whole golden legacy facts build retains pinned baseline numbers and report
     // and the rest of the queue equals the baseline's.
     const { runner: additiveRunner, ...queueWithoutRunner } = nowRest.improvements
     assert.deepEqual(additiveRunner, { state: "unknown", last_success_age: "unknown" })
-    const nowData = { ...nowRest, improvements: queueWithoutRunner, jobs: nowRest.jobs.map(({ clocks, ...row }) => row) }
+    const { annotation_refresh: additiveRefresh, ...legacyLoop } = nowRest.loop_health
+    assert.deepEqual(additiveRefresh.reporting, { state: "measured", value: 0, reasons: [] })
+    assert.deepEqual(additiveRefresh.codes, [])
+    assert.equal(additiveRefresh.considered.state, "measured")
+    const nowData = { ...nowRest, loop_health: legacyLoop, improvements: queueWithoutRunner, jobs: nowRest.jobs.map(({ clocks, context, ...row }) => row) }
     assert.equal(additiveOverview.schema, "factory-overview/1")
     assert.deepEqual(checkNumbers({ overview: additiveOverview }), [])
     assert.deepEqual(JSON.parse(readFileSync(join(current, "rollups/overview.json"), "utf8")), additiveOverview)
-    assert.deepEqual(nowData, oldData, "only the build timestamp, separately checked additive overview/checks/learning and the queue's additive runner may differ")
+    assert.deepEqual(nowData, oldData, "only the build timestamp and separately checked additive clocks, context, refresh monitoring, overview/checks/learning and queue runner may differ")
     // The queue twin is the data's queue exactly, and the baseline's plus the runner.
     const queueTwin = JSON.parse(readFileSync(join(current, "rollups/improvements.json"), "utf8"))
     assert.deepEqual(queueTwin, now.improvements)

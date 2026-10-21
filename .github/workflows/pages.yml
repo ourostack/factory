@@ -108,6 +108,7 @@ jobs:
           node site/scripts/build-data.mjs --reports _reports --main . --desk _desk --out site/dist/data.json --pulls-out "$RUNNER_TEMP/pulls.json" --pulls-cache "$RUNNER_TEMP/pulls-cache.json" | tee -a "$GITHUB_STEP_SUMMARY"
           cp site/src/index.html site/src/styles.css site/src/format.js site/src/preferences.js site/src/briefing.js site/src/walk.js site/src/steps.js site/src/app.js site/dist/
           cp site/src/reader.js site/dist/
+          cp site/src/task-context.js site/dist/
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the pull request cache

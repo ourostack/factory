@@ -21,6 +21,7 @@ import { validateImprovementChecks } from "./improvement-checks.mjs";
 const { hasReasonText, lifecycleClockIssues } = createRequire(import.meta.url)("../src/format.js");
 const { validateBriefing } = createRequire(import.meta.url)("../src/briefing.js");
 const { validateLearning } = createRequire(import.meta.url)("../src/learning.js");
+const { validateContextSummary } = createRequire(import.meta.url)("../src/task-context.js");
 
 const STATES = new Set(["measured", "partial", "unavailable"]);
 const STATED_KEYS = new Set(["state", "value", "reasons", "bound", "basis", "kind", "n", "N", "of", "out_of_scope", "excluded", "run_url"]);
@@ -80,6 +81,7 @@ const NUMBER_PATHS = [
   /^capture_coverage\.hosts\[\d+\]\.(records|unverified_machines|not_counted_machines)$/,
   /^loop_health\.machines\.(reporting|without_loop|unreadable_loop|quiet|stale)$/,
   /^loop_health\.(headless|notices)\[\d+\]\.machines$/,
+  /^loop_health\.annotation_refresh\.(reporting|considered|codes\[\d+\]\.machines)$/,
   /^loop_health\.verdict\.(quiet|stale)$/,
   /^scope\.(sessions_total|sessions_scoped|sessions_scoped_bound|sessions_other)$/,
   ...ROLLUP_PATHS,
@@ -186,6 +188,10 @@ export function checkNumbers(data) {
   }
 
   function walk(node, path, top) {
+    if (/^jobs\[\d+\]\.context$/.test(path)) {
+      if (!validateContextSummary(node)) bad(path, "task_context_summary_invalid");
+      return;
+    }
     // EXACT lifecycle subtree only. Its class/basis/period offsets are a
     // different, closed contract; no general numbers/queue exemption.
     if (/^jobs\[\d+\]\.clocks$/.test(path)) {

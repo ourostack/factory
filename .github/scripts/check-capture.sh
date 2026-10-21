@@ -105,9 +105,11 @@ while IFS= read -r path; do
     def code: type == "string" and test("^[a-z_]{1,32}$");
     ((has("loop") | not) or (.loop |
       .v == 1
-      and (keys - ["v", "improvement_open", "improvement_claimed", "improvement_shipped", "improvement_verifying", "oldest_open_age_days", "closed_confirmed_month", "closed_unverified_month", "loop_alarms_open", "steps_stale", "headless"] | length == 0)
+      and (keys - ["v", "improvement_open", "improvement_claimed", "improvement_shipped", "improvement_verifying", "oldest_open_age_days", "closed_confirmed_month", "closed_unverified_month", "loop_alarms_open", "steps_stale", "headless", "triage_refresh"] | length == 0)
       and ([to_entries[] | select(.key != "v") |
-        if .key == "headless" then (.value == null or (.value | code)) else (.value == null or (.value | count)) end
+        if .key == "headless" then (.value == null or (.value | code))
+        elif .key == "triage_refresh" then (.value == null or .value == "current" or .value == "incomplete" or .value == "resource_unrecoverable")
+        else (.value == null or (.value | count)) end
       ] | all)
       and (tojson | utf8bytelength <= 512)
     ))

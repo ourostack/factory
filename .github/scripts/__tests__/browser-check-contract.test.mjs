@@ -221,7 +221,8 @@ test("the gate must catch every planned negative control, and each control is ac
     "missing_chart_equivalent", "broken_focus_return", "false_copied_claim", "chart_text_out_of_bounds", "unnamed_link",
     "conclusion_below_first_screen", "cards_at_wide_screen", "page_height_over_budget", "stacked_table_without_roles",
     "caveat_in_the_conclusion_place", "clipped_text_in_narrow_plot", "view_unit_mismatch_on_compare", "task_figure_differs_on_compare", "bound_before_under_on_compare", "task_lead_differs_from_compare", "bound_before_under_on_task_page", "share_edge_on_task_page", "task_share_removed", "share_label_differs_from_words", "slow_data_file", "slowdown_3x_over_budget", "slow_after_action", "loading_marker_never_clears",
-    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize"]
+    "slow_in_page_navigation", "triage_row_links_out", "withdrawn_review_offers_a_prompt", "triage_coverage_count_altered", "triage_row_misnumbered", "task_popup_target_returns", "session_chart_stale_after_resize",
+    "task_context_nested_records", "task_context_private_prose", "task_context_numbers_changed"]
   assert.deepEqual([...G.NEGATIVE_CONTROLS].sort(), [...names].sort())
   const source = readFileSync(SCRIPT, "utf8")
   for (const name of names) assert.equal(source.split(`expectFailure("${name}"`).length - 1, 1, `${name} is run exactly once`)
@@ -233,7 +234,7 @@ test("routes that promise a chart must draw it, with an equivalent table that ha
 })
 
 test("every required check is recorded by name, and a run that skips one fails", () => {
-  const required = ["keyboard_enter_opens_inline_records_and_keeps_focus", "keyboard_space_opens_inline_records_and_keeps_focus",
+  const required = ["keyboard_enter_opens_standalone_picker_and_keeps_focus", "keyboard_space_opens_standalone_picker_and_keeps_focus",
     "keyboard_select_by_type_ahead_and_clear_with_space_keep_focus", "tab_order_follows_the_page_on_primary_routes", "filter_change_updates_aggregates_and_coverage",
     "clear_selection_without_the_original_link", "storage_denied_keeps_the_site_usable", "storage_methods_throwing_keep_the_site_usable",
     "data_fetch_failure_says_so_and_navigation_works", "render_error_is_isolated", "json_twins_match_data_and_rendered_meaning"]
@@ -248,7 +249,7 @@ test("every required check is recorded by name, and a run that skips one fails",
   // The selection note uses the reader wording, never the old internal status line.
   assert.match(source, /An item from this link is selected/)
   assert.doesNotMatch(source, /\/Selection requested\//)
-  assert.match(source, /waitForSelector\("#task-records\[open\]"\)/)
+  assert.match(source, /waitForSelector\("#other-tasks\[open\]"\)/)
 })
 
 test("the command refuses missing, relative or in-repository paths before launching a browser", () => {
@@ -330,10 +331,10 @@ test("the Improvements page is checked against triage queues the real reducer bu
 test("the in-page pass clicks through the reader's links on one loaded page, under its own budget rule", () => {
   assert.deepEqual(G.IN_PAGE_STEPS.map((s) => s.route), ["tasks", "task", "task", "session", "time", "compare", "findings", "improvements", "why", "help", "overview"])
   for (const step of G.IN_PAGE_STEPS) assert.ok(G.ROUTES.some((r) => r.name === step.route) &&
-    (/a(\.[\w-]+)?\[href[\^*]?="(#\/|\/session\/)/.test(step.click) || step.click === "#task-records > summary"), step.route)
+    (/a(\.[\w-]+)?\[href[\^*]?="(#\/|\/session\/)/.test(step.click) || step.click === "#other-tasks > summary"), step.route)
   // The task and session reached by click are the ones every other check reads.
   assert.equal(G.IN_PAGE_STEPS[1].click, '#view-tasks a[href^="#/task/{task}"]')
-  assert.equal(G.IN_PAGE_STEPS[2].click, '#task-records > summary')
+  assert.equal(G.IN_PAGE_STEPS[2].click, '#other-tasks > summary')
   assert.equal(G.IN_PAGE_STEPS[3].click, '#view-task a[href*="/session/{session}"]')
   assert.deepEqual([...G.IN_PAGE_WIDTHS], [1280, 390])
   assert.equal(G.IN_PAGE_BUDGET_MS, 5000)
