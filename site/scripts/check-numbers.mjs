@@ -15,6 +15,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { validateImprovementQueue } from "./improvement-queue.mjs";
 import { validateImprovementChecks } from "./improvement-checks.mjs";
+import { isReleaseVersion } from "./outcomes.mjs";
 
 // The page's own words for each reason. A reason with no words would reach
 // a reader as a code, so it fails the build here.
@@ -205,6 +206,7 @@ export function checkNumbers(data) {
     if (node === undefined) return bad(path, "undefined_value");
     if (typeof node === "number") return bad(path, Number.isFinite(node) ? "bare_number" : "non_finite");
     if (typeof node === "string") {
+      if (/^trend\[\d+\]\.version$/.test(path) && isReleaseVersion(node)) return;
       const key = path.split(".").pop().replace(/\[\d+\]$/, "");
       if (BAD_STRING.test(node) && !FREE_KEYS.has(key)) bad(path, "bad_string_value");
       return;

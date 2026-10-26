@@ -219,12 +219,13 @@ export function attentionPerDelivered(jobs) {
   return rollup(members, { of: "delivered tasks", reduce: (v) => Math.round(v.reduce((a, b) => a + b, 0) / v.length), measure: "attention_per_delivered" })
 }
 
+export const isReleaseVersion = (v) => /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?:-(?:alpha|beta|rc)\.[0-9]{1,4})?$/.test(v)
+
 export function releaseTrend(outcomesFile, measuresFile, compareVersions) {
   const o = isObject(outcomesFile?.groupings?.plugin_version) ? outcomesFile.groupings.plugin_version : {}
   const m = isObject(measuresFile?.groupings?.plugin_version) ? measuresFile.groupings.plugin_version : {}
-  const isRelease = (v) => /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?:-(?:alpha|beta|rc)\.[0-9]{1,4})?$/.test(v)
   const keys = [...new Set([...Object.keys(o), ...Object.keys(m)])]
-  const versions = [...keys.filter(isRelease).sort(compareVersions), ...keys.filter((k) => k === "mixed")]
+  const versions = [...keys.filter(isReleaseVersion).sort(compareVersions), ...keys.filter((k) => k === "mixed")]
   return versions.map((version) => {
     const s = outcomesSummary(isObject(o[version]) ? o[version] : null)
     const mv = isObject(m[version]) ? m[version] : {}
