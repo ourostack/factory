@@ -209,10 +209,10 @@ function authorityWorkflow(scenario, { factsOnly = false, actualBase = false, in
   if (introducing) {
     // CI runs tests from a merge RESULT checkout. Its HEAD is not a PR head.
     // Introduce current code against the historical store's own data. Recent
-    // captures and their old labels are not a maintenance-code fixture.
+    // captures, labels and contexts are not a maintenance-code fixture.
     // Never weaken the released validator's merge-bearing-head refusal.
     sourceHead = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    const dataRoots = new Set(["facts", "labels", "capture", "corrections", "triage"])
+    const dataRoots = new Set(["facts", "labels", "capture", "corrections", "triage", "context"])
     const entries = git("ls-tree", sourceHead).split("\n").filter((entry) => !dataRoots.has(entry.split("\t")[1]))
     for (const name of dataRoots) {
       const historical = git("ls-tree", base, "--", name)
@@ -320,7 +320,7 @@ test("S2-1: real introducing maintenance head validates with exact 050c278a base
   const r = authorityWorkflow({}, { actualBase: true, introducing: true })
   try {
     assert.equal(r.base, "050c278a8119b6d7ebb681f4f0ab6b57ea800dd2")
-    const dataRoots = new Set(["facts", "labels", "capture", "corrections", "triage"])
+    const dataRoots = new Set(["facts", "labels", "capture", "corrections", "triage", "context"])
     for (const name of dataRoots) assert.equal(r.git("ls-tree", r.head, "--", name), r.git("ls-tree", r.base, "--", name))
     const code = (ref) => r.git("ls-tree", ref).split("\n").filter((entry) => !dataRoots.has(entry.split("\t")[1]))
     assert.deepEqual(code(r.head), code(r.sourceHead))
@@ -343,7 +343,7 @@ test("S2-1: real introducing maintenance head validates with exact 050c278a base
     assert.equal(r.run(workflowRun(text, "Re-read the actual actor and head after validation"), true, {
       ACTOR: outputs.actor, TRUSTED_MAINTAINER: outputs.trusted_maintainer,
     }).status, 0)
-    t.diagnostic(`introducing source=${r.sourceHead} fixtureHead=${r.head} base=${r.base}; non-triage source trees identical, historical triage, single base parent; old-helper bytes unchanged; maintenance passed`)
+    t.diagnostic(`introducing source=${r.sourceHead} fixtureHead=${r.head} base=${r.base}; non-data source trees identical, historical data, single base parent; old-helper bytes unchanged; maintenance passed`)
     assert.equal(existsSync(join(r.dir, ".github/scripts/triage-values.mjs")), false)
     assert.equal(existsSync(join(r.dir, ".github/scripts/check-triage.sh")), false)
     noActions(r)
@@ -463,7 +463,7 @@ test("S2-1: installed missing/crashing helpers and helper deletion history never
   }
 })
 
-test("remote CI: introducing fixture isolates modern triage from scrubbed merged-result checkout", (t) => {
+test("remote CI: introducing fixture isolates modern triage and context from scrubbed merged-result checkout", (t) => {
   if (!process.env.DESK_DIR) { assert.notEqual(process.env.FACTORY_REQUIRE_DESK, "1"); return }
   const home = realpathSync(mkdtempSync(join(tmpdir(), "triage-ci-merged-")))
   const repo = join(home, "repo")
@@ -475,13 +475,17 @@ test("remote CI: introducing fixture isolates modern triage from scrubbed merged
     git("config", "user.name", "fixture"); git("config", "user.email", "fixture@example.invalid")
     copyFileSync(new URL(import.meta.url), join(repo, ".github/scripts/__tests__/validate-workflow.test.mjs"))
     const modernTriage = "triage/fedcba9876543210.json"
+    const modernContext = "context/fedcba9876543210fedcba9876543210.json"
     const fixture = JSON.parse(readFileSync(join(ROOT, ".github/scripts/__tests__/fixtures/v12-triage.json"), "utf8"))
     mkdirSync(join(repo, "triage"), { recursive: true })
     writeFileSync(join(repo, modernTriage), JSON.stringify(fixture.public) + "\n")
-    git("add", "--", ".github/scripts/__tests__/validate-workflow.test.mjs", modernTriage)
+    mkdirSync(join(repo, "context"), { recursive: true })
+    writeFileSync(join(repo, modernContext), JSON.stringify({ modern_context_sentinel: true }) + "\n")
+    git("add", "--", ".github/scripts/__tests__/validate-workflow.test.mjs", modernTriage, modernContext)
     git("commit", "-q", "--allow-empty", "-m", "candidate test bytes")
     const candidate = git("rev-parse", "HEAD")
     const triageTree = git("rev-parse", `${candidate}:triage`)
+    const contextTree = git("rev-parse", `${candidate}:context`)
     git("checkout", "-q", "--detach", base)
     git("merge", "--quiet", "--no-ff", "--no-edit", candidate)
     const merged = git("rev-parse", "HEAD")
@@ -495,7 +499,8 @@ test("remote CI: introducing fixture isolates modern triage from scrubbed merged
     t.diagnostic(`CI-shaped source=${source} candidate=${candidate} merged=${merged}; two-parent checkout; token-free child`)
     assert.equal(result.status, 0, result.stdout + result.stderr)
     assert.equal(git("rev-parse", `${merged}:triage`), triageTree)
-    assert.equal(git("diff", "--name-only", candidate, merged, "--", "facts", "triage", "corrections", "capture"), "")
+    assert.equal(git("rev-parse", `${merged}:context`), contextTree)
+    assert.equal(git("diff", "--name-only", candidate, merged, "--", "facts", "triage", "corrections", "capture", "context"), "")
   } finally { rmSync(home, { recursive: true, force: true }) }
 })
 

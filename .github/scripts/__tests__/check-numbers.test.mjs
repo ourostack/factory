@@ -9,6 +9,8 @@ import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 import { measured, rollup, unavailable } from "../../../site/scripts/state.mjs"
 import { readFileSync } from "node:fs"
 import { deriveImprovementQueue } from "../../../site/scripts/improvement-queue.mjs"
+import { releaseTrend } from "../../../site/scripts/outcomes.mjs"
+import { compareVersions } from "../../../site/scripts/waste.mjs"
 
 const triageFixture = JSON.parse(readFileSync(new URL("./fixtures/v12-triage.json", import.meta.url), "utf8"))
 const queueNow = Date.parse("2026-10-10T12:00:00Z")
@@ -97,6 +99,30 @@ const codes = (d) => checkNumbers(d).map((v) => v.code)
 
 test("a well-formed document passes", () => {
   assert.deepEqual(checkNumbers(good()), [])
+})
+
+test("release trend accepts stable release identifiers produced from report groupings", () => {
+  const versions = ["3.2.0-alpha.349", "3.2.0", "3.2.17"]
+  const trend = releaseTrend({
+    groupings: { plugin_version: Object.fromEntries(versions.map((version) => [version, { signoff: { jobs: 1 } }])) },
+  }, null, compareVersions)
+  assert.deepEqual(trend.map((row) => row.version), versions)
+  assert.deepEqual(checkNumbers({ trend }), [])
+})
+
+test("release labels do not exempt numeric strings at other paths or in measurements", () => {
+  for (const document of [
+    { trend: [{ other: "3.2.0" }] },
+    { nested: { version: "3.2.0" } },
+    { nested: { trend: [{ version: "3.2.0" }] } },
+    { trend: [{ nested: { version: "3.2.0" } }] },
+    { version: "3.2.0" },
+    { metric: measured("3.2.0") },
+    { trend: [{ first_pass_yield: measured("3.2.0") }] },
+  ]) assert.ok(checkNumbers(document).some((issue) => issue.code === "bad_string_value"))
+  for (const version of ["", "123", "3.2", "3.2.0.1", "3.2.1000", "NaN", "Infinity"]) {
+    assert.ok(checkNumbers({ trend: [{ version }] }).some((issue) => issue.code === "bad_string_value"), version)
+  }
 })
 
 test("a bare number outside config is refused", () => {
