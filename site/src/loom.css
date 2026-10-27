@@ -62,7 +62,7 @@ code { font: .85em var(--mono); letter-spacing: -.01em; }
 .theme { font: inherit; font-size: .85rem; background: transparent; color: var(--ink); border: 1px solid var(--rule); border-radius: 99px; padding: .35em .9em; cursor: pointer; }
 .theme:hover { border-color: var(--help); }
 
-main { display: block; padding: clamp(1.5rem, 5vw, 4rem) clamp(1rem, 4vw, 3rem) 4rem; max-width: 76rem; margin: 0 auto; }
+main { display: block; padding: clamp(1.25rem, 3.5vw, 2.75rem) clamp(1rem, 4vw, 3rem) 4rem; max-width: 76rem; margin: 0 auto; }
 main:focus { outline: none; }
 main:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .page > * { animation: rise .6s var(--ease) both; }
@@ -75,8 +75,12 @@ main:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .eyebrow code { text-transform: none; letter-spacing: 0; }
 .display { font: 500 clamp(2rem, 5.2vw, 3.6rem)/1.08 var(--serif); letter-spacing: -.015em; margin: 0 0 1.2rem; max-width: 22ch; text-wrap: balance; }
 .display em { font-style: italic; color: var(--accent-text); }
+.display.compact { font-size: clamp(1.8rem, 3.8vw, 2.7rem); max-width: 30ch; margin-bottom: .7rem; }
+/* Headings take focus on every route change for screen readers and keyboard orientation.
+   Mark them with a deliberate rule under the first line instead of boxing the whole hero. */
 .display:focus { outline: none; }
-.display:focus-visible { outline: 3px solid var(--focus); outline-offset: 6px; border-radius: 6px; }
+.display:focus-visible { outline: none; text-decoration: underline 3px var(--focus); text-decoration-skip-ink: none; text-underline-offset: .16em; }
+.display:focus-visible em { text-decoration: inherit; }
 .h1-note { margin: -.4rem 0 1.2rem; font-size: .9rem; color: var(--muted); }
 .lede { font-size: 1.15rem; max-width: var(--measure); }
 .lede.small { font-size: .98rem; color: var(--muted); }
@@ -104,6 +108,7 @@ main:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .legend { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; padding: 0; margin: 1.6rem 0; font-size: .9rem; color: var(--muted); }
 .legend li { display: flex; align-items: center; gap: .45rem; }
 .chip { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
+.chip.weft { background: repeating-linear-gradient(90deg, var(--weft) 0 3px, color-mix(in srgb, var(--weft) 55%, transparent) 3px 6px); }
 .chip.hatch { background: repeating-linear-gradient(45deg, var(--linen) 0 3px, var(--linen-line) 3px 4.5px); outline: 1px solid var(--linen-line); }
 .t-cmd { fill: var(--cmd); background: var(--cmd); } .t-read { fill: var(--read); background: var(--read); }
 .t-write { fill: var(--write); background: var(--write); } .t-help { fill: var(--help); background: var(--help); }
@@ -117,6 +122,13 @@ section { margin-top: 3.5rem; }
 .sec-head p { margin: 0; max-width: var(--measure); color: var(--muted); }
 
 /* the shelf */
+.shelf-sec { margin-top: 1.4rem; }
+.shelf-bar { display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem 1.6rem; border-top: 1px solid var(--rule); padding-top: .8rem; }
+.shelf-bar h2 { font: 500 1.35rem/1.2 var(--serif); margin: 0; }
+.legend.compact { margin: 0; font-size: .85rem; }
+.shelf-sec .shelf { margin: .8rem 0 1rem; }
+.aside-note { max-width: var(--measure); font-size: .92rem; color: var(--muted); border-left: 3px solid var(--rule); padding-left: 1rem; margin-top: 2rem; }
+.aside-note p { margin: .3rem 0; }
 .task-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .5rem 1.5rem; }
 .task-list a { font: 500 1.05rem var(--serif); }
 .shelf { list-style: none; padding: 0; margin: 1.6rem 0; display: grid; gap: .6rem; }
