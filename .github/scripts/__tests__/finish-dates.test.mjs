@@ -589,6 +589,8 @@ const jobReport = (id, status, timeline) => ({
 })
 
 const FA = "a".repeat(32), FB = "b".repeat(32), FC = "c".repeat(32)
+// Public UUID-v4 session identities, as the strict session catalog requires.
+const S1 = "11111111-1111-4111-8111-111111111111", S2 = "22222222-2222-4222-8222-222222222222", S3 = "33333333-3333-4333-8333-333333333333"
 function storeFixture({ withDesk }) {
   const dir = mkdtempSync(join(tmpdir(), "finish-build-"))
   const reports = join(dir, "reports")
@@ -597,26 +599,26 @@ function storeFixture({ withDesk }) {
   write(join(reports, "rollups/measures.json"), { groupings: {} })
   write(join(reports, "rollups/muda.json"), { groupings: { overall: { all: { jobs: 3, jobs_labeled: 0, wastes: [] } } }, wastes: ["defects"] })
   const desk = withDesk ? { finished_on: { state: "measured", value: "2026-10-02", basis: "transition", reasons: [] } } : {}
-  write(join(reports, `jobs/${FA}.json`), jobReport(FA, "done", { lead_window: win(100000), ...desk, prs: [], intervals: [{ session_id: "s1", host: "claude-code" }] }))
-  write(join(reports, `jobs/${FB}.json`), jobReport(FB, "done", { intervals: [{ session_id: "s2", host: "claude-code" }] }))
-  write(join(reports, `jobs/${FC}.json`), jobReport(FC, "processing", { lead_window: win(1), prs: [], intervals: [{ session_id: "s3", host: "claude-code" }] }))
+  write(join(reports, `jobs/${FA}.json`), jobReport(FA, "done", { lead_window: win(100000), ...desk, prs: [], intervals: [{ session_id: S1, host: "claude-code" }] }))
+  write(join(reports, `jobs/${FB}.json`), jobReport(FB, "done", { intervals: [{ session_id: S2, host: "claude-code" }] }))
+  write(join(reports, `jobs/${FC}.json`), jobReport(FC, "processing", { lead_window: win(1), prs: [], intervals: [{ session_id: S3, host: "claude-code" }] }))
   write(join(reports, "rollups/stackup.json"), {
     schema: "desk.factory.rollups/1",
     jobs: [stackRow(FA), stackRow(FB), stackRow(FC, { status: "processing" })],
   })
   write(join(reports, "rollups/tasks.json"), { jobs: [taskRow(FA), taskRow(FB), taskRow(FC)] })
-  write(join(main, "facts/claude-code-s1.json"), facts("s1", [{ job: FA }]))
-  write(join(main, "facts/claude-code-s2.json"), facts("s2", [{ job: FB }]))
-  write(join(main, "facts/claude-code-s3.json"), facts("s3", [{ job: FC }]))
+  write(join(main, `facts/claude-code-${S1}.json`), facts(S1, [{ job: FA }]))
+  write(join(main, `facts/claude-code-${S2}.json`), facts(S2, [{ job: FB }]))
+  write(join(main, `facts/claude-code-${S3}.json`), facts(S3, [{ job: FC }]))
   execFileSync("git", ["init", "-q", main])
   const commit = (msg, iso) => {
     execFileSync("git", ["-C", main, "add", "."])
     execFileSync("git", ["-C", main, "-c", "user.name=x", "-c", "user.email=x@example.com", "commit", "-q", "-m", msg], { env: { ...process.env, GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso } })
   }
   commit("intake", "2026-10-01T09:00:00Z")
-  write(join(main, `labels/${FA}/s1.json`), { job: FA })
+  write(join(main, `labels/${FA}/${S1}.json`), { job: FA })
   commit("labels a", "2026-10-03T09:00:00Z")
-  write(join(main, `labels/${FB}/s2.json`), { job: FB })
+  write(join(main, `labels/${FB}/${S2}.json`), { job: FB })
   commit("labels b", "2026-10-05T09:00:00Z")
   return { dir, reports, main, out: join(dir, "dist/data.json") }
 }
