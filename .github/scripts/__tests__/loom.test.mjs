@@ -594,3 +594,44 @@ test("programmatic heading focus is a deliberate mark, not a stock box around th
   assert.match(rule[1], /text-decoration|box-shadow|border/);
   assert.match(css, /:focus-visible \{ outline: 3px solid var\(--focus\)/, "interactive controls keep their ring");
 });
+
+async function weaveOf(f) {
+  const m = await mount({ details: [[f.session.id, detail(f)]] });
+  await m.go(`#/session/${f.session.id}`);
+  const num = (n, k) => Number(n.getAttribute(k));
+  const hits = all(m.host).filter((n) => /^hit( short)?$/.test(n.getAttribute("class") || ""));
+  const axis = all(m.host).find((n) => n.getAttribute("class") === "axis");
+  const labels = tags(axis, "text").map((t) => ({ x: num(t, "x"), text: t.textContent })).filter((l) => l.text).sort((a, b) => a.x - b.x);
+  const svgNode = all(m.host).find((n) => n.getAttribute("class") === "weave");
+  return { m, num, hits, labels, svgNode };
+}
+const readable = (labels) => labels.every((l, i) => i === 0 || l.x - labels[i - 1].x >= 40);
+
+test("a five-minute session is woven at a readable width with proportional, uncrowded time", async () => {
+  const f = facts({ intervals: [span("turn", 0, 60000), span("tool", 0, 120000, { tool: "shell" }), span("tool", 240000, 300000, { tool: "read" })] }, LONE);
+  f.session.duration_ms = 300000;
+  const { num, hits, labels } = await weaveOf(f);
+  assert.equal(hits.length, 1);
+  assert.ok(num(hits[0], "width") >= 300, `the whole session is ${num(hits[0], "width")}px wide`);
+  const k = num(hits[0], "width") / 300000;
+  assert.ok(readable(labels), JSON.stringify(labels));
+  assert.equal(labels.at(-1).text, "5 min");
+  assert.ok(Math.abs(labels.at(-1).x - 300000 * k) < 1e-6);
+  assert.ok(labels.length >= 3, "intermediate elapsed labels mark the minutes");
+  for (const l of labels.slice(0, -1)) assert.ok(Math.abs(l.x - k * (/min/.test(l.text) ? Number(l.text.split(" ")[0]) * 60000 : 0)) < 1e-6, l.text);
+});
+
+test("a short multi-period session keeps one time scale and a tiny final period stays tiny", async () => {
+  const f = facts({ intervals: [span("turn", 0, 1000), span("tool", 2 * HOUR, 2 * HOUR + 30000, { tool: "read" })] }, LONE);
+  f.session.duration_ms = 2 * HOUR + 30000;
+  const { num, hits, labels, svgNode } = await weaveOf(f);
+  assert.equal(hits.length, 3);
+  const k = num(hits[0], "width") / HOUR;
+  assert.ok((2 * HOUR + 30000) * k >= 300, "the frame is readable");
+  for (let i = 0; i < 3; i++) assert.ok(Math.abs(num(hits[i], "x") - i * HOUR * k) < 1e-6);
+  assert.equal(hits[2].getAttribute("data-short") === "true", 30000 * k < 12);
+  const last = all(svgNode).filter((n) => /\bthread\b/.test(n.getAttribute("class") || "") && num(n, "x") >= 2 * HOUR * k - 1e-6);
+  assert.ok(last.length && last.every((t) => num(t, "width") <= 30000 * k + 1e-6));
+  assert.ok(readable(labels), JSON.stringify(labels));
+  assert.equal(labels.at(-1).text, "2 h 30 s");
+});
