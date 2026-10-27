@@ -34,7 +34,7 @@ test("improvement-system alarms state their effect, owner or unassigned, and nex
   // Capture alarms are not improvement-system alarms.
   assert.deepEqual(S.improvementAlarms(F.statusLine({ capture: { alarms: [{ host: "x", code: "coverage_dropped" }] } })), [])
   // Current checks lead; alarm detail remains reachable from Overview.
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.ok(html.indexOf('id="improvement-monitoring"') < html.indexOf('id="improvement-alarms"'), "alarms remain in the named monitoring disclosure")
   assert.ok(html.indexOf('id="improvement-status"') < html.indexOf('id="improvement-monitoring"'), "current-check arrival precedes diagnostics")
   const app = read("site/src/app.js")
@@ -61,7 +61,7 @@ test("one task table: Tasks and the task page share columns, sort and lifecycle 
   assert.match(app, /“at least” or “at most”/)
   assert.match(app, /declared/)
   // On the task page the other tasks are below the task, collapsed.
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const view = html.slice(html.indexOf('id="view-task"'), html.indexOf('id="view-session"'))
   assert.ok(view.indexOf('id="task-head"') < view.indexOf('id="task-picker"'), "the task title comes before the list of tasks")
   assert.match(view, /<details id="other-tasks" class="other-tasks">\s*<summary>/)
@@ -72,7 +72,7 @@ test("one reader-facing label per cause, and no raw cause code in reader text", 
   assert.equal(W.causeWords("waiting:no_session"), "No recorded task session")
   assert.equal(W.waitCauseLabel("other_task"), "Recorded work on other tasks")
   assert.equal(W.waitCauseLabel("no_session"), "No recorded task session")
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.doesNotMatch(html, />Agent on another task</)
   // Rank causes with a task filter says one coherent thing.
   const app = read("site/src/app.js")
@@ -101,7 +101,7 @@ test("Inspect recorded tasks opens the affected deliveries, filtered", () => {
 })
 
 test("the display time zone lives in a compact control and never changes without the reader", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const header = html.slice(0, html.indexOf('<main'))
   assert.doesNotMatch(header, /Supported instants use your display zone/)
   assert.match(html, /<details id="display-settings" class="display-settings">/)

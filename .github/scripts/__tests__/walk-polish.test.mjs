@@ -167,7 +167,7 @@ test("#/ opens the latest finished task from the real snapshot, which has no fin
   const latest = finished.reduce((a, j) => (!a || j.finish_order.value > a.finish_order.value ? j : a), null)
   assert.equal(F.defaultTask(jobs).id, latest.id)
   // The rule is said the same way to people and to agents.
-  assert.match(read("site/src/index.html"), /opens on the latest-finished task that has something to teach and waste labels, named or private/)
+  assert.match(read("site/src/evidence.html"), /opens on the latest-finished task that has something to teach and waste labels, named or private/)
   assert.match(read("site/src/llms-template.txt"), /`#\/` opens on the latest-finished task that has something to teach and waste labels, named or private\./)
 })
 
@@ -212,7 +212,7 @@ test("the share mode lives in the URL and the page draws it on a 0 to 100% axis"
   assert.deepEqual(F.parseRoute("#/compare?mode=share"), { view: "compare", mode: "share" })
   assert.deepEqual(F.parseRoute("#/causes?mode=share"), { view: "causes" }, "Rank causes has no share mode")
   assert.deepEqual(F.parseRoute("#/compare?mode=working"), { view: "compare", mode: "working" })
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(html, /<button type="button" class="mode-btn" data-mode="share" aria-pressed="false">Share of each task<\/button>/)
   const app = read("site/src/app.js")
   assert.match(app, /const scale = share \? \{ unit: "share", per: 1, max_ms: 1, ticks: \[0, 0\.25, 0\.5, 0\.75, 1\] \}/)
@@ -347,7 +347,7 @@ test("the status line gives one scoped consequence and destination; flat monitor
   assert.equal(F.glossaryRoute("x\"><script>"), null)
   assert.deepEqual(F.parseRoute("#/why?term=improvement-loop"), { view: "why", term: "improvement-loop" })
   assert.deepEqual(F.parseRoute("#/why?term=<x>"), { view: "why" })
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   for (const id of ["capture-coverage", "improvement-loop", "job-hours", "evaluator", "session", "card", "operator", "sign-off", "agent-on-another-task", "labeled-pause", "timeline-ladder", "andon"]) assert.match(html, new RegExp(`<dt id="g-${id}">`), id)
   const app = read("site/src/app.js")
   assert.doesNotMatch(app, /el\("details", "status-details"\)|"Health details"/)
@@ -454,7 +454,7 @@ test("the final review's fixes: one legend shape, a padded Pareto frame, the pic
   // The Pareto frame no longer pans (its bars wrap into rows), so it needs no end padding for a pinned axis.
   assert.match(app, /const plotW = colW \* n \+ 8;/)
   assert.match(app, /share \? \(phone \|\| k > 1 \? "% of lead time" : "% of each task's lead time"\)/)
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(html, /<dt id="g-work-burst">Work burst<\/dt>/)
   assert.match(html, /<dt id="g-rework">Rework<\/dt>/)
   // The picker says "partial" once.

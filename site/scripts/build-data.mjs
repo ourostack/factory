@@ -72,6 +72,7 @@ import { readTriageBatches } from "../../.github/scripts/triage-values.mjs";
 import { deriveImprovementQueue, validateImprovementQueue } from "./improvement-queue.mjs";
 import { buildImprovementChecks, CHECK_METHOD } from "./improvement-checks.mjs";
 import { projectTaskContext } from "./task-context.mjs";
+import { buildSessionCatalog, buildSessionDetail } from "./session-intelligence.mjs";
 const { contextSummary } = createRequire(import.meta.url)("../src/task-context.js");
 
 function arg(name, fallback) {
@@ -410,6 +411,13 @@ for (const job of jobs.filter((job) => /^[0-9a-f]{32}$/.test(job.id))) {
   taskContexts.set(job.id, doc);
   job.context = contextSummary(doc);
 }
+
+// Independent of the legacy report-timeline list: every published session is
+// discoverable. Builders validate all documents before any new output is written.
+const sessionCatalog = buildSessionCatalog({ facts: publicFacts, sources: checkSources });
+const sessionDetails = publicFacts.map((facts) => buildSessionDetail({
+  facts, contexts: taskContexts, jobs, sources: checkSources,
+}));
 
 // Each job's labeled time, from the evaluator's label files on main
 // (labels/<job>/<session>.json), clipped to the job's own share of each
@@ -1137,6 +1145,11 @@ if (violations.length) {
 mkdirSync(dirname(outFile), { recursive: true });
 writeFileSync(outFile, JSON.stringify(data), "utf8");
 writeFileSync(join(dirname(outFile), "health.json"), JSON.stringify(health), "utf8");
+mkdirSync(join(dirname(outFile), "sessions"), { recursive: true });
+writeFileSync(join(dirname(outFile), "sessions/index.json"), JSON.stringify(sessionCatalog), "utf8");
+for (const doc of sessionDetails) {
+  writeFileSync(join(dirname(outFile), "sessions", `${doc.session.id}.json`), JSON.stringify(doc), "utf8");
+}
 if (taskContexts.size) {
   mkdirSync(join(dirname(outFile), "context"), { recursive: true });
   for (const [job, doc] of taskContexts) writeFileSync(join(dirname(outFile), "context", `${job}.json`), JSON.stringify(doc), "utf8");

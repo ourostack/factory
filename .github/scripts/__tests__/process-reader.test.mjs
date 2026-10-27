@@ -334,7 +334,7 @@ test("one scoped alarm exposes the blocked operation and recovery, not speculati
   assert.equal(specific.href, "#/store");
   const capture = R.materialWarning({ alarms: [{ key: "loop:annotation_refresh" }, { key: "capture:claude-code" }] });
   assert.match(capture.effect, /capture/i, "an actual task-data warning takes priority over unrelated automation");
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /id="material-warning"/, "do not repeat the same warning in a second header row");
   const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8");
   assert.doesNotMatch(app.slice(app.indexOf("function renderStatusLine"), app.indexOf("// A headline figure")), /el\("details"|public ownership incomplete|Impact and repair/);
@@ -445,7 +445,7 @@ test("legacy issue summaries do not contradict a current completed check or conf
 });
 
 test("primary HTML exposes four direct destinations and loads the learning reader in dependency order", () => {
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8");
   const nav = html.slice(html.indexOf('<nav class="steps"'), html.indexOf("</nav>"));
   assert.deepEqual([...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1]), ["#/", "#/time", "#/improvements", "#/tasks"]);
   assert.match(html, /data-step="store" href="#\/store">Data health/);

@@ -146,7 +146,7 @@ test("Overview and Compare lead with their conclusion, right under the heading",
   assert.equal(B.conclusionWords({ state: "attention", attention: [item("a"), item("b")], investigation: [] }), "2 items need your attention first, led by: a.")
   assert.equal(B.conclusionWords({ state: "limited", attention: [], investigation: [item("Deliveries are waiting for an answer")] }), "Nothing is flagged for your attention first; 1 recorded pattern is worth investigating: Deliveries are waiting for an answer.")
   assert.equal(B.conclusionWords({ state: "limited", attention: [], investigation: [] }), "Nothing in this briefing is flagged for attention or investigation.")
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const after = (view, id) => { const v = html.slice(html.indexOf(`id="view-${view}"`)); return v.slice(v.indexOf("</h1>") + 5).trimStart().startsWith(`<p id="${id}"`) }
   const overview = html.slice(html.indexOf('id="view-overview"'), html.indexOf('id="view-time"'))
   assert.ok(overview.indexOf("</h1>") < overview.indexOf('id="overview-conclusion"') && overview.indexOf('id="overview-conclusion"') < overview.indexOf('id="overview-monitoring"'), "the learning conclusion precedes monitoring inventories")

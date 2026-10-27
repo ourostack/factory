@@ -323,7 +323,7 @@ test("without the by-week file nothing is drawn rather than a zero", () => {
 })
 
 test("Compare has the Over time section, its lede, its two toggles and the cause × week table", () => {
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   assert.match(html, /id="over-time"/)
   assert.match(html, /Each task is counted in the week it finished \(UTC\)/)
   for (const v of ['data-over="week"', 'data-over="task"', 'data-otmode="share"', 'data-otmode="all"', 'data-otmode="working"', 'id="cause-weeks"', 'id="over-time-base"']) assert.ok(html.includes(v), v)

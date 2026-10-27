@@ -398,7 +398,7 @@ test("the private-names overlay names tasks as text, and a missing or malformed 
 })
 
 test("the briefing navigation preserves all evidence views, Why Lean, About and the store's numbers", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   for (const id of ["status-line", "view-task", "view-session", "view-compare", "view-causes", "view-act", "view-cause", "view-why", "view-about", "view-store", "jobs-table", "stackup", "fe-dots", "stackup-table", "pareto", "pareto-table", "cause-detail", "problems", "alarm-owners", "guide"]) assert.match(html, new RegExp(`id="${id}"`), id)
   assert.match(html, /recorded by the agent through Desk's sign-off tool|on the operator's word/)
   assert.doesNotMatch(html, /witnessed/)

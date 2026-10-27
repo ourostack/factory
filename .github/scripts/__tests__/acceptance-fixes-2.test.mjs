@@ -68,7 +68,7 @@ test("the legacy task recommendation drops the label condition, without choosing
   assert.doesNotMatch(app, /F\.landingChoice\(data\.jobs\)/)
   assert.match(read("site/src/llms-template.txt"), /and `waste\.sessions_labeled` has a value of 1 or more \(the task has evaluator waste labels\)\. Open the one with the latest `finish_date\.value`\./)
   assert.match(read("site/src/llms-template.txt"), /If no task qualifies, the label condition is dropped; if still none qualifies,/)
-  assert.match(read("site/src/index.html"), /"Follow a task" opens on the latest-finished task that has something to teach and waste labels/)
+  assert.match(read("site/src/evidence.html"), /"Follow a task" opens on the latest-finished task that has something to teach and waste labels/)
 })
 
 // ------------------------------------------------------------ I-n1
@@ -230,7 +230,7 @@ test("Fix 1 M-1: the landing note holds in either picker order", () => {
 })
 
 test("Fix 1 M-2, M-3: the Store's intro and the Health row point to the one scope line", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.doesNotMatch(html, /counted beside each figure/)
   assert.match(html, /Jobs whose card predates sign-off are out of scope; the line below says how many\./)
   assert.match(read("site/src/app.js"), /key === "unsigned_deliveries" \? F\.withoutScope\(number\) : number/)

@@ -9,6 +9,14 @@ import { test } from "node:test"
 import { checkNumbers } from "../../../site/scripts/check-numbers.mjs"
 
 const SCRIPT = new URL("../../../site/scripts/build-data.mjs", import.meta.url).pathname
+const JOB = { a: "a".repeat(32), b: "b".repeat(32), c: "c".repeat(32), d: "d".repeat(32) }
+const SESSION = {
+  s1: "11111111-1111-4111-8111-111111111111",
+  s2: "22222222-2222-4222-8222-222222222222",
+  s3: "33333333-3333-4333-8333-333333333333",
+  s4: "44444444-4444-4444-8444-444444444444",
+  s9: "99999999-9999-4999-8999-999999999999",
+}
 
 function write(path, obj) {
   mkdirSync(dirname(path), { recursive: true })
@@ -52,12 +60,12 @@ function fixture() {
   write(join(reports, "rollups/coverage.json"), { sessions_with_facts: 3, jobs: 3, jobs_open: 1, labels: { files: 0 } })
   write(join(reports, "rollups/measures.json"), { groupings: {} })
   write(join(reports, "rollups/muda.json"), { groupings: { overall: { all: { jobs: 3, jobs_labeled: 0, wastes: [] } } }, wastes: ["defects"] })
-  write(join(reports, "jobs/a.json"), job("a", "done"))
-  write(join(reports, "jobs/b.json"), job("b", "done", { active_time_ms: { class: "measured", partial: true, partial_reasons: ["worker_shared"], value: 9 } }))
-  write(join(reports, "jobs/c.json"), job("c", "processing", { active_time_ms: { class: "unavailable", reason: "job_offsets_unavailable", value: null } }))
-  write(join(main, "facts/claude-code-s1.json"), facts("s1", { models: [{ id: "m1", requests: 4, tokens: { input: 1, output: 2, cache_read: 3, cache_write: 4, reasoning: null } }] }))
-  write(join(main, "facts/claude-code-s2.json"), facts("s2"))
-  write(join(main, "facts/claude-code-s3.json"), facts("s3", { agents: [{ n: 1, parent: null }, { n: 2, parent: 1 }] }))
+  write(join(reports, `jobs/${JOB.a}.json`), job(JOB.a, "done"))
+  write(join(reports, `jobs/${JOB.b}.json`), job(JOB.b, "done", { active_time_ms: { class: "measured", partial: true, partial_reasons: ["worker_shared"], value: 9 } }))
+  write(join(reports, `jobs/${JOB.c}.json`), job(JOB.c, "processing", { active_time_ms: { class: "unavailable", reason: "job_offsets_unavailable", value: null } }))
+  write(join(main, `facts/claude-code-${SESSION.s1}.json`), facts(SESSION.s1, { models: [{ id: "m1", requests: 4, tokens: { input: 1, output: 2, cache_read: 3, cache_write: 4, reasoning: null } }] }))
+  write(join(main, `facts/claude-code-${SESSION.s2}.json`), facts(SESSION.s2))
+  write(join(main, `facts/claude-code-${SESSION.s3}.json`), facts(SESSION.s3, { agents: [{ n: 1, parent: null }, { n: 2, parent: 1 }] }))
   execFileSync("git", ["init", "-q", main])
   execFileSync("git", ["-C", main, "add", "."])
   execFileSync("git", ["-C", main, "-c", "user.name=x", "-c", "user.email=x@example.com", "commit", "-q", "-m", "intake"], {
@@ -357,8 +365,8 @@ test("tool kinds come from the pipeline's rows when they carry a state; a row wi
 
 test("a job report with state and reasons reaches the job page with all three states", () => {
   const fx = fixture()
-  write(join(fx.reports, "jobs/d.json"), {
-    job: "d",
+  write(join(fx.reports, `jobs/${JOB.d}.json`), {
+    job: JOB.d,
     formulas: {
       status: { class: "declared", reasons: [], state: "measured", value: "done" },
       waits: {
@@ -371,7 +379,7 @@ test("a job report with state and reasons reaches the job page with all three st
   const r = build(fx)
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
-  const d = data.jobs.find((j) => j.id === "d")
+  const d = data.jobs.find((j) => j.id === JOB.d)
   const states = new Set(d.details.map((x) => x.number.state))
   assert.deepEqual([...states].sort(), ["measured", "partial", "unavailable"])
   assert.deepEqual(checkNumbers(data), [])
@@ -379,7 +387,7 @@ test("a job report with state and reasons reaches the job page with all three st
 
 test("harness worker counts say how many sessions they rest on", () => {
   const fx = fixture()
-  write(join(fx.main, "facts/claude-code-s4.json"), facts("s4", { agents: [], unavailable: [{ field: "agents", reason: "source_unreadable" }] }))
+  write(join(fx.main, `facts/claude-code-${SESSION.s4}.json`), facts(SESSION.s4, { agents: [], unavailable: [{ field: "agents", reason: "source_unreadable" }] }))
   const r = build(fx)
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
@@ -445,7 +453,7 @@ test("without them, every caption and number says substantial sessions", () => {
 
 test("the page takes every section caption from the caption table, and the scope paragraph names the headline population", () => {
   const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   assert.match(app, /F\.caption\(section, data\.scopes\[SCOPE_OF\[section\]\]\)/)
   assert.match(app, /F\.caption\("headlines", data\.scopes\.headlines\)/)
   assert.doesNotMatch(app, /Everything above and below/)
@@ -478,14 +486,14 @@ test("an outcomes rollup fills sign-off, yield and the unsigned deliveries slot,
     first_pass_yield: { state: "partial", value: 1, reasons: ["awaiting_signoff"], n: 2, N: 2, passed: 2, returned: 0, awaiting_signoff: 1, changed_ask_only: 0, excluded: [{ reason: "not_recorded", jobs: 1 }] },
     rework: { state: "measured", reasons: [], n: 2, N: 2, returns: { in_task: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 }, at_review: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 }, after_delivery: { agent_error: 0, changed_ask: 0, new_information: 0, external: 0 } }, changed_ask: 0, reason_check: { state: "unavailable", reasons: ["no_refusals"] }, defects: { state: "unavailable", reasons: ["no_labels"], n: 0, N: 2 } },
   })
-  write(join(fx.reports, "jobs/a.json"), job("a", "done", { signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], verified: true, reason: null, wait: { class: "lt_1h", censored: false } } }))
+  write(join(fx.reports, `jobs/${JOB.a}.json`), job(JOB.a, "done", { signoff: { class: "declared", state: "measured", value: "accepted", reasons: [], verified: true, reason: null, wait: { class: "lt_1h", censored: false } } }))
   const r = build(fx)
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   assert.deepEqual(checkNumbers(data), [])
   assert.equal(data.outcomes.signoff.accepted.value, 1)
   assert.equal(data.outcomes.first_pass_yield.bound, "upper")
-  assert.equal(data.jobs.find((j) => j.id === "a").signoff.value, "accepted")
+  assert.equal(data.jobs.find((j) => j.id === JOB.a).signoff.value, "accepted")
   const health = JSON.parse(readFileSync(join(dirname(fx.out), "health.json"), "utf8"))
   assert.deepEqual(checkNumbers(health), [])
   assert.equal(health.slots.unsigned_deliveries.value, 1)
@@ -533,26 +541,26 @@ test("with no loop slot anywhere the open improvement items slot is no data, nev
 
 test("the build gives each task its waste from its label files and its sessions, and adds the trend and what to fix next", () => {
   const fx = fixture()
-  write(join(fx.reports, "jobs/a.json"), { ...job("a", "done"), timeline: { intervals: [{ session_id: "s1", host: "claude-code" }] } })
-  write(join(fx.reports, "jobs/c.json"), { ...job("c", "done"), timeline: { intervals: [{ session_id: "s1", host: "claude-code" }] } })
+  write(join(fx.reports, `jobs/${JOB.a}.json`), { ...job(JOB.a, "done"), timeline: { intervals: [{ session_id: SESSION.s1, host: "claude-code" }] } })
+  write(join(fx.reports, `jobs/${JOB.c}.json`), { ...job(JOB.c, "done"), timeline: { intervals: [{ session_id: SESSION.s1, host: "claude-code" }] } })
   // Session s1 holds jobs a (0..1000) and c (1000..1500); each job's evaluator labeled the whole session.
-  write(join(fx.main, "facts/claude-code-s1.json"), facts("s1", { jobs: [{ job: "a", segments: [{ start_ms: 0, end_ms: 1000 }] }, { job: "c", segments: [{ start_ms: 1000, end_ms: 1500 }] }] }))
-  write(join(fx.main, "labels/a/s1.json"), { schema: "desk.factory.labels/1", job: "a", session: "s1", stretches: [{ start_ms: 0, end_ms: 1500, class: "muda", waste: "waiting" }] })
-  write(join(fx.main, "labels/c/s1.json"), { schema: "desk.factory.labels/1", job: "c", session: "s1", stretches: [{ start_ms: 0, end_ms: 1500, class: "muda", waste: "waiting" }] })
+  write(join(fx.main, `facts/claude-code-${SESSION.s1}.json`), facts(SESSION.s1, { jobs: [{ job: JOB.a, segments: [{ start_ms: 0, end_ms: 1000 }] }, { job: JOB.c, segments: [{ start_ms: 1000, end_ms: 1500 }] }] }))
+  write(join(fx.main, `labels/${JOB.a}/${SESSION.s1}.json`), { schema: "desk.factory.labels/1", job: JOB.a, session: SESSION.s1, stretches: [{ start_ms: 0, end_ms: 1500, class: "muda", waste: "waiting" }] })
+  write(join(fx.main, `labels/${JOB.c}/${SESSION.s1}.json`), { schema: "desk.factory.labels/1", job: JOB.c, session: SESSION.s1, stretches: [{ start_ms: 0, end_ms: 1500, class: "muda", waste: "waiting" }] })
   // A label file naming another job is not this job's.
-  write(join(fx.main, "labels/a/s9.json"), { schema: "desk.factory.labels/1", job: "b", session: "s9", stretches: [{ start_ms: 0, end_ms: 5, class: "muda", waste: "motion" }] })
+  write(join(fx.main, `labels/${JOB.a}/${SESSION.s9}.json`), { schema: "desk.factory.labels/1", job: JOB.b, session: SESSION.s9, stretches: [{ start_ms: 0, end_ms: 5, class: "muda", waste: "motion" }] })
   const r = build(fx)
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(fx.out, "utf8"))
   assert.deepEqual(checkNumbers(data), [])
-  const a = data.jobs.find((j) => j.id === "a")
+  const a = data.jobs.find((j) => j.id === JOB.a)
   assert.deepEqual(a.waste.rows.map((x) => [x.key, x.total_ms.value, x.total_ms.state]), [["waiting", 1000, "measured"]])
-  assert.deepEqual(data.jobs.find((j) => j.id === "c").waste.rows.map((x) => [x.key, x.total_ms.value]), [["waiting", 500]])
+  assert.deepEqual(data.jobs.find((j) => j.id === JOB.c).waste.rows.map((x) => [x.key, x.total_ms.value]), [["waiting", 500]])
   assert.deepEqual(data.labeled_waste.rows.map((x) => [x.key, x.total_ms.value]), [["waiting", 1500]], "the shared session counts once in all")
-  assert.deepEqual(data.jobs.find((j) => j.id === "b").waste.rows, [])
-  assert.deepEqual(data.sessions.map((s) => s.session_id), ["s1"])
-  assert.match(data.sessions[0].facts_url, /\/blob\/main\/facts\/claude-code-s1\.json$/)
+  assert.deepEqual(data.jobs.find((j) => j.id === JOB.b).waste.rows, [])
+  assert.deepEqual(data.sessions.map((s) => s.session_id), [SESSION.s1])
+  assert.ok(data.sessions[0].facts_url.endsWith(`/blob/main/facts/claude-code-${SESSION.s1}.json`))
   assert.ok(Array.isArray(data.trend))
-  assert.ok(data.fix_next.some((i) => i.id === "waste_waiting" && i.examples[0].job === "a"))
+  assert.ok(data.fix_next.some((i) => i.id === "waste_waiting" && i.examples[0].job === JOB.a))
   assert.equal(typeof data.waste_actions.waiting, "string")
 })

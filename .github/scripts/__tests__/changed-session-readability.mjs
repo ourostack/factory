@@ -17,9 +17,12 @@ assert.equal(digest(fs.readFileSync(path.join(site, leaf))), expected)
 const candidate = fs.readFileSync(new URL("../../../site/src/styles.css", import.meta.url))
 const original = fs.readFileSync(path.join(site, "styles.css"))
 const results = [], errors = []
+// The previous reader moved to evidence.html when the Loom became the entry;
+// older built artifacts still carry it as index.html.
+const ENTRY = fs.existsSync(path.join(site, "evidence.html")) ? "evidence.html" : "index.html"
 const server = createServer((req, res) => {
   const name = new URL(req.url, "http://localhost").pathname
-  const file = path.resolve(site, "." + (name === "/" ? "/index.html" : name))
+  const file = path.resolve(site, "." + (name === "/" ? `/${ENTRY}` : name))
   if (!file.startsWith(path.resolve(site) + path.sep)) { res.writeHead(400).end(); return }
   try {
     const bytes = name === "/styles.css" ? mode === "candidate" ? candidate : original : fs.readFileSync(file)
