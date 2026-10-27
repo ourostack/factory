@@ -77,6 +77,92 @@ test("the browser refuses malformed/unsafe story envelopes rather than rendering
   }
 });
 
+function recommendationProjection() {
+  const doc = projection();
+  doc.record.schema = "desk.factory.context/2";
+  doc.record.recommendations = [{
+    id: "fedcba9876543210",
+    observations: [doc.record.events[0].id],
+    problem: "The behavior was not checked through the actual connection.",
+    change: "Verify the requested behavior through the actual connection.",
+    hypothesis: "A direct check may catch a mismatch before handover.",
+    check: "Compare the observed behavior with the requested result.",
+    confidence: "medium",
+  }];
+  return doc;
+}
+
+test("the checked context projection preserves reviewed recommendations without changing placements", () => {
+  const doc = recommendationProjection();
+  assert.equal(module.validateTaskContext(doc).ok, true);
+  const projected = adapter.projectTaskContext({ job: JOB, bytes: JSON.stringify(doc.record), facts, ...validators });
+  assert.deepEqual(projected.record.recommendations, doc.record.recommendations);
+  assert.deepEqual(projected.placements, projection().placements);
+  assert.deepEqual(module.contextSummary(projected), module.contextSummary(projection()));
+});
+
+test("the browser keeps recommendation references, prose, authority and coverage closed", () => {
+  assert.equal(module.validateTaskContext(recommendationProjection()).ok, true);
+  for (const edit of [
+    (doc) => { delete doc.record.recommendations; },
+    (doc) => { doc.record.recommendations[0].observations = []; },
+    (doc) => { doc.record.recommendations[0].observations = ["ffffffffffffffff"]; },
+    (doc) => { doc.record.recommendations[0].observations.push(doc.record.events[0].id); },
+    (doc) => { doc.record.recommendations.push(structuredClone(doc.record.recommendations[0])); },
+    (doc) => { doc.record.recommendations[0].change = null; },
+    (doc) => { doc.record.recommendations[0].change = "See /Users/private"; },
+    (doc) => { doc.record.recommendations[0].hypothesis = "x".repeat(161); },
+    (doc) => { doc.record.recommendations[0].shipped = true; },
+    (doc) => { doc.record.recommendations[0].confidence = "certain"; },
+    (doc) => { doc.record.schema = "desk.factory.context/3"; },
+  ]) {
+    const doc = recommendationProjection();
+    edit(doc);
+    assert.equal(module.validateTaskContext(doc).ok, false);
+  }
+  const legacy = projection();
+  legacy.record.recommendations = [];
+  assert.equal(module.validateTaskContext(legacy).ok, false);
+});
+
+test("withheld and unavailable records cannot retain recommendation prose or bypass review", () => {
+  assert.equal(module.validateTaskContext(recommendationProjection()).ok, true);
+  for (const state of ["withheld", "unavailable"]) {
+    const doc = recommendationProjection();
+    doc.availability = doc.record.state = state;
+    doc.record.heading = null;
+    doc.record.events = [];
+    doc.placements = [];
+    doc.record.coverage = { state: "unavailable", reasons: [state === "withheld" ? "withheld" : "not_recorded"], omitted_events: 0 };
+    assert.equal(module.validateTaskContext(doc).ok, false);
+    doc.record.recommendations = [];
+    assert.equal(module.validateTaskContext(doc).ok, true);
+    doc.record.privacy.verdict = "not_required";
+    doc.record.privacy.reviewer = null;
+    assert.equal(module.validateTaskContext(doc).ok, true);
+    doc.record.recommendations = recommendationProjection().record.recommendations;
+    assert.equal(module.validateTaskContext(doc).ok, false);
+  }
+});
+
+test("the browser accepts the bounded recommendation lists and rejects either overflow", () => {
+  const doc = recommendationProjection();
+  const event = doc.record.events[0], placement = doc.placements[0];
+  doc.record.events = Array.from({ length: 9 }, (_, i) => ({ ...structuredClone(event), id: i.toString(16).padStart(16, "0") }));
+  doc.placements = doc.record.events.map((event) => ({ event: event.id, spans: structuredClone(placement.spans) }));
+  doc.record.recommendations = Array.from({ length: 8 }, (_, i) => ({
+    ...structuredClone(doc.record.recommendations[0]),
+    id: (i + 16).toString(16).padStart(16, "0"),
+    observations: doc.record.events.slice(0, 8).map((event) => event.id),
+  }));
+  assert.equal(module.validateTaskContext(doc).ok, true);
+  doc.record.recommendations.push({ ...structuredClone(doc.record.recommendations[0]), id: "eeeeeeeeeeeeeeee" });
+  assert.equal(module.validateTaskContext(doc).ok, false);
+  doc.record.recommendations.pop();
+  doc.record.recommendations[0].observations.push(doc.record.events[8].id);
+  assert.equal(module.validateTaskContext(doc).ok, false);
+});
+
 test("publication registers checked context and strips obsolete wording from full report copies", () => {
   const root = mkdtempSync(join(tmpdir(), "factory-context-publish-"));
   const reports = join(root, "reports"), dist = join(root, "dist");
@@ -125,7 +211,7 @@ test("the actual Desk contract and ordinary site build reject source changes wit
   const canonical = await import(pathToFileURL(join(desk, "plugins/desk/mcp/src/factory/context-schema.js")));
   const { stableStringify } = await import(pathToFileURL(join(desk, "plugins/desk/mcp/src/factory/pipeline/normalize.js")));
   const { build } = await import(pathToFileURL(join(desk, "plugins/desk/mcp/src/factory/pipeline/build.js")));
-  const { contextFacts, contextRecord } = await import(pathToFileURL(join(desk, "tests/desk/mcp/__tests__/factory/_context_fixture.js")));
+  const { contextFacts, contextRecord, reviewContext } = await import(pathToFileURL(join(desk, "tests/desk/mcp/__tests__/factory/_context_fixture.js")));
   const root = mkdtempSync(join(tmpdir(), "factory-context-canonical-"));
   const main = join(root, "main"), reports = join(root, "reports");
   const facts = contextFacts(), value = contextRecord(facts), job = value.job;
@@ -155,6 +241,19 @@ test("the actual Desk contract and ordinary site build reject source changes wit
   const fragment = JSON.parse(readFileSync(join(beforeDir, "context", `${job}.json`), "utf8"));
   assert.equal(module.validateTaskContext(fragment, job).ok, true);
   assert.equal(fragment.record.privacy.payload_sha256, canonical.contextPayloadHash(fragment.record));
+  const recommended = reviewContext({
+    ...value, schema: "desk.factory.context/2",
+    recommendations: [{ ...recommendationProjection().record.recommendations[0], observations: [value.events[0].id] }],
+  });
+  writeFileSync(join(main, "context", `${job}.json`), `${stableStringify(recommended)}\n`);
+  assert.equal(canonical.validateContextBytes(readFileSync(join(main, "context", `${job}.json`))).ok, true);
+  const recommendationDir = join(root, "recommendations"), withRecommendation = runBuild(recommendationDir);
+  const recommendationFragment = JSON.parse(readFileSync(join(recommendationDir, "context", `${job}.json`), "utf8"));
+  assert.equal(module.validateTaskContext(recommendationFragment, job).ok, true);
+  assert.deepEqual(recommendationFragment.record.recommendations, recommended.recommendations);
+  assert.equal(recommendationFragment.record.privacy.payload_sha256, canonical.contextPayloadHash(recommended));
+  assert.deepEqual(withRecommendation.lead_time_ms, before.lead_time_ms);
+  assert.deepEqual(withRecommendation.active_time_ms, before.active_time_ms);
   facts.intervals[0].end_ms += 1;
   writeFileSync(factsPath, `${stableStringify(facts)}\n`);
   const afterDir = join(root, "after"), after = runBuild(afterDir);
