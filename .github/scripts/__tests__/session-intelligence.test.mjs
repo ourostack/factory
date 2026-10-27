@@ -187,7 +187,8 @@ test("explicit task shares do not change whole-session totals or imply session-c
   assert.deepEqual(d.contexts[0], projection());
   assert.equal(d.contexts[1].availability, "unavailable");
   assert.equal(d.contexts[1].reason, "not_published");
-  assert.deepEqual(d.outcomes[0], { job: JOB, scope: "task", status: measured("done"), state: measured("accepted"),
+  assert.deepEqual(d.outcomes[0], { job: JOB, scope: "task", snapshot: { session: SESSION, rev: null },
+    status: measured("done"), state: measured("accepted"),
     returns: { state: "measured", reasons: [], items: [{ caught: "at_review", counts: true }] } });
   assert.equal(d.outcomes[1].state.state, "unavailable");
   assert.equal(validators.validateSessionDetail(d).ok, true);
@@ -286,6 +287,49 @@ test("a stop without a recorded worker cannot become a measured zero root-stop t
 test("malformed capture flags fail rather than disappearing from measurements", () => {
   for (const unavailable of [{}, [null], [{ field: "turns" }], [{ field: "turns", reason: 7 }]]) {
     assert.throws(() => detail(facts({ unavailable })), /session_/);
+  }
+});
+
+test("task outcome snapshots retain their recording session and lifecycle revision", () => {
+  const first = facts({ jobs: [binding()], outcomes: [
+    { job: JOB, rev: 3, state: "not_delivered", returns: [{ caught: "at_review", counts: true }] },
+  ] });
+  const secondId = "22222222-2222-4222-8222-222222222222";
+  const second = facts({ session: { ...first.session, id: secondId }, jobs: [binding()], outcomes: [
+    { job: JOB, rev: 11, state: "accepted", returns: [
+      { caught: "at_review", counts: true }, { caught: "after_delivery", counts: true },
+    ] },
+  ] });
+  const options = { jobs: [{ id: JOB, status: "done" }] };
+  const old = detail(first, options).outcomes[0], newer = detail(second, options).outcomes[0];
+  assert.deepEqual(old.snapshot, { session: SESSION, rev: 3 });
+  assert.deepEqual(newer.snapshot, { session: secondId, rev: 11 });
+  assert.equal(old.state.value, "not_delivered");
+  assert.equal(newer.state.value, "accepted");
+  assert.equal(old.returns.items.length, 1);
+  assert.equal(newer.returns.items.length, 2);
+});
+
+test("outcome snapshot validation keeps missing revisions unknown and rejects foreign or malformed identity", () => {
+  const d = detail(facts({ jobs: [binding()], outcomes: [{ job: JOB, state: "accepted", returns: [] }] }));
+  assert.deepEqual(d.outcomes[0].snapshot, { session: SESSION, rev: null });
+  assert.equal(validators.validateSessionDetail(d).ok, true);
+  for (const snapshot of [
+    { session: "22222222-2222-4222-8222-222222222222", rev: 3 },
+    { session: SESSION, rev: -1 }, { session: SESSION, rev: 1.5 },
+    { session: SESSION, rev: "3" }, { session: SESSION, rev: 3, current: true },
+  ]) {
+    const changed = structuredClone(d);
+    changed.outcomes[0].snapshot = snapshot;
+    assert.equal(validators.validateSessionDetail(changed).ok, false, JSON.stringify(snapshot));
+  }
+});
+
+test("outcome snapshots refuse malformed recorded revisions rather than silently dropping them", () => {
+  for (const rev of [-1, 1.5, "3", Infinity]) {
+    assert.throws(() => detail(facts({ jobs: [binding()], outcomes: [
+      { job: JOB, rev, state: "accepted", returns: [] },
+    ] })), /session_detail_invalid/);
   }
 });
 
