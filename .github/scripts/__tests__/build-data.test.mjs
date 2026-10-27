@@ -453,7 +453,7 @@ test("without them, every caption and number says substantial sessions", () => {
 
 test("the page takes every section caption from the caption table, and the scope paragraph names the headline population", () => {
   const app = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   assert.match(app, /F\.caption\(section, data\.scopes\[SCOPE_OF\[section\]\]\)/)
   assert.match(app, /F\.caption\("headlines", data\.scopes\.headlines\)/)
   assert.doesNotMatch(app, /Everything above and below/)

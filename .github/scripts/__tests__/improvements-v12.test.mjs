@@ -106,7 +106,7 @@ test("unsupported_handoff_fields_are_not_copied_or_promoted", () => {
 })
 
 test("why_lean_is_an_open_experiment_not_a_uniqueness_claim", () => {
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   const why = html.slice(html.indexOf('id="view-why"'), html.indexOf('id="view-about"'))
   const experiment = why.indexOf("open experiment")
   assert.ok(experiment >= 0 && experiment < why.indexOf("Four questions"), "the experiment framing comes before the method")
@@ -116,7 +116,7 @@ test("why_lean_is_an_open_experiment_not_a_uniqueness_claim", () => {
   assert.doesNotMatch(why, /\b(unique|uniquely|the first (factory|method|to)|the only (factory|method|one)|no one else|nobody else|industry borrows no)\b/i, "no unsupported uniqueness claim")
 })
 
-const html = () => readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+const html = () => readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
 const appSource = () => readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
 
 test("static_comparison_and_findings_intros_ask_the_question_without_takt_or_savings", () => {

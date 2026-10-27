@@ -376,11 +376,11 @@ test("the swimlane's operator lane: a tick per prompt of the session and a band 
 })
 
 test("the page no longer says prompts and pull requests stay off the clock", () => {
-  for (const f of ["site/src/app.js", "site/src/walk.js", "site/src/index.html"]) {
+  for (const f of ["site/src/app.js", "site/src/walk.js", "site/src/evidence.html"]) {
     const s = read(f)
     assert.doesNotMatch(s, /only as counts|never beside a box|which would place them on the clock|never its start and end on the clock|waits carry no clock|Idle bands carry no clock time|placing idle time on the task's clock is not shown/, f)
   }
-  const about = read("site/src/index.html")
+  const about = read("site/src/evidence.html")
   assert.match(about, /<strong>Operator prompts are on the task's clock\.<\/strong>/)
   assert.match(about, /<strong>Pull requests are on the task's clock\.<\/strong>/)
   // The page draws the markers and the Handoffs table.
