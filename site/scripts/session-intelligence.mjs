@@ -7,7 +7,8 @@ import { projectTaskContext } from "./task-context.mjs";
 
 const { validateSessionCatalog, validateSessionDetail } = createRequire(import.meta.url)("../src/session-data.js");
 const HOUR = 3600000;
-const PARTIAL = new Set(["source_unreadable", "log_truncated", "capped", "host_records_partly", "interval_outside_session_clock"]);
+const PARTIAL = new Set(["source_unreadable", "log_truncated", "capped", "host_records_partly", "interval_outside_session_clock", "returns_not_fully_recorded"]);
+const PARTIAL_WAITS = new Set(["host_records_partly", "interval_outside_session_clock"]);
 const CATEGORIES = { shell: "commands", read: "reading", search: "reading", web: "reading", edit: "writing",
   agent: "helpers", skill: "notes", desk: "notes" };
 const COVERED = ["commands", "reading", "writing", "helpers", "notes", "other", "stops", "captured"];
@@ -79,12 +80,16 @@ function workersOf(facts) {
   return result;
 }
 function bindingsOf(facts) {
+  const segmentReasons = [...new Set([
+    ...reasons(facts, ["job_segments"]),
+    ...reasons(facts, ["job_offsets"]).filter((r) => r === "desk_public"),
+  ])].sort();
   return items(facts.jobs, reasons(facts, ["jobs"]), (binding) => {
     if (!object(binding)) fail();
     return {
       job: binding.job,
       agents: items(binding.agents, reasons(facts, ["job_agents"]), (n) => n),
-      segments: items(binding.segments, reasons(facts, ["job_segments"]), (s) => {
+      segments: items(binding.segments, segmentReasons, (s) => {
         if (!object(s)) fail();
         return { start_ms: s.start_ms, end_ms: s.end_ms };
       }),
@@ -113,9 +118,12 @@ function numbersOf(facts, duration, intervals, workers) {
   const roots = new Set(workers.items.filter((w) => w.parent === null).map((w) => w.n));
   const workerIds = new Set(workers.items.map((w) => w.n));
   const stops = intervals.items.filter((i) => i.kind === "human_wait" && roots.has(i.agent));
-  const stopReasons = [...new Set([...intervals.reasons, ...reasons(facts, ["agents"])])].sort();
+  const waitReasons = reasons(facts, ["human_waits"]);
+  const stopReasons = [...new Set([...intervals.reasons, ...reasons(facts, ["agents"]), ...waitReasons])].sort();
   const unidentified = intervals.items.some((i) => i.kind === "human_wait" && !workerIds.has(i.agent));
-  const stopIntervals = workers.state === "unavailable" || !roots.size || unidentified
+  // Desk's wait-field flags remove the measure except for explicitly partial
+  // capture or intervals dropped outside the session clock.
+  const stopIntervals = workers.state === "unavailable" || !roots.size || unidentified || waitReasons.some((r) => !PARTIAL_WAITS.has(r))
     ? { ...unavailable(stopReasons.length ? stopReasons : ["not_recorded"]), items: [] }
     : { ...intervals, reasons: stopReasons };
   const activity = intervals.state === "unavailable" ? unavailable(intervals.reasons)
@@ -154,6 +162,8 @@ function binsOf(duration, intervals, stops, stopIntervals) {
 function outcomesOf(facts, bindings, jobs) {
   const recorded = items(facts.outcomes, reasons(facts, ["outcomes"]), (o) => {
     if (!object(o) || typeof o.job !== "string") fail();
+    if (Object.hasOwn(o, "returns_truncated") && o.returns_truncated !== true ||
+        Object.hasOwn(o, "returns_unreadable") && (!integer(o.returns_unreadable) || o.returns_unreadable < 1 || o.returns_unreadable > 9999)) fail();
     return o;
   });
   if (new Set(recorded.items.map((o) => o.job)).size !== recorded.items.length) fail();
@@ -163,11 +173,13 @@ function outcomesOf(facts, bindings, jobs) {
     const state = !outcome || outcome.state === "not_recorded"
       ? unavailable(recorded.reasons.length ? recorded.reasons : ["not_recorded"])
       : recorded.reasons.length ? direct(partial(outcome.state, recorded.reasons), "session_counter") : measured(outcome.state);
+    const returnReasons = [...recorded.reasons];
+    if (outcome?.returns_truncated === true || outcome?.returns_unreadable > 0) returnReasons.push("returns_not_fully_recorded");
     return {
       job, scope: "task",
       status: !summary || summary.status === undefined || summary.status === "unavailable" ? unavailable(["not_recorded"]) : measured(summary.status),
       state,
-      returns: items(outcome?.returns, recorded.reasons, (r) => {
+      returns: items(outcome?.returns, [...new Set(returnReasons)].sort(), (r) => {
         if (!object(r)) fail();
         return { caught: r.caught, counts: r.counts };
       }),

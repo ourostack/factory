@@ -301,6 +301,69 @@ test("return stages retain the recorded counting decision without attributing th
   assert.equal(validators.validateSessionDetail(d).ok, false);
 });
 
+test("human-wait capture flags affect stop totals and bins without changing activity", () => {
+  for (const wait of [[], [span("human_wait", 1000, 2000)]]) {
+    const intervals = [span("turn", 0, 1500), ...wait];
+    const before = detail(facts({ intervals }));
+    for (const reason of ["field_absent", "source_unreadable", "log_truncated", "withheld_public",
+      "host_records_partly", "interval_outside_session_clock"]) {
+      const d = detail(facts({ intervals, unavailable: [{ field: "human_waits", reason }] }));
+      const partly = ["host_records_partly", "interval_outside_session_clock"].includes(reason);
+      const expected = partly
+        ? { state: "partial", value: wait.length ? 1000 : 0, reasons: [reason], bound: "lower" }
+        : missing(reason);
+      assert.deepEqual(d.numbers.stop_ms, expected, reason);
+      assert.deepEqual(d.bins.rows[0].stops, expected, reason);
+      assert.deepEqual(d.bins.rows[1].stops, partly ? { ...expected, value: 0 } : expected, reason);
+      assert.deepEqual(d.numbers.activity_ms, measured(1500));
+      assert.deepEqual(d.bins.rows[0].commands, before.bins.rows[0].commands);
+      assert.equal(validators.validateSessionDetail(d).ok, true);
+    }
+  }
+});
+
+test("truncated or unreadable task returns retain readable entries without claiming complete history", () => {
+  for (const markers of [{ returns_truncated: true }, { returns_unreadable: 2 },
+    { returns_truncated: true, returns_unreadable: 1 }]) {
+    for (const returns of [[], [{ caught: "at_review", counts: true }], undefined]) {
+      const d = detail(facts({ jobs: [binding()], outcomes: [{ job: JOB, state: "accepted", returns, ...markers }] }));
+      assert.deepEqual(d.outcomes[0].returns, {
+        state: returns === undefined ? "unavailable" : "partial",
+        reasons: ["returns_not_fully_recorded"], items: returns ?? [],
+      });
+      assert.deepEqual(d.outcomes[0].state, measured("accepted"));
+      assert.equal(validators.validateSessionDetail(d).ok, true);
+    }
+  }
+});
+
+test("available return completeness markers must match the published boolean and positive-count shapes", () => {
+  for (const markers of [{ returns_truncated: false }, { returns_truncated: "true" },
+    { returns_unreadable: 0 }, { returns_unreadable: -1 }, { returns_unreadable: 1.5 },
+    { returns_unreadable: 10000 }, { returns_unreadable: Infinity }]) {
+    assert.throws(() => detail(facts({ jobs: [binding()], outcomes: [
+      { job: JOB, state: "accepted", returns: [], ...markers },
+    ] })), /session_/);
+  }
+});
+
+test("protected task shares retain desk_public without confusing task-clock failures with share failures", () => {
+  for (const segments of [undefined, [{ start_ms: 0, end_ms: 1000 }]]) {
+    const d = detail(facts({ jobs: [{ job: JOB, agents: [0], segments }],
+      unavailable: [{ field: "job_offsets", reason: "desk_public" }] }));
+    assert.deepEqual(d.bindings.items[0].segments, { state: "unavailable", reasons: ["desk_public"], items: [] });
+    assert.deepEqual(d.numbers.activity_ms, measured(3500));
+    assert.equal(validators.validateSessionDetail(d).ok, true);
+  }
+  for (const reason of ["source_unreadable", "field_absent", "interval_outside_session_clock"]) {
+    const f = facts({ jobs: [binding()], unavailable: [{ field: "job_offsets", reason }] });
+    assert.deepEqual(detail(f).bindings.items[0].segments,
+      { state: "measured", reasons: [], items: [{ start_ms: 0, end_ms: 1000 }] });
+    delete f.jobs[0].segments;
+    assert.deepEqual(detail(f).bindings.items[0].segments, { state: "unavailable", reasons: ["not_recorded"], items: [] });
+  }
+});
+
 // Run the real build in its own process with fixture I/O held entirely in
 // memory. No temporary directories, cleanup, Git mutation or network calls.
 async function memoryBuild(files) {
