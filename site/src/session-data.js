@@ -80,7 +80,9 @@
     if (!unique(jobs) || !bins(value.bins, value.numbers.duration_ms)) return false;
     if (!list(value.contexts, (doc) => context && context.validateTaskContext(doc).ok && jobs.includes(doc.job)) ||
         !unique(value.contexts.map((v) => v.job)) || value.contexts.length !== jobs.length) return false;
-    return list(value.outcomes, (v) => keys(v, "job,scope,status,state,returns") && jobs.includes(v.job) && v.scope === "task" &&
+    return list(value.outcomes, (v) => keys(v, "job,scope,snapshot,status,state,returns") && jobs.includes(v.job) && v.scope === "task" &&
+      keys(v.snapshot, "session,rev") && v.snapshot.session === value.session.id &&
+      (v.snapshot.rev === null || integer(v.snapshot.rev)) &&
       stated(v.status, (s) => matches(s, REASON) && s !== "unavailable") &&
       stated(v.state, (s) => ["accepted", "refused", "delivered_unsigned", "reopened", "not_delivered"].includes(s)) &&
       collection(v.returns, (r) => keys(r, "caught,counts") && ["in_task", "at_review", "after_delivery"].includes(r.caught) &&
