@@ -6,6 +6,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { runInNewContext } from "node:vm"
 import { assessLayout, measureLayout, checkChartEquivalents, CHART_EQUIVALENTS, compareFigures, assessTaskForms, textScaleInit, parseArgs, ROUTES } from "../../../site/scripts/verify-v12-browser.mjs"
 
@@ -41,7 +42,7 @@ function recordProcesses() {
 }
 const server = createServer(async (req, res) => {
   try {
-    const path = resolve(site, "." + (new URL(req.url, "http://localhost").pathname === "/" ? "/index.html" : new URL(req.url, "http://localhost").pathname))
+    const path = resolve(site, "." + (new URL(req.url, "http://localhost").pathname === "/" ? `/${ENTRY}` : new URL(req.url, "http://localhost").pathname))
     assert.ok(path.startsWith(site + sep))
     const body = await readFile(path)
     res.writeHead(200, { "Content-Type": types[extname(path)] || "text/plain" })
@@ -53,6 +54,9 @@ const server = createServer(async (req, res) => {
     else { res.writeHead(error.code === "ENOENT" ? 404 : 500); res.end("not found") }
   }
 })
+// The previous reader moved to evidence.html when the Loom became the entry;
+// older built artifacts still carry it as index.html.
+const ENTRY = existsSync(join(site, "evidence.html")) ? "evidence.html" : "index.html"
 let browser = null, base = null
 const task = "800163a15783a69bceaf189f60d686fd", session = "c2a25a10-d203-4cb5-82d0-02195923a8d8"
 async function loaded(page, hash, selector) {
