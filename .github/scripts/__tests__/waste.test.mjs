@@ -95,6 +95,8 @@ function build(fx) {
   return JSON.parse(readFileSync(fx.out, "utf8"))
 }
 
+// Public UUID-v4 session identities, as the strict session catalog requires.
+const S1 = "11111111-1111-4111-8111-111111111111", S3 = "33333333-3333-4333-8333-333333333333"
 const ALL = ["defects", "overproduction", "waiting", "non_utilized_talent", "transportation", "inventory", "motion", "extra_processing", "unknown"]
 const muda = (rows, extra = {}) => ({ wastes: ALL, groupings: { overall: { all: { jobs: 3, jobs_labeled: 2, wastes: rows, ...extra } } } })
 
@@ -103,7 +105,7 @@ test("an unknown label keeps its own row, is never folded into another, and is n
     { waste: "waiting", total_ms: 600000, jobs: 2, share: 0.6, confidence_ms: { high: 600000, medium: 0, low: 0 }, evaluator_versions: ["3.2.0-alpha.98"] },
     { waste: "unknown", total_ms: 400000, jobs: 1, share: 0.4, confidence_ms: { high: 400000, medium: 0, low: 0 }, evaluator_versions: ["3.2.0-alpha.98", "3.2.0-alpha.198"] },
   ]
-  const data = build(fixture(muda(rows), { "claude-code-s1.json": facts("s1") }))
+  const data = build(fixture(muda(rows), { [`claude-code-${S1}.json`]: facts(S1) }))
   assert.deepEqual(checkNumbers(data), [])
   assert.deepEqual(data.waste.breakdown.map((r) => r.waste), ["waiting", "unknown"])
   const [waiting, unknown] = data.waste.breakdown
@@ -122,7 +124,7 @@ test("time on low-confidence labels is flagged, and a row with no recorded confi
     { waste: "motion", total_ms: 1000, jobs: 1, share: 0.5 },
     { waste: "inventory", total_ms: 1000, jobs: 1, share: 0.5, confidence_ms: { high: 0, medium: 0, low: 0 } },
   ]
-  const data = build(fixture(muda(rows), { "claude-code-s1.json": facts("s1") }))
+  const data = build(fixture(muda(rows), { [`claude-code-${S1}.json`]: facts(S1) }))
   assert.deepEqual(checkNumbers(data), [])
   const [defects, motion, inventory] = data.waste.breakdown
   assert.deepEqual(defects.qualifiers, ["low_confidence"])
@@ -136,8 +138,8 @@ test("time on low-confidence labels is flagged, and a row with no recorded confi
 
 test("a published /3 facts file whose commit carries a time builds, and counts like any other", () => {
   const sha = "b".repeat(40)
-  const v3 = facts("s3", { schema: "desk.factory.published/3", refs: { prs: [], commits: [{ repo: "ourostack/desk", sha, at_ms: 1200 }], private: { prs: 0, commits: 0 } }, unavailable: [{ field: "outcomes", reason: "capped" }] })
-  const data = build(fixture(muda([]), { "claude-code-s1.json": facts("s1"), "claude-code-s3.json": v3 }))
+  const v3 = facts(S3, { schema: "desk.factory.published/3", refs: { prs: [], commits: [{ repo: "ourostack/desk", sha, at_ms: 1200 }], private: { prs: 0, commits: 0 } }, unavailable: [{ field: "outcomes", reason: "capped" }] })
+  const data = build(fixture(muda([]), { [`claude-code-${S1}.json`]: facts(S1), [`claude-code-${S3}.json`]: v3 }))
   assert.deepEqual(checkNumbers(data), [])
   assert.equal(data.headlines.find((h) => h.id === "substantial_sessions").number.value >= 0, true)
 })
