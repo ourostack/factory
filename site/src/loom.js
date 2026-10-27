@@ -682,8 +682,10 @@
       const res = d.bins.resolution_ms.value, dur = durationOf(d);
       // Horizontal position is elapsed time: k pixels per millisecond. A short final
       // period keeps its true width; only its pointer target gets a small margin.
+      const MIN_FRAME = 560, LABEL_GAP = 64;
+      // A short session is stretched to a readable frame; every position still uses this one scale.
       const u = Math.max(14, Math.min(44, Math.floor(760 / Math.max(1, dur / res))));
-      const k = u / res, X = (ms) => ms * k;
+      const k = Math.max(u / res, MIN_FRAME / dur), X = (ms) => ms * k;
       const rowH = 20, gap = 6, top = 8, y0 = top + 16, PAD = 16, MIN_HIT = 12;
       const base = y0 + LANES.length * (rowH + gap), H = base + 46, W = X(dur), SW = W + PAD;
       const box = svg("svg", { viewBox: `0 0 ${SW} ${H}`, width: String(SW), height: String(H), class: "weave", "aria-hidden": "true", focusable: "false" });
@@ -720,12 +722,17 @@
       // elapsed-hour axis: ticks at column edges, labels far enough apart to read
       const axis = svg("g", { class: "axis" });
       axis.append(svg("line", { x1: "0", y1: String(base + 22), x2: String(W), y2: String(base + 22) }));
-      const every = Math.max(1, Math.ceil(64 / u));
-      for (let c = 0; c < n; c++) {
-        const at = X(rows[c].start_ms);
+      // Period edges get ticks; labels sit on round elapsed times far enough apart to read.
+      for (const r of rows) {
+        const at = X(r.start_ms);
         axis.append(svg("line", { x1: String(at), y1: String(base + 19), x2: String(at), y2: String(base + 27), class: "tick" }));
-        if (c % every || (c && W - at < 48)) continue;
-        axis.append(svg("text", { x: String(at), y: String(base + 40), "text-anchor": c ? "middle" : "start" }, elapsed(rows[c].start_ms)));
+      }
+      const step = [MINUTE, 2 * MINUTE, 5 * MINUTE, 10 * MINUTE, 15 * MINUTE, 30 * MINUTE, HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, 24 * HOUR, 48 * HOUR]
+        .find((ms) => X(ms) >= LABEL_GAP) || 96 * HOUR;
+      for (let t = 0; t < dur; t += step) {
+        const at = X(t);
+        if (t && W - at < LABEL_GAP) break;
+        axis.append(svg("text", { x: String(at), y: String(base + 40), "text-anchor": t ? "middle" : "start" }, t ? elapsed(t) : "0"));
       }
       axis.append(svg("line", { x1: String(W), y1: String(base + 19), x2: String(W), y2: String(base + 27), class: "tick" }),
         svg("text", { x: String(W), y: String(base + 40), "text-anchor": "end" }, elapsed(dur)));
