@@ -775,10 +775,13 @@ export function textScaleInit(scale) {
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".txt": "text/plain; charset=utf-8", ".png": "image/png", ".svg": "image/svg+xml" }
 
 function serve(site) {
+  // The previous reader moved to evidence.html when the Loom became the entry;
+  // older built artifacts still carry it as index.html.
+  const entry = existsSync(join(site, "evidence.html")) ? "evidence.html" : "index.html"
   const server = createServer(async (req, res) => {
     try {
       const path = decodeURIComponent(new URL(req.url, "http://localhost").pathname)
-      const file = normalize(join(site, path === "/" ? "index.html" : path))
+      const file = normalize(join(site, path === "/" ? entry : path))
       if (!file.startsWith(site + sep) && file !== site) throw new Error("outside")
       const body = await readFile(file)
       res.writeHead(200, { "Content-Type": TYPES[extname(file)] || "application/octet-stream", "Cache-Control": "no-store" })
