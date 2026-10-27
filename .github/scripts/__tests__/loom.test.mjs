@@ -565,3 +565,32 @@ test("a check shows its comparison, uncertainty, measurement state and every lim
   assert.match(t, /interval: not established/i);
   assert.match(t, /no effect estimate/i);
 });
+
+test("the shelf puts a real session strip before orientation and the task directory", async () => {
+  const { host } = await mount();
+  const main = all(host).find((n) => n.getAttribute("id") === "main");
+  const text = [];
+  let firstSession = null, taskIndex = null, legend = null;
+  const walk = (n) => {
+    if (!(n instanceof Node)) { text.push(n.textContent); return; }
+    if (firstSession === null && n.tagName === "A" && (n.getAttribute("href") || "").startsWith("#/session/")) firstSession = text.join("").length;
+    if (taskIndex === null && n.tagName === "H2" && /Tasks on the loom/.test(n.textContent)) taskIndex = text.join("").length;
+    if (legend === null && n.tagName === "UL" && n.getAttribute("aria-label") === "Key") legend = text.join("").length;
+    n.children.forEach(walk);
+  };
+  walk(main);
+  assert.ok(firstSession !== null && taskIndex !== null);
+  assert.ok(firstSession < taskIndex, "a session strip comes before the task directory");
+  assert.ok(firstSession < 320, `only a short orientation precedes the first session (${firstSession} characters)`);
+  assert.ok(legend !== null && legend < firstSession, "the key sits with the shelf");
+});
+
+test("programmatic heading focus is a deliberate mark, not a stock box around the hero", () => {
+  const css = read("site/src/loom.css");
+  const rule = /\.display:focus-visible\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, "headings keep a visible focus indicator");
+  assert.doesNotMatch(rule[1], /outline:\s*3px/);
+  assert.match(rule[1], /outline:\s*none/);
+  assert.match(rule[1], /text-decoration|box-shadow|border/);
+  assert.match(css, /:focus-visible \{ outline: 3px solid var\(--focus\)/, "interactive controls keep their ring");
+});
