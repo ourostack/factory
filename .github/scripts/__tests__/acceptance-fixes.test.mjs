@@ -198,7 +198,7 @@ test("I2: a task page states the operator's own time: the Store's attention esti
 // ------------------------------------------------------------------ I4
 
 test("I4: the glossary defines the v1.1 words: finish day (UTC) and its marks, Handoffs, the prompt and pull request markers, operator attention and every why-the-agent-stopped class", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const terms = [...html.matchAll(/<dt id="g-([a-z0-9-]+)">/g)].map((m) => m[1])
   for (const t of ["finish-day", "handoffs", "prompt-marker", "pull-request-markers", "operator-attention", "why-the-agent-stopped", "stopped-short", "human-gate", "asked-a-question", "error-or-limit", "interrupted", "why-not-known"]) {
     assert.ok(terms.includes(t), t)
@@ -309,7 +309,7 @@ test("M1: a pull request's words drop 'Desk does not say which yet' wherever Des
   assert.match(W.prLegendWords([{ created: true }, { created: null }]), /Desk does not say which for some/)
   assert.equal(W.prLegendWords([]), "A pull request this task opened or mentioned, on the ladder's second lane at its opening time; a diamond is one merged.")
   assert.match(W.prStateWords({ created: false, state: "merged" }), /^A pull request this task's sessions mentioned but did not open; it merged$/)
-  const about = read("site/src/index.html")
+  const about = read("site/src/evidence.html")
   assert.doesNotMatch(about, /Desk does not say which yet/)
   assert.doesNotMatch(read("site/src/app.js"), /Desk does not say which yet/)
 })
@@ -515,7 +515,7 @@ test("Fix 1 I-1: the legacy recommendation retains its teaching criteria without
   assert.equal(F.parseRoute("#/task").view, "missing")
   assert.doesNotMatch(read("site/src/app.js"), /F\.landingChoice\(data\.jobs\)/)
   assert.match(read("site/src/llms-template.txt"), /`active_time_ms` is measured, or partial with a value, at 300000 ms or more; `map_bursts` has a value of 1 or more and is not `unavailable`; `human_turns` has a value of 1 or more/)
-  assert.match(read("site/src/index.html"), /at least 5 minutes of known working time, at least one work burst on its map, at least one recorded operator prompt and evaluator waste labels/)
+  assert.match(read("site/src/evidence.html"), /at least 5 minutes of known working time, at least one work burst on its map, at least one recorded operator prompt and evaluator waste labels/)
 })
 
 test("Fix 1 I-1: each task row says how many work bursts its map draws", async () => {

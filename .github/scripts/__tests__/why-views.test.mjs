@@ -356,7 +356,7 @@ test("Copy as a prompt asks the why's A3 question and says where its data sits",
 
 test("every class has its own color in both themes and a pattern, so no class is told by hue alone", () => {
   const css = read("site/src/styles.css")
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const light = css.slice(0, css.indexOf("@media (prefers-color-scheme: dark)"))
   const dark = css.slice(css.indexOf("@media (prefers-color-scheme: dark)"))
   for (const k of ["stopped_short", "question", "error_limit", "interrupted", "gate"]) {
@@ -376,7 +376,7 @@ test("llms.txt describes every new key and the sub-cause routes", () => {
 })
 
 test("the page draws the split: the Pareto toggle is on by default and every why view is wired", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(html, /id="why-toggle"[^>]*aria-pressed="true"/)
   assert.match(html, /Split by why/)
   const app = read("site/src/app.js")

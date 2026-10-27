@@ -185,13 +185,13 @@ test("no call site formats a number on its own: app.js has no number formatting"
 })
 
 test("the page loads the formatter before the renderer, and the deploy copies it", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.ok(html.indexOf('src="format.js"') > 0 && html.indexOf('src="format.js"') < html.indexOf('src="app.js"'))
   assert.match(read(".github/workflows/pages.yml"), /cp [^\n]*site\/src\/format\.js/)
 })
 
 test("the purpose and limit statements are on the page and in the README", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const readme = read("README.md")
   for (const text of [html, readme]) {
     assert.match(text, /human attention/i)
@@ -254,7 +254,7 @@ test("the job table opens a job page that shows each measure's state and reason 
   const src = readFileSync(new URL("../../../site/src/app.js", import.meta.url), "utf8")
   assert.match(src, /function renderJobDetail\(/)
   assert.match(src, /hashchange/)
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   assert.match(html, /id="job-detail"/)
 })
 

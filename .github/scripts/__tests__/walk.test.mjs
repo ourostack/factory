@@ -93,7 +93,7 @@ test("#/ lands on the latest-finished task of at least an hour, named or private
   // An open task never lands while a finished one exists, however late its position.
   assert.equal(F.defaultTask([{ id: "open", status: "processing", finish_order: measured(30), finish_basis: "facts", lead_time_ms: measured(90 * H) }, j("old", 1, "2026-09-26", 50 * H)]).id, "old")
   // About and llms.txt state the same rule.
-  const about = read("site/src/index.html")
+  const about = read("site/src/evidence.html")
   assert.match(about, /Tasks whose labels landed together are ordered by lead time, so the longest of them takes the latest position\./)
   assert.match(about, /Tasks are ordered by the UTC day they finished, earliest first\./)
   assert.match(about, /"Follow a task" opens on the latest-finished task that has something to teach and waste labels, named or private/)
@@ -158,7 +158,7 @@ test("when a pull request cannot be read, the name comes from what was read and 
   // The page says a partial name is partial, and About states the rule the code follows.
   const tn = F.taskName({}, { id: "0123456789abcdef", name: "Read, opened later", name_basis: "partial", more_prs: measured(2) })
   assert.equal(tn.partial, true)
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(html, /Otherwise the earliest-readable public pull-request title is only a reference/)
   assert.match(read("site/src/app.js"), /some could not be read for this build, so an earlier one may exist/)
   assert.doesNotMatch(html, /first public pull request its sessions opened/)
@@ -167,7 +167,7 @@ test("when a pull request cannot be read, the name comes from what was read and 
 })
 
 test("Improvements distinguishes a completed inconclusive check from no check", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const act = html.slice(html.indexOf('id="view-act"'), html.indexOf('id="view-why"'))
   assert.match(act, /A completed check can be inconclusive\. A missing check is different/)
   assert.doesNotMatch(act, /no issue has that yet|none has been checked/)
@@ -286,34 +286,37 @@ test("finish order reads git history: the commit that first added a path, oldest
 test("the build publishes finish order and the name fields on every task row", () => {
   const dir = mkdtempSync(join(tmpdir(), "walk-build-"))
   const reports = join(dir, "reports")
+  // Public identities: 32-hex job IDs and UUID-v4 session IDs, as the session catalog requires.
+  const DONE = "d".repeat(32), OPEN = "e".repeat(32)
+  const S1 = "11111111-1111-4111-8111-111111111111", S2 = "22222222-2222-4222-8222-222222222222"
   const main = join(dir, "main")
   const json = (p, o) => write(p, JSON.stringify(o))
   json(join(reports, "rollups/coverage.json"), { sessions_with_facts: 2, jobs: 2, jobs_open: 1, labels: { files: 1 } })
   json(join(reports, "rollups/measures.json"), { groupings: {} })
   json(join(reports, "rollups/muda.json"), { groupings: { overall: { all: { jobs: 2, jobs_labeled: 1, wastes: [] } } }, wastes: [] })
   const job = (id, status, session) => ({ job: id, formulas: { status: { class: "declared", value: status }, lead_time_ms: { class: "declared", value: 1000 } }, timeline: { intervals: [{ session_id: session, host: "claude-code" }] } })
-  json(join(reports, "jobs/done1.json"), job("done1", "done", "s1"))
-  json(join(reports, "jobs/open1.json"), job("open1", "processing", "s2"))
+  json(join(reports, `jobs/${DONE}.json`), job(DONE, "done", S1))
+  json(join(reports, `jobs/${OPEN}.json`), job(OPEN, "processing", S2))
   const facts = (id, jobId) => ({ schema: "desk.factory.published/1", session: { host: "claude-code", id, duration_ms: 600000, ended: true, entrypoint: "cli", host_version: "1" }, models: [], agents: [], intervals: [{ kind: "turn", start_ms: 0, end_ms: 400000 }], counts: { tool_calls: {}, tool_failures: {}, api_retries: 0, compactions: 0, tool_retries: 0 }, refs: { prs: [] }, jobs: [{ job: jobId }], unavailable: [] })
-  json(join(main, "facts/claude-code-s2.json"), facts("s2", "open1"))
+  json(join(main, `facts/claude-code-${S2}.json`), facts(S2, OPEN))
   execFileSync("git", ["init", "-q", main])
   const commit = (msg) => {
     execFileSync("git", ["-C", main, "add", "."])
     execFileSync("git", ["-C", main, "-c", "user.name=x", "-c", "user.email=x@example.com", "commit", "-q", "-m", msg])
   }
   commit("open task's facts first")
-  json(join(main, "facts/claude-code-s1.json"), facts("s1", "done1"))
-  json(join(main, "labels/done1/s1.json"), { job: "done1", session: "s1", stretches: [] })
+  json(join(main, `facts/claude-code-${S1}.json`), facts(S1, DONE))
+  json(join(main, `labels/${DONE}/${S1}.json`), { job: DONE, session: S1, stretches: [] })
   commit("done task")
   const out = join(dir, "dist/data.json")
   const r = spawnSync("node", [new URL("../../../site/scripts/build-data.mjs", import.meta.url).pathname, "--reports", reports, "--main", main, "--out", out], { env: { ...process.env, FACTORY_SITE_OFFLINE: "1", GITHUB_TOKEN: "" }, encoding: "utf8" })
   assert.equal(r.status, 0, r.stderr)
   const data = JSON.parse(readFileSync(out, "utf8"))
   const by = Object.fromEntries(data.jobs.map((j) => [j.id, j]))
-  assert.deepEqual([by.done1.finish_order, by.done1.finish_basis], [measured(1), "labels"], "a labeled task comes before open ones, even if its facts came later")
-  assert.deepEqual([by.open1.finish_order, by.open1.finish_basis], [measured(2), "facts"])
+  assert.deepEqual([by[DONE].finish_order, by[DONE].finish_basis], [measured(1), "labels"], "a labeled task comes before open ones, even if its facts came later")
+  assert.deepEqual([by[OPEN].finish_order, by[OPEN].finish_basis], [measured(2), "facts"])
   // Offline, no title is read, so no task is named.
-  assert.ok(!("name" in by.done1) && !("name" in by.open1))
+  assert.ok(!("name" in by[DONE]) && !("name" in by[OPEN]))
   assert.deepEqual(checkNumbers(data), [])
 })
 
@@ -483,7 +486,7 @@ test("every meaning color is defined for light and dark, in one fixed stacking o
   assert.equal(new Set(F.SEGMENTS.map((x) => x.token)).size, F.SEGMENTS.length, "one color per meaning")
   // Hatches come from the tokens, for CSS and for SVG.
   assert.match(css, /--hatch-agents-working: repeating-linear-gradient\(135deg, var\(--c-agents-working\)/)
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(html, /<pattern id="hatch-agents-working"[\s\S]*?var\(--c-agents-working\)/)
   assert.match(html, /<pattern id="hatch-no-session"[\s\S]*?var\(--c-no-session\)/)
 })
@@ -491,7 +494,7 @@ test("every meaning color is defined for light and dark, in one fixed stacking o
 // ------------------------------------------------------- the page's rules
 
 test("no decorative cards: no stat tiles, takeaway cards, pipeline steps or chart cards remain", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const app = read("site/src/app.js")
   const css = read("site/src/styles.css")
   for (const cls of ["stat-tile", "chart-card", "pipeline-step", "takeaway\"", "featured-card", "kpi-row\" class"]) {
@@ -508,7 +511,7 @@ test("no decorative cards: no stat tiles, takeaway cards, pipeline steps or char
 })
 
 test("viewer orientation and supported instants do not redefine operator evidence or UTC day precision", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   // The new first-visit briefing addresses the viewer. Keep the old operator
   // wording guard on the retained work/evidence/learning surfaces, rather
   // than banning the approved heading "Needs your attention".
@@ -538,7 +541,7 @@ test("viewer orientation and supported instants do not redefine operator evidenc
 })
 
 test("Why Lean? gives the eight wastes as our mapping, the glossary, and its sources inline", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const why = html.slice(html.indexOf('id="view-why"'), html.indexOf('id="view-about"'))
   for (const w of ["Waiting", "Defects", "Extra processing", "Overproduction", "Motion", "Transportation", "Inventory", "Non-utilized talent"]) assert.match(why, new RegExp(`</span>${w}</dt>`), w)
   assert.match(why, /our own mapping/)
@@ -686,7 +689,7 @@ test("Improvements never treats a countermeasure merge or issue closure as its m
   assert.doesNotMatch(app, /merged, not yet checked/)
   assert.doesNotMatch(app, /"fixed by "/)
   assert.doesNotMatch(app, /: "var\(--status-good\)"\);\n/)
-  assert.match(read("site/src/index.html"), /A merged change, a closed issue and a measured benefit are independent facts/)
+  assert.match(read("site/src/evidence.html"), /A merged change, a closed issue and a measured benefit are independent facts/)
 })
 
 test("one term for the time agents were busy: Working time", () => {
@@ -694,5 +697,5 @@ test("one term for the time agents were busy: Working time", () => {
   assert.doesNotMatch(app, /"Agent time"/)
   assert.match(app, /"Working time"/)
   // The task and session views do not re-announce the whole page; focus moves to the heading instead.
-  assert.doesNotMatch(read("site/src/index.html"), /id="(job|session)-detail" aria-live/)
+  assert.doesNotMatch(read("site/src/evidence.html"), /id="(job|session)-detail" aria-live/)
 })
