@@ -31,20 +31,24 @@
         !REASONS.includes(doc.reason) || !Array.isArray(doc.placements) || doc.placements.length > 64) return bad();
     const record = doc.record;
     if (record === null) return doc.availability !== "published" && doc.placements.length === 0 ? { ok: true, codes: [] } : bad();
-    if (!keys(record, "schema,job,evaluator,state,heading,events,sources,coverage,privacy") || record.schema !== "desk.factory.context/1" ||
+    const hasRecommendations = record?.schema === "desk.factory.context/2";
+    const recordKeys = "schema,job,evaluator,state,heading,events,sources,coverage,privacy" + (hasRecommendations ? ",recommendations" : "");
+    if (!keys(record, recordKeys) || !["desk.factory.context/1", "desk.factory.context/2"].includes(record.schema) ||
         record.job !== doc.job || record.state !== doc.availability || !version(record.evaluator) || !text(record.heading, 120) ||
         !Array.isArray(record.events) || record.events.length > 64 || !Array.isArray(record.sources) || record.sources.length > 512) return bad();
+    const recommendations = hasRecommendations ? record.recommendations : [];
+    if (!Array.isArray(recommendations) || recommendations.length > 8) return bad();
     const privacy = record.privacy;
     if (!keys(privacy, "verdict,payload_sha256,reviewer") || !SHA.test(privacy.payload_sha256) ||
         !(privacy.verdict === "approved" && version(privacy.reviewer) ||
           privacy.verdict === "not_required" && privacy.reviewer === null && record.state !== "published" &&
-          record.heading === null && record.events.length === 0)) return bad();
+          record.heading === null && record.events.length === 0 && recommendations.length === 0)) return bad();
     const coverage = record.coverage;
     if (!keys(coverage, "state,reasons,omitted_events") || !["measured", "partial", "unavailable"].includes(coverage.state) ||
         !Array.isArray(coverage.reasons) || coverage.reasons.some((reason) => !["not_recorded", "withheld", "omitted", "unplaced", "review_pending"].includes(reason)) ||
         !Number.isSafeInteger(coverage.omitted_events) || coverage.omitted_events < 0 ||
         (coverage.state === "measured" && (coverage.reasons.length || coverage.omitted_events)) ||
-        (record.state !== "published" && (record.heading !== null || record.events.length || coverage.state !== "unavailable"))) return bad();
+        (record.state !== "published" && (record.heading !== null || record.events.length || recommendations.length || coverage.state !== "unavailable"))) return bad();
     const sources = new Map();
     for (const source of record.sources) {
       if (!keys(source, "session,sha256") || !SESSION.test(source.session) || !SHA.test(source.sha256) || sources.has(source.session)) return bad();
@@ -65,6 +69,18 @@
             (["start", "end"].includes(ref.anchor) ? ref.range !== null : !Array.isArray(ref.range) || ref.range.length !== 2 ||
               !ref.range.every((at) => offset(at) && at >= 0) || ref.range[1] <= ref.range[0])) return bad();
       }
+    }
+    const recommendationIds = new Set();
+    for (const recommendation of recommendations) {
+      if (!keys(recommendation, "id,observations,problem,change,hypothesis,check,confidence") ||
+          !ID.test(recommendation.id) || recommendationIds.has(recommendation.id) ||
+          !Array.isArray(recommendation.observations) || recommendation.observations.length < 1 ||
+          recommendation.observations.length > 8 || new Set(recommendation.observations).size !== recommendation.observations.length ||
+          recommendation.observations.some((id) => !events.has(id)) ||
+          !text(recommendation.problem, 240, false) || !text(recommendation.change, 240, false) ||
+          !text(recommendation.hypothesis, 160, false) || !text(recommendation.check, 240, false) ||
+          !["high", "medium", "low"].includes(recommendation.confidence)) return bad();
+      recommendationIds.add(recommendation.id);
     }
     if ((record.state === "published" && (!events.size || !sources.size || coverage.state === "unavailable")) ||
         doc.placements.length !== events.size) return bad();
