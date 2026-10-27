@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { runInNewContext } from "node:vm";
 import { test } from "node:test";
 import { projection, JOB, SESSION, HASH } from "./fixtures/task-context.mjs";
 import { buildImprovementChecks } from "../../../site/scripts/improvement-checks.mjs";
@@ -634,4 +635,52 @@ test("a short multi-period session keeps one time scale and a tiny final period 
   assert.ok(last.length && last.every((t) => num(t, "width") <= 30000 * k + 1e-6));
   assert.ok(readable(labels), JSON.stringify(labels));
   assert.equal(labels.at(-1).text, "2 h 30 s");
+});
+
+test("the static entry shows a loading state and a visible, retryable script-load failure", async () => {
+  const html = read("site/src/index.html");
+  const rootMarkup = /<div id="loom"[^>]*>([\s\S]*?)\n<\/div>/.exec(html)[1];
+  assert.match(rootMarkup, /class="loom-boot-pending"[^>]*role="status"[^>]*>[^<]*Loading/);
+  const failed = /<div class="loom-boot-failed" role="alert">([\s\S]*?)<\/div>/.exec(rootMarkup);
+  assert.ok(failed, "a failure state ships in the static page");
+  assert.match(failed[1], /couldn.t load/i);
+  assert.match(failed[1], /<button type="button" onclick="location\.reload\(\)">Try again<\/button>/);
+  assert.match(failed[1], /href="evidence\.html"/);
+  assert.match(failed[1], /href="llms\.txt"/);
+  assert.match(rootMarkup, /<noscript>[\s\S]*evidence\.html[\s\S]*<\/noscript>/);
+  // Without any stylesheet, only one state is visible: the inline rules decide.
+  assert.match(html, /<style>[\s\S]*\.loom-boot-failed \{ display: none; \}[\s\S]*\[data-loom-asset="failed"\] \.loom-boot-failed \{ display: block; \}[\s\S]*\[data-loom-asset="failed"\] \.loom-boot-pending \{ display: none; \}[\s\S]*<\/style>/);
+  const scripts = [...html.matchAll(/<script src="([^"]+)"([^>]*)><\/script>/g)];
+  assert.equal(scripts.length, 5);
+  for (const [, src, rest] of scripts) {
+    const handler = /onerror="([^"]+)"/.exec(rest);
+    assert.ok(handler, `${src} reports its own load failure`);
+    const element = new Node("html");
+    runInNewContext(handler[1], { document: { documentElement: element } });
+    assert.equal(element.getAttribute("data-loom-asset"), "failed", src);
+  }
+});
+
+test("boot replaces the static state normally, and leaves the failure state when an asset failed", () => {
+  const page = (failed) => {
+    const root = new Node("div");
+    root.append(new Node("p"));
+    const html = new Node("html");
+    if (failed) html.setAttribute("data-loom-asset", "failed");
+    const fetches = [];
+    const win = { location: { hash: "#/", search: "", replace() {} }, addEventListener() {}, matchMedia: () => ({ matches: false }),
+      fetch: (path) => { fetches.push(path); return new Promise(() => {}); },
+      document: { ...doc, documentElement: html, getElementById: (id) => id === "loom" ? root : null } };
+    return { root, win, fetches };
+  };
+  const ok = page(false);
+  loom.boot(ok.win);
+  assert.equal(ok.root.children[0].tagName, "A", "the reader replaced the static state");
+  assert.match(ok.root.textContent, /Loading the session catalog/);
+  assert.ok(ok.fetches.includes("sessions/index.json"));
+  const bad = page(true);
+  loom.boot(bad.win);
+  assert.equal(bad.root.children.length, 1);
+  assert.equal(bad.root.children[0].tagName, "P", "the static failure state stays");
+  assert.deepEqual(bad.fetches, [], "no partial reader starts without its dependencies");
 });
