@@ -463,13 +463,22 @@
       };
       more.addEventListener("click", () => { state.shown += PAGE; fill(); });
       fill();
+      // Sessions first: a short hero, the key the strips need, then the shelf itself.
+      // Orientation and the task directory follow the first strips instead of preceding them.
       return el("div", { class: "page page-shelf" },
         el("p", { class: "eyebrow" }, `The loom · ${plural(sorted.length, "session")} in this build`, " ", tag("recorded")),
-        el("h1", { class: "display" }, "Every session, ", el("em", {}, "woven from what the record saw.")),
-        el("p", { class: "lede" }, "Each strip is one agent session. Its length follows how long the session ran; the density of its thread follows how much of that time has recorded activity. ",
-          "Bare, cross-hatched canvas means no captured interval. That doesn’t show nothing happened, and it is never counted as a loss."),
-        el("p", { class: "lede small" }, unlisted ? `${plural(unlisted, "session")} list${unlisted === 1 ? "s" : ""} no task association; they stay on the shelf. An empty list can also mean associations weren’t recorded; each session’s page says which.` : "Every session here carries at least one task association."),
-        legend(), taskIndex(sorted), el("section", { "aria-labelledby": "sh-h" }, head("sh-h", "The shelf", "Open a session to see its weave hour by hour, what was reviewed about it, and what could change."), list, more));
+        el("h1", { class: "display compact" }, "Every session, ", el("em", {}, "woven from what the record saw.")),
+        el("p", { class: "lede" }, "Each strip is one agent session. Its length follows how long the session ran; the density of its thread follows how much of that time has recorded activity."),
+        el("section", { class: "shelf-sec", "aria-labelledby": "sh-h" },
+          el("div", { class: "shelf-bar" }, el("h2", { id: "sh-h" }, "The shelf"),
+            el("ul", { class: "legend compact", "aria-label": "Key" },
+              el("li", {}, el("span", { class: "chip weft" }), "Recorded activity"),
+              el("li", {}, el("span", { class: "chip hatch" }), "No captured interval"))),
+          list, more),
+        el("aside", { class: "aside-note" },
+          el("p", {}, "Bare, cross-hatched canvas means no captured interval. That doesn’t show nothing happened, and it is never counted as a loss. Open a session to see its weave hour by hour, what was reviewed about it, and what could change."),
+          el("p", {}, unlisted ? `${plural(unlisted, "session")} list${unlisted === 1 ? "s" : ""} no task association; they stay on the shelf. An empty list can also mean associations weren’t recorded; each session’s page says which.` : "Every session here carries at least one task association.")),
+        taskIndex(sorted));
     }
     async function taskShelf(job) {
       const rows = order(state.catalog.sessions.filter((r) => r.jobs.includes(job)));
