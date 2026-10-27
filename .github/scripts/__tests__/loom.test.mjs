@@ -711,3 +711,43 @@ test("a failed or malformed task-name source is visible with a retry, distinct f
   assert.match(absent.host.textContent, /task names aren.t published in this build/i);
   assert.doesNotMatch(read("site/src/loom.js"), /optional\("rollups\/tasks\.json"\)\.catch/, "boot no longer swallows name-source failures");
 });
+
+const SECOND = "6e2f4a81-bd40-4f51-ac6d-4e5f6a7b8c93";
+const snapshotFacts = (id, rev, state, returns) => facts({ jobs: [binding()], outcomes: [{ job: JOB, rev, state, returns }] }, id);
+const snapshotDetail = (f) => detail(f, { jobs: [{ id: JOB, status: "done" }], contexts: new Map([[JOB, projection()]]) });
+
+test("a session's task outcome reads as that session's recorded snapshot, apart from this build's status", async () => {
+  for (const [rev, words] of [[3, /revision 3/], [null, /revision not recorded/]]) {
+    const f = snapshotFacts(SESSION, rev, "not_delivered", [{ caught: "at_review", counts: true }]);
+    const m = await mount({ details: [[SESSION, snapshotDetail(f)]] });
+    await m.go(`#/session/${SESSION}`);
+    const text = m.host.textContent;
+    assert.match(text, words);
+    assert.match(text, /as this session recorded it/i);
+    assert.match(text, /not the current or complete/i);
+    assert.match(text, /this build.s task summary/i);
+    assert.doesNotMatch(text, /When this was built, the task was|For the whole task, as recorded:/);
+  }
+});
+
+test("the task shelf prefers the highest known revision among loaded snapshots and names its source", async () => {
+  const older = snapshotFacts(SESSION, 3, "not_delivered", [{ caught: "at_review", counts: true }]);
+  const newer = snapshotFacts(SECOND, 11, "accepted", [{ caught: "at_review", counts: true }, { caught: "after_delivery", counts: true }, { caught: "in_task", counts: true }]);
+  const list = [older, newer];
+  const m = await mount({ catalog: catalogOf(list), readDetail: (id) => Promise.resolve(snapshotDetail(list.find((f) => f.session.id === id))) });
+  await m.go(`#/sessions?task=${JOB}`);
+  let text = m.host.textContent;
+  assert.match(text, /revision 11/);
+  assert.match(text, /accepted/);
+  assert.ok(text.includes(SECOND.slice(0, 8)), "the snapshot names its recording session");
+  assert.match(text, /2 of 2 session records loaded/);
+  assert.doesNotMatch(text, /not handed over yet/);
+  assert.match(text, /this build.s task summary/i);
+
+  const unknown = [snapshotFacts(SESSION, null, "accepted", []), snapshotFacts(SECOND, null, "refused", [])];
+  const u = await mount({ catalog: catalogOf(unknown), readDetail: (id) => Promise.resolve(snapshotDetail(unknown.find((f) => f.session.id === id))) });
+  await u.go(`#/sessions?task=${JOB}`);
+  text = u.host.textContent;
+  assert.match(text, /no loaded snapshot records its revision/i);
+  assert.match(text, /not necessarily the latest/i);
+});

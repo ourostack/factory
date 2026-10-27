@@ -331,6 +331,18 @@
       return null;
     }
     const unbound = (d) => d.bindings.state === "measured" && !d.bindings.items.length;
+    // Outcome state and returns are the recording session's snapshot of the task; status is this build's summary.
+    const revText = (o) => o.snapshot.rev === null ? "revision not recorded" : `revision ${count(o.snapshot.rev)}`;
+    const stateText = (o) => `${STATES[o.state.value] || o.state.value}${o.state.state === "partial" ? " (partly recorded)" : ""}`;
+    const statusText = (o) => o.status.state === "unavailable" ? "This build’s task summary doesn’t record its status."
+      : `This build’s task summary lists its status as ${o.status.value.replace(/_/g, " ")}${o.status.state === "partial" ? " (partly recorded)" : ""}.`;
+    // Among loaded snapshots, the highest recorded revision wins; without one, none is called the latest.
+    function latestSnapshot(details, job) {
+      const all = details.flatMap((d) => d.outcomes.filter((o) => o.job === job && o.state.state !== "unavailable"));
+      const known = all.filter((o) => o.snapshot.rev !== null);
+      if (known.length) return { o: known.reduce((a, b) => b.snapshot.rev > a.snapshot.rev ? b : a), known: true };
+      return all.length ? { o: all[0], known: false } : null;
+    }
 
     async function go(hash) {
       const route = parseRoute(hash);
@@ -509,15 +521,20 @@
       const failed = results.filter((r) => !r.ok).length;
       const any = [...woven.values()][0];
       const ctx = any && any.contexts.find((c) => c.job === job);
-      const outcome = any && any.outcomes.find((o) => o.job === job);
+      const latest = latestSnapshot([...woven.values()], job);
+      const by = (o) => el("a", { href: `#/session/${o.snapshot.session}` }, `session ${shortId(o.snapshot.session)}`);
       const longest = longestOf(rows);
       return el("div", { class: "page page-task" },
         el("a", { href: "#/", class: "back" }, "← All sessions"),
         el("p", { class: "eyebrow" }, "Task association · ", el("code", {}, job.slice(0, 8)), " ", tag("recorded")),
-        el("h1", { class: "display" }, name || `Unnamed task ${job.slice(0, 8)}`),
+        el("h1", { class: "display" }, taskLabel(job)),
         published(ctx) && ctx.record.heading !== name ? el("p", { class: "lede" }, "Reviewed heading: ", el("strong", {}, ctx.record.heading), " ", tag("reviewed")) : null,
         el("p", { class: "lede" }, `${plural(rows.length, "session")} carry this task. Some may have run side by side, so their lengths don’t add up to the task’s length. A session bound to several tasks shows whole-session figures, not only this task’s share.`),
-        outcome && outcome.state.state !== "unavailable" ? el("p", { class: "lede small" }, `When this was built, the task was ${STATES[outcome.state.value] || outcome.state.value}${outcome.state.state === "partial" ? " (partly recorded)" : ""}. `, tag("task")) : null,
+        latest ? el("p", { class: "lede small" }, latest.known
+          ? [`Latest snapshot among the ${woven.size} of ${rows.length} session records loaded here: ${revText(latest.o)}, recorded by `, by(latest.o),
+            ` — the task was ${stateText(latest.o)}. Sessions not loaded may hold a newer one. `]
+          : [`No loaded snapshot records its revision. Shown from `, by(latest.o), `, not necessarily the latest: the task was ${stateText(latest.o)}. `],
+        statusText(latest.o), " ", tag("task")) : null,
         el("p", { class: "disclosure", role: "note" }, `Woven from ${woven.size} of ${rows.length} session records on this task (open sessions first, then the longest)`,
           failed ? `; ${plural(failed, "record")} couldn’t be read` : "", rows.length > SCAN ? ". Open any other session for its weave." : "."),
         legend(),
@@ -599,7 +616,7 @@
       const result = results.length
         ? cellBox("result", "What came of it", results.map((e) => el("p", { class: "sb-v" }, e.explanation)), tag("reviewed"))
         : cellBox("result", "What came of it", [el("p", { class: "sb-v sb-empty" }, "This session’s own result isn’t reviewed yet."),
-          outcome ? el("p", { class: "muted" }, `For the whole task, as recorded: ${STATES[outcome.state.value] || outcome.state.value}${outcome.state.state === "partial" ? " (partly recorded)" : ""}.`) : null],
+          outcome ? el("p", { class: "muted" }, `For the whole task, as this session recorded it (${revText(outcome)}): ${stateText(outcome)}.`) : null],
         outcome ? tag("task") : tag("recorded"));
       let next;
       const pick = mine[0] || wide[0];
@@ -825,7 +842,7 @@
       if (!d.outcomes.length) return null;
       return el("section", { class: "knots", "aria-labelledby": "kn-h" },
         head("kn-h", "Where the task went back for another pass",
-          "This is each task’s whole history, not only this session’s. Returns carry no session time, so they aren’t drawn on the weave or counted as this session’s rework. ", tag("task")),
+          "This is each task’s history as this session recorded it: a snapshot, not the current or complete task history. Returns carry no session time, so they aren’t drawn on the weave or counted as this session’s rework. ", tag("task")),
         d.outcomes.map((o) => {
           const r = o.returns, counted = r.items.filter((x) => x.counts), uncounted = r.items.length - counted.length;
           const W = 60 * r.items.length + (r.state === "measured" ? 30 : 110) + 20;
@@ -842,11 +859,11 @@
             : svg("path", { d: `M${x} 40 C${x + 30} 30 ${x + 50} 50 ${x + 80} 38 M${x + 84} 37 l12 -4 M${x + 86} 42 l14 2`, class: "knot-path k-frayed" }));
           const groups = new Map();
           for (const item of counted) groups.set(item.caught, (groups.get(item.caught) || 0) + 1);
-          const status = o.status.state === "unavailable" ? "" : ` Its recorded status: ${o.status.value.replace(/_/g, " ")}.`;
+          const status = ` ${statusText(o)}`;
           return el("article", { class: "knot-task" },
             el("h3", {}, el("a", { href: `#/sessions?task=${o.job}` }, taskLabel(o.job))),
-            el("p", { class: "muted" }, o.state.state === "unavailable" ? `Its hand-over state wasn’t recorded (${reasonText(o.state.reasons)}).`
-              : `When this was built, the task was ${STATES[o.state.value] || o.state.value}${o.state.state === "partial" ? " (partly recorded)" : ""}.`, status),
+            el("p", { class: "muted" }, o.state.state === "unavailable" ? `In this session’s snapshot (${revText(o)}), its hand-over state wasn’t recorded (${reasonText(o.state.reasons)}).`
+              : `As this session recorded it (${revText(o)}), the task was ${stateText(o)}.`, status),
             r.state === "unavailable" ? el("p", {}, `Its return history wasn’t recorded (${reasonText(r.reasons)}). That is unknown, not zero.`) : [
               r.items.length ? el("div", { class: "knot-row" }, thread) : null,
               el("ul", { class: "knot-list" },
@@ -1037,7 +1054,7 @@
           term("Threads", "Each row is one kind of recorded activity, plus a row for main-agent stops. A thicker thread means more of that period was covered. Rows overlap, so they don’t add up to the whole period."),
           term("Bare canvas", "No captured interval. That doesn’t show nothing happened: helpers keep their own records, and some work isn’t captured. It is never counted as zero, inactivity or a loss."),
           term("Main-agent stops and recorded prompts", "A stop runs from when the main agent stopped to the next recorded prompt. The record usually doesn’t say why, and a prompt isn’t proof that a person replied. Other activity may overlap a stop."),
-          term("Loops", "Times a task went back for another pass, marked by when they were caught: during the work, at review, or after hand-over. They belong to the whole task. Returns not counted as rework and unreadable history stay visible and are never counted as mistakes."),
+          term("Loops", "Times a task went back for another pass, marked by when they were caught: during the work, at review, or after hand-over. They belong to the whole task, as a snapshot each session recorded; an older session can show an older state. Returns not counted as rework and unreadable history stay visible and are never counted as mistakes."),
           term("Pins", "A reviewed story step is pinned where its evidence is. A pin is not a duration, and the gap between pins is not time spent."),
           term("Four kinds of statement", "Recorded: measured from the session record. Reviewed story: a checked, privacy-reviewed explanation. Proposal: a reviewed suggestion, never generated from counts. Checked: what a later canonical check found."),
           term("Task associations", "A session can be bound to one or more tasks. A task’s name tells you what the task was, not what the whole session was for."),
