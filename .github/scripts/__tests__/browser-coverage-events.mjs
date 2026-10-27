@@ -7,6 +7,7 @@ import { readFile, mkdir, writeFile, readdir } from "node:fs/promises"
 import { resolve, join, sep, extname } from "node:path"
 import { pathToFileURL } from "node:url"
 import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { parseArgs } from "../../../site/scripts/verify-v12-browser.mjs"
 import { deriveImprovementQueue, validateImprovementQueue } from "../../../site/scripts/improvement-queue.mjs"
@@ -44,11 +45,14 @@ const clockSession = details.slice().sort((a, b) => clockScore(b) - clockScore(a
 assert.ok(task && labeled, "real task and a published labeled session are required")
 const results = [], requests = [], actions = []
 let browser = null
+// The previous reader moved to evidence.html when the Loom became the entry;
+// older built artifacts still carry it as index.html.
+const ENTRY = existsSync(join(site, "evidence.html")) ? "evidence.html" : "index.html"
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" }
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost")
-    const path = resolve(site, "." + (url.pathname === "/" ? "/index.html" : url.pathname))
+    const path = resolve(site, "." + (url.pathname === "/" ? `/${ENTRY}` : url.pathname))
     assert.ok(path.startsWith(site + sep))
     requests.push(url.pathname)
     const body = await readFile(path)
@@ -1409,7 +1413,7 @@ try {
     }
   })
   for (const id of ["evidence-drawer", "main", "map-clear", "comparison-conclusion", "why-toggle", "causes-unlabeled"]) await scenario(`missing_dom_id_${id}_keeps_its_real_boundary_safe`, async (page, context) => {
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     assert.ok(html.includes(`id="${id}"`))
     const damaged = id === "comparison-conclusion"
       ? html.replace(/<p id="comparison-conclusion"[^>]*>[\s\S]*?<\/p>/, "")
@@ -2133,7 +2137,7 @@ try {
     if (variant === "mismatch") assert.match(await page.locator("#cause-detail").innerText(), /does not add up/)
   }, { viewport: { width: 390, height: 844 } })
   for (const id of ["zone-current", "overview-triage-note", "map-selection"]) await scenario(`optional_dom_absent_before_native_initialization_${id}`, async (page, context) => {
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     assert.ok(html.includes(`id="${id}"`))
     await context.route("**/", (r) => r.fulfill({ contentType: "text/html", body: html.replace(`id="${id}"`, `id="fixture-absent-${id}"`) }))
     await load(page, "#/", "#overview-state")
@@ -2430,7 +2434,7 @@ try {
     assert.match(await page.locator("#session-detail").textContent(), /models: none recorded/)
   })
   for (const id of ["vsm-title", "vsm-caption", "scope-context", "time-breakdown-note"]) await scenario(`native_optional_dom_boundary_${id}`, async (page, context) => {
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     if (id === "vsm-caption") {
       await context.addInitScript(() => document.addEventListener("DOMContentLoaded", () => {
         document.querySelector(".vsm-block > .chart-caption").remove()
@@ -2784,7 +2788,7 @@ try {
     await closeDrawer(page)
   }, { viewport: { width: 390, height: 900 } })
   for (const id of ["landing-note", "why-toggle-note", "improvement-status", "answer-tiles", "jobs-table"]) await scenario(`remaining_optional_shell_${id}`, async (page, context) => {
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     assert.ok(html.includes(`id="${id}"`))
     await context.route("**/", (route) => route.fulfill({ contentType: "text/html", body: html.replace(`id="${id}"`, `id="fixture-absent-${id}"`) }))
     if (id === "landing-note") await load(page, `#/task/${task.id}`, "#vsm .vsm-box")
@@ -3490,7 +3494,7 @@ try {
     assert.ok((await page.locator("#stackup .sb-group-note").first().textContent()).trim())
   })
   await scenario("remaining_g_no_skip_link_and_no_answer_tile_are_optional_to_the_store", async (page, context) => {
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     assert.ok(html.includes('class="skip-link"') && html.includes('id="answer-tiles"'))
     await context.route("**/", (route) => route.fulfill({ contentType: "text/html", body: html.replace('class="skip-link"', 'class="fixture-absent-skip-link"').replace('id="answer-tiles"', 'id="fixture-absent-answer-tiles"') }))
     await load(page, "#/store", "#jobs-table .data-table")
@@ -3653,7 +3657,7 @@ try {
     assert.match(await page.locator("#task-lede").textContent(), /Synthetic external reader prefix/)
   })
   await scenario("remaining_h_a_removed_selection_note_and_map_label_do_not_invent_a_selected_item", async (page, context) => {
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     assert.ok(html.includes('id="map-selection"'))
     await context.route("**/", (route) => route.fulfill({ contentType: "text/html", body: html.replace('id="map-selection"', 'id="fixture-absent-map-selection"') }))
     await context.addInitScript(() => {
@@ -3717,7 +3721,7 @@ try {
     assert.equal(B.validateBriefing(d.overview).ok, true)
     assert.ok(d.overview.attention.some((row) => row.id.startsWith("alarm:") && row.family === "improvement_system"))
     await fixtureJson(context, "data.json", d)
-    const html = await readFile(join(site, "index.html"), "utf8")
+    const html = await readFile(join(site, ENTRY), "utf8")
     const ids = ["improvement-status", "overview-triage-note", "improvement-triage-note", "improvement-alarms"]
     for (const id of ids) assert.ok(html.includes(`id="${id}"`))
     const altered = ids.reduce((body, id) => body.replace(`id="${id}"`, `id="fixture-absent-${id}"`), html)
