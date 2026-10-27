@@ -74,7 +74,7 @@ const allFacts = () => [facts({ jobs: [binding()] }), facts({ jobs: [binding()] 
 // Learning with one real shipped change whose check was inconclusive with no baseline.
 const LA = "c87c243fe6149fafb9296c32cd11dca0";
 const sha = "41541eb0e1a1f04879cc14110ff321962c90fe18";
-function learningDoc() {
+function learningDoc({ verdict = "too_few_jobs", partial = false, before = 0 } = {}) {
   const m = (value) => ({ state: "measured", value, reasons: [] });
   const p = (value) => ({ state: "partial", value, reasons: ["log_truncated"], bound: "lower" });
   const data = { schema: "factory-site/3", reports_commit: sha, jobs: [{ id: LA, status: "done", lead_time_ms: p(400000), signoff: m("not_recorded") }],
@@ -86,9 +86,12 @@ function learningDoc() {
     issues: [{ number: 53, url: "https://github.com/ourostack/factory/issues/53", state: "closed", body: "PRIVATE_BODY" }], records: [],
     parseCard: () => ({ ok: true, card: { signal: "human_wait", job_class: "any", hypothesis: { measure: "human_wait", direction: "down" },
       plugin: "desk", version: "3.2.0-alpha.108", countermeasure: "https://github.com/ourostack/desk/pull/65", evidence_jobs: ["PRIVATE_TRIGGER"] } }),
-    checkCard: () => ({ status: "checked", verdict: "too_few_jobs", state: "measured", reasons: [], jobs: 54,
+    checkCard: () => ({ status: "checked", verdict, state: partial ? "partial" : "measured", reasons: partial ? ["host_records_partly"] : [], jobs: 54 + before,
       excluded: [{ reason: "open_job", jobs: 25 }, { reason: "plugin_not_reported", jobs: 9 }],
-      comparison: { before: { jobs: 0, groups: 0, median: null }, after: { jobs: 20, groups: 9, median: 0 }, change: null, interval: null, direction: null } }),
+      comparison: before
+        ? { before: { jobs: before, groups: 6, median: 2 * HOUR }, after: { jobs: 20, groups: 9, median: HOUR }, change: -HOUR,
+          interval: [-HOUR - 420000, -3000000], direction: "down" }
+        : { before: { jobs: 0, groups: 0, median: null }, after: { jobs: 20, groups: 9, median: 0 }, change: null, interval: null, direction: null } }),
   });
   checks.sources = { desk: "a".repeat(40), facts: "b".repeat(40), reports: sha };
   return buildLearning({ data, checks });
@@ -473,4 +476,92 @@ test("small text meets 4.5:1 contrast on every paper in both themes", () => {
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /:focus-visible/);
   assert.match(css, /@media \(max-width:/);
+});
+
+test("absent or incomplete task bindings are never read as an unbound session", async () => {
+  for (const [f, words] of [
+    [facts({ jobs: undefined }, LONE), /task associations weren.t recorded/i],
+    [facts({ unavailable: [{ field: "jobs", reason: "withheld_public" }] }, LONE), /task associations weren.t recorded/i],
+    [facts({ jobs: [], unavailable: [{ field: "jobs", reason: "log_truncated" }] }, LONE), /task associations are incomplete/i],
+  ]) {
+    const m = await mount({ details: [[LONE, detail(f)]] });
+    await m.go(`#/session/${LONE}`);
+    assert.match(m.host.textContent, words);
+    assert.doesNotMatch(m.host.textContent, /isn.t bound to any task|No task association was recorded/i);
+  }
+  const partly = detail(facts({ jobs: [binding()], unavailable: [{ field: "jobs", reason: "log_truncated" }] }), { contexts: new Map([[JOB, projection()]]) });
+  const m = await mount({ details: [[SESSION, partly]] });
+  await m.go(`#/session/${SESSION}`);
+  assert.match(m.host.textContent, /Restore the device connection/);
+  assert.match(m.host.textContent, /task associations are incomplete/i);
+  assert.match(m.host.textContent, /the log was cut short/);
+});
+
+test("the weave and task swatches give every period its actual elapsed width", async () => {
+  const m = await mount({ details: [[SESSION, bound(projection())]] });
+  await m.go(`#/session/${SESSION}`);
+  const num = (n, k) => Number(n.getAttribute(k));
+  const hits = all(m.host).filter((n) => n.getAttribute("class") === "hit" || n.getAttribute("class") === "hit short");
+  assert.equal(hits.length, 4);
+  const k = num(hits[0], "width") / HOUR;
+  for (let i = 0; i < 4; i++) assert.ok(Math.abs(num(hits[i], "x") - i * HOUR * k) < 1e-6, `column ${i} starts at its time`);
+  const lastStart = 3 * HOUR * k;
+  const threads = all(m.host).filter((n) => /\bthread\b/.test(n.getAttribute("class") || "") && num(n, "x") >= lastStart - 1e-6);
+  assert.ok(threads.length > 0, "the final second keeps its thread");
+  for (const t of threads) assert.ok(num(t, "width") <= 1000 * k + 1e-6, "no elapsed width is granted to the final second");
+  assert.equal(hits[3].getAttribute("data-short"), "true");
+  const end = all(m.host).find((n) => n.tagName === "TEXT" && n.textContent === "3 h 1 s");
+  assert.ok(end && Math.abs(num(end, "x") - (3 * HOUR + 1000) * k) < 1e-6, "axis ends at the real duration");
+  const pin = attr(m.host, "data-pin", "3".repeat(16))[0];
+  assert.ok(Math.abs(num(tags(pin, "line")[0], "x1") - 5000 * k) < 1e-6, "pins sit at their evidence time");
+
+  const many = [facts({ jobs: [binding()] })];
+  const t = await mount({ catalog: catalogOf(many), details: [[SESSION, detail(many[0], { contexts: new Map([[JOB, projection()]]) })]] });
+  await t.go(`#/sessions?task=${JOB}`);
+  const reads = all(t.host).filter((n) => n.getAttribute("class") === "t-read");
+  const last = reads.find((n) => num(n, "x") >= 3 - 1e-9);
+  assert.ok(last && num(last, "width") <= 1000 / HOUR + 1e-9, "swatches keep the final second's width");
+});
+
+test("a linked session that can't be read is an error with retry, not an empty mending page", async () => {
+  let fail = true;
+  const good = bound(proposal());
+  const m = await mount({ readDetail: () => fail ? Promise.reject(new Error("offline <x>")) : Promise.resolve(good) });
+  await m.go(`#/mend?session=${SESSION}&focus=${"4".repeat(16)}`);
+  let text = m.host.textContent;
+  assert.match(text, /couldn.t load the linked session/i);
+  assert.ok(text.includes("offline <x>"));
+  assert.doesNotMatch(text, /No reviewed proposal/);
+  const retry = tags(m.host, "button").find((b) => /try again/i.test(b.textContent));
+  assert.ok(retry);
+  fail = false;
+  retry.dispatch("click"); await flush(); await flush();
+  text = m.host.textContent;
+  assert.doesNotMatch(text, /couldn.t load the linked session/i);
+  assert.ok(all(m.host).some((n) => n.getAttribute("id") === `idea-${"4".repeat(16)}`));
+  const broken = structuredClone(good); broken.numbers.activity_ms = 5;
+  const invalid = await mount({ details: [[SESSION, broken]] });
+  await invalid.go(`#/mend?session=${SESSION}`);
+  assert.match(invalid.host.textContent, /linked session.s record didn.t pass its checks/i);
+});
+
+test("a check shows its comparison, uncertainty, measurement state and every limitation", async () => {
+  const m = await mount({ learning: learningDoc({ verdict: "confirmed", partial: true, before: 10 }) });
+  await m.go("#/mend");
+  const card = all(m.host).find((n) => (n.getAttribute("class") || "").includes("check-note"));
+  const text = card.textContent;
+  assert.match(text, /Helped/);
+  assert.match(text, /measurement: partial/i);
+  assert.match(text, /Before median: at least 2 hours/);
+  assert.match(text, /After median: at least 1 hour/);
+  assert.match(text, /after minus before: −1 hour, partly recorded/i);
+  assert.match(text, /95% interval: −1 hour 7 minutes to −50 minutes/i);
+  assert.match(text, /10 tasks in 6 groups/);
+  for (const words of [/capture/i, /shared workers/i, /association/i, /mix of tasks/i, /related measure/i]) assert.match(text, words);
+  const none = await mount();
+  await none.go("#/mend");
+  const t = all(none.host).find((n) => (n.getAttribute("class") || "").includes("check-note")).textContent;
+  assert.match(t, /Before median: not recorded/);
+  assert.match(t, /interval: not established/i);
+  assert.match(t, /no effect estimate/i);
 });
