@@ -203,6 +203,7 @@ section { margin-top: 3.5rem; }
 .unknown { fill: none; stroke: var(--muted); stroke-dasharray: 1 1; }
 .col:hover .thread { transform: scaleY(1.15); filter: brightness(1.1); }
 .hit { fill: transparent; cursor: crosshair; }
+.short-mark { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; }
 .cursor { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0; transition: x .15s var(--ease), opacity .2s; }
 .cursor.on { opacity: 1; }
 .col { animation: weave-in .5s var(--ease) both; animation-delay: calc(var(--d) * 14ms + .25s); }
@@ -291,6 +292,10 @@ section { margin-top: 3.5rem; }
 .observed { margin: 0 0 .5rem; padding-left: 1rem; font: italic .9rem var(--serif); }
 .guess { font-size: .86rem !important; color: var(--muted); font-style: italic; }
 .note-sessions { font-size: .88rem; color: var(--muted); }
+.comparison { margin: .4rem 0; padding-left: 1rem; font-size: .9rem; font-variant-numeric: tabular-nums lining-nums; }
+.comparison li { margin: .15rem 0; }
+.limits { margin: .4rem 0; padding-left: 1rem; }
+.limits li { margin: .15rem 0; }
 
 .about { max-width: var(--measure); }
 .about dt { font: 500 1.2rem var(--serif); margin-top: 1rem; }

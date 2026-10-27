@@ -68,7 +68,28 @@
     too_few_independent_groups: "Too few independent groups to estimate an effect.",
     association_not_causation: "An association is not proof that the change caused it.",
     task_mix_not_controlled: "The mix of tasks wasn’t controlled.",
+    capture_changes_not_controlled: "Changes in what was captured weren’t controlled.",
+    shared_workers_not_independent: "Shared workers make the before and after samples less independent.",
+    related_measure_not_original_evidence: "This is a related measure, not the original evidence that raised the problem.",
+    no_effect_estimate: "No effect estimate is established.",
   };
+  const COUNT_MEASURES = new Set(["tool_failures", "tool_retries", "api_retries", "compactions", "retouches"]);
+  const kindOf = (measure) => measure === "flow_efficiency" ? "share" : COUNT_MEASURES.has(measure) ? "count" : "time";
+  function amount(v, kind, signed) {
+    const sign = signed && v < 0 ? "−" : signed && v > 0 ? "+" : "";
+    const a = Math.abs(v);
+    if (v === 0) return "0";
+    const text = kind === "share" ? `${Math.round(a * 1000) / 10}${signed ? " percentage points" : "%"}`
+      : kind === "count" ? count(Math.round(a * 100) / 100) : span(a);
+    return sign + text;
+  }
+  // A comparison figure keeps its state and bound; it is never shown more exactly than recorded.
+  function figureText(f, kind, signed) {
+    if (!f || f.state === "unavailable") return `not recorded${f && f.reasons.length ? ` (${reasonText(f.reasons)})` : ""}`;
+    const text = amount(f.value, kind, signed);
+    if (f.state === "measured") return text;
+    return f.bound === "lower" ? `at least ${text}` : f.bound === "upper" ? `at most ${text}` : `${text}, partly recorded`;
+  }
 
   // ---------- small, strict DOM helpers: text only enters as text nodes ----------
   function kit(doc) {
@@ -286,6 +307,13 @@
       a.id.localeCompare(b.id));
     const taskName = (job) => state.names.get(job) || null;
     const taskLabel = (job) => taskName(job) || `Unnamed task ${job.slice(0, 8)}`;
+    // Task bindings are a stated collection: only a complete, empty one means "bound to no task".
+    function bindingNote(b) {
+      if (b.state === "unavailable") return `Task associations weren’t recorded (${reasonText(b.reasons)}), so whether it worked on a task is unknown.`;
+      if (b.state === "partial") return `Task associations are incomplete (${reasonText(b.reasons)}); ${b.items.length ? "only the readable ones are shown" : "none of them could be read"}.`;
+      return null;
+    }
+    const unbound = (d) => d.bindings.state === "measured" && !d.bindings.items.length;
 
     async function go(hash) {
       const route = parseRoute(hash);
@@ -378,20 +406,23 @@
     }
     // A woven swatch from a loaded detail: one hairline row per lane, no dominant-lane colouring.
     function swatch(d) {
-      const rows = d.bins.rows, n = Math.max(1, rows.length);
+      // Units are resolution periods of elapsed time; a short final period stays short.
+      const rows = d.bins.rows, res = rows.length ? d.bins.resolution_ms.value : 1;
+      const n = rows.length ? durationOf(d) / res : 1;
       const box = svg("svg", { viewBox: `0 0 ${n} ${LANES.length}`, preserveAspectRatio: "none", class: "swatch", role: "img",
         "aria-label": `Woven from ${rows.length} period${rows.length === 1 ? "" : "s"} of its record; one thread per kind of activity.` },
       svg("rect", { width: String(n), height: String(LANES.length), fill: "url(#loom-hatch)" }));
-      rows.forEach((r, c) => LANES.forEach((l, i) => {
+      rows.forEach((r) => LANES.forEach((l, i) => {
         const v = r[l.key], w = r.end_ms - r.start_ms;
         if (v.state === "unavailable" || !v.value || !w) return;
-        box.append(svg("rect", { x: String(c), y: String(i + 0.12), width: "1.02", height: "0.76", class: `t-${l.cls}`,
+        // Full periods overlap by a hair to avoid seams; a shorter period is drawn at its own width.
+        box.append(svg("rect", { x: String(r.start_ms / res), y: String(i + 0.12), width: String(w / res + (w === res ? 0.02 : 0)), height: "0.76", class: `t-${l.cls}`,
           "fill-opacity": (0.25 + 0.75 * Math.min(1, v.value / w)).toFixed(2) }));
       }));
       return el("span", { class: "bolt-strip woven", style: "--w:100%" }, box);
     }
     function associations(row) {
-      if (!row.jobs.length) return el("span", { class: "assoc none" }, "No task association");
+      if (!row.jobs.length) return el("span", { class: "assoc none" }, "No task association listed");
       return row.jobs.map((job, i) => [i ? el("span", { class: "sep" }, " · ") : null,
         el("span", { class: "assoc" }, taskLabel(job))]);
     }
@@ -421,7 +452,7 @@
     }
     function shelf(rows) {
       const sorted = order(rows), longest = longestOf(sorted);
-      const unbound = sorted.filter((r) => !r.jobs.length).length;
+      const unlisted = sorted.filter((r) => !r.jobs.length).length;
       const list = el("ol", { class: "shelf", "aria-label": "Sessions: open ones first, then the longest" });
       const more = el("button", { type: "button", class: "ghost" });
       const fill = () => {
@@ -437,7 +468,7 @@
         el("h1", { class: "display" }, "Every session, ", el("em", {}, "woven from what the record saw.")),
         el("p", { class: "lede" }, "Each strip is one agent session. Its length follows how long the session ran; the density of its thread follows how much of that time has recorded activity. ",
           "Bare, cross-hatched canvas means no captured interval. That doesn’t show nothing happened, and it is never counted as a loss."),
-        el("p", { class: "lede small" }, unbound ? `${plural(unbound, "session")} carr${unbound === 1 ? "ies" : "y"} no task association; they stay on the shelf.` : "Every session here carries at least one task association."),
+        el("p", { class: "lede small" }, unlisted ? `${plural(unlisted, "session")} list${unlisted === 1 ? "s" : ""} no task association; they stay on the shelf. An empty list can also mean associations weren’t recorded; each session’s page says which.` : "Every session here carries at least one task association."),
         legend(), taskIndex(sorted), el("section", { "aria-labelledby": "sh-h" }, head("sh-h", "The shelf", "Open a session to see its weave hour by hour, what was reviewed about it, and what could change."), list, more));
     }
     async function taskShelf(job) {
@@ -536,8 +567,8 @@
       const goal = reviewed.length
         ? cellBox("goal", "What it was for", reviewed.map((c) => el("p", { class: "sb-v" }, c.record.heading)), [tag("reviewed"), " ", tag("task")])
         : cellBox("goal", "What it was for", [el("p", { class: "sb-v sb-empty" }, "Not reviewed yet."),
-          el("p", { class: "muted" }, d.bindings.items.length ? ["Task associations, not proof of intent: ", d.bindings.items.map((b, i) => [i ? "; " : "", taskLabel(b.job)])]
-            : "No task association was recorded.")], tag("reviewed"));
+          d.bindings.items.length ? el("p", { class: "muted" }, "Task associations, not proof of intent: ", d.bindings.items.map((b, i) => [i ? "; " : "", taskLabel(b.job)])) : null,
+          bindingNote(d.bindings) ? el("p", { class: "muted" }, bindingNote(d.bindings)) : unbound(d) ? el("p", { class: "muted" }, "It is bound to no task in its complete record.") : null], tag("reviewed"));
       const result = results.length
         ? cellBox("result", "What came of it", results.map((e) => el("p", { class: "sb-v" }, e.explanation)), tag("reviewed"))
         : cellBox("result", "What came of it", [el("p", { class: "sb-v sb-empty" }, "This session’s own result isn’t reviewed yet."),
@@ -560,9 +591,11 @@
       return el("section", { class: "summary-band", "aria-label": "In short" }, el("div", { class: "sb-grid" }, goal, result, next));
     }
     function tasksWorked(d) {
-      if (!d.bindings.items.length) return null;
+      if (unbound(d)) return null;
+      const note = bindingNote(d.bindings);
       return el("section", { class: "bindings", "aria-labelledby": "bd-h" },
         head("bd-h", "Tasks it worked on", "The session’s figures above are for the whole session. A task’s share is shown only where it was recorded. ", tag("recorded")),
+        note ? el("p", { class: "problem", role: "note" }, note) : null,
         el("ul", { class: "binding-list" }, d.bindings.items.map((b) => {
           const seg = b.segments;
           const total = seg.items.reduce((n, s) => n + s.end_ms - s.start_ms, 0);
@@ -581,8 +614,12 @@
     function story(d, id, episodes, loom) {
       const sec = el("section", { class: "story", "aria-labelledby": "st-h" },
         head("st-h", "Why it did it", "Reviewed steps are pinned where their evidence sits. A pin is not a duration, and the gap between pins is not time spent. ", tag("reviewed")));
-      if (!d.bindings.items.length) {
+      if (unbound(d)) {
         sec.append(unwritten("This session isn’t bound to any task, so there’s no reviewed story to attach to it.", null));
+        return sec;
+      }
+      if (!d.bindings.items.length) {
+        sec.append(unwritten("No reviewed story can be attached while its task associations are unknown.", bindingNote(d.bindings)));
         return sec;
       }
       if (episodes.length) {
@@ -634,33 +671,38 @@
         return { node: none, readout: null, table: null, focusPin() {} };
       }
       const res = d.bins.resolution_ms.value, dur = durationOf(d);
-      const u = Math.max(14, Math.min(44, Math.floor(760 / n)));
-      const rowH = 20, gap = 6, top = 8, y0 = top + 16;
-      const base = y0 + LANES.length * (rowH + gap), H = base + 46, W = n * u;
-      const box = svg("svg", { viewBox: `0 0 ${W} ${H}`, width: String(W), height: String(H), class: "weave", "aria-hidden": "true", focusable: "false" });
+      // Horizontal position is elapsed time: k pixels per millisecond. A short final
+      // period keeps its true width; only its pointer target gets a small margin.
+      const u = Math.max(14, Math.min(44, Math.floor(760 / Math.max(1, dur / res))));
+      const k = u / res, X = (ms) => ms * k;
+      const rowH = 20, gap = 6, top = 8, y0 = top + 16, PAD = 16, MIN_HIT = 12;
+      const base = y0 + LANES.length * (rowH + gap), H = base + 46, W = X(dur), SW = W + PAD;
+      const box = svg("svg", { viewBox: `0 0 ${SW} ${H}`, width: String(SW), height: String(H), class: "weave", "aria-hidden": "true", focusable: "false" });
       const laneY = (i) => y0 + i * (rowH + gap);
       box.append(svg("rect", { x: "0", y: String(top), width: String(W), height: "8", fill: "url(#loom-hatch)", rx: "2" }));
       LANES.forEach((l, i) => box.append(svg("rect", { x: "0", y: String(laneY(i)), width: String(W), height: String(rowH), fill: "url(#loom-hatch)", rx: "2" })));
       let current = 0;
       rows.forEach((r, c) => {
-        const w = r.end_ms - r.start_ms, x = c * u;
+        const w = r.end_ms - r.start_ms, x = X(r.start_ms), cw = X(w);
+        const tx = cw > 4 ? x + 1 : x, tw = cw > 4 ? cw - 2 : cw, short = cw < MIN_HIT;
         const col = svg("g", { class: "col", style: `--d:${c}` });
         const cap = r.captured;
         if (cap.state !== "unavailable" && cap.value > 0) {
-          col.append(svg("rect", { x: String(x + 1), y: String(top), width: String(u - 2), height: "8", rx: "1.5", class: "t-captured", "fill-opacity": (0.2 + 0.8 * cap.value / w).toFixed(2) }));
+          col.append(svg("rect", { x: String(tx), y: String(top), width: String(tw), height: "8", rx: "1.5", class: "t-captured", "fill-opacity": (0.2 + 0.8 * cap.value / w).toFixed(2) }));
         }
         LANES.forEach((l, i) => {
           const v = r[l.key];
           if (v.state === "unavailable") {
-            col.append(svg("rect", { x: String(x + u / 2 - 2), y: String(laneY(i) + rowH / 2 - 2), width: "4", height: "4", class: "unknown" }));
+            col.append(svg("rect", { x: String(x + cw / 2 - Math.min(2, cw / 2)), y: String(laneY(i) + rowH / 2 - 2), width: String(Math.min(4, cw)), height: "4", class: "unknown" }));
             return;
           }
           if (!v.value) return;
           const h = Math.max(2, rowH * Math.sqrt(v.value / w));
-          col.append(svg("rect", { x: String(x + 1), y: (laneY(i) + (rowH - h) / 2).toFixed(1), width: String(u - 2), height: h.toFixed(1), rx: "1.5",
+          col.append(svg("rect", { x: String(tx), y: (laneY(i) + (rowH - h) / 2).toFixed(1), width: String(tw), height: h.toFixed(1), rx: "1.5",
             class: `thread t-${l.cls}${v.state === "partial" ? " partial" : ""}` }));
         });
-        const hit = svg("rect", { x: String(x), y: "0", width: String(u), height: String(H), class: "hit" });
+        if (short) col.append(svg("line", { x1: String(x), y1: String(top - 2), x2: String(x), y2: String(base + 2), class: "short-mark" }));
+        const hit = svg("rect", { x: String(x), y: "0", width: String(short ? MIN_HIT : cw), height: String(H), class: short ? "hit short" : "hit", ...(short ? { "data-short": "true" } : {}) });
         hit.addEventListener("pointerenter", () => pick(c));
         hit.addEventListener("click", () => pick(c));
         col.append(hit);
@@ -670,24 +712,25 @@
       const axis = svg("g", { class: "axis" });
       axis.append(svg("line", { x1: "0", y1: String(base + 22), x2: String(W), y2: String(base + 22) }));
       const every = Math.max(1, Math.ceil(64 / u));
-      for (let c = 0; c < n; c += every) {
-        axis.append(svg("line", { x1: String(c * u), y1: String(base + 19), x2: String(c * u), y2: String(base + 27), class: "tick" }));
-        if (c && W - c * u < 48) continue;
-        axis.append(svg("text", { x: String(c * u), y: String(base + 40), "text-anchor": c ? "middle" : "start" }, elapsed(c * res)));
+      for (let c = 0; c < n; c++) {
+        const at = X(rows[c].start_ms);
+        axis.append(svg("line", { x1: String(at), y1: String(base + 19), x2: String(at), y2: String(base + 27), class: "tick" }));
+        if (c % every || (c && W - at < 48)) continue;
+        axis.append(svg("text", { x: String(at), y: String(base + 40), "text-anchor": c ? "middle" : "start" }, elapsed(rows[c].start_ms)));
       }
-      axis.append(svg("line", { x1: String(W - 0.5), y1: String(base + 19), x2: String(W - 0.5), y2: String(base + 27), class: "tick" }),
-        svg("text", { x: String(W), y: String(base + 40), "text-anchor": "end" }, dur === null ? "" : elapsed(dur)));
+      axis.append(svg("line", { x1: String(W), y1: String(base + 19), x2: String(W), y2: String(base + 27), class: "tick" }),
+        svg("text", { x: String(W), y: String(base + 40), "text-anchor": "end" }, elapsed(dur)));
       box.append(axis);
       const pins = svg("g", { class: "pins" });
       const pinCol = (at) => Math.min(n - 1, Math.floor(at / res));
       for (const ep of episodes) {
         if (ep.at === null) continue;
-        const x = pinCol(ep.at) * u + u / 2;
+        const x = X(ep.at);
         pins.append(svg("g", { class: `pin-ep kind-${ep.event.kind}`, "data-pin": ep.event.id },
           svg("line", { x1: String(x), y1: String(y0 - 4), x2: String(x), y2: String(base + 4) }),
           svg("path", { d: `M${x} ${base + 4} l5 5 l-5 5 l-5 -5 z` })));
       }
-      const cursor = svg("rect", { x: "0", y: String(top - 4), width: String(u), height: String(base - top + 8), rx: "3", class: "cursor" });
+      const cursor = svg("rect", { x: "0", y: String(top - 4), width: String(Math.max(2, X(rows[0].end_ms))), height: String(base - top + 8), rx: "3", class: "cursor" });
       box.append(pins, cursor);
       if (!reduced()) box.append(svg("g", { class: "shuttle" }, svg("ellipse", { cx: "0", cy: String(top + 4), rx: "14", ry: "4" })));
       const labels = el("div", { class: "row-labels", "aria-hidden": "true", style: `--top:${top}px;--y0:${y0}px;--rh:${rowH}px;--gap:${gap}px` },
@@ -709,7 +752,8 @@
       function pick(c) {
         current = Math.max(0, Math.min(n - 1, c));
         const r = rows[current], w = r.end_ms - r.start_ms;
-        cursor.setAttribute("x", String(current * u));
+        cursor.setAttribute("x", String(X(r.start_ms)));
+        cursor.setAttribute("width", String(Math.max(2, X(w))));
         cursor.setAttribute("class", "cursor on");
         const notes = [];
         if (r.captured.state === "measured" && r.captured.value === 0) notes.push("No captured interval here. That doesn’t show nothing happened: helpers keep their own records, and some work isn’t captured.");
@@ -721,7 +765,7 @@
           notes.map((t) => el("p", { class: "ro-note" }, t)),
           pinned(current).map((ep) => el("p", { class: "ro-pin" }, "Reviewed step pinned here: ", ep.event.explanation)));
         if (typeof scroller.scrollTo === "function" && typeof scroller.clientWidth === "number") {
-          const x = current * u;
+          const x = X(r.start_ms);
           if (x < scroller.scrollLeft + 40 || x > scroller.scrollLeft + scroller.clientWidth - 40) scroller.scrollTo({ left: x - scroller.clientWidth / 2, behavior: reduced() ? "auto" : "smooth" });
         }
       }
@@ -829,7 +873,22 @@
         el("p", { class: "note-sessions" }, "Seen in: ", seen.map((sid, i) => [i ? ", " : "",
           state.rows.has(sid) ? el("a", { href: `#/session/${sid}` }, `session ${shortId(sid)}`) : el("code", {}, shortId(sid))])));
     }
-    function proposalsSection(route, focusId) {
+    function byId(node, id) {
+      if (node.getAttribute && node.getAttribute("id") === id) return node;
+      for (const k of Array.from(node.children || [])) { const f = k.getAttribute ? byId(k, id) : null; if (f) return f; }
+      return null;
+    }
+    function linkedProblem(linked, retry) {
+      if (!linked) return null;
+      if (!linked.known) return el("p", { class: "problem", role: "note" }, `The linked session ${shortId(linked.id)} isn’t in this build’s session catalog, so its proposals can’t be read here.`);
+      if (linked.res.ok) return null;
+      return el("div", { class: "problem", role: "alert" },
+        el("p", {}, linked.res.kind === "invalid" ? `The linked session’s record didn’t pass its checks, so no proposal is read from it.`
+          : `Couldn’t load the linked session’s record: ${linked.res.text}`),
+        el("p", {}, el("button", { type: "button", class: "ghost", onclick: retry }, "Try again"), " ",
+          el("a", { href: `#/session/${linked.id}` }, `Open session ${shortId(linked.id)}`)));
+    }
+    function proposalsSection(focusId, linked) {
       const sec = el("section", { class: "mend-proposals", "aria-labelledby": "mp-h" });
       let status = null;
       const fill = () => {
@@ -852,11 +911,23 @@
             status.focus();
           });
         }
-        put(sec, 
+        const failed = linked && linked.known && !linked.res.ok;
+        const retry = async (e) => {
+          if (e && e.currentTarget) e.currentTarget.setAttribute("disabled", "");
+          state.details.delete(linked.id);
+          linked.res = await detail(linked.id);
+          fill();
+          const card = focusId ? byId(sec, `idea-${focusId}`) : null;
+          (card || status).setAttribute("tabindex", "-1");
+          (card || status).focus();
+        };
+        put(sec,
           head("mp-h", "Reviewed proposals", "Each comes from a reviewed task story and cites the steps it noticed. Shipping a change and the change helping are different marks, so each card carries both. ", tag("idea")),
+          linkedProblem(linked, retry),
           status,
           found.size ? el("ol", { class: "notes" }, [...found.values()].map((p) => proposalCard(p, focusId)))
-            : el("p", { class: "story-note" }, "No reviewed proposal in the session records searched so far. That is not the same as having nothing to change."),
+            : failed ? null
+              : el("p", { class: "story-note" }, "No reviewed proposal in the session records searched so far. That is not the same as having nothing to change."),
           button);
       };
       fill();
@@ -866,7 +937,15 @@
       const card = r.card;
       const measure = card ? MEASURES[card.measure] || card.measure.replace(/_/g, " ") : null;
       const pr = r.implementation.url ? /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)$/.exec(r.implementation.url) : null;
-      const limits = r.limits.filter((k) => LIMITS[k]).map((k) => LIMITS[k]);
+      const limits = r.limits.map((k) => LIMITS[k] || `${k.replace(/_/g, " ")}.`);
+      const kind = card ? kindOf(card.measure) : "time";
+      const side = (label, x) => el("li", {}, `${label} median: ${figureText(x.median, kind, false)} (${plural(x.jobs, "task")} in ${plural(x.groups, "group")})`);
+      const comparison = r.status !== "checked" ? null : el("ul", { class: "comparison", "aria-label": "The measured comparison" },
+        side("Before", r.before), side("After", r.after),
+        el("li", {}, `Change, after minus before: ${figureText(r.change, kind, true)}`),
+        el("li", {}, r.interval ? `95% interval: ${amount(r.interval.low, kind, true)} to ${amount(r.interval.high, kind, true)}${r.interval.state === "partial" ? ` (partly recorded: ${reasonText(r.interval.reasons)}; the true bounds may lie elsewhere)` : ""}`
+          : "95% interval: not established"),
+        el("li", {}, `Measurement: ${r.measurement_state}${r.measurement_state === "partial" ? ", so side medians are lower bounds and the change has an unknown direction of error" : ""}. Canonical method: 95% bootstrap interval, 10,000 resamples, at least 6 independent groups per side.`));
       return el("li", { class: "note check-note" },
         el("header", {}, glyph("knot"), el("h3", {}, measure ? `Change aimed at ${measure}` : `Change ${r.ref}`),
           el("span", { class: "status" }, el("span", { class: `pill ch-${r.implementation.merged}`, "data-pill": "change" }, MERGED[r.implementation.merged]),
@@ -879,10 +958,11 @@
               card && card.version ? ` Released in ${card.plugin} ${card.version}.` : card ? " Not released in a recorded version yet." : ""), tag("recorded")),
           el("li", { class: "step s-check" }, el("span", { class: "step-k" }, "Check"),
             el("p", {}, card ? `Watching ${measure}, hoping it goes ${card.direction}. ` : "", el("strong", {}, `${RESULTS[r.result] || r.result}.`)),
+            comparison,
             r.status === "checked" ? el("p", { class: "muted" }, `${plural(r.sample_jobs, "task")} considered: ${count(r.before.jobs)} before the change and ${count(r.after.jobs)} after.`,
               r.excluded.length ? [" Left out: ", r.excluded.map((x, i) => [i ? "; " : "", `${count(x.jobs)} ${EXCLUDED[x.reason] || x.reason.replace(/_/g, " ")}`]), "."] : "") : null,
             r.reasons.length ? el("p", { class: "muted" }, `Why it isn’t checked: ${reasonText(r.reasons)}.`) : null,
-            limits.map((t) => el("p", { class: "guess" }, t)), tag("checked")),
+            el("ul", { class: "limits", "aria-label": "Limitations of this check" }, limits.map((t) => el("li", { class: "guess" }, t))), tag("checked")),
           el("li", { class: "step s-learn" }, el("span", { class: "step-k" }, "Then"), el("p", {}, "The next step isn’t recorded."))));
     }
     function checksSection() {
@@ -901,14 +981,15 @@
       return sec;
     }
     async function mend(route) {
-      if (route.session && state.rows.has(route.session)) await detail(route.session);
+      // The explicitly linked session is read first; its outcome is shown, never folded into an empty scan.
+      const linked = route.session ? { id: route.session, known: state.rows.has(route.session), res: null } : null;
+      if (linked && linked.known) linked.res = await detail(linked.id);
       const page = el("div", { class: "page page-mend" },
         el("p", { class: "eyebrow" }, "Noticed → Try → Check → Then"),
         el("h1", { class: "display" }, "What to mend ", el("em", {}, "next.")),
         el("p", { class: "lede" }, "Each card runs the same loop: what was noticed, one change to try, what would show whether it helped, and what was decided. Nothing here claims time saved or a proven cause."),
-        proposalsSection(route, route.focus), checksSection());
-      const find = (node) => node.getAttribute && node.getAttribute("id") === `idea-${route.focus}` ? node : Array.from(node.children || []).reduce((f, k) => f || (k.getAttribute ? find(k) : null), null);
-      return [page, route.focus ? find(page) : null];
+        proposalsSection(route.focus, linked), checksSection());
+      return [page, route.focus ? byId(page, `idea-${route.focus}`) : null];
     }
 
     // ---------- how to read ----------
