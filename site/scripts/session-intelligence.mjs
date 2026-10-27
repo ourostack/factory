@@ -176,7 +176,7 @@ function outcomesOf(facts, bindings, jobs) {
     const returnReasons = [...recorded.reasons];
     if (outcome?.returns_truncated === true || outcome?.returns_unreadable > 0) returnReasons.push("returns_not_fully_recorded");
     return {
-      job, scope: "task",
+      job, scope: "task", snapshot: { session: facts.session.id, rev: outcome?.rev ?? null },
       status: !summary || summary.status === undefined || summary.status === "unavailable" ? unavailable(["not_recorded"]) : measured(summary.status),
       state,
       returns: items(outcome?.returns, [...new Set(returnReasons)].sort(), (r) => {
