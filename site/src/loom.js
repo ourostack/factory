@@ -1034,6 +1034,8 @@
     const win = scope;
     const target = legacyTarget(win.location.hash, win.location.search);
     if (target) { win.location.replace(target); return; }
+    // A dependency that failed to load leaves the page's static failure state in place.
+    if (win.document.documentElement.getAttribute("data-loom-asset") === "failed") return;
     const json = (path) => win.fetch(path, { cache: "no-cache" }).then((r) => {
       if (!r.ok) throw new Error(`${path} answered ${r.status}`);
       return r.json();
@@ -1042,7 +1044,7 @@
     let rows = null;
     const catalog = json("sessions/index.json").then((c) => { rows = c; return c; });
     mountLoom({
-      root: win.document.getElementById("loom"), catalog,
+      root: win.document.getElementById("loom"), document: win.document, window: win, catalog,
       readDetail: (id) => {
         const row = rows && Array.isArray(rows.sessions) ? rows.sessions.find((r) => r.id === id) : null;
         return json(row ? row.detail : `sessions/${id}.json`);
