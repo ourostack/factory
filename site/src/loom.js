@@ -232,7 +232,7 @@
     const win = options.window || (typeof window !== "undefined" ? window : null);
     const { el, svg, put } = kit(doc);
     const reduced = () => !!(win && win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    const state = { catalog: null, catalogError: null, rows: new Map(), names: new Map(), learning: { kind: "loading" },
+    const state = { namesSource: { kind: "loading" }, catalog: null, catalogError: null, rows: new Map(), names: new Map(), learning: { kind: "loading" },
       details: new Map(), loaded: new Map(), shown: PAGE, seq: 0 };
 
     // chrome
@@ -280,7 +280,12 @@
       else if (l.v === null || l.v === undefined) state.learning = { kind: "none" };
       else if (!Learning || !Learning.validateLearning(l.v).ok) state.learning = { kind: "invalid" };
       else state.learning = { kind: "ok", doc: l.v };
-      if (t.ok && t.v && Array.isArray(t.v.jobs)) {
+      // A missing names file, a failed read and a malformed file are three different states.
+      if (!t.ok) state.namesSource = { kind: "error", text: message(t.e) };
+      else if (t.v === null || t.v === undefined) state.namesSource = { kind: "none" };
+      else if (typeof t.v !== "object" || !Array.isArray(t.v.jobs)) state.namesSource = { kind: "invalid" };
+      else {
+        state.namesSource = { kind: "ok" };
         for (const r of t.v.jobs) {
           if (r && JOB.test(r.job) && typeof r.name === "string" && r.name.trim() && r.name.length <= 300) state.names.set(r.job, r.name.trim());
         }
@@ -306,7 +311,19 @@
       ((b.duration_ms.state === "unavailable" ? -1 : b.duration_ms.value) - (a.duration_ms.state === "unavailable" ? -1 : a.duration_ms.value)) ||
       a.id.localeCompare(b.id));
     const taskName = (job) => state.names.get(job) || null;
-    const taskLabel = (job) => taskName(job) || `Unnamed task ${job.slice(0, 8)}`;
+    const taskLabel = (job) => {
+      const source = state.namesSource.kind;
+      if (source === "ok") return taskName(job) || `Unnamed task ${job.slice(0, 8)}`;
+      return `Task ${job.slice(0, 8)}${source === "none" ? "" : " (name not loaded)"}`;
+    };
+    function namesNotice() {
+      const source = state.namesSource;
+      if (source.kind === "none") return el("p", { class: "disclosure names-notice", role: "note" }, "Task names aren’t published in this build, so tasks show their short ids.");
+      if (source.kind !== "error" && source.kind !== "invalid") return null;
+      return el("div", { class: "problem names-notice", role: "alert" },
+        el("p", {}, `Task names couldn’t be loaded (${source.kind === "invalid" ? "the names file is malformed" : source.text}), so tasks show their short ids. Sessions and their records are unaffected. `,
+          el("button", { type: "button", class: "ghost", onclick: () => win.location.reload() }, "Try again")));
+    }
     // Task bindings are a stated collection: only a complete, empty one means "bound to no task".
     function bindingNote(b) {
       if (b.state === "unavailable") return `Task associations weren’t recorded (${reasonText(b.reasons)}), so whether it worked on a task is unknown.`;
@@ -332,7 +349,8 @@
       else if (route.view === "mend") [page, focus] = await mend(route);
       else page = about();
       if (token !== state.seq) return;
-      main.replaceChildren(page);
+      const notice = route.view === "about" || state.catalogError ? null : namesNotice();
+      put(main, notice, page);
       const current = route.view === "mend" ? "#/mend" : route.view === "about" ? "#/about" : "#/";
       for (const a of nav) {
         if (a.getAttribute("href") === current) a.setAttribute("aria-current", "page");
@@ -1049,7 +1067,7 @@
         const row = rows && Array.isArray(rows.sessions) ? rows.sessions.find((r) => r.id === id) : null;
         return json(row ? row.detail : `sessions/${id}.json`);
       },
-      learning: optional("rollups/learning.json"), tasks: optional("rollups/tasks.json").catch(() => null),
+      learning: optional("rollups/learning.json"), tasks: optional("rollups/tasks.json"),
     });
   }
   return { mountLoom, legacyTarget, parseRoute, boot };

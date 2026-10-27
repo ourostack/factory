@@ -138,7 +138,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 function windowStub(hash = "#/") {
   const listeners = {};
   return {
-    location: { hash, search: "", replaced: null, replace(url) { this.replaced = url; } },
+    location: { hash, search: "", replaced: null, reloads: 0, replace(url) { this.replaced = url; }, reload() { this.reloads += 1; } },
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
     matchMedia: () => ({ matches: false }), listeners, document: doc,
   };
@@ -683,4 +683,31 @@ test("boot replaces the static state normally, and leaves the failure state when
   assert.equal(bad.root.children.length, 1);
   assert.equal(bad.root.children[0].tagName, "P", "the static failure state stays");
   assert.deepEqual(bad.fetches, [], "no partial reader starts without its dependencies");
+});
+
+test("a failed or malformed task-name source is visible with a retry, distinct from a task that has no name", async () => {
+  for (const [tasks, words] of [
+    [Promise.reject(new Error("rollups/tasks.json answered 500")), /rollups\/tasks\.json answered 500/],
+    [{ jobs: "nope" }, /malformed/i],
+    [{ schema: "x" }, /malformed/i],
+  ]) {
+    const m = await mount({ tasks });
+    const text = m.host.textContent;
+    assert.match(text, /task names couldn.t be loaded/i);
+    assert.match(text, words);
+    assert.ok(attr(m.host, "role", "alert").some((n) => /task names/i.test(n.textContent)));
+    assert.doesNotMatch(text, /Unnamed task/, "a failed source is not evidence that tasks are unnamed");
+    assert.match(text, new RegExp(`Task ${JOB.slice(0, 8)} \\(name not loaded\\)`));
+    const retry = tags(m.host, "button").find((b) => /try again/i.test(b.textContent));
+    retry.dispatch("click");
+    assert.equal(m.win.location.reloads, 1);
+    assert.ok(links(m.host).includes(`#/session/${SESSION}`), "browsing stays available");
+  }
+  const unnamed = await mount({ tasks: { jobs: [{ job: JOB, name: null }] } });
+  assert.match(unnamed.host.textContent, new RegExp(`Unnamed task ${JOB.slice(0, 8)}`));
+  assert.doesNotMatch(unnamed.host.textContent, /task names couldn.t be loaded/i);
+  const absent = await mount({ tasks: null });
+  assert.doesNotMatch(absent.host.textContent, /task names couldn.t be loaded|Unnamed task/i);
+  assert.match(absent.host.textContent, /task names aren.t published in this build/i);
+  assert.doesNotMatch(read("site/src/loom.js"), /optional\("rollups\/tasks\.json"\)\.catch/, "boot no longer swallows name-source failures");
 });
