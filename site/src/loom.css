@@ -90,6 +90,8 @@ main:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .back:hover { color: var(--accent-text); }
 .problem { max-width: var(--measure); padding: .9rem 1.1rem; border-left: 3px solid var(--write); background: color-mix(in srgb, var(--write) 6%, transparent); border-radius: 0 10px 10px 0; }
 .problem p { margin: 0; }
+.names-notice { margin: 0 0 1.4rem; }
+.names-notice .ghost { margin: 0 0 0 .4rem; padding: .25em .9em; }
 .disclosure { font-size: .9rem; color: var(--muted); max-width: var(--measure); border-left: 3px solid var(--rule); padding-left: .9rem; }
 .ghost { font: inherit; font-size: .95rem; background: transparent; color: var(--ink); border: 1.5px dashed var(--help); border-radius: 99px; padding: .5em 1.1em; cursor: pointer; margin-top: 1rem; }
 .ghost:hover { background: color-mix(in srgb, var(--help) 10%, transparent); }
