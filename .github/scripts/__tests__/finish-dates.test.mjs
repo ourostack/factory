@@ -550,7 +550,7 @@ test("llms.txt lists by_week.json, drops 'no date', and describes the finish dat
   // The null-with-reason convention covers every file under rollups/ and map/, Desk's and the store's.
   assert.match(text, /every file under `rollups\/` and `map\/`, Desk's and the store's/)
   for (const code of ["lead_window_partial", "finish_from_last_work", "anchor_after_labels", "anchor_unconfirmed", "github_lookup_capped"]) assert.match(text, new RegExp(code))
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   assert.doesNotMatch(html, /No who, no when/)
   assert.doesNotMatch(html, /that time is never published/)
 })
@@ -740,7 +740,7 @@ test("N4: a task whose status is unknown is ordered with open tasks, not finishe
 })
 
 test("N5: the About 'Finish order' paragraph says what llms.txt says", () => {
-  const html = readFileSync(new URL("../../../site/src/index.html", import.meta.url), "utf8")
+  const html = readFileSync(new URL("../../../site/src/evidence.html", import.meta.url), "utf8")
   const para = /<h2 class="block-title">Finish order<\/h2>\s*<p>([^]*?)<\/p>/.exec(html)[1]
   assert.match(para, /on or after/)
   assert.match(para, /open tasks (come )?last/i)

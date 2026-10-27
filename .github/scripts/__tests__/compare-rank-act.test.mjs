@@ -522,7 +522,7 @@ test("the evidence drawer gives a labeled wait the swimlane's cross-hatch, not t
 // ------------------------------------------------------------- the page
 
 test("analysis retains onward links without a compulsory numbered tour", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   const view = (id, next) => html.slice(html.indexOf(`id="view-${id}"`), html.indexOf(`id="view-${next}"`))
   assert.doesNotMatch(html, /Step [1-4] of 4/)
   assert.match(view("task", "session"), /href="#\/time"/)
@@ -556,7 +556,7 @@ test("llms.txt describes the files behind steps 2 to 4 in the page's words", asy
 
 test("the page wires fix round 1: the working view, the waste label, the phone tables, pinned Pareto axes, a reachable Other bar and the unlabeled notes", () => {
   const app = read("site/src/app.js")
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(app, /S\.workingView\(S\.stackBars\(selectedJobs, stackRows, taskRows, opts\("working"\)\)\)/)
   assert.match(app, /drawStackup\(node, S\.emphasizeCategories\(bars, current\.category\), mode\)/)
   for (const t of ["sb-table", "pareto-table", "cause-tasks"]) assert.ok(app.includes(`"data-table ${t}"`), t)

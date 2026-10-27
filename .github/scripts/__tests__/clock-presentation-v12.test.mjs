@@ -142,7 +142,7 @@ test("sums_are_task_exposure_and_ratios_keep_uncertainty", () => {
 })
 
 test("compare offers production and request modes backed by the producer, labelled honestly", () => {
-  const html = read("site/src/index.html")
+  const html = read("site/src/evidence.html")
   assert.match(html, /data-mode="production"[^>]*>Production time</)
   assert.match(html, /data-mode="request"[^>]*>Request to delivery</)
   const app = read("site/src/app.js")
