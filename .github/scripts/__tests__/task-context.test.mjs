@@ -203,6 +203,31 @@ test("only the closed per-task context summary is exempted from numerical traver
   assert.ok(checkNumbers({ other: { context: { unguarded: 3 } } }).some((issue) => issue.code === "bare_number"));
 });
 
+test("canonical selected-session context stays published beside excluded changing siblings", {
+  skip: !process.env.DESK_DIR && !process.env.FACTORY_REQUIRE_DESK,
+}, async () => {
+  assert.ok(process.env.DESK_DIR);
+  const desk = resolve(process.env.DESK_DIR);
+  const canonical = await import(pathToFileURL(join(desk, "plugins/desk/mcp/src/factory/context-schema.js")));
+  const fixture = await import(pathToFileURL(join(desk, "tests/desk/mcp/__tests__/factory/_context_fixture.js")));
+  const a = fixture.contextFacts();
+  const b = structuredClone(a);
+  b.session.id = "87654321-1234-4123-8123-123456789abc";
+  const value = fixture.contextRecord(a);
+  value.schema = "desk.factory.context/2"; value.recommendations = [];
+  value.coverage = { state: "partial", reasons: ["not_recorded", "unplaced", "selected_sessions"], omitted_events: 0 };
+  fixture.reviewContext(value);
+  const project = () => adapter.projectTaskContext({ job: value.job, bytes: JSON.stringify(value), facts: [a, b],
+    validateContextBytes: canonical.validateContextBytes, checkContextAgainstFacts: canonical.checkContextAgainstFacts });
+  assert.equal(project().availability, "published");
+  assert.equal(module.validateTaskContext(project()).ok, true);
+  b.session.duration_ms += 1;
+  assert.equal(project().availability, "published");
+  value.coverage.reasons = ["not_recorded", "unplaced"];
+  fixture.reviewContext(value);
+  assert.equal(project().reason, "source_changed", "ordinary full-source records still reject an omitted bound session");
+})
+
 test("the actual Desk contract and ordinary site build reject source changes without changing report totals", {
   skip: !process.env.DESK_DIR && !process.env.FACTORY_REQUIRE_DESK,
 }, async () => {
