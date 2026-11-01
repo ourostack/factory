@@ -553,7 +553,8 @@
       const d = res.d, dur = durationOf(d), open = !d.session.ended;
       const reviewed = d.contexts.filter((c) => published(c) && c.record.events.some((e) => cites(e, id)));
       const episodes = [];
-      for (const c of reviewed) for (const e of c.record.events) if (cites(e, id)) episodes.push({ event: e, job: c.job, at: pinPoint(e, id, dur) });
+      for (const c of reviewed) for (const e of c.record.events) if (cites(e, id)) episodes.push({ event: e, job: c.job,
+        at: c.record.coverage.reasons.includes("unplaced") ? null : pinPoint(e, id, dur) });
       episodes.sort((a, b) => (a.at === null) - (b.at === null) || (a.at || 0) - (b.at || 0));
       const proposals = d.contexts.flatMap(proposalsOf).map((p) => ({ ...p, scope: p.sessions.has(id) ? "session" : "task" }));
       const loom = weave(d, episodes);
