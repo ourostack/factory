@@ -809,7 +809,7 @@
         const notes = [];
         if (r.captured.state === "measured" && r.captured.value === 0) notes.push("No captured interval here. That doesn’t show nothing happened: helpers keep their own records, and some work isn’t captured.");
         if (r.stops.state !== "unavailable" && r.stops.value > 0) notes.push("A main-agent stop covers part of this period; other activity may overlap it.");
-        put(readout, 
+        put(readout,
           el("p", { class: "ro-when" }, "Since it opened, ", el("span", { "data-loom": "when" }, when(r)), w < res ? " (the last, shorter period)" : ""),
           el("ul", { class: "ro-lanes" }, [CAPTURED, ...LANES].map((l) => el("li", { class: `ro-${l.cls}` },
             el("span", { class: "ro-k" }, l.label), " ", el("span", { "data-lane": l.key }, cell(r[l.key], w))))),

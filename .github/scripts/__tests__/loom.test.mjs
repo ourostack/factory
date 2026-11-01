@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import { test } from "node:test";
 import { projection, JOB, SESSION, HASH } from "./fixtures/task-context.mjs";
@@ -449,8 +449,10 @@ test("the static entry loads validators in order, ships no demo data and keeps t
     const source = read(file);
     assert.doesNotMatch(source, /\bdemo\b|95f7a528|86df72b9|b76a3a21|prototype/i, file);
   }
-  const base = execFileSync("git", ["show", "8da1801b763436db752700cea731ed958973ee08:site/src/index.html"], { cwd: new URL(".", root), encoding: "utf8" });
-  assert.equal(read("site/src/evidence.html"), base);
+  // Fingerprint of the published pre-Loom entry, independent of checkout history.
+  assert.equal(createHash("sha256").update(read("site/src/evidence.html")).digest("hex"),
+    "614b2e08428b648146ad51e546b07964a4baf673b348f376b79344e8e8db467a",
+    "the historical reader entry stays byte-for-byte intact");
   const pages = read(".github/workflows/pages.yml");
   assert.match(pages, /cp site\/src\/evidence\.html site\/src\/session-data\.js site\/src\/learning\.js site\/src\/loom\.js site\/src\/loom\.css site\/dist\//);
 });
