@@ -278,6 +278,25 @@ test("withheld and source-changed contexts explain themselves without leaking or
   }
 });
 
+test("unplaced reviewed context retains its story and proposal without invented clock pins", async () => {
+  const p = proposal();
+  p.record.coverage = { state: "partial", reasons: ["not_recorded", "unplaced"], omitted_events: 0 };
+  for (const e of p.record.events) {
+    e.kind = "work"; e.lean = "support"; e.reason = null; e.prerequisite = null; e.resumption = null;
+    for (const r of e.evidence) { r.anchor = "share_start"; r.range = [0, 1000]; }
+  }
+  const m = await mount({ details: [[SESSION, bound(p)]] });
+  await m.go(`#/session/${SESSION}`);
+  assert.equal(attr(m.host, "data-pin").length, 0);
+  const chapters = all(m.host).filter(n => n.getAttribute("class") === "chapter-btn");
+  assert.equal(chapters.length, p.record.events.length);
+  assert.ok(chapters.every(n => n.textContent.includes("not placed in time")));
+  assert.ok(chapters.every(n => !n.textContent.includes("evidence near")));
+  assert.ok(m.host.textContent.includes(p.record.recommendations[0].change));
+  chapters[0].dispatch("click");
+  assert.equal(chapters[0].getAttribute("aria-pressed"), "true");
+});
+
 test("recommendations are proposals, scoped to this session only when their observations cite it", async () => {
   const here = await mount({ details: [[SESSION, bound(proposal())]] });
   await here.go(`#/session/${SESSION}`);
