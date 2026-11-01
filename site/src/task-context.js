@@ -45,7 +45,8 @@
           record.heading === null && record.events.length === 0 && recommendations.length === 0)) return bad();
     const coverage = record.coverage;
     if (!keys(coverage, "state,reasons,omitted_events") || !["measured", "partial", "unavailable"].includes(coverage.state) ||
-        !Array.isArray(coverage.reasons) || coverage.reasons.some((reason) => !["not_recorded", "withheld", "omitted", "unplaced", "review_pending"].includes(reason)) ||
+        !Array.isArray(coverage.reasons) || coverage.reasons.some((reason) => !["not_recorded", "withheld", "omitted", "unplaced", "review_pending", "selected_sessions"].includes(reason)) ||
+        (coverage.reasons.includes("selected_sessions") && (!hasRecommendations || coverage.state !== "partial" || !coverage.reasons.includes("not_recorded"))) ||
         !Number.isSafeInteger(coverage.omitted_events) || coverage.omitted_events < 0 ||
         (coverage.state === "measured" && (coverage.reasons.length || coverage.omitted_events)) ||
         (record.state !== "published" && (record.heading !== null || record.events.length || recommendations.length || coverage.state !== "unavailable"))) return bad();
