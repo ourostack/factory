@@ -6,6 +6,10 @@
 
 # Factory
 
+**Agent work, measured in public: Desk's published session facts and the job reports CI builds from them. No who, no when, just how.**
+
+[The reports site](https://ourostack.github.io/factory/) · [Desk](https://github.com/ourostack/desk) · [Reading the reports](#reading-the-reports) · [More from Ouro](https://github.com/ourostack)
+
 This is the public factory store for [Desk](https://github.com/ourostack/desk). It holds published session facts and the job reports built from them. It measures how agent work flows, never the people who do it.
 
 ## What this is for
