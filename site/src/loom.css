@@ -41,7 +41,8 @@ a:hover { color: var(--accent-text); }
 code { font: .85em var(--mono); letter-spacing: -.01em; }
 .loom-defs { position: absolute; }
 .hatch-bg { fill: var(--linen); } .hatch-line { stroke: var(--linen-line); stroke-width: 1.4; }
-.weft-a { fill: var(--weft); } .weft-b { fill: var(--weft); opacity: .55; }
+.weave-weft { fill: var(--weft); } .weave-warp { fill: color-mix(in srgb, var(--weft) 40%, var(--linen)); }
+.weave-gap { fill: color-mix(in srgb, var(--weft) 45%, #000); opacity: .5; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .skip { position: absolute; left: -999px; top: 8px; background: var(--ink); color: var(--paper); padding: .5em 1em; border-radius: 6px; z-index: 9; }
 .skip:focus { left: 8px; }
@@ -110,7 +111,7 @@ main:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .legend { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; padding: 0; margin: 1.6rem 0; font-size: .9rem; color: var(--muted); }
 .legend li { display: flex; align-items: center; gap: .45rem; }
 .chip { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
-.chip.weft { background: repeating-linear-gradient(90deg, var(--weft) 0 3px, color-mix(in srgb, var(--weft) 55%, transparent) 3px 6px); }
+.chip.weft { overflow: hidden; vertical-align: middle; } .chip.weft svg { display: block; width: 100%; height: 100%; }
 .chip.hatch { background: repeating-linear-gradient(45deg, var(--linen) 0 3px, var(--linen-line) 3px 4.5px); outline: 1px solid var(--linen-line); }
 .t-cmd { fill: var(--cmd); background: var(--cmd); } .t-read { fill: var(--read); background: var(--read); }
 .t-write { fill: var(--write); background: var(--write); } .t-help { fill: var(--help); background: var(--help); }

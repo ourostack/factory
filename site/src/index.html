@@ -24,11 +24,35 @@
       <rect width="6" height="6" class="hatch-bg" />
       <line x1="0" y1="0" x2="0" y2="6" class="hatch-line" />
     </pattern>
-    <pattern id="loom-weft" width="6" height="8" patternUnits="userSpaceOnUse">
-      <rect width="3" height="4" class="weft-a" />
-      <rect x="3" y="4" width="3" height="4" class="weft-a" />
-      <rect x="3" width="3" height="4" class="weft-b" />
-      <rect y="4" width="3" height="4" class="weft-b" />
+    <!-- Plain weave in CSS pixels: each weft thread passes over one warp thread and under the next, and the thread on top shades the one beneath. -->
+    <linearGradient id="loom-roll-h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.32" /><stop offset="0.38" stop-color="#fff" stop-opacity="0.28" /><stop offset="1" stop-color="#000" stop-opacity="0.42" /></linearGradient>
+    <linearGradient id="loom-roll-v" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.32" /><stop offset="0.38" stop-color="#fff" stop-opacity="0.28" /><stop offset="1" stop-color="#000" stop-opacity="0.42" /></linearGradient>
+    <linearGradient id="loom-fall-x" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0" /><stop offset="1" stop-color="#000" stop-opacity="0.45" /></linearGradient>
+    <linearGradient id="loom-rise-x" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.45" /><stop offset="1" stop-color="#000" stop-opacity="0" /></linearGradient>
+    <linearGradient id="loom-fall-y" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0" /><stop offset="1" stop-color="#000" stop-opacity="0.45" /></linearGradient>
+    <linearGradient id="loom-rise-y" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.45" /><stop offset="1" stop-color="#000" stop-opacity="0" /></linearGradient>
+    <pattern id="loom-weft" y="1" width="18" height="18" patternUnits="userSpaceOnUse">
+      <rect width="18" height="18" class="weave-gap" />
+      <rect width="18" height="6" class="weave-weft" />
+      <rect width="18" height="6" fill="url(#loom-roll-h)" />
+      <rect y="9" width="18" height="6" class="weave-weft" />
+      <rect y="9" width="18" height="6" fill="url(#loom-roll-h)" />
+      <rect width="6" height="18" class="weave-warp" />
+      <rect width="6" height="18" fill="url(#loom-roll-v)" />
+      <rect x="9" width="6" height="18" class="weave-warp" />
+      <rect x="9" width="6" height="18" fill="url(#loom-roll-v)" />
+      <rect width="6" height="6" class="weave-weft" />
+      <rect width="6" height="6" fill="url(#loom-roll-h)" />
+      <rect x="9" y="9" width="6" height="6" class="weave-weft" />
+      <rect x="9" y="9" width="6" height="6" fill="url(#loom-roll-h)" />
+      <rect y="6" width="6" height="2" fill="url(#loom-rise-y)" />
+      <rect y="16" width="6" height="2" fill="url(#loom-fall-y)" />
+      <rect x="9" y="15" width="6" height="2" fill="url(#loom-rise-y)" />
+      <rect x="9" y="7" width="6" height="2" fill="url(#loom-fall-y)" />
+      <rect x="7" width="2" height="6" fill="url(#loom-fall-x)" />
+      <rect x="15" width="2" height="6" fill="url(#loom-rise-x)" />
+      <rect x="6" y="9" width="2" height="6" fill="url(#loom-rise-x)" />
+      <rect x="16" y="9" width="2" height="6" fill="url(#loom-fall-x)" />
     </pattern>
   </defs>
 </svg>
