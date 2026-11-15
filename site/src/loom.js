@@ -430,9 +430,10 @@
       const label = share === null ? "Recorded activity share not available." :
         `Recorded activity covers about ${Math.round(share * 100)}% of its captured time${row.activity_ms.state === "partial" ? " (partly recorded)" : ""}. Where in the session isn’t shown here.`;
       return el("span", { class: "bolt-strip", style: `--w:${width.toFixed(1)}%` },
-        svg("svg", { viewBox: "0 0 100 8", preserveAspectRatio: "none", class: "swatch", role: "img", "aria-label": label },
-          svg("rect", { width: "100", height: "8", fill: "url(#loom-hatch)" }),
-          share === null ? null : svg("rect", { width: "100", height: "8", fill: "url(#loom-weft)", class: "bolt-fill", "fill-opacity": (0.15 + 0.85 * share).toFixed(2) })));
+        // No viewBox: the weave stays in CSS pixels so it reads as thread at any strip length.
+        svg("svg", { class: "swatch", role: "img", "aria-label": label },
+          svg("rect", { width: "100%", height: "100%", fill: "url(#loom-hatch)" }),
+          share === null ? null : svg("rect", { width: "100%", height: "100%", fill: "url(#loom-weft)", class: "bolt-fill", "fill-opacity": (0.15 + 0.85 * share).toFixed(2) })));
     }
     // A woven swatch from a loaded detail: one hairline row per lane, no dominant-lane colouring.
     function swatch(d) {
@@ -502,7 +503,7 @@
         el("section", { class: "shelf-sec", "aria-labelledby": "sh-h" },
           el("div", { class: "shelf-bar" }, el("h2", { id: "sh-h" }, "The shelf"),
             el("ul", { class: "legend compact", "aria-label": "Key" },
-              el("li", {}, el("span", { class: "chip weft" }), "Recorded activity"),
+              el("li", {}, el("span", { class: "chip weft" }, svg("svg", { "aria-hidden": "true", focusable: "false" }, svg("rect", { width: "100%", height: "100%", fill: "url(#loom-weft)" }))), "Recorded activity"),
               el("li", {}, el("span", { class: "chip hatch" }), "No captured interval"))),
           list, more),
         el("aside", { class: "aside-note" },
