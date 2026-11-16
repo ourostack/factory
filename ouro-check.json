@@ -10,7 +10,8 @@
       "narrow-heading": "The headline's 22-character measure is the design's own (.display in loom.css)."
     },
     "/evidence.html": {
-      "axe": "The frozen pre-Loom reader (its bytes are pinned by .github/scripts/__tests__/loom.test.mjs) has one tooltip with no accessible name. Its own axe findings are waived here until the reader is retired or refrozen; no other page is covered."
+      "axe": "The frozen pre-Loom reader (its bytes are pinned by .github/scripts/__tests__/loom.test.mjs) has one tooltip with no accessible name. Its own axe findings are waived here until the reader is retired or refrozen; no other page is covered.",
+      "lone-word": "The evidence reader prints the words of each published record, which change with every build, so a lone last word at a phone width depends on the day. Re-check when the reader is retired or refrozen."
     }
   }
 }
