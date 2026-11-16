@@ -27,6 +27,8 @@
 
 * { box-sizing: border-box; }
 html { background: var(--paper); color: var(--ink); }
+p, li, dd, figcaption { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; }
 body {
   margin: 0; min-height: 100vh; font: 17px/1.55 var(--sans);
   font-variant-numeric: oldstyle-nums proportional-nums;

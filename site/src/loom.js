@@ -255,7 +255,7 @@
     function setTheme(t) {
       doc.documentElement.setAttribute("data-theme", t);
       theme.textContent = t === "night" ? "Daylight" : "Lamplight";
-      theme.setAttribute("aria-label", t === "night" ? "Switch to the light theme" : "Switch to the dark theme");
+      theme.setAttribute("aria-label", t === "night" ? "Daylight: switch to the light theme" : "Lamplight: switch to the dark theme");
       try { win.localStorage.setItem("loom-theme", t); } catch { /* no storage: the choice lasts this visit */ }
     }
     let saved = null;
