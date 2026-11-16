@@ -284,6 +284,10 @@ Compare now separates task-population filters from category emphasis. Every supp
 
 Findings lead with an observation and its limits, then concrete stretches and affected tasks. The running Pareto line uses the published ranked task-exposure denominator, never inferred savings. Improvements presents the canonical validated public queue's lifecycle, ownership, verification and availability, while retaining investigation context and inspection-only opaque-ID handoffs. A proposed route does not create ownership; shipment does not prove improvement. Private decision specifics remain unavailable. Copying a prompt does not navigate or authorize execution; denied clipboard access reveals selectable text. These reader changes do not complete automated accounting or the integrated release-browser gate.
 
+## Ouro HX
+
+The site's Ouro HX tokens are plain stylesheets from the Ouro UI release recorded in `.github/ouro-hx-installed.json`: `site/src/ouro/` (linked by `index.html`). The screen check, Ouro check, is in `lib/ouro/check/` with its AX kit in `lib/ouro/ax/`; both are copies of that release's files, and a test fails when one differs from the record. To run it on a built site: `npm install`, `npx playwright install chromium`, build the site as `pages.yml` does, then `node lib/ouro/check/check.ts site/dist --config ouro-check.json`. Its waivers in `ouro-check.json` each give a reason.
+
 ## Rendered-browser gate
 
 For the reproduced live-data defects and fixed task-journey grouping, run the focused,

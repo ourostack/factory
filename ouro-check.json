@@ -1,0 +1,16 @@
+{
+  "waive": {
+    "**": {
+      "layout-shift": "The page draws its loading line first, then the catalogue fills in, so the content moves. Reserving the catalogue's height is follow-up work.",
+      "first-paint-swap": "The first frame shows static link text that the script then builds into the page's own links, so the words change once. Follow-up work.",
+      "type-scale": "The views use 15 to 16 text sizes and 6 weights. Consolidating them to the scale of 10 sizes and 3 weights is follow-up work.",
+      "failed-request": "The page asks for an optional local-names.json, which only a machine that serves its own names has. The check's server answers 404, as it should."
+    },
+    "/": {
+      "narrow-heading": "The headline's 22-character measure is the design's own (.display in loom.css)."
+    },
+    "/evidence.html": {
+      "axe": "The frozen pre-Loom reader (its bytes are pinned by .github/scripts/__tests__/loom.test.mjs) has one tooltip with no accessible name. Its own axe findings are waived here until the reader is retired or refrozen; no other page is covered."
+    }
+  }
+}
