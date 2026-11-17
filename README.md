@@ -165,7 +165,7 @@ The store also checks plugin names on every facts file a pull request adds or mo
 
 **Your GitHub account and the timing of your pull requests are visible.** An intake pull request is opened from the contributor's GitHub account, so that account appears as the pull request's author, like any other public contribution, and GitHub shows when the pull request and its commits were made. A rejected pull request stays readable after it is closed. The facts inside it still carry no identity, and no time of day.
 
-Changes to anything outside the data paths, published facts under `facts/`, published waste labels under `labels/`, capture records under `capture/`, and bounded authenticated triage under `triage/`, are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI merges only the correction records and `factory.json` changes described under "How the loop closes itself", and leaves everything else for a maintainer.
+Changes to anything outside the data paths, published facts under `facts/`, published waste labels under `labels/`, capture records under `capture/`, and bounded authenticated triage under `triage/`, are maintenance. Only a maintainer, someone with write access or more to this repository, can make them, through a pull request that passes validation; CI merges only the correction records and `factory.json` changes described under "How the loop closes itself", and leaves everything else for a maintainer. The one exception is Ouro Current's update of the installed Ouro UI files, described under "Ouro HX".
 
 ## Trusted triage intake and inspection queue
 
@@ -287,6 +287,8 @@ Findings lead with an observation and its limits, then concrete stretches and af
 ## Ouro HX
 
 The site's Ouro HX tokens are plain stylesheets from the Ouro UI release recorded in `.github/ouro-hx-installed.json`: `site/src/ouro/` (linked by `index.html`). The screen check, Ouro check, is in `lib/ouro/check/` with its AX kit in `lib/ouro/ax/`; both are copies of that release's files, and a test fails when one differs from the record. To run it on a built site: `npm install`, `npx playwright install chromium`, build the site as `pages.yml` does, then `node lib/ouro/check/check.ts site/dist --config ouro-check.json`. Its waivers in `ouro-check.json` each give a reason.
+
+Ouro Current, Ouro UI's update app, opens a pull request from the branch `ouro-current/update` after each Ouro UI release, so the store stays within a day of it. That pull request merges on its own once `factory-validate` passes, with its own tests run as a maintainer's would be, when its author is the Ouro Current app (`ouro-current[bot]`) and it changes only `.github/ouro-hx-installed.json` and the files that record lists, each under a folder the record on `main` already installs into (`lib/ouro/`, `site/src/ouro/`). The rule is `.github/scripts/ouro-current.mjs`. Anything else it opens, the same change from anyone else, and the same branch from a fork are judged as any other pull request.
 
 ## Rendered-browser gate
 

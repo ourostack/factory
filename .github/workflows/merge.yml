@@ -31,6 +31,13 @@
 # `factory.json` (passing Desk main's parseStoreConfig) merges on its own,
 # at the validated head (`.github/scripts/maintenance-allowlist.mjs`, from
 # main). `intake.json`, `capture.json` and `.github/` stay with a maintainer.
+# Ouro Current's update merges on its own too, at the validated head, when
+# its factory-validate run passed (`.github/scripts/ouro-current.mjs`, from
+# main): a pull request by the Ouro Current app (`ouro-current[bot]`, by
+# login, type and account id) from its branch `ouro-current/update` in this
+# repository, changing only `.github/ouro-hx-installed.json` and the files it
+# lists, all under the install roots main's record uses (`lib/ouro/`,
+# `site/src/ouro/`). Anything else it opens is validated as anyone's.
 # The same changes from anyone else fail validation with `path` and are
 # rejected. A maintainer is the pull request author when
 # their permission on this repository is `admin` or `write`; any API error
@@ -165,6 +172,20 @@ jobs:
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
           base_sha=$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")
           while IFS=$'\t' read -r number association same_repo held actor trusted_maintainer; do
+            # Ouro Current's update, by main's rule on the API's own read of
+            # the pull request: it needs no Desk validator (it touches no data
+            # path) and merges on its own. Anything else is validated below.
+            if [ -f .github/scripts/ouro-current.mjs ]; then
+              ouro=$(node .github/scripts/ouro-current.mjs "$base_sha" "$HEAD_SHA" "$RUNNER_TEMP/triage-api-$number.json" 2> /dev/null || true)
+              if [ "$ouro" = ok ]; then
+                printf '{"ok":true,"ouro_current":true}\n' > "$RUNNER_TEMP/factory-validate-$number.json"
+                continue
+              fi
+              if [ "$ouro" = ouro_current_check_unavailable ]; then
+                printf '{"unavailable":"ouro_current_check_unavailable"}\n' > "$RUNNER_TEMP/factory-validate-$number.json"
+                continue
+              fi
+            fi
             node .github/scripts/triage-values.mjs --validate-pr "$RUNNER_TEMP/desk" "$RUNNER_TEMP/triage-api-$number.json" \
               --base "$base_sha" --head "$HEAD_SHA" --author-association "$association" \
               --repo "$REPOSITORY" --pr "$number" \
@@ -302,6 +323,17 @@ jobs:
             if jq -e '.ok == true' "$result" > /dev/null; then
               if [ "$held" = true ]; then
                 summary "factory-merge: #$number passed but is held (draft or labeled hold); not merged"
+                continue
+              fi
+              if jq -e '.ouro_current == true' "$result" > /dev/null; then
+                if [ "$same_repo" != true ] || [ "$CONCLUSION" != "success" ]; then
+                  summary "factory-merge: #$number Ouro Current's update, but its head left this repository or its validation run failed; no action"
+                  continue
+                fi
+                # The sha parameter makes GitHub refuse the merge if the head moved.
+                if merge_at_head "$number"; then
+                  summary "factory-merge: #$number Ouro Current's update; merged at head $HEAD_SHA"
+                fi
                 continue
               fi
               if jq -e '.maintenance == true' "$result" > /dev/null; then
