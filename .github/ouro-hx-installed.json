@@ -1,6 +1,6 @@
 {
-  "tag": "v1.3.266",
-  "tagCommit": "e1f7b220b31b8f28ef3720621f2ff187c3801ccb",
+  "tag": "v1.3.267",
+  "tagCommit": "eda0c0a18980310b08cea312535ebb602a1b4373",
   "files": {
     "lib/ouro/ax/checks.ts": "10d083a6f4f6b2149880b0fec7bfcead76e77de9a21dea578dafe1e1699ca3a3",
     "lib/ouro/ax/cli.ts": "ad1a7a04e77d407dba61279d0be810929559591ca6a9cb2e698077109c699e97",
@@ -11,7 +11,7 @@
     "lib/ouro/ax/help.ts": "3e10e7b43b176bfae882ec25ab950f722eca76bda2b24a8239f19f8805dbb1cb",
     "lib/ouro/ax/outcome.ts": "ab83a9c4182039a7d23a176bdfc159c29aaf9b3515c7bb939190877bdbaefe60",
     "lib/ouro/ax/output.ts": "fcee98161b3537d82043898d4139af0fa2b84f4a6fa52bc1bb9c0ed6615356a2",
-    "lib/ouro/ax/problem.ts": "3f4d9ed5fe2a0f773d525da2222414b33d03ae903a6d69530cecbc0a55b69d58",
+    "lib/ouro/ax/problem.ts": "6f55bba8c4bf04c8521f9b6a3c15e385a9810a413ef4809e4c7d14e64315b539",
     "lib/ouro/ax/terminal.ts": "41b6a375fe92d67e6190dccabfa80c94a9e275c641e83c46114d8d209c652ca5",
     "lib/ouro/ax/voice.ts": "b92512692f13f2fbd3ee45407b876d6a18ac164f8c35a33524ac5d7c88a015b5",
     "lib/ouro/ax/wait.ts": "fed4890771d0ce5d1a43d93e73c7d621818bbcb44b30e88c88be274972a133c7",
