@@ -39,6 +39,16 @@
 #     `head_tests_author_not_maintainer` or `head_tests_head_not_in_repository`,
 #     which is also what the validator would say about a change outside the
 #     data paths; the candidate's code is never executed.
+#   - One exception: Ouro Current's update (`.github/scripts/ouro-current.mjs`,
+#     read from the base and run on Git objects in a step with no token). A
+#     pull request by the Ouro Current app (`ouro-current[bot]`, by login, type
+#     and account id) from its branch `ouro-current/update` in this repository,
+#     which changes only `.github/ouro-hx-installed.json` and the files that
+#     record lists, all under the install roots the base's record uses
+#     (`lib/ouro/`, `site/src/ouro/`), runs its tests as a maintainer's would,
+#     and factory-validate then passes it without Desk's validator, since it
+#     touches no data path. The same change from anyone else, a fork, another
+#     branch, or one more path anywhere is refused as above.
 #   - Correction records and `factory.json` are not data paths here, so a
 #     maintainer's pull request that changes only them also runs the suite
 #     with Desk required. Ruling: that is accepted on purpose. A drift between
@@ -108,6 +118,33 @@ jobs:
           git fetch --quiet --no-tags origin "$HEAD_SHA"
           test "$(git rev-parse --verify "$HEAD_SHA^{commit}")" = "$HEAD_SHA"
 
+      - name: Decide whether this is Ouro Current's update
+        id: ouro_current
+        env:
+          REPOSITORY: ${{ github.repository }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          AUTHOR_ID: ${{ github.event.pull_request.user.id }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          umask 077
+          # The base's rule, on Git objects only; no token in this step.
+          snapshot="$RUNNER_TEMP/ouro-current.json"
+          ok=no
+          if jq -n -c --arg repository "$REPOSITORY" --arg login "$AUTHOR" --arg id "$AUTHOR_ID" --arg type "$AUTHOR_TYPE" \
+            --arg head_repository "$HEAD_REPOSITORY" --arg ref "$HEAD_REF" \
+            '{repository:$repository,pr:{user:{login:$login,id:($id|tonumber? // null),type:$type},head:{ref:$ref,repo:{full_name:$head_repository}}}}' \
+            > "$snapshot" 2> /dev/null \
+            && [ -f .github/scripts/ouro-current.mjs ] \
+            && [ "$(node .github/scripts/ouro-current.mjs "$BASE_SHA" "$HEAD_SHA" "$snapshot" 2> /dev/null)" = ok ]; then
+            ok=yes
+          fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
       - name: Decide whether the candidate has code to run
         id: scope
         env:
@@ -117,6 +154,7 @@ jobs:
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OURO_CURRENT: ${{ steps.ouro_current.outputs.ok }}
         run: |
           set -uo pipefail
           paths="$RUNNER_TEMP/changed-paths"
@@ -138,6 +176,13 @@ jobs:
           if [ "$code" = no ]; then
             echo "run=no" >> "$GITHUB_OUTPUT"
             echo "factory-head-tests: the pull request changes only data; there is no candidate code to run"
+            exit 0
+          fi
+          # Ouro Current's update, which the previous step checked from the
+          # base, runs its tests as a maintainer's would.
+          if [ "${OURO_CURRENT:-}" = yes ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+            echo "factory-head-tests: Ouro Current's update of the installed Ouro UI files"
             exit 0
           fi
           maintainer=no
@@ -311,6 +356,14 @@ jobs:
             || ! printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "factory-validate: triage_check_unavailable"
             exit 1
+          fi
+          # Ouro Current's update of the installed Ouro UI files, by the
+          # base's rule on the API's own read of the pull request: its own
+          # tests passed above, and the data checks below have nothing to read.
+          if [ -f .github/scripts/ouro-current.mjs ] \
+            && [ "$(node .github/scripts/ouro-current.mjs "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/triage-api.json" 2> /dev/null)" = ok ]; then
+            printf 'factory-validate: passed (ouro current)\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           expected_helpers=$'.github/scripts/check-triage.sh\n.github/scripts/triage-values.mjs'
           if ! base_helpers=$(git ls-tree --name-only "$BASE_SHA" -- .github/scripts/check-triage.sh .github/scripts/triage-values.mjs 2> /dev/null); then
