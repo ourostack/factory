@@ -358,3 +358,23 @@ test("a reports-only improvement queue cannot publish without the matching check
   assert.throws(() => publishData({ reports, dist }), /triage_projection_invalid/)
   rmSync(dir, { recursive: true, force: true })
 })
+
+test("--validate-pr calls Desk's validate-pr with its flags as an object and the seams second, and refuses a malformed flag", async () => {
+  const desk = mkdtempSync(join(tmpdir(), "desk-validate-pr-"))
+  try {
+    const scripts = join(desk, "plugins/desk/mcp/scripts")
+    mkdirSync(scripts, { recursive: true })
+    writeFileSync(join(scripts, "factory.js"), `export async function runValidatePrCommand(flags, seams) {
+  return { ok: true, flags, seams: Object.keys(seams).sort(), runner: typeof seams.runner }
+}\n`)
+    const head = "b".repeat(40), base = "a".repeat(40)
+    const argv = ["--base", base, "--head", head, "--author-association", "NONE", "--repo", "example/project", "--pr", "1"]
+    const answer = await values.validateWithDeskSnapshot({ desk, argv, snapshot: join(desk, "none.json") })
+    assert.deepEqual(answer, {
+      ok: true, flags: { base, head, "author-association": "NONE", repo: "example/project", pr: "1" }, seams: ["env", "runner"], runner: "function",
+    })
+    for (const bad of [[...argv, "--extra", "x"], [...argv, "--pr", "2"], ["--base"], ["base", base]]) {
+      assert.throws(() => values.validatePrFlags(bad), /validate_pr_usage/, JSON.stringify(bad))
+    }
+  } finally { rmSync(desk, { recursive: true, force: true }) }
+})

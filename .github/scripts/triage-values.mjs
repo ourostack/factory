@@ -268,7 +268,22 @@ export async function validateWithDeskSnapshot({ desk, argv, snapshot }) {
     return { code: 1, stdout: "" }
   }
   const { runValidatePrCommand } = await import(pathToFileURL(join(desk, "plugins/desk/mcp/scripts/factory.js")))
-  return runValidatePrCommand({ argv, runner, env: {} })
+  return runValidatePrCommand(validatePrFlags(argv), { runner, env: {} })
+}
+
+const VALIDATE_PR_FLAGS = ["base", "head", "author-association", "repo", "pr"]
+
+// Desk's validate-pr takes its flags as an object ({ base, head, "author-association", repo, pr })
+// and the seams second, since Desk's factory command line moved to Ouro AX. A malformed or
+// unknown flag throws, and the caller reports the check as unavailable: it never passes.
+export function validatePrFlags(argv) {
+  const flags = {}
+  for (let i = 0; i < argv.length; i += 2) {
+    const name = argv[i]?.startsWith("--") ? argv[i].slice(2) : ""
+    if (!VALIDATE_PR_FLAGS.includes(name) || typeof argv[i + 1] !== "string" || name in flags) throw new Error("validate_pr_usage")
+    flags[name] = argv[i + 1]
+  }
+  return flags
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
