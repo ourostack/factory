@@ -10,10 +10,11 @@
 //     account id): a `[bot]` login is GitHub's own and no person can take it;
 //   - the head is the branch `ouro-current/update` in this repository (not a
 //     fork);
-//   - every change adds, modifies or deletes a regular file, and every path is
-//     `.github/ouro-hx-installed.json` or a file the record lists at the base
-//     or at the head;
-//   - every file the head's record lists, and every file that changes, is
+//   - what merging the head into the base lands (`git merge-tree`, over every
+//     merge base, as GitHub merges it) adds, modifies or deletes regular files
+//     only, and every path is `.github/ouro-hx-installed.json` or a file the
+//     record lists at the base or in that merge;
+//   - every file the merged record lists, and every file that changes, is
 //     under an install root of the base's record: a listed path up to its
 //     first `ouro` folder (`lib/ouro/`, `site/src/ouro/`). The roots come from
 //     the base only. Nothing under `.github/` or a data path is a root.
@@ -28,6 +29,7 @@
 //   ouro_current_change             a type change, or a file that is not regular
 //   ouro_current_record             the record is missing or malformed
 //   ouro_current_empty              the pull request changes nothing
+//   ouro_current_conflict           the head does not merge cleanly
 //   ouro_current_check_unavailable  the snapshot or the commits could not be read
 // The exit status is 0 only for `ok`.
 import { execFileSync } from "node:child_process"
@@ -91,9 +93,18 @@ export function checkOuroCurrent({ base, head, snapshot, runGit = git }) {
   if (identity) return fail(identity)
   if (!GIT_REF.test(base ?? "") || !GIT_REF.test(head ?? "")) return unavailable
 
+  // What merging the head lands, as GitHub merges it (every merge base, not
+  // the one `base...head` picks), so a head cannot revert a path unseen.
+  let tree
+  try {
+    tree = runGit(["merge-tree", "--write-tree", base, head]).trim()
+  } catch (error) {
+    return error?.status === 1 ? fail("ouro_current_conflict") : unavailable
+  }
+  if (!GIT_REF.test(tree)) return unavailable
   let entries
   try {
-    const fields = runGit(["diff", "--no-renames", "--name-status", "-z", `${base}...${head}`]).split("\0")
+    const fields = runGit(["diff", "--no-renames", "--name-status", "-z", base, tree]).split("\0")
     if (fields.pop() !== "") return unavailable
     if (fields.length % 2 !== 0) return unavailable
     entries = []
@@ -104,7 +115,7 @@ export function checkOuroCurrent({ base, head, snapshot, runGit = git }) {
   if (entries.length === 0) return fail("ouro_current_empty")
 
   const before = listed(runGit, base)
-  const after = listed(runGit, head)
+  const after = listed(runGit, tree)
   if (!before || !after) return fail("ouro_current_record")
   const roots = new Set([...before].map(rootOf).filter(Boolean))
   const underRoot = (path) => [...roots].some((root) => path.startsWith(root))
@@ -119,12 +130,12 @@ export function checkOuroCurrent({ base, head, snapshot, runGit = git }) {
     else if (status !== "A" && status !== "M" && status !== "D") codes.add("ouro_current_change")
   }
   if (codes.size === 0) {
-    // Every file the head keeps must be a regular file: no symlink, no submodule.
+    // Every file the merge keeps must be a regular file: no symlink, no submodule.
     for (const { status, path } of entries) {
       if (status === "D") continue
       let entry
       try {
-        entry = runGit(["ls-tree", "-z", head, "--", path])
+        entry = runGit(["ls-tree", "-z", tree, "--", path])
       } catch {
         return unavailable
       }

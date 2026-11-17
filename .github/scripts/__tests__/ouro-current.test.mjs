@@ -97,6 +97,45 @@ test("a symlink, a deleted record, a malformed record or an empty change is refu
   assert.deepEqual(check({}).codes, ["ouro_current_empty"])
 })
 
+test("a head with two merge bases is judged by what merging it lands, so it cannot quietly revert main's .github", () => {
+  const s = store()
+  try {
+    const at = (day) => ({ ...process.env, GIT_AUTHOR_DATE: `2026-01-0${day}T00:00:00Z`, GIT_COMMITTER_DATE: `2026-01-0${day}T00:00:00Z` })
+    const run = (day, ...args) => execFileSync("git", args, { cwd: s.dir, env: at(day), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+    const write = (p, text) => { mkdirSync(dirname(join(s.dir, p)), { recursive: true }); writeFileSync(join(s.dir, p), text) }
+    // Main fixes a script (M1) while an earlier update (Y) is open, then merges Y with a merge commit.
+    write(".github/scripts/x.mjs", "fixed\n")
+    run(1, "add", "-A"); run(1, "commit", "-q", "-m", "M1")
+    const m1 = run(1, "rev-parse", "HEAD")
+    run(2, "checkout", "-q", "-b", "y", s.base)
+    for (const [p, t] of Object.entries(withRecord({ "lib/ouro/ax/a.ts": "a2\n" }))) write(p, t)
+    run(2, "add", "-A"); run(2, "commit", "-q", "-m", "Y")
+    run(3, "checkout", "-q", "main"); run(3, "merge", "-q", "--no-ff", "-m", "merge Y", "y")
+    const main = run(3, "rev-parse", "HEAD")
+    // The next head merges M1 into Y but drops M1's fix, and changes only Ouro files on top.
+    run(4, "checkout", "-q", "y"); run(4, "merge", "-q", "--no-ff", "--no-commit", m1)
+    run(4, "rm", "-q", "-f", ".github/scripts/x.mjs")
+    for (const [p, t] of Object.entries(withRecord({ "lib/ouro/ax/a.ts": "a3\n" }))) write(p, t)
+    run(4, "add", "-A"); run(4, "commit", "-q", "-m", "H")
+    const head = run(4, "rev-parse", "HEAD")
+    run(4, "checkout", "-q", "main")
+    assert.equal(run(4, "merge-base", "--all", main, head).split("\n").length, 2)
+    const runGit = (args) => execFileSync("git", args, { cwd: s.dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    assert.deepEqual(checkOuroCurrent({ base: main, head, snapshot: { repository: "example/project", pr: pr() }, runGit }).codes, ["ouro_current_path"])
+  } finally { s.close() }
+})
+
+test("a head that does not merge cleanly is refused", () => {
+  const s = store()
+  try {
+    const head = s.candidate(withRecord(update))
+    writeFileSync(join(s.dir, "lib/ouro/ax/a.ts"), "main's own\n")
+    s.git("commit", "-q", "-am", "main")
+    const runGit = (args) => execFileSync("git", args, { cwd: s.dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    assert.deepEqual(checkOuroCurrent({ base: s.git("rev-parse", "HEAD"), head, snapshot: { repository: "example/project", pr: pr() }, runGit }).codes, ["ouro_current_conflict"])
+  } finally { s.close() }
+})
+
 test("anyone else, a fork, or another branch with the same change is not Ouro Current", () => {
   const change = withRecord(update)
   for (const user of [{ login: "someone", id: 1, type: "User" }, { ...BOT, type: "User" }, { ...BOT, id: 1 }, { ...BOT, login: "ouro-current" }]) {
