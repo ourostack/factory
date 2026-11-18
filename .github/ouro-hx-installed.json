@@ -1,10 +1,10 @@
 {
-  "tag": "v1.3.297",
-  "tagCommit": "86c871940b33ffab942eb0053b16f124ff59c7c6",
+  "tag": "v1.3.298",
+  "tagCommit": "3394ac56470af18900182093e766ce25b0249e29",
   "files": {
     "lib/ouro/ax/checks.ts": "21f7f2dd63a86ce58447c7af3b02dc00069df43620bee53c71b0faa3697a0ff4",
     "lib/ouro/ax/cli.ts": "1cbaf0a683321b6343c3f45a77934c138d8ea25eac36526d34d688b8ede36234",
-    "lib/ouro/ax/command.ts": "84690718241fe815047427804e3759c90c8347a7e2ae39fbc48749a526709250",
+    "lib/ouro/ax/command.ts": "0f2b7d0b8ff29bc23a8ff6e360da92f3eb7256b3b854b014b48b27b052ed5c43",
     "lib/ouro/ax/dev-commands.ts": "911d0d56d47f7feb0d64eb96367c29369bd82a7fa925568e8dacda7a4454e09f",
     "lib/ouro/ax/doctor.ts": "50f27db03682d620e2c78babc40e4ff9d62f731d07ab4eb52678a7c2ad8a4c9d",
     "lib/ouro/ax/effects.ts": "08c5e6ebd2485ec34a6e0d915200bdd09447548754d5b430cfb4941a7c7dc5ca",
