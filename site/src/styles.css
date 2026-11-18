@@ -457,7 +457,7 @@ h3.bars-title, h3.sub-title { font-size: 16px; margin: 24px 0 8px; }
   pointer-events: none;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   font-size: 13px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
@@ -1347,7 +1347,7 @@ table.data-table.drawer-table th, table.data-table.drawer-table td { padding: 4p
 /* ---------- Steps 2 to 4: compare, rank, act ---------- */
 .compare-lede, .causes-lede { color: var(--text-primary); }
 /* The choices wrap onto a second line rather than run past the page. */
-.mode-toggle { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.mode-toggle { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 0; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .mode-btn, .ot-btn { font: inherit; font-size: 14px; padding: 6px 12px; min-height: 36px; background: var(--surface-1); color: var(--text-secondary); border: 0; cursor: pointer; }
 .mode-btn + .mode-btn, .ot-btn + .ot-btn { border-left: 1px solid var(--border); }
 .mode-btn[aria-pressed="true"], .ot-btn[aria-pressed="true"] { background: var(--text-primary); color: var(--background); font-weight: 600; }
