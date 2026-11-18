@@ -489,9 +489,9 @@ test("small text meets 4.5:1 contrast on every paper in both themes", () => {
   const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
   for (const name of ["day", "night"]) {
     const t = theme(name);
-    const texts = Object.keys(t).filter((k) => k === "ink" || k === "muted" || k.endsWith("-text"));
+    const texts = Object.keys(t).filter((k) => k === "foreground" || k === "muted" || k.endsWith("-text"));
     assert.ok(texts.length >= 8, name);
-    for (const text of texts) for (const paper of ["paper", "paper-2", "card"]) {
+    for (const text of texts) for (const paper of ["background", "paper-2", "card"]) {
       assert.ok(ratio(t[text], t[paper]) >= 4.5, `${name} ${text} on ${paper}: ${ratio(t[text], t[paper]).toFixed(2)}`);
     }
   }
