@@ -26,6 +26,12 @@
   --border: rgba(11, 11, 11, 0.12);
   --focus: #2a78d6;
   --link: #1f63b8;
+  /* Theme tokens (shadcn's names) defined through the page's own colors, by meaning. */
+  --muted-foreground: var(--text-secondary);
+  --card: var(--surface-1);
+  --popover: var(--surface-2);
+  --primary: var(--link);
+  --ring: var(--focus);
 
   /* Meaning colors. Each is at least 3:1 against the page in both themes,
      except the deliberately faint "no session running" band, which always
@@ -109,6 +115,11 @@
     --border: rgba(255, 255, 255, 0.14);
     --focus: #6ea8ff;
     --link: #79aef5;
+    --muted-foreground: var(--text-secondary);
+    --card: var(--surface-1);
+    --popover: var(--surface-2);
+    --primary: var(--link);
+    --ring: var(--focus);
 
     --c-value: #4fb874;
     --c-necessary: #8f8e88;
