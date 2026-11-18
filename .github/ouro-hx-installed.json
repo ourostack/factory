@@ -1,11 +1,12 @@
 {
-  "tag": "v1.3.287",
-  "tagCommit": "7756b03e76b36f23e7ad9bd6ed741b5534e5b036",
+  "tag": "v1.3.288",
+  "tagCommit": "aafc8842888bcfc927095c4e9e348c74d8108096",
   "files": {
     "lib/ouro/ax/checks.ts": "21f7f2dd63a86ce58447c7af3b02dc00069df43620bee53c71b0faa3697a0ff4",
-    "lib/ouro/ax/cli.ts": "ad1a7a04e77d407dba61279d0be810929559591ca6a9cb2e698077109c699e97",
+    "lib/ouro/ax/cli.ts": "1cbaf0a683321b6343c3f45a77934c138d8ea25eac36526d34d688b8ede36234",
     "lib/ouro/ax/command.ts": "f630829b90fd17009e55f2a226edc2225d0663425d63ca0ab7bca5cbd2247987",
     "lib/ouro/ax/dev-commands.ts": "911d0d56d47f7feb0d64eb96367c29369bd82a7fa925568e8dacda7a4454e09f",
+    "lib/ouro/ax/doctor.ts": "50f27db03682d620e2c78babc40e4ff9d62f731d07ab4eb52678a7c2ad8a4c9d",
     "lib/ouro/ax/effects.ts": "08c5e6ebd2485ec34a6e0d915200bdd09447548754d5b430cfb4941a7c7dc5ca",
     "lib/ouro/ax/exit-codes.ts": "b6a6cc62877e7125f17846f9aa0861e3f849fa20cff3e52d4e44391562780d7c",
     "lib/ouro/ax/help.ts": "3e10e7b43b176bfae882ec25ab950f722eca76bda2b24a8239f19f8805dbb1cb",
