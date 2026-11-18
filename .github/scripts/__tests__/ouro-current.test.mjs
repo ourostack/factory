@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { test } from "node:test"
 
-import { OURO_CURRENT, checkOuroCurrent } from "../ouro-current.mjs"
+import { OURO_CURRENT, checkOuroCurrent, main } from "../ouro-current.mjs"
 
 // Ouro Current's update of the installed Ouro UI files: the rule, then the real workflow steps that apply it.
 const ROOT = new URL("../../../", import.meta.url).pathname
@@ -16,7 +16,7 @@ const mergeText = readFileSync(new URL("../../workflows/merge.yml", import.meta.
 const BOT = { login: OURO_CURRENT.login, id: OURO_CURRENT.id, type: "Bot" }
 const pr = ({ user = BOT, repo = "example/project", ref = "ouro-current/update" } = {}) => ({ user, head: { ref, repo: { full_name: repo } } })
 const sha256 = (text) => createHash("sha256").update(text).digest("hex")
-const record = (files) => `${JSON.stringify({ tag: "v1.0.1", tagCommit: "0".repeat(40), files: Object.fromEntries(Object.entries(files).map(([p, t]) => [p, sha256(t)])) }, null, 2)}\n`
+const record = (files, tag = "v1.0.1") => `${JSON.stringify({ tag, tagCommit: "0".repeat(40), files: Object.fromEntries(Object.entries(files).map(([p, t]) => [p, sha256(t)])) }, null, 2)}\n`
 
 // A store whose base installs two Ouro files under lib/ouro/ and site/src/ouro/, as factory's own record does.
 const installed = { "lib/ouro/ax/a.ts": "a1\n", "site/src/ouro/b.css": "b1\n" }
@@ -24,7 +24,7 @@ const installed = { "lib/ouro/ax/a.ts": "a1\n", "site/src/ouro/b.css": "b1\n" }
 const update = { "lib/ouro/ax/a.ts": "a2\n", "lib/ouro/check/c.ts": "c\n" }
 const withRecord = (files, extra = {}) => ({ ...files, [RECORD]: record({ ...installed, ...files, ...extra }) })
 
-function store({ trusted = false } = {}) {
+function store({ trusted = false, extra = {} } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "ouro-current-")))
   const dir = join(home, "repo")
   mkdirSync(dir)
@@ -36,6 +36,7 @@ function store({ trusted = false } = {}) {
   write("README.md", "x\n")
   for (const [p, t] of Object.entries(installed)) write(p, t)
   write(RECORD, record(installed))
+  for (const [p, t] of Object.entries(extra)) write(p, t)
   if (trusted) {
     for (const p of [
       ".github/scripts/ouro-current.mjs", ".github/scripts/triage-values.mjs", ".github/scripts/check-triage.sh", ".github/scripts/check-capture.sh",
@@ -62,12 +63,12 @@ function store({ trusted = false } = {}) {
   return { home, dir, base, git, candidate, close: () => rmSync(home, { recursive: true, force: true }) }
 }
 
-function check(change, snapshot = { repository: "example/project", pr: pr() }) {
-  const s = store()
+function check(change, snapshot = { repository: "example/project", pr: pr() }, { newRules, extra } = {}) {
+  const s = store({ extra })
   try {
     const head = s.candidate(change)
     const runGit = (args) => execFileSync("git", args, { cwd: s.dir, encoding: "utf8" })
-    return checkOuroCurrent({ base: s.base, head, snapshot, runGit })
+    return checkOuroCurrent({ base: s.base, head, snapshot, runGit, newRules })
   } finally { s.close() }
 }
 
@@ -145,6 +146,118 @@ test("anyone else, a fork, or another branch with the same change is not Ouro Cu
   assert.deepEqual(check(change, { repository: "example/project", pr: pr({ ref: "ouro-current/update-2" }) }).codes, ["ouro_current_head"])
   assert.deepEqual(check(change, { repository: "example/project", pr: null }).codes, ["ouro_current_author"])
   assert.deepEqual(check(change, null).codes, ["ouro_current_check_unavailable"])
+})
+
+// ouro-check.json: factory's Ouro check file, whose `known` lists the findings Ouro Current's update may record for the rules it adds.
+const CHECK = "ouro-check.json"
+const checkFile = (value) => `${JSON.stringify(value, null, 2)}\n`
+const BASE_CHECK = { waive: { "**": { "layout-shift": "A waiver." } }, known: { "off-theme": ["#act-unlabeled sets color: red"] } }
+const KNOWN_BASE = { [CHECK]: checkFile(BASE_CHECK) }
+// The base's release lists off-theme; the new tag adds new-rule.
+const RULES = { base: ["off-theme"], head: ["off-theme", "new-rule"] }
+// The update at a new tag (the record names it), with ouro-check.json as `value`.
+const knownUpdate = (value, tag = "v1.0.2") => ({ [RECORD]: record(installed, tag), [CHECK]: checkFile(value) })
+const withKnown = (known) => ({ ...BASE_CHECK, known })
+const OFF_THEME = BASE_CHECK.known["off-theme"]
+
+test("an update adds known entries only under a rule its release adds", () => {
+  const added = withKnown({ "off-theme": OFF_THEME, "new-rule": ["#b sets color: red", "#c sets color: blue"] })
+  assert.deepEqual(check(knownUpdate(added), undefined, { newRules: RULES, extra: KNOWN_BASE }), { ok: true, codes: [] })
+  // The base's release lists no new-rules file, so every rule the head lists is new.
+  assert.deepEqual(check(knownUpdate(added), undefined, { newRules: { base: [], head: ["new-rule"] }, extra: KNOWN_BASE }), { ok: true, codes: [] })
+})
+
+test("an entry under a rule the base's release lists, or under one neither release lists, is refused", () => {
+  const existing = withKnown({ "off-theme": [...OFF_THEME, "#b sets color: red"] })
+  assert.deepEqual(check(knownUpdate(existing), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+  const made = withKnown({ ...BASE_CHECK.known, "made-up": ["#b sets color: red"] })
+  assert.deepEqual(check(knownUpdate(made), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+  // One new rule does not excuse another, nor a new entry under an old rule beside it.
+  const mixed = withKnown({ "off-theme": [...OFF_THEME, "#b sets color: red"], "new-rule": ["#c sets color: blue"] })
+  assert.deepEqual(check(knownUpdate(mixed), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+})
+
+test("an update that removes a known entry or a rule, or changes a waiver, is refused", () => {
+  for (const known of [{ "off-theme": [] }, {}]) {
+    assert.deepEqual(check(knownUpdate(withKnown(known)), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"], JSON.stringify(known))
+  }
+  const waived = { ...BASE_CHECK, waive: { "**": { "layout-shift": "Changed." } } }
+  assert.deepEqual(check(knownUpdate(waived), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+  const waivedAndAdded = { ...withKnown({ "off-theme": OFF_THEME, "new-rule": ["#b sets color: red"] }), waive: {} }
+  assert.deepEqual(check(knownUpdate(waivedAndAdded), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+})
+
+test("ouro-check.json that does not parse, has duplicate or non-string entries, or is added or deleted is refused", () => {
+  const added = withKnown({ "off-theme": OFF_THEME, "new-rule": ["#b sets color: red"] })
+  assert.deepEqual(check({ [RECORD]: record(installed, "v1.0.2"), [CHECK]: "{ not json\n" }, undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+  for (const known of [{ "off-theme": OFF_THEME, "new-rule": ["#b", "#b"] }, { "off-theme": OFF_THEME, "new-rule": ["#b", 1] }, { "off-theme": OFF_THEME, "new-rule": "#b" }, []]) {
+    assert.deepEqual(check(knownUpdate({ ...BASE_CHECK, known }), undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_known"], JSON.stringify(known))
+  }
+  // Only a modification is allowed: a file the base lacks, or one the update deletes.
+  assert.deepEqual(check(knownUpdate(added)).codes, ["ouro_current_change"])
+  assert.deepEqual(check({ ...knownUpdate(added), [CHECK]: null }, undefined, { newRules: RULES, extra: KNOWN_BASE }).codes, ["ouro_current_change"])
+})
+
+test("without the rule lists a change to ouro-check.json is unavailable, and a waiver change needs none", () => {
+  const added = knownUpdate(withKnown({ "off-theme": OFF_THEME, "new-rule": ["#b sets color: red"] }))
+  for (const newRules of [undefined, { base: [], head: null }, { base: null, head: ["new-rule"] }]) {
+    assert.deepEqual(check(added, undefined, { newRules, extra: KNOWN_BASE }), { ok: false, codes: ["ouro_current_check_unavailable"] }, JSON.stringify(newRules))
+  }
+  const waived = knownUpdate({ ...BASE_CHECK, waive: {} })
+  assert.deepEqual(check(waived, undefined, { newRules: undefined, extra: KNOWN_BASE }).codes, ["ouro_current_known"])
+  // A refusal already found stands; the lists do not turn it into a hold.
+  const withPath = { ...added, "facts/x.json": "{}\n" }
+  assert.deepEqual(check(withPath, undefined, { newRules: undefined, extra: KNOWN_BASE }).codes, ["ouro_current_path"])
+})
+
+// main fetches the rule lists itself, through the fetch it is given; every URL it asks for is recorded.
+const RULES_URL = (tag) => `https://raw.githubusercontent.com/ourostack/ouro-ui/${tag}/registry/ouro/check/new-rules.json`
+const rules = (names) => JSON.stringify(names.map((rule) => ({ rule, summary: `${rule} is new.` })))
+
+async function runMain(change, answers, { extra = KNOWN_BASE, snapshot = { repository: "example/project", pr: pr() } } = {}) {
+  const s = store({ extra })
+  try {
+    const head = s.candidate(change)
+    const file = join(s.home, "snapshot.json")
+    writeFileSync(file, JSON.stringify(snapshot))
+    const runGit = (args) => execFileSync("git", args, { cwd: s.dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    const urls = []
+    const fetchText = async (url) => {
+      urls.push(url)
+      if (!Object.hasOwn(answers, url)) throw new Error(`no answer for ${url}`)
+      return answers[url]
+    }
+    const out = []
+    const status = await main({ argv: [s.base, head, file], write: (text) => out.push(text), runGit, fetchText })
+    return { status, output: out.join(""), urls }
+  } finally { s.close() }
+}
+
+test("main reads both tags' rule lists, for a change to ouro-check.json only, and refuses a tag that is not a release tag unfetched", async () => {
+  const added = knownUpdate(withKnown({ "off-theme": OFF_THEME, "new-rule": ["#b sets color: red"] }))
+  const both = { [RULES_URL("v1.0.1")]: rules(["off-theme"]), [RULES_URL("v1.0.2")]: rules(["off-theme", "new-rule"]) }
+  assert.deepEqual(await runMain(added, both, { extra: KNOWN_BASE }), { status: 0, output: "ok\n", urls: [RULES_URL("v1.0.1"), RULES_URL("v1.0.2")] })
+  // A 404 at the base's tag is an empty list, as a release from before the file has none.
+  const noBase = { [RULES_URL("v1.0.1")]: null, [RULES_URL("v1.0.2")]: rules(["new-rule"]) }
+  assert.deepEqual(await runMain(added, noBase, { extra: KNOWN_BASE }), { status: 0, output: "ok\n", urls: [RULES_URL("v1.0.1"), RULES_URL("v1.0.2")] })
+  // A 404 at the new tag leaves the lists unavailable.
+  const noHead = { [RULES_URL("v1.0.1")]: rules(["off-theme"]), [RULES_URL("v1.0.2")]: null }
+  assert.deepEqual(await runMain(added, noHead, { extra: KNOWN_BASE }), { status: 1, output: "ouro_current_check_unavailable\n", urls: [RULES_URL("v1.0.1"), RULES_URL("v1.0.2")] })
+  // A list that is not an array of rules is unavailable too.
+  const bad = { [RULES_URL("v1.0.1")]: rules(["off-theme"]), [RULES_URL("v1.0.2")]: "{}" }
+  assert.equal((await runMain(added, bad, { extra: KNOWN_BASE })).output, "ouro_current_check_unavailable\n")
+
+  // A record tag that is not a release tag is never fetched: the head's lists are unavailable.
+  for (const tag of ["v1.0.2/../x", "main", "v1.0", "V1.0.2"]) {
+    const unsafe = knownUpdate(withKnown({ "off-theme": OFF_THEME, "new-rule": ["#b sets color: red"] }), tag)
+    assert.deepEqual(await runMain(unsafe, both, { extra: KNOWN_BASE }), { status: 1, output: "ouro_current_check_unavailable\n", urls: [RULES_URL("v1.0.1")] }, tag)
+  }
+
+  // Unchanged ouro-check.json: nothing is fetched, and the update is judged as before.
+  assert.deepEqual(await runMain(withRecord(update), {}), { status: 0, output: "ok\n", urls: [] })
+  // Not Ouro Current's update: refused by identity before anything is fetched.
+  const fork = { repository: "example/project", pr: pr({ repo: "fork/project" }) }
+  assert.deepEqual(await runMain(added, both, { extra: KNOWN_BASE, snapshot: fork }), { status: 1, output: "ouro_current_head\n", urls: [] })
 })
 
 // The workflows' own steps, run for real; only the gh API is a fixture, and every request is recorded.

@@ -40,14 +40,16 @@
 #     which is also what the validator would say about a change outside the
 #     data paths; the candidate's code is never executed.
 #   - One exception: Ouro Current's update (`.github/scripts/ouro-current.mjs`,
-#     read from the base and run on Git objects in a step with no token). A
+#     read from the base and run on Git objects, and fetching the release's rule
+#     lists when `ouro-check.json` changes, in a step with no token). A
 #     pull request by the Ouro Current app (`ouro-current[bot]`, by login, type
 #     and account id) from its branch `ouro-current/update` in this repository,
 #     which changes only `.github/ouro-hx-installed.json` and the files that
 #     record lists, all under the install roots the base's record uses
-#     (`lib/ouro/`, `site/src/ouro/`), runs its tests as a maintainer's would,
-#     and factory-validate then passes it without Desk's validator, since it
-#     touches no data path. The same change from anyone else, a fork, another
+#     (`lib/ouro/`, `site/src/ouro/`), and `ouro-check.json` only to add `known`
+#     entries for the rules its release adds, runs its tests as a maintainer's
+#     would, and factory-validate then passes it without Desk's validator, since
+#     it touches no data path. The same change from anyone else, a fork, another
 #     branch, or one more path anywhere is refused as above.
 #   - Correction records and `factory.json` are not data paths here, so a
 #     maintainer's pull request that changes only them also runs the suite
