@@ -62,7 +62,7 @@ code { font: .85em var(--mono); letter-spacing: -.01em; }
 .mast nav a[aria-current="page"] { border-color: var(--accent); font-weight: 600; }
 .mast nav .nav-out { color: var(--muted); }
 .asof { margin: 0 0 0 auto; font-size: .82rem; color: var(--muted); }
-.theme { font: inherit; font-size: .85rem; background: transparent; color: var(--foreground); border: 1px solid var(--rule); border-radius: 99px; padding: .35em .9em; cursor: pointer; }
+.theme { font: inherit; font-size: .85rem; background: transparent; color: var(--foreground); border: 1px solid var(--rule); border-radius: 9999px; padding: .35em .9em; cursor: pointer; }
 .theme:hover { border-color: var(--help); }
 
 main { display: block; padding: clamp(1.25rem, 3.5vw, 2.75rem) clamp(1rem, 4vw, 3rem) 4rem; max-width: 76rem; margin: 0 auto; }
@@ -96,7 +96,7 @@ main:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .names-notice { margin: 0 0 1.4rem; }
 .names-notice .ghost { margin: 0 0 0 .4rem; padding: .25em .9em; }
 .disclosure { font-size: .9rem; color: var(--muted); max-width: var(--measure); border-left: 3px solid var(--rule); padding-left: .9rem; }
-.ghost { font: inherit; font-size: .95rem; background: transparent; color: var(--foreground); border: 1.5px dashed var(--help); border-radius: 99px; padding: .5em 1.1em; cursor: pointer; margin-top: 1rem; }
+.ghost { font: inherit; font-size: .95rem; background: transparent; color: var(--foreground); border: 1.5px dashed var(--help); border-radius: 9999px; padding: .5em 1.1em; cursor: pointer; margin-top: 1rem; }
 .ghost:hover { background: color-mix(in srgb, var(--help) 10%, transparent); }
 .ghost[disabled] { opacity: .6; cursor: progress; }
 .ghost[hidden] { display: none; }
@@ -150,9 +150,9 @@ section { margin-top: 3.5rem; }
 .swatch { width: 100%; height: 100%; display: block; }
 .bolt-caption { grid-area: cap; font-size: .88rem; color: var(--muted); }
 .is-open .bolt-link { background: color-mix(in srgb, var(--help) 8%, transparent); }
-.pill { font-size: .78rem; border-radius: 99px; padding: .2em .7em; border: 1px solid var(--rule); color: var(--foreground); white-space: nowrap; }
+.pill { font-size: .78rem; border-radius: 9999px; padding: .2em .7em; border: 1px solid var(--rule); color: var(--foreground); white-space: nowrap; }
 .pill.open { border-color: var(--help); color: var(--help-text); }
-.shared { font-size: .72rem; color: var(--muted); border: 1px dashed var(--muted); border-radius: 99px; padding: .1em .55em; }
+.shared { font-size: .72rem; color: var(--muted); border: 1px dashed var(--muted); border-radius: 9999px; padding: .1em .55em; }
 
 /* one session */
 .ledger mark { background: none; color: inherit; padding: 0 .05em; box-shadow: inset 0 -.38em 0 var(--hl); }
