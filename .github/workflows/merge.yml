@@ -37,7 +37,9 @@
 # login, type and account id) from its branch `ouro-current/update` in this
 # repository, changing only `.github/ouro-hx-installed.json` and the files it
 # lists, all under the install roots main's record uses (`lib/ouro/`,
-# `site/src/ouro/`). Anything else it opens is validated as anyone's.
+# `site/src/ouro/`), and `ouro-check.json` only to add `known` entries for the
+# rules its release adds (never a waiver, a removal or an older rule's entry).
+# Anything else it opens is validated as anyone's.
 # The same changes from anyone else fail validation with `path` and are
 # rejected. A maintainer is the pull request author when
 # their permission on this repository is `admin` or `write`; any API error
