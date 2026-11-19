@@ -1,6 +1,6 @@
 {
-  "tag": "v1.3.346",
-  "tagCommit": "6296b95a14aae5976944f3041a1f2989fbcbf70a",
+  "tag": "v1.3.347",
+  "tagCommit": "d805797e81c98102513eecb76da3c18bca837de7",
   "files": {
     "lib/ouro/ax/checks.ts": "21f7f2dd63a86ce58447c7af3b02dc00069df43620bee53c71b0faa3697a0ff4",
     "lib/ouro/ax/cli.ts": "1cbaf0a683321b6343c3f45a77934c138d8ea25eac36526d34d688b8ede36234",
