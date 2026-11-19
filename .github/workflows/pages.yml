@@ -112,6 +112,7 @@ jobs:
           cp site/src/evidence.html site/src/session-data.js site/src/learning.js site/src/loom.js site/src/loom.css site/dist/
           mkdir -p site/dist/ouro
           cp site/src/ouro/ouro-base.css site/src/ouro/ouro-theme.css site/dist/ouro/
+          node site/scripts/fragment-focus.mjs site/dist/index.html site/dist/evidence.html
           echo "Site data built: $(wc -c < site/dist/data.json) bytes" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the pull request cache
