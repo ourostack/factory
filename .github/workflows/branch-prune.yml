@@ -1,0 +1,47 @@
+name: Branch prune
+# Deletes stale branches once a day with ourostack/.github's tools/branch-prune, the rule every ourostack repository runs:
+# a branch fully merged into main, or one whose most recent pull request merged or closed unmerged at least 3 days ago and
+# that still points at that pull request's head. It never touches main, a protected or release branch, a branch with an
+# open pull request, or one pushed to in the last 3 days. Other repositories call ourostack/.github's reusable workflow at
+# main; this one names a pinned image for every job (.github/scripts/__tests__/runners.test.mjs), so it runs the tool in
+# a job of its own. Run it by hand with dry-run to list what it would delete.
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "List what would be deleted and delete nothing."
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: branch-prune
+  cancel-in-progress: false
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: ourostack/.github
+          ref: main
+          path: .ouro-tools
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: ""
+      - name: Delete the branches that carry no work
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry-run || false }}
+        run: |
+          flag=""; [ "$DRY_RUN" = "true" ] && flag="--dry-run"
+          node .ouro-tools/tools/branch-prune/prune.mjs $flag --min-age-days 3 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
