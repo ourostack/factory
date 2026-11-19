@@ -31,6 +31,7 @@
     "lib/ouro/check/text-check.ts": "6bfeddf9f3669a6d741f10baf62d94c0be80db620a4d55163187312c57df8934",
     "lib/ouro/check/theme-check.ts": "286349d9802d6a6f852af452746d2db763bbcb95b593c5ca75a1227365788226",
     "lib/ouro/check/wrap-check.ts": "474c9b7a08be766c7479931b3f0f0cb6678efcd10918d0047270f3e6fccda918",
+    "lib/ouro/fragment-focus-script.ts": "ff725ffb57e7abc0d244cf651537649b22ba0b1d81501c9a5dcb2237a41ece46",
     "site/src/ouro/ouro-base.css": "736213399c410f59ad8c678954643650bd78cda46bdc0ae3122fb2a96ef1e50f",
     "site/src/ouro/ouro-theme.css": "a7d8151dd67cf804795d5bfe5ef31df09ab8b557bf9bd55421ea2082ac025492"
   }

@@ -67,9 +67,6 @@
       "main:focus-visible sets outline-color: 3px solid var(--focus), a fixed colour",
       "table.data-table thead th sets color: var(--text-muted), a fixed colour"
     ],
-    "giant-text": [],
-    "fragment-focus": [
-      "Safari takes focus as stylesheets load, on this page opened at a place on it, without fragmentFocusScript"
-    ]
+    "giant-text": []
   }
 }
