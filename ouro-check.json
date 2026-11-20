@@ -92,6 +92,7 @@
       "This paragraph wraps at 960px in a 2464px column, leaving the rest empty. Let it use the width it has: remove `.foot p { max-width: 60rem }`. If the design sets a measure on purpose, declare it at 40ch or wider: read the max-width from a --measure-* token, add data-ouro-measure to the text, or set \"measure\" in ouro-check.json.",
       "This paragraph wraps at 960px in a 3104px column, leaving the rest empty. Let it use the width it has: remove `.foot p { max-width: 60rem }`. If the design sets a measure on purpose, declare it at 40ch or wider: read the max-width from a --measure-* token, add data-ouro-measure to the text, or set \"measure\" in ouro-check.json.",
       "This paragraph wraps at 960px in a 3744px column, leaving the rest empty. Let it use the width it has: remove `.foot p { max-width: 60rem }`. If the design sets a measure on purpose, declare it at 40ch or wider: read the max-width from a --measure-* token, add data-ouro-measure to the text, or set \"measure\" in ouro-check.json."
-    ]
+    ],
+    "popup-first-frame": []
   }
 }
