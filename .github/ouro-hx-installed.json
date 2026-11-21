@@ -1,6 +1,6 @@
 {
-  "tag": "v1.3.412",
-  "tagCommit": "14492985657b49720748533149bbf0a8a9b32c51",
+  "tag": "v1.3.414",
+  "tagCommit": "0b9df784c2770ede4854c301bb09dfcce9227476",
   "files": {
     "lib/ouro/ax/ax-command.ts": "c96277de9e73a9633e166dfd6b5990b47dda32d08fe132b90e7de2933ca3f21f",
     "lib/ouro/ax/ax-moved.d.ts": "878ff338c7eb2c273854635c354c6bbfc63a8536e33ea5db5b14f770c2353445",
@@ -17,23 +17,6 @@
     "lib/ouro/ax/terminal.ts": "41b6a375fe92d67e6190dccabfa80c94a9e275c641e83c46114d8d209c652ca5",
     "lib/ouro/ax/voice.ts": "b92512692f13f2fbd3ee45407b876d6a18ac164f8c35a33524ac5d7c88a015b5",
     "lib/ouro/ax/wait.ts": "fed4890771d0ce5d1a43d93e73c7d621818bbcb44b30e88c88be274972a133c7",
-    "lib/ouro/check/check.ts": "db58c1156d5363a681f53922abf75f2a30abcce1ec788eb73e49c8961c4ded80",
-    "lib/ouro/check/design-check.ts": "1107d20db9ce9ced8d6210322a8484d9cd4984da2f4d070ed35e2916aadf9975",
-    "lib/ouro/check/fade-check.ts": "d5c15693a55eb35152a481c02eed06a1de2c7cc277cff08a0aed5a237009e62b",
-    "lib/ouro/check/fades.ts": "c85e3d167ef2d9010e49d6389d29eecdbcfa64ef26db7b6586e53ba98fc62840",
-    "lib/ouro/check/in-page.ts": "c701a4f4fbd9d06b09f3ffb4194448b568ce599a798e1ccf1b0235616f7a6876",
-    "lib/ouro/check/interaction-check.ts": "bd60d4fb2d0679b9783cfe2cfe75d8377cf2cb6b3b0bb5382aa42af1b7565664",
-    "lib/ouro/check/layout-check.ts": "d89aec513950075a229d8279acd2c3fd358d7c0cfc25e90f95c57abaeff370de",
-    "lib/ouro/check/measure.ts": "17a09758b59d747c05732d691e49ba40fd550d0927526af58ae5498d75967a1a",
-    "lib/ouro/check/motion-check.ts": "3edb03043c6b449a3eaa23788f32a641bc8e17556d16e05e37df934d0f1647b5",
-    "lib/ouro/check/overlap-check.ts": "cfbe22895320f925a47f853dbec3a53ba11aae14f20ec2f0449fe84d13f807fb",
-    "lib/ouro/check/serve.ts": "5c18b5b7287f8b035d5f4e22b7af0a36fd39e8503771b1ce08528d1a8d1f254c",
-    "lib/ouro/check/size-check.ts": "194a0148718e7c7cae31881aab35f7d7b524416efa19697ebb03124ff1cfdf37",
-    "lib/ouro/check/text-check.ts": "6bfeddf9f3669a6d741f10baf62d94c0be80db620a4d55163187312c57df8934",
-    "lib/ouro/check/theme-check.ts": "286349d9802d6a6f852af452746d2db763bbcb95b593c5ca75a1227365788226",
-    "lib/ouro/check/wrap-check.ts": "474c9b7a08be766c7479931b3f0f0cb6678efcd10918d0047270f3e6fccda918",
-    "lib/ouro/fragment-focus-script.ts": "ff725ffb57e7abc0d244cf651537649b22ba0b1d81501c9a5dcb2237a41ece46",
-    "site/src/ouro/ouro-base.css": "736213399c410f59ad8c678954643650bd78cda46bdc0ae3122fb2a96ef1e50f",
-    "site/src/ouro/ouro-theme.css": "a7d8151dd67cf804795d5bfe5ef31df09ab8b557bf9bd55421ea2082ac025492"
+    "lib/ouro/fragment-focus-script.ts": "ff725ffb57e7abc0d244cf651537649b22ba0b1d81501c9a5dcb2237a41ece46"
   }
 }
