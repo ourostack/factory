@@ -83,6 +83,7 @@
   --avatar-6: #0f6cbd;
   --avatar-7: #8764b8;
   --avatar-8: #c239b3;
+  --ouro-gap-min: var(--ouro-size-2);
   --ouro-size-0_5: 0.125rem;
   --ouro-size-1: 0.25rem;
   --ouro-size-1_5: 0.375rem;
