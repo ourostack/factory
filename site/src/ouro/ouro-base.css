@@ -122,6 +122,8 @@
   --ouro-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ouro-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ouro-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ouro-duration-bounce: 650ms;
+  --ouro-ease-bounce: linear(0, 0.1221, 0.3776, 0.6454, 0.8608, 1.002, 1.074, 1.0947, 1.0845, 1.0608, 1.0352, 1.0144, 1.0005, 0.9933, 0.991, 0.9919, 0.9941, 0.9965, 0.9985, 0.9999, 1.0006, 1);
   --ouro-duration-press: 160ms;
   --ouro-duration-fast: 150ms;
   --ouro-duration-base: 200ms;
