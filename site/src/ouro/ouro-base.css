@@ -132,6 +132,10 @@
   --ouro-duration-draw: 240ms;
   --ouro-duration-slow: 300ms;
   --ouro-duration-sheet: 500ms;
+  --ouro-dialog-duration: var(--ouro-duration-slow);
+  --ouro-dialog-ease: var(--ouro-ease-out);
+  --ouro-dialog-exit-duration: var(--ouro-duration-base);
+  --ouro-dialog-exit-ease: var(--ouro-dialog-ease);
   --ouro-press-scale: 0.97;
   --ouro-backdrop-color: #18181b;
   --ouro-backdrop-max: 0.4;
@@ -283,7 +287,15 @@
 @supports (clip-path: shape(from 0 0, close)) {
   [data-ouro-surface],
   [data-ouro-avatar-surface] {
-    --ouro-sq-path: var(--ouro-sq-capsule-path, shape(from 0 calc(var(--ouro-sq-r)*1), curve to calc(var(--ouro-sq-r)*.1591) calc(var(--ouro-sq-r)*.1591) with 0 calc(var(--ouro-sq-r)*.613) / calc(var(--ouro-sq-r)*-.0092) calc(var(--ouro-sq-r)*.3274), curve to calc(var(--ouro-sq-r)*1) 0 with calc(var(--ouro-sq-r)*.3274) calc(var(--ouro-sq-r)*-.0092) / calc(var(--ouro-sq-r)*.613) 0, line to calc(100% - var(--ouro-sq-r)*1) 0, curve to calc(100% - var(--ouro-sq-r)*.1591) calc(var(--ouro-sq-r)*.1591) with calc(100% - var(--ouro-sq-r)*.613) 0 / calc(100% - var(--ouro-sq-r)*.3274) calc(var(--ouro-sq-r)*-.0092), curve to 100% calc(var(--ouro-sq-r)*1) with calc(100% + var(--ouro-sq-r)*.0092) calc(var(--ouro-sq-r)*.3274) / 100% calc(var(--ouro-sq-r)*.613), line to 100% calc(100% - var(--ouro-sq-r)*1), curve to calc(100% - var(--ouro-sq-r)*.1591) calc(100% - var(--ouro-sq-r)*.1591) with 100% calc(100% - var(--ouro-sq-r)*.613) / calc(100% + var(--ouro-sq-r)*.0092) calc(100% - var(--ouro-sq-r)*.3274), curve to calc(100% - var(--ouro-sq-r)*1) 100% with calc(100% - var(--ouro-sq-r)*.3274) calc(100% + var(--ouro-sq-r)*.0092) / calc(100% - var(--ouro-sq-r)*.613) 100%, line to calc(var(--ouro-sq-r)*1) 100%, curve to calc(var(--ouro-sq-r)*.1591) calc(100% - var(--ouro-sq-r)*.1591) with calc(var(--ouro-sq-r)*.613) 100% / calc(var(--ouro-sq-r)*.3274) calc(100% + var(--ouro-sq-r)*.0092), curve to 0 calc(100% - var(--ouro-sq-r)*1) with calc(var(--ouro-sq-r)*-.0092) calc(100% - var(--ouro-sq-r)*.3274) / 0 calc(100% - var(--ouro-sq-r)*.613), close));
+    --ouro-sq-cmds: from 0 calc(var(--ouro-sq-r)*1), curve to calc(var(--ouro-sq-r)*.1591) calc(var(--ouro-sq-r)*.1591) with 0 calc(var(--ouro-sq-r)*.613) / calc(var(--ouro-sq-r)*-.0092) calc(var(--ouro-sq-r)*.3274), curve to calc(var(--ouro-sq-r)*1) 0 with calc(var(--ouro-sq-r)*.3274) calc(var(--ouro-sq-r)*-.0092) / calc(var(--ouro-sq-r)*.613) 0, line to calc(100% - var(--ouro-sq-r)*1) 0, curve to calc(100% - var(--ouro-sq-r)*.1591) calc(var(--ouro-sq-r)*.1591) with calc(100% - var(--ouro-sq-r)*.613) 0 / calc(100% - var(--ouro-sq-r)*.3274) calc(var(--ouro-sq-r)*-.0092), curve to 100% calc(var(--ouro-sq-r)*1) with calc(100% + var(--ouro-sq-r)*.0092) calc(var(--ouro-sq-r)*.3274) / 100% calc(var(--ouro-sq-r)*.613), line to 100% calc(100% - var(--ouro-sq-r)*1), curve to calc(100% - var(--ouro-sq-r)*.1591) calc(100% - var(--ouro-sq-r)*.1591) with 100% calc(100% - var(--ouro-sq-r)*.613) / calc(100% + var(--ouro-sq-r)*.0092) calc(100% - var(--ouro-sq-r)*.3274), curve to calc(100% - var(--ouro-sq-r)*1) 100% with calc(100% - var(--ouro-sq-r)*.3274) calc(100% + var(--ouro-sq-r)*.0092) / calc(100% - var(--ouro-sq-r)*.613) 100%, line to calc(var(--ouro-sq-r)*1) 100%, curve to calc(var(--ouro-sq-r)*.1591) calc(100% - var(--ouro-sq-r)*.1591) with calc(var(--ouro-sq-r)*.613) 100% / calc(var(--ouro-sq-r)*.3274) calc(100% + var(--ouro-sq-r)*.0092), curve to 0 calc(100% - var(--ouro-sq-r)*1) with calc(var(--ouro-sq-r)*-.0092) calc(100% - var(--ouro-sq-r)*.3274) / 0 calc(100% - var(--ouro-sq-r)*.613), close;
+    --ouro-sq-path: var(--ouro-sq-capsule-path, shape(var(--ouro-sq-cmds)));
+  }
+  [data-ouro-avatar-surface][data-ouro-bite] {
+    --ouro-bite-x: calc(100% - var(--ouro-bite-c));
+    clip-path: shape(evenodd var(--ouro-sq-cmds), move to calc(var(--ouro-bite-x) + var(--ouro-bite-r)) calc(100% - var(--ouro-bite-c)), arc to calc(var(--ouro-bite-x) - var(--ouro-bite-r)) calc(100% - var(--ouro-bite-c)) of var(--ouro-bite-r), arc to calc(var(--ouro-bite-x) + var(--ouro-bite-r)) calc(100% - var(--ouro-bite-c)) of var(--ouro-bite-r), close);
+  }
+  [dir="rtl"] [data-ouro-avatar-surface][data-ouro-bite] {
+    --ouro-bite-x: calc(0% + var(--ouro-bite-c));
   }
 }
 
@@ -334,32 +346,6 @@
   }
   50% {
     opacity: 0.55;
-  }
-}
-
-@keyframes ouro-scroll-fade-left {
-  from {
-    animation-timing-function: linear;
-    mask-image: var(--ouro-scroll-fade-ramps);
-    mask-repeat: no-repeat;
-    mask-composite: intersect;
-    mask-position: -2rem 0, 0 0;
-  }
-  to {
-    mask-image: var(--ouro-scroll-fade-ramps);
-    mask-repeat: no-repeat;
-    mask-composite: intersect;
-    mask-position: 0 0, 0 0;
-  }
-}
-
-@keyframes ouro-scroll-fade-right {
-  from {
-    animation-timing-function: linear;
-    mask-size: calc(100% + 2rem) 100%, calc(100% + 2rem) 100%;
-  }
-  to {
-    mask-size: calc(100% + 2rem) 100%, 100% 100%;
   }
 }
 
