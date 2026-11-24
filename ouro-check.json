@@ -101,6 +101,12 @@
     "near-miss": [
       "6.4px apart: more than 0 and under the 8px minimum gap, so neither touching nor clearly apart",
       "6px apart: more than 0 and under the 8px minimum gap, so neither touching nor clearly apart"
-    ]
+    ],
+    "backtrack": [],
+    "dropped-frames": [],
+    "jump": [],
+    "pop-in": [],
+    "sibling-reflow": [],
+    "text-rewrap": []
   }
 }
