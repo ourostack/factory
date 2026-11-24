@@ -107,6 +107,7 @@
     "jump": [],
     "pop-in": [],
     "sibling-reflow": [],
-    "text-rewrap": []
+    "text-rewrap": [],
+    "off-centre-text": []
   }
 }
