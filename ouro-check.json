@@ -108,6 +108,10 @@
     "pop-in": [],
     "sibling-reflow": [],
     "text-rewrap": [],
-    "off-centre-text": []
+    "off-centre-text": [],
+    "label-clip": [],
+    "off-curve": [],
+    "opacity-step": [],
+    "overshoot": []
   }
 }
