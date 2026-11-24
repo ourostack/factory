@@ -324,6 +324,44 @@
   }
 }
 
+@keyframes ouro-composer-reveal {
+  from {
+    clip-path: inset(var(--ouro-composer-gap) 0 0 0 round var(--ouro-composer-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--ouro-composer-radius));
+  }
+}
+
+@keyframes ouro-composer-conceal {
+  from {
+    clip-path: inset(0 0 0 0 round var(--ouro-composer-radius));
+  }
+  to {
+    clip-path: inset(var(--ouro-composer-gap) 0 0 0 round var(--ouro-composer-radius));
+  }
+}
+
+@keyframes ouro-composer-toolbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+}
+
+@keyframes ouro-composer-toolbar-out {
+  to {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+}
+
+@keyframes ouro-composer-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @keyframes ouro-pulse {
   50% {
     opacity: 0.4;
