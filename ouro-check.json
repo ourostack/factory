@@ -112,6 +112,11 @@
     "label-clip": [],
     "off-curve": [],
     "opacity-step": [],
-    "overshoot": []
+    "overshoot": [],
+    "boxed-blurb": [],
+    "empty-panel": [],
+    "panel-clip": [],
+    "panel-off-screen": [],
+    "wrapped-short-line": []
   }
 }
