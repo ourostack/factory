@@ -25,6 +25,10 @@
 //     `known`, and an entry under a rule the old tag lists is refused. The
 //     rule lists are read from ourostack/ouro-ui by `main`, at the two tags, so
 //     `checkOuroCurrent` itself reads nothing but Git blobs.
+//   - `AGENTS.md` may only be modified (Ouro Current never adds or deletes
+//     the repository's own file), and `.agents/skills/the-bar/SKILL.md` may
+//     only be added or modified (never deleted): neither is under an install
+//     root or listed in the record, so each needs its own allowance.
 //
 // The candidate's files are read as Git blobs and parsed as data; nothing
 // from them is executed or echoed. The installed files' digests are checked by
@@ -48,6 +52,12 @@ import { pathToFileURL } from "node:url"
 export const OURO_CURRENT = Object.freeze({ login: "ouro-current[bot]", id: 357084126, type: "Bot", branch: "ouro-current/update" })
 export const RECORD = ".github/ouro-hx-installed.json"
 const CHECK = "ouro-check.json"
+// Ouro UI's bar block in AGENTS.md, and the skill it points at: neither is a registry file under an install
+// root, and neither is listed in RECORD, so they need their own rule. AGENTS.md is the repository's own and
+// is only ever modified (never added or deleted) by Ouro Current; the skill file is added once and modified
+// after, never deleted, so a repository that opts out keeps whatever it already has.
+export const AGENTS_PATH = "AGENTS.md"
+export const SKILL_PATH = ".agents/skills/the-bar/SKILL.md"
 const GIT_REF = /^[0-9a-f]{40}$/u
 const DIGEST = /^[0-9a-f]{64}$/u
 const TAG = /^v\d+\.\d+\.\d+$/u
@@ -189,6 +199,10 @@ export function checkOuroCurrent({ base, head, snapshot, runGit = git, newRules 
     } else if (path === CHECK) {
       if (status !== "M") codes.add("ouro_current_change")
       else knownChanged = true
+    } else if (path === AGENTS_PATH) {
+      if (status !== "M") codes.add("ouro_current_change")
+    } else if (path === SKILL_PATH) {
+      if (status !== "A" && status !== "M") codes.add("ouro_current_change")
     } else if (!underRoot(path) || !(before.has(path) || after.has(path))) codes.add("ouro_current_path")
     else if (status !== "A" && status !== "M" && status !== "D") codes.add("ouro_current_change")
   }
