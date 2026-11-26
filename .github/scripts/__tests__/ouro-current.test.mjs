@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { test } from "node:test"
 
-import { OURO_CURRENT, checkOuroCurrent, main } from "../ouro-current.mjs"
+import { OURO_CURRENT, AGENTS_PATH, SKILL_PATH, checkOuroCurrent, main } from "../ouro-current.mjs"
 
 // Ouro Current's update of the installed Ouro UI files: the rule, then the real workflow steps that apply it.
 const ROOT = new URL("../../../", import.meta.url).pathname
@@ -89,6 +89,16 @@ test("the bot touching a workflow, a script, a data path or a file outside the r
   // A control character in a changed path, or in a path the record names.
   assert.deepEqual(check({ ...withRecord(update), "lib/ouro/a\u0001.ts": "x\n" }).codes, ["ouro_current_path"])
   assert.deepEqual(check(withRecord({ "lib/ouro/a\u0001.ts": "x\n" })).codes, ["ouro_current_record"])
+})
+
+test("Ouro UI's bar block in AGENTS.md and the skill it points at pass, modified or added, but never the other way", () => {
+  assert.deepEqual(check({ ...withRecord(update), [AGENTS_PATH]: "after\n" }, undefined, { extra: { [AGENTS_PATH]: "before\n" } }), { ok: true, codes: [] })
+  assert.deepEqual(check({ ...withRecord(update), [SKILL_PATH]: "skill\n" }), { ok: true, codes: [] })
+  // AGENTS.md is the repository's own: Ouro Current never adds or deletes it.
+  assert.deepEqual(check({ ...withRecord(update), [AGENTS_PATH]: "added\n" }).codes, ["ouro_current_change"])
+  assert.deepEqual(check({ ...withRecord(update), [AGENTS_PATH]: null }, undefined, { extra: { [AGENTS_PATH]: "before\n" } }).codes, ["ouro_current_change"])
+  // The skill file is never deleted once installed.
+  assert.deepEqual(check({ ...withRecord(update), [SKILL_PATH]: null }, undefined, { extra: { [SKILL_PATH]: "skill\n" } }).codes, ["ouro_current_change"])
 })
 
 test("a symlink, a deleted record, a malformed record or an empty change is refused", () => {
