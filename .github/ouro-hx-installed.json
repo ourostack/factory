@@ -1,6 +1,6 @@
 {
-  "tag": "v1.3.611",
-  "tagCommit": "c67baeda5107aed49294c387da57b66d5b2d4364",
+  "tag": "v1.3.612",
+  "tagCommit": "37b1524faf3766b4fa4ccbf0789d8102e5a4087f",
   "files": {
     "lib/ouro/ax/ax-command.ts": "1b55ce39c440b78f21c86b68e3d4bcc57c99d146b0e51ff09527aab24cb9ca8c",
     "lib/ouro/ax/ax-moved.d.ts": "878ff338c7eb2c273854635c354c6bbfc63a8536e33ea5db5b14f770c2353445",
