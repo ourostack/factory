@@ -160,6 +160,8 @@
   --ouro-row-hover-shadow: 0 0 0 1px var(--border);
   --ouro-state-hover: 5%;
   --ouro-state-pressed: 12%;
+  --ouro-avatar-tint-mix: 18%;
+  --ouro-avatar-ink-mix: 70%;
 }
 
 .dark {
@@ -182,6 +184,8 @@
   --avatar-6: #6cb8f6;
   --avatar-7: #c3a6ec;
   --avatar-8: #ef85e2;
+  --ouro-avatar-tint-mix: 46%;
+  --ouro-avatar-ink-mix: 18%;
   --ouro-backdrop-color: #000000;
   --ouro-glass-tint: 12%;
   --ouro-glass-rim: rgb(255 255 255 / 0.3);
@@ -211,6 +215,8 @@
     --avatar-6: #6cb8f6;
     --avatar-7: #c3a6ec;
     --avatar-8: #ef85e2;
+    --ouro-avatar-tint-mix: 46%;
+    --ouro-avatar-ink-mix: 18%;
     --ouro-backdrop-color: #000000;
     --ouro-glass-tint: 12%;
     --ouro-glass-rim: rgb(255 255 255 / 0.3);
