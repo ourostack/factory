@@ -118,6 +118,7 @@
     "panel-clip": [],
     "panel-off-screen": [],
     "wrapped-short-line": [],
-    "off-centre-ink": []
+    "off-centre-ink": [],
+    "nested-frame": []
   }
 }
