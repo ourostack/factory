@@ -69,7 +69,7 @@
   --radius: 0.9375rem;
   --ouro-corner-shape: squircle;
   --ouro-radius-scale: 1;
-  --ouro-message-run-gap: var(--ouro-size-1);
+  --ouro-message-run-gap: var(--ouro-size-2);
   --destructive-foreground: #ffffff;
   --success: #157d3c;
   --success-foreground: #ffffff;
