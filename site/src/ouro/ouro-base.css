@@ -325,3 +325,23 @@
     transform: translateY(0) scale(1);
   }
 }
+
+@keyframes ouro-message-sent {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
+@keyframes ouro-message-received {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes ouro-message-fade {
+  from {
+    opacity: 0;
+  }
+}
